@@ -48,6 +48,9 @@ pub struct SiteConfig {
     /// vichan only: the site's fixed thumbnail extension (e.g. "png"), if it has one.
     #[serde(default)]
     pub thumb_ext: Option<String>,
+    /// Name of another configured site (a FoolFuuka archive) to offer when a thread 404s.
+    #[serde(default)]
+    pub archive: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
@@ -58,6 +61,9 @@ pub enum SiteKind {
     /// vichan / tinyboard / infinity / lainchan: 4chan-compatible JSON.
     Vichan,
     Lynxchan,
+    /// FoolFuuka 4chan archives (desuarchive, ...).
+    Foolfuuka,
+    Jschan,
 }
 
 #[derive(Debug, Clone, Deserialize)]

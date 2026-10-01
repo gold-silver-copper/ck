@@ -1,6 +1,8 @@
 //! Imageboard backends. Each one speaks a different engine's JSON API.
 
+mod foolfuuka;
 mod futaba;
+mod jschan;
 mod lynxchan;
 
 use std::sync::Arc;
@@ -16,6 +18,10 @@ pub trait Backend: Send + Sync {
     fn catalog(&self, board: &str) -> Result<Vec<Post>>;
     /// All posts of a thread, OP first.
     fn thread(&self, board: &str, no: u64) -> Result<Vec<Post>>;
+    /// The thread a post is in, for engines that can look it up.
+    fn find_thread(&self, _board: &str, _post: u64) -> Result<Option<u64>> {
+        Ok(None)
+    }
     fn board_url(&self, board: &str) -> String;
     fn thread_url(&self, board: &str, no: u64) -> String;
 }
@@ -27,6 +33,8 @@ pub fn build(cfg: &SiteConfig) -> Arc<dyn Backend> {
         SiteKind::Fourchan => Arc::new(futaba::Futaba::fourchan(boards)),
         SiteKind::Vichan => Arc::new(futaba::Futaba::vichan(url.unwrap_or_default(), cfg.thumb_ext.clone(), boards)),
         SiteKind::Lynxchan => Arc::new(lynxchan::Lynxchan::new(url.unwrap_or_default(), boards)),
+        SiteKind::Foolfuuka => Arc::new(foolfuuka::Foolfuuka::new(url.unwrap_or_default(), boards)),
+        SiteKind::Jschan => Arc::new(jschan::Jschan::new(url.unwrap_or_default(), boards)),
     }
 }
 
@@ -56,6 +64,11 @@ mod tests {
                 let op = cat.iter().find(|p| !p.sticky).or(cat.first()).ok_or_else(|| anyhow::anyhow!("empty catalog"))?;
                 let posts = b.thread(board, op.no)?;
                 anyhow::ensure!(!posts.is_empty() && posts[0].no == op.no, "thread mismatch");
+                // Engines that can look up a post's thread must find this one.
+                if let Some(reply) = posts.get(1) {
+                    let found = b.find_thread(board, reply.no)?;
+                    anyhow::ensure!(found.is_none_or(|t| t == op.no), "find_thread({}) gave {found:?}", reply.no);
+                }
                 let files: usize = posts.iter().map(|p| p.files.len()).sum();
                 // The first thumbnail must exist and decode.
                 let thumb = posts.iter().flat_map(|p| &p.files).find_map(|f| f.thumb.clone());

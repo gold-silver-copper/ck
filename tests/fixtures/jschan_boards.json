@@ -1,0 +1,112 @@
+{
+ "boards": [
+  {
+   "_id": "v",
+   "sequence_value": 321306,
+   "pph": 6,
+   "ips": 61,
+   "lastPostTimestamp": {
+    "text": "8 minutes ago",
+    "color": "#0ed900"
+   },
+   "settings": {
+    "name": "Video Games",
+    "description": "it's fucking video games, baby",
+    "sfw": false,
+    "unlistedLocal": false
+   },
+   "ppd": 106,
+   "tags": [
+    "Video Games",
+    "Vidya"
+   ],
+   "webring": false
+  },
+  {
+   "_id": "b",
+   "sequence_value": 334057,
+   "pph": 1,
+   "ips": 25,
+   "lastPostTimestamp": {
+    "text": "6 minutes ago",
+    "color": "#0bd900"
+   },
+   "settings": {
+    "name": "Random",
+    "description": "only the dead can know peace from this FUN",
+    "sfw": false,
+    "unlistedLocal": false
+   },
+   "ppd": 45,
+   "tags": [
+    "random",
+    "shitposting",
+    "funposting",
+    "off topic",
+    "bees"
+   ],
+   "webring": false
+  },
+  {
+   "_id": "k",
+   "sequence_value": 20748,
+   "pph": 4,
+   "ips": 24,
+   "lastPostTimestamp": {
+    "text": "3 minutes ago",
+    "color": "#05d900"
+   },
+   "settings": {
+    "name": "Weapons and Militaria",
+    "description": "A magical place!",
+    "sfw": false,
+    "unlistedLocal": false
+   },
+   "ppd": 29,
+   "tags": [],
+   "webring": false
+  },
+  {
+   "_id": "6abeecce2b52ca72407392cb",
+   "uri": "homu",
+   "path": "https://homurachan.org/homu",
+   "lastPostTimestamp": {
+    "text": "9 minutes ago",
+    "color": "#10d900"
+   },
+   "siteName": "Homurachan",
+   "sequence_value": 1328,
+   "pph": 59,
+   "ppd": 590,
+   "ips": 93,
+   "settings": {
+    "sfw": true,
+    "name": "Axis Enclave",
+    "description": "Racist LLMs"
+   },
+   "webring": true
+  },
+  {
+   "_id": "6abeecce2b52ca724073929c",
+   "uri": "kohi",
+   "path": "https://smuglo.li/kohi",
+   "lastPostTimestamp": {
+    "text": "35 minutes ago",
+    "color": "#3dd900"
+   },
+   "tags": [],
+   "siteName": "Smug",
+   "sequence_value": 633468,
+   "pph": 9,
+   "ips": 84,
+   "settings": {
+    "sfw": false,
+    "name": "Kohi",
+    "description": "いらっしゃいませ！"
+   },
+   "webring": true
+  }
+ ],
+ "page": 1,
+ "maxPage": 4
+}

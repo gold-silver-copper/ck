@@ -248,6 +248,8 @@ enum Msg {
     Thread(u64, Result<Vec<Post>>),
     /// A background refresh of a watched or open thread.
     Refreshed(ThreadKey, Result<Vec<Post>>),
+    /// The thread a quoted post is in: (board, post, thread).
+    Found(u64, Board, u64, Result<Option<u64>>),
 }
 
 pub struct App {
@@ -289,6 +291,8 @@ pub struct App {
     pending_post: Option<u64>,
     /// Board the loaded catalog belongs to.
     catalog_board: String,
+    /// After a thread 404'd: the same thread on the site's configured archive.
+    archive_offer: Option<ThreadKey>,
     pub tick: usize,
     pub quit: bool,
     req: u64,
@@ -339,6 +343,7 @@ impl App {
             trail: Vec::new(),
             pending_post: None,
             catalog_board: String::new(),
+            archive_offer: None,
             tick: 0,
             quit: false,
             req: 0,
@@ -422,6 +427,22 @@ impl App {
         while let Ok(msg) = self.rx.try_recv() {
             match msg {
                 Msg::Refreshed(key, res) => self.refreshed(key, res),
+                Msg::Found(id, board, post, res) if id == self.req => {
+                    self.loading = None;
+                    match res {
+                        Ok(Some(no)) => {
+                            if let Some(t) = &self.thread {
+                                self.trail.push((self.board.clone().unwrap_or(board.clone()), t.no, t.posts[t.selected].no));
+                            }
+                            self.open_thread_at(board, no, Some(post), true);
+                        }
+                        Ok(None) => {
+                            let msg = format!("Post {post} isn't in this thread, and this site can't say which thread it's in");
+                            self.status = Some((msg, true));
+                        }
+                        Err(e) => self.error(e),
+                    }
+                }
                 Msg::Cached(id, age) if id == self.req && self.status.is_none() => {
                     self.status = Some((format!("Up to date (checked {}s ago)", age.as_secs()), false));
                 }
@@ -457,10 +478,11 @@ impl App {
                     match res {
                         Ok(posts) => self.set_thread(posts),
                         Err(e) if http::is_not_found(&e) => {
-                            self.status = Some(("Thread was deleted or archived".into(), true));
-                            if let Some(key) = self.board.as_ref().map(|b| self.key(&b.uri, self.pending_thread))
-                                && let Some(w) = self.store.watched_mut(&key)
-                            {
+                            let Some(key) = self.board.as_ref().map(|b| self.key(&b.uri, self.pending_thread)) else {
+                                continue;
+                            };
+                            self.thread_gone(&key);
+                            if let Some(w) = self.store.watched_mut(&key) {
                                 w.dead = true;
                                 self.save();
                             }
@@ -514,6 +536,7 @@ impl App {
     fn load_thread(&mut self, no: u64) {
         let Some(board) = self.board.clone() else { return };
         self.pending_thread = no;
+        self.archive_offer = None;
         self.thread_checked = Instant::now();
         self.spawn(format!("Loading thread {no}"), move |b| b.thread(&board.uri, no), Msg::Thread);
     }
@@ -633,12 +656,24 @@ impl App {
                     self.save();
                 }
                 if is_open {
-                    self.status = Some(("Thread was deleted or archived".into(), true));
+                    self.thread_gone(&key);
                 }
             }
             // Other failures (network, rate limits) just wait for the next round.
             Err(e) if is_open => self.error(e),
             Err(_) => {}
+        }
+    }
+
+    /// A thread 404'd: say so, and offer the site's archive if it has one.
+    fn thread_gone(&mut self, key: &ThreadKey) {
+        let archive = self.sites.iter().find(|s| s.cfg.name == key.site).and_then(|s| s.cfg.archive.clone());
+        match archive.filter(|a| self.sites.iter().any(|s| s.cfg.name == *a)) {
+            Some(a) => {
+                self.status = Some((format!("Thread was deleted or archived. Press a to open it in {a}"), true));
+                self.archive_offer = Some(ThreadKey { site: a, board: key.board.clone(), no: key.no });
+            }
+            None => self.status = Some(("Thread was deleted or archived".into(), true)),
         }
     }
 
@@ -734,6 +769,12 @@ impl App {
             KeyCode::Char('v') if matches!(self.view, View::Catalog | View::Thread) => self.open_viewer(),
             KeyCode::Char('w') if matches!(self.view, View::Catalog | View::Thread) => self.toggle_watch(),
             KeyCode::Char('x') if matches!(self.view, View::Watched | View::History) => self.remove_entry(),
+            KeyCode::Char('a') if self.view == View::Thread && self.archive_offer.is_some() => {
+                if let Some(key) = self.archive_offer.take() {
+                    self.open_key(key);
+                    self.return_to = None;
+                }
+            }
             KeyCode::Esc if self.view == View::Thread && self.thread.as_ref().is_some_and(|t| !t.search.is_empty()) => {
                 if let Some(t) = &mut self.thread {
                     t.set_search(String::new());
@@ -971,10 +1012,10 @@ impl App {
                 self.load_catalog();
             }
             (None, Some(post)) => {
-                self.status = Some((
-                    format!("Post {post} isn't in this thread, and this site doesn't say which thread it's in"),
-                    true,
-                ));
+                // Ask the engine which thread the post is in (only some can).
+                let uri = target.uri.clone();
+                let label = format!("Looking up post {post}");
+                self.spawn(label, move |b| b.find_thread(&uri, post), move |id, r| Msg::Found(id, target, post, r));
             }
         }
     }

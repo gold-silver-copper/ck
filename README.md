@@ -7,6 +7,8 @@ A terminal imageboard browser built with [ratatui](https://ratatui.rs). One inte
 | `4chan`    | the official 4chan API                   | 4chan                            |
 | `vichan`   | vichan, tinyboard, infinity (4chan-style JSON) | lainchan, wizchan, uboachan |
 | `lynxchan` | LynxChan                                 | endchan, kohlchan                |
+| `foolfuuka`| FoolFuuka 4chan archives                 | desuarchive, b4k                 |
+| `jschan`   | jschan                                   | zzzchan                          |
 
 Read-only: browse boards, catalogs, and threads. Files open in your default viewer/browser.
 
@@ -87,6 +89,9 @@ url = "https://somechan.org"
 boards = ["b", { uri = "tech", title = "Technology" }]
 thumb_ext = "png"   # only if the site renders every thumbnail as png (vichan's `thumb_ext`)
 ```
+
+A site can name a FoolFuuka archive with `archive = "desuarchive"`. When one of its
+threads 404s, ck offers to open it there (`a`).
 
 ## Tests
 

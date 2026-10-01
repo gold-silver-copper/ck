@@ -296,6 +296,7 @@ pub fn as_bool(v: &Value) -> bool {
     match v {
         Value::Bool(b) => *b,
         Value::Number(n) => n.as_u64().is_some_and(|n| n != 0),
+        Value::String(s) => matches!(s.as_str(), "1" | "true"),
         _ => false,
     }
 }

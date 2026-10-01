@@ -1,0 +1,299 @@
+{
+ "_id": "6abee3a12d5a21c7146b0045",
+ "date": "2026-10-01T22:50:09.152Z",
+ "u": 1790895009152,
+ "name": "Anonymous",
+ "country": null,
+ "board": "v",
+ "tripcode": null,
+ "capcode": null,
+ "subject": "ITT: Terrible Vidya Music",
+ "message": "I'll start:",
+ "messagehash": "3Ga87X66XOSYsTmcw7nxcRquy4PNPGmi1FZxc1PepU0=",
+ "nomarkup": "I'll start:",
+ "thread": null,
+ "email": "",
+ "spoiler": false,
+ "signature": null,
+ "address": null,
+ "banmessage": null,
+ "userId": "a82851",
+ "files": [
+  {
+   "filename": "74dd673c3b8ff3f9873b6d014608c64c7796da9c11e31f9cf289b16353c7d298.mp4",
+   "spoiler": null,
+   "hash": "74dd673c3b8ff3f9873b6d014608c64c7796da9c11e31f9cf289b16353c7d298",
+   "originalFilename": "nsg721.mp4",
+   "mimetype": "video/mp4",
+   "size": 12165634,
+   "extension": ".mp4",
+   "sizeString": "11.6MB",
+   "duration": 299.050667,
+   "durationString": "04:59",
+   "thumbextension": ".jpg",
+   "codec": "h264",
+   "geometry": {
+    "width": 640,
+    "height": 360,
+    "thumbwidth": 250,
+    "thumbheight": 140
+   },
+   "geometryString": "640x360",
+   "hasThumb": true
+  },
+  {
+   "filename": "0786d9b189ea83e7d94e465269c851d0e2b86a2f3078fa0fe764ca96de51e0b8.mp4",
+   "spoiler": null,
+   "hash": "0786d9b189ea83e7d94e465269c851d0e2b86a2f3078fa0fe764ca96de51e0b8",
+   "originalFilename": "Crime_Spree_-_Track_3.mp4",
+   "mimetype": "video/mp4",
+   "size": 1349579,
+   "extension": ".mp4",
+   "sizeString": "1.3MB",
+   "duration": 97.012971,
+   "durationString": "01:37",
+   "thumbextension": ".jpg",
+   "codec": "h264",
+   "geometry": {
+    "width": 476,
+    "height": 270,
+    "thumbwidth": 250,
+    "thumbheight": 141
+   },
+   "geometryString": "476x270",
+   "hasThumb": true
+  },
+  {
+   "filename": "dcac3d4b1551b83ba28bc5d4682a68c75d057baf12ed0eb57712daaaff3dbf1d.mp4",
+   "spoiler": null,
+   "hash": "dcac3d4b1551b83ba28bc5d4682a68c75d057baf12ed0eb57712daaaff3dbf1d",
+   "originalFilename": "Fantasia_on_the_Sega_Genesiss_rendition_of_The_Rite_of_Spring._r.mp4",
+   "mimetype": "video/mp4",
+   "size": 5752219,
+   "extension": ".mp4",
+   "sizeString": "5.5MB",
+   "duration": 167.381333,
+   "durationString": "02:47",
+   "thumbextension": ".jpg",
+   "codec": "h264",
+   "geometry": {
+    "width": 640,
+    "height": 480,
+    "thumbwidth": 250,
+    "thumbheight": 187
+   },
+   "geometryString": "640x480",
+   "hasThumb": true
+  },
+  {
+   "filename": "2feb8681690ba2bb8d33c763eddff6a6f1b0714f904544c62f4b8736cacf9d82.mp4",
+   "spoiler": null,
+   "hash": "2feb8681690ba2bb8d33c763eddff6a6f1b0714f904544c62f4b8736cacf9d82",
+   "originalFilename": "2_-_Sonic_3D_Blast_5_GBC_-_Green_Hill_Zone_Act_15(1).mp4",
+   "mimetype": "video/mp4",
+   "size": 1526263,
+   "extension": ".mp4",
+   "sizeString": "1.5MB",
+   "duration": 58.008,
+   "durationString": "00:58",
+   "thumbextension": ".jpg",
+   "codec": "h264",
+   "geometry": {
+    "width": 426,
+    "height": 254,
+    "thumbwidth": 250,
+    "thumbheight": 149
+   },
+   "geometryString": "426x254",
+   "hasThumb": true
+  },
+  {
+   "filename": "90dfc5f12b874a67be30c97a41a8f2195e9ea9cfc04f6da0f074024cce3b638b.mp4",
+   "spoiler": null,
+   "hash": "90dfc5f12b874a67be30c97a41a8f2195e9ea9cfc04f6da0f074024cce3b638b",
+   "originalFilename": "Invidious.mp4",
+   "mimetype": "video/mp4",
+   "size": 5601813,
+   "extension": ".mp4",
+   "sizeString": "5.3MB",
+   "duration": 132.007016,
+   "durationString": "02:12",
+   "thumbextension": ".jpg",
+   "codec": "h264",
+   "geometry": {
+    "width": 1920,
+    "height": 1080,
+    "thumbwidth": 250,
+    "thumbheight": 140
+   },
+   "geometryString": "1920x1080",
+   "hasThumb": true
+  }
+ ],
+ "quotes": [],
+ "crossquotes": [],
+ "backlinks": [
+  {
+   "_id": "6abee4e77ae094adc4c6cce6",
+   "postId": 321303
+  }
+ ],
+ "replyposts": 2,
+ "replyfiles": 4,
+ "sticky": 0,
+ "locked": 0,
+ "bumplocked": 0,
+ "cyclic": 0,
+ "bumped": "2026-10-01T23:26:32.585Z",
+ "postId": 321302,
+ "replies": [
+  {
+   "_id": "6abee4e77ae094adc4c6cce6",
+   "date": "2026-10-01T22:55:35.318Z",
+   "u": 1790895335318,
+   "name": "Anonymous",
+   "country": null,
+   "board": "v",
+   "tripcode": null,
+   "capcode": null,
+   "subject": "",
+   "message": "<a class=\"quote\" href=\"/v/thread/321302.html#321302\">&gt;&gt;321302</a> <small>(OP)</small> \r\nCrime Spree and 3D Blast aren't working on my computer for some reason, so here's the fixed uploads:",
+   "messagehash": "Kpg3TtSgopQITZqPeJvbMEvKC92U/kZ2UQ/REZtMH4I=",
+   "nomarkup": ">>321302\r\nCrime Spree and 3D Blast aren't working on my computer for some reason, so here's the fixed uploads:",
+   "thread": 321302,
+   "email": "",
+   "spoiler": false,
+   "signature": null,
+   "address": null,
+   "banmessage": null,
+   "userId": "a82851",
+   "files": [
+    {
+     "filename": "26fa70457f1a01b3db8614a2b0b1b908c2ba093d262c7dc3b6370fcce3aa950e.webm",
+     "spoiler": null,
+     "hash": "26fa70457f1a01b3db8614a2b0b1b908c2ba093d262c7dc3b6370fcce3aa950e",
+     "originalFilename": "ezgif-2c9db10e2af00b9e.webm",
+     "mimetype": "video/webm",
+     "size": 2874923,
+     "extension": ".webm",
+     "sizeString": "2.7MB",
+     "duration": 97.016,
+     "durationString": "01:37",
+     "thumbextension": ".jpg",
+     "codec": "vp8",
+     "geometry": {
+      "width": 476,
+      "height": 270,
+      "thumbwidth": 250,
+      "thumbheight": 141
+     },
+     "geometryString": "476x270",
+     "hasThumb": true
+    },
+    {
+     "filename": "e071d11059def8e38dadbed0be0a36a354205a8d6856139f12e51b4480aa10d4.webm",
+     "spoiler": null,
+     "hash": "e071d11059def8e38dadbed0be0a36a354205a8d6856139f12e51b4480aa10d4",
+     "originalFilename": "ezgif-25d89b726b7605c1.webm",
+     "mimetype": "video/webm",
+     "size": 1574802,
+     "extension": ".webm",
+     "sizeString": "1.5MB",
+     "duration": 58,
+     "durationString": "00:58",
+     "thumbextension": ".jpg",
+     "codec": "vp8",
+     "geometry": {
+      "width": 426,
+      "height": 254,
+      "thumbwidth": 250,
+      "thumbheight": 149
+     },
+     "geometryString": "426x254",
+     "hasThumb": true
+    }
+   ],
+   "quotes": [
+    {
+     "_id": "6abee3a12d5a21c7146b0045",
+     "thread": 321302,
+     "postId": 321302
+    }
+   ],
+   "crossquotes": [],
+   "backlinks": [],
+   "postId": 321303
+  },
+  {
+   "_id": "6abeec28f9778e5600dd5845",
+   "date": "2026-10-01T23:26:32.585Z",
+   "u": 1790897192585,
+   "name": "Anonymous",
+   "country": null,
+   "board": "v",
+   "tripcode": null,
+   "capcode": null,
+   "subject": "",
+   "message": "Obligatory.",
+   "messagehash": "YqOTltNCoDvLGyzbW9fASiGMQk8dYvq2W9C0sPjrDBE=",
+   "nomarkup": "Obligatory.",
+   "thread": 321302,
+   "email": "",
+   "spoiler": false,
+   "signature": null,
+   "address": null,
+   "banmessage": null,
+   "userId": "51f52f",
+   "files": [
+    {
+     "filename": "fa7f24efe85ac92643418e1cffb2ad73f2116b306fb43ea6b7736d0340768bad.mp4",
+     "spoiler": null,
+     "hash": "fa7f24efe85ac92643418e1cffb2ad73f2116b306fb43ea6b7736d0340768bad",
+     "originalFilename": "Mansion-Basement.mp4",
+     "mimetype": "video/mp4",
+     "size": 1169964,
+     "extension": ".mp4",
+     "sizeString": "1.1MB",
+     "duration": 64.833333,
+     "durationString": "01:04",
+     "thumbextension": ".jpg",
+     "codec": "h264",
+     "geometry": {
+      "width": 400,
+      "height": 256,
+      "thumbwidth": 250,
+      "thumbheight": 160
+     },
+     "geometryString": "400x256",
+     "hasThumb": true
+    },
+    {
+     "filename": "bf984e6059a2eaac152b8b8658116c61303fe7a64f7f2e50d62acdc6d23ba07a.webm",
+     "spoiler": null,
+     "hash": "bf984e6059a2eaac152b8b8658116c61303fe7a64f7f2e50d62acdc6d23ba07a",
+     "originalFilename": "Central_City.webm",
+     "mimetype": "video/webm",
+     "size": 847087,
+     "extension": ".webm",
+     "sizeString": "827.2KB",
+     "duration": 1511430.473,
+     "durationString": "419:50:30",
+     "thumbextension": ".jpg",
+     "codec": "vp8",
+     "geometry": {
+      "width": 488,
+      "height": 352,
+      "thumbwidth": 249,
+      "thumbheight": 180
+     },
+     "geometryString": "488x352",
+     "hasThumb": true
+    }
+   ],
+   "quotes": [],
+   "crossquotes": [],
+   "backlinks": [],
+   "postId": 321305
+  }
+ ]
+}

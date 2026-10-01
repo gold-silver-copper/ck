@@ -6,6 +6,10 @@
 #                      These have no board-list API, so `boards` is required.
 #   kind = "lynxchan"  LynxChan engines (endchan, kohlchan, ...). Boards are
 #                      fetched automatically unless `boards` is given.
+#   kind = "foolfuuka" FoolFuuka 4chan archives (desuarchive, b4k, ...).
+#   kind = "jschan"    jschan engines (zzzchan, ...).
+#
+# `archive` names another site (a FoolFuuka archive) to offer when a thread 404s.
 #
 # `boards` entries are either a bare URI ("g") or { uri = "g", title = "Technology" }.
 #
@@ -25,6 +29,7 @@ refresh_watched_secs = 60
 [[site]]
 name = "4chan"
 kind = "4chan"
+archive = "desuarchive"
 
 [[site]]
 name = "lainchan"
@@ -81,3 +86,13 @@ url = "https://endchan.net"
 name = "kohlchan"
 kind = "lynxchan"
 url = "https://kohlchan.net"
+
+[[site]]
+name = "desuarchive"
+kind = "foolfuuka"
+url = "https://desuarchive.org"
+
+[[site]]
+name = "zzzchan"
+kind = "jschan"
+url = "https://zzzchan.xyz"

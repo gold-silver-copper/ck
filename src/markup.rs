@@ -34,6 +34,8 @@ pub enum Flavor {
     Vichan,
     /// LynxChan's `markdown` field: raw newlines are line breaks.
     Lynxchan,
+    /// jschan: raw newlines are line breaks, and `<small>(OP)</small>` annotations are dropped.
+    Jschan,
 }
 
 /// An open tag while parsing.
@@ -53,14 +55,15 @@ pub fn parse_html(html: &str, flavor: Flavor) -> Parsed {
 
     while !rest.is_empty() {
         let lt = rest.find('<').unwrap_or(rest.len());
-        if lt > 0 {
+        if lt > 0 && !stack.iter().any(|o| o.name == "small" && flavor == Flavor::Jschan) {
             let text = decode(&rest[..lt]);
             let style = stack.last().map(|o| o.style).unwrap_or_default();
             if stack.iter().any(|o| o.code) {
                 b.code_text(&text, style);
             } else {
                 let text = text.replace('\r', "");
-                let text = if flavor == Flavor::Lynxchan { text } else { text.replace('\n', " ") };
+                let newlines = matches!(flavor, Flavor::Lynxchan | Flavor::Jschan);
+                let text = if newlines { text } else { text.replace('\n', " ") };
                 let href = stack.iter().rev().find_map(|o| o.href.as_deref());
                 for (i, part) in text.split('\n').enumerate() {
                     if i > 0 {
@@ -111,8 +114,14 @@ pub fn parse_html(html: &str, flavor: Flavor) -> Parsed {
                     "span" | "div" | "p" => match class.as_str() {
                         c if c.contains("spoiler") => base.patch(SPOILER),
                         c if c.contains("quote") || c.contains("greentext") => base.patch(GREENTEXT),
-                        c if c.contains("heading") || c.contains("redtext") => base.patch(HEADING),
+                        c if c.contains("heading") || c.contains("redtext") || c == "title" => base.patch(HEADING),
                         c if c.contains("pinktext") || c.contains("orangetext") => base.patch(PINKTEXT),
+                        // jschan's inline formatting.
+                        "bold" => base.add_modifier(Modifier::BOLD),
+                        "em" => base.add_modifier(Modifier::ITALIC),
+                        "underline" => base.add_modifier(Modifier::UNDERLINED),
+                        "strike" => base.add_modifier(Modifier::CROSSED_OUT),
+                        "mono" => base.patch(CODE),
                         _ => base,
                     },
                     _ => base,
@@ -280,6 +289,8 @@ fn parse_href(href: &str) -> Link {
     let number = |s: &str| s.trim_end_matches(".html").trim_end_matches(".json").parse().ok();
     match segs[..] {
         [board, "thread" | "res", t, ..] => Link { board: Some(percent_decode(board)), thread: number(t), post },
+        // FoolFuuka links posts it can't place in a thread as /board/post/123/.
+        [board, "post", p, ..] => Link { board: Some(percent_decode(board)), thread: None, post: number(p) },
         [board] | [board, "index.html" | "catalog" | "catalog.html"] => {
             Link { board: Some(percent_decode(board)), thread: None, post }
         }
@@ -527,6 +538,8 @@ mod tests {
         assert_eq!(parse_href("//boards.4chan.org/g/catalog#s=lmg%2F"), link(Some("g"), None, None));
         assert_eq!(parse_href("/λ/res/31826.html#44350"), link(Some("λ"), Some(31826), Some(44350)));
         assert_eq!(parse_href("/%CE%BB/res/1.html#q2"), link(Some("λ"), Some(1), Some(2)));
+        assert_eq!(parse_href("https://desuarchive.org/g/thread/9/#10"), link(Some("g"), Some(9), Some(10)));
+        assert_eq!(parse_href("/g/post/10/"), link(Some("g"), None, Some(10)));
     }
 
     #[test]
