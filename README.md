@@ -130,5 +130,10 @@ threads 404s, ck offers to open it there (`a`).
 
 ## Tests
 
-    cargo test                           # offline unit tests
-    cargo test -- --ignored --nocapture  # hit every default site live
+    cargo test                           # offline: unit, parsing and snapshot tests
+    cargo test -- --ignored --nocapture  # hit every default site live (rate-limited)
+
+The offline tests parse real, trimmed responses from every engine in `tests/fixtures/`, and
+render every view with fixed data and a fixed clock into the snapshots in `src/snapshots/`
+([insta](https://insta.rs)). After an intended UI change, review the differences and update
+them with `INSTA_UPDATE=always cargo test` (or `cargo insta review`).

@@ -20,4 +20,5 @@ unicode-width = "0.2.2"
 ureq = "3"
 
 [dev-dependencies]
+insta = "1.48.0"
 tempfile = "3.27.0"

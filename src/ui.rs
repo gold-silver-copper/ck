@@ -1,4 +1,4 @@
-use chrono::{Local, TimeZone};
+use chrono::{Local, TimeZone, Utc};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect, Size};
 use ratatui::style::{Color, Modifier, Style};
@@ -7,7 +7,7 @@ use ratatui::widgets::{Block, BorderType, Borders, Clear, List, ListItem, Paragr
 use ratatui_image::Image;
 use unicode_width::UnicodeWidthStr;
 
-use crate::app::{App, Hit, SiteRow, Sort, ThreadLayout, ThreadView, View};
+use crate::app::{App, Clock, Hit, SiteRow, Sort, ThreadLayout, ThreadView, View};
 use crate::images::{Images, State};
 use crate::keys::{Action, KeyMap};
 use crate::markup;
@@ -195,14 +195,12 @@ fn footer_hints(app: &App) -> String {
     let k = |a| app.keys.key(a);
     match app.view {
         View::Thread => format!(
-            "j/k post · enter quote · {} preview · {} back · {} search · {} spoiler · {} unread · {} view · {} save · {} watch · {} help",
+            "j/k post · enter quote · {} preview · {} back · {} search · {} unread · {} view · {} watch · {} help",
             k(Action::Preview),
             k(Action::JumpBack),
             k(Action::Search),
-            k(Action::Spoiler),
             k(Action::Unread),
             k(Action::View),
-            k(Action::Download),
             k(Action::Watch),
             k(Action::Help)
         ),
@@ -323,7 +321,7 @@ fn draw_history(f: &mut Frame, app: &mut App, area: Rect) {
         .map(|i| {
             let v = &app.store.history[i];
             let mut spans = thread_row(&v.key, &v.subject);
-            spans.push(Span::styled(format!("  {}", ago(v.opened)), dim()));
+            spans.push(Span::styled(format!("  {}", ago(v.opened, app.clock)), dim()));
             ListItem::new(Line::from(spans))
         })
         .collect();
@@ -376,7 +374,7 @@ fn draw_catalog(f: &mut Frame, app: &mut App, area: Rect) {
                 format!("R:{} I:{}", p.replies.unwrap_or(0), p.images.unwrap_or(0)),
                 Style::new().fg(Color::Blue),
             ));
-            head.push(Span::styled(format!("  {}", ago(p.time)), dim()));
+            head.push(Span::styled(format!("  {}", ago(p.time, app.clock)), dim()));
             if app.compact {
                 // One line: the header, then as much of the text as fits.
                 let used: usize = head.iter().map(|s| s.content.width()).sum();
@@ -529,7 +527,7 @@ fn draw_thread(f: &mut Frame, app: &mut App, area: Rect) {
     app.hit = Some(Hit::Thread { area });
     let thumbs = app.images.enabled() && area.width >= MIN_THUMB_WIDTH;
     if t.layout.as_ref().is_none_or(|l| l.width != area.width) {
-        let l = layout_thread(t, area.width, thumbs);
+        let l = layout_thread(t, area.width, thumbs, app.clock);
         // After a refresh, keep the same post at the top even if lines above it changed.
         if let Some((i, off)) = t.anchor.take() {
             t.scroll = (l.starts[i] + off).min(l.lines.len().saturating_sub(t.viewport));
@@ -576,7 +574,7 @@ fn draw_thread(f: &mut Frame, app: &mut App, area: Rect) {
 
 /// Lay out every post of a thread as wrapped lines, recording where each post starts.
 /// With `thumbs`, posts with files get a fixed-size thumbnail column on the left.
-fn layout_thread(t: &ThreadView, width: u16, thumbs: bool) -> ThreadLayout {
+fn layout_thread(t: &ThreadView, width: u16, thumbs: bool, clock: Clock) -> ThreadLayout {
     let text_width = width.saturating_sub(2).max(10) as usize;
     let mut lines = Vec::new();
     let mut starts = Vec::with_capacity(t.posts.len() + 1);
@@ -586,10 +584,10 @@ fn layout_thread(t: &ThreadView, width: u16, thumbs: bool) -> ThreadLayout {
         match p.files.first().filter(|_| thumbs) {
             Some(file) => {
                 thumb_at.push((lines.len(), i));
-                let text = post_lines(p, &post_ctx(t, i), text_width - THUMB.width as usize - 1);
+                let text = post_lines(p, &post_ctx(t, i, clock), text_width - THUMB.width as usize - 1);
                 lines.extend(beside(placeholder(file, p.files.len(), THUMB), text, THUMB.width));
             }
-            None => lines.extend(post_lines(p, &post_ctx(t, i), text_width)),
+            None => lines.extend(post_lines(p, &post_ctx(t, i, clock), text_width)),
         }
         lines.push(Line::raw(""));
     }
@@ -604,7 +602,7 @@ fn draw_preview(f: &mut Frame, app: &App) {
     let width = w.saturating_sub(4) as usize;
     let mut lines = Vec::new();
     for &i in &p.posts {
-        lines.extend(post_lines(&t.posts[i], &post_ctx(t, i), width));
+        lines.extend(post_lines(&t.posts[i], &post_ctx(t, i, app.clock), width));
         lines.push(Line::raw(""));
     }
     for n in &p.elsewhere {
@@ -689,10 +687,12 @@ struct PostCtx<'a> {
     reveal: bool,
     /// Lowercase search query to highlight.
     search: String,
+    clock: Clock,
 }
 
-fn post_ctx(t: &ThreadView, i: usize) -> PostCtx<'_> {
+fn post_ctx(t: &ThreadView, i: usize, clock: Clock) -> PostCtx<'_> {
     PostCtx {
+        clock,
         is_op: i == 0,
         is_new: t.is_new(i),
         backlinks: &t.backlinks[i],
@@ -707,7 +707,7 @@ fn post_lines(p: &Post, ctx: &PostCtx, width: usize) -> Vec<Line<'static>> {
     let mut head = vec![
         Span::styled(p.name.clone(), Style::new().fg(theme().name).bold()),
         Span::raw("  "),
-        Span::styled(fmt_time(p.time), dim()),
+        Span::styled(fmt_time(p.time, ctx.clock), dim()),
         Span::raw("  "),
         Span::styled(format!("No.{}", p.no), Style::new().fg(Color::Blue)),
     ];
@@ -888,18 +888,23 @@ fn truncate(s: &str, width: usize) -> String {
     out
 }
 
-fn fmt_time(ts: i64) -> String {
-    match Local.timestamp_opt(ts, 0).single() {
-        Some(t) => format!("{} ({})", t.format("%Y-%m-%d %H:%M"), ago(ts)),
+/// Local date and time with the relative time; UTC when the clock is fixed (tests).
+fn fmt_time(ts: i64, clock: Clock) -> String {
+    let date = match clock.fixed {
+        Some(_) => Utc.timestamp_opt(ts, 0).single().map(|t| t.format("%Y-%m-%d %H:%M").to_string()),
+        None => Local.timestamp_opt(ts, 0).single().map(|t| t.format("%Y-%m-%d %H:%M").to_string()),
+    };
+    match date {
+        Some(d) => format!("{d} ({})", ago(ts, clock)),
         None => String::new(),
     }
 }
 
-fn ago(ts: i64) -> String {
+fn ago(ts: i64, clock: Clock) -> String {
     if ts == 0 {
         return String::new();
     }
-    let secs = (Local::now().timestamp() - ts).max(0);
+    let secs = (clock.now() - ts).max(0);
     match secs {
         s if s < 60 => format!("{s}s ago"),
         s if s < 3600 => format!("{}m ago", s / 60),

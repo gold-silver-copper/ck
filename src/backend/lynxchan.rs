@@ -21,13 +21,20 @@ impl Lynxchan {
         Self { base, boards }
     }
 
-    /// Some installs wrap responses as `{"status": "ok", "data": ...}`.
     fn get(&self, path: &str) -> Result<Value> {
-        let mut v = get_json(&format!("{}{path}", self.base))?;
-        if v.get("status").is_some() && v.get("data").is_some() {
-            v = v["data"].take();
-        }
-        Ok(v)
+        Ok(unwrap(get_json(&format!("{}{path}", self.base))?))
+    }
+
+    /// Thread OPs from `/{board}/catalog.json`.
+    pub fn parse_catalog(&self, v: &Value) -> Vec<Post> {
+        v.as_array().into_iter().flatten().map(|t| self.post(t, "threadId")).collect()
+    }
+
+    /// A thread from `/{board}/res/{no}.json`: the OP's fields plus `posts`.
+    pub fn parse_thread(&self, v: &Value) -> Vec<Post> {
+        let mut posts = vec![self.post(v, "threadId")];
+        posts.extend(v["posts"].as_array().into_iter().flatten().map(|p| self.post(p, "postId")));
+        posts
     }
 
     fn post(&self, v: &Value, no_key: &str) -> Post {
@@ -95,6 +102,29 @@ impl Lynxchan {
     }
 }
 
+/// Some responses (kohlchan's board list) are wrapped as `{"status": "ok", "data": ...}`.
+pub fn unwrap(mut v: Value) -> Value {
+    if v.get("status").is_some() && v.get("data").is_some() {
+        v = v["data"].take();
+    }
+    v
+}
+
+/// One page of `/boards.js?json=1` (already unwrapped): boards and the page count.
+pub fn parse_boards(v: &Value) -> (Vec<Board>, u64) {
+    let boards = v["boards"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|b| {
+            let uri = as_str(&b["boardUri"])?;
+            let nsfw = b["specialSettings"].as_array().map(|s| !s.iter().any(|x| x.as_str() == Some("sfw")));
+            Some(Board { uri, title: as_str(&b["boardName"]).unwrap_or_default(), nsfw })
+        })
+        .collect();
+    (boards, as_u64(&v["pageCount"]).unwrap_or(1))
+}
+
 /// A file's thumbnail path and whether it's a spoiler. Spoilers and non-images point at
 /// shared placeholder images, which aren't worth showing.
 fn thumb(v: &Value) -> (Option<String>, bool) {
@@ -116,15 +146,8 @@ impl Backend for Lynxchan {
         let mut out = Vec::new();
         let mut page = 1;
         loop {
-            let v = self.get(&format!("/boards.js?json=1&page={page}"))?;
-            for b in v["boards"].as_array().into_iter().flatten() {
-                let Some(uri) = as_str(&b["boardUri"]) else { continue };
-                let nsfw = b["specialSettings"]
-                    .as_array()
-                    .map(|s| !s.iter().any(|x| x.as_str() == Some("sfw")));
-                out.push(Board { uri, title: as_str(&b["boardName"]).unwrap_or_default(), nsfw });
-            }
-            let pages = as_u64(&v["pageCount"]).unwrap_or(1);
+            let (boards, pages) = parse_boards(&self.get(&format!("/boards.js?json=1&page={page}"))?);
+            out.extend(boards);
             if page >= pages || page >= MAX_BOARD_PAGES {
                 break;
             }
@@ -134,15 +157,11 @@ impl Backend for Lynxchan {
     }
 
     fn catalog(&self, board: &str) -> Result<Vec<Post>> {
-        let v = self.get(&format!("/{}/catalog.json", enc(board)))?;
-        Ok(v.as_array().into_iter().flatten().map(|t| self.post(t, "threadId")).collect())
+        Ok(self.parse_catalog(&self.get(&format!("/{}/catalog.json", enc(board)))?))
     }
 
     fn thread(&self, board: &str, no: u64) -> Result<Vec<Post>> {
-        let v = self.get(&format!("/{}/res/{no}.json", enc(board)))?;
-        let mut posts = vec![self.post(&v, "threadId")];
-        posts.extend(v["posts"].as_array().into_iter().flatten().map(|p| self.post(p, "postId")));
-        Ok(posts)
+        Ok(self.parse_thread(&self.get(&format!("/{}/res/{no}.json", enc(board)))?))
     }
 
     fn board_url(&self, board: &str) -> String {
@@ -160,9 +179,41 @@ mod tests {
 
     use super::Lynxchan;
 
-    fn fixture(name: &str) -> Vec<Value> {
+    fn json(name: &str) -> Value {
         let path = format!("{}/tests/fixtures/{name}", env!("CARGO_MANIFEST_DIR"));
         serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
+    }
+
+    fn fixture(name: &str) -> Vec<Value> {
+        serde_json::from_value(json(name)).unwrap()
+    }
+
+    #[test]
+    fn boards_plain_and_wrapped() {
+        // endchan: plain JSON.
+        let (boards, pages) = super::parse_boards(&super::unwrap(json("lynxchan_boards.json")));
+        assert_eq!(boards.len(), 4);
+        assert_eq!(boards[0].uri, "polru");
+        assert!(pages > 1);
+        // kohlchan: {"status": "ok", "data": {...}}.
+        let (boards, pages) = super::parse_boards(&super::unwrap(json("lynxchan_boards_wrapped.json")));
+        assert_eq!((boards[0].uri.as_str(), boards[0].title.as_str()), ("int", "International"));
+        assert_eq!(pages, 1);
+    }
+
+    #[test]
+    fn catalog_and_thread() {
+        let end = Lynxchan::new("https://endchan.net".into(), None);
+        let cat = end.parse_catalog(&json("lynxchan_catalog.json"));
+        assert_eq!(cat[0].no, 908495);
+        assert!(cat[0].sticky);
+        let posts = end.parse_thread(&json("lynxchan_thread.json"));
+        assert_eq!(posts[0].no, 867082);
+        // The OP links the previous thread through its rendered markdown.
+        assert!(posts[0].links.iter().any(|l| l.thread == Some(782482)));
+        let kohl = Lynxchan::new("https://kohlchan.net".into(), None);
+        let posts = kohl.parse_thread(&json("kohlchan_thread.json"));
+        assert!(posts.len() > 1 && posts.iter().all(|p| p.no > 0));
     }
 
     fn find(v: &[Value], no: u64) -> &Value {

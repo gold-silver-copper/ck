@@ -10,6 +10,8 @@ mod model;
 mod store;
 mod theme;
 mod ui;
+#[cfg(test)]
+mod ui_tests;
 
 use std::time::Duration;
 

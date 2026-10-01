@@ -1,0 +1,34 @@
+---
+source: src/ui_tests.rs
+expression: snapshot(&mut a)
+---
+ ck  › 4chan › /g/
+╭ /g/ - Technology (4 threads) ────────────────────────────────────────────────────────────────────╮
+│  ┌────────┐ 📌  🔒  1  Welcome to /g/  R:3 I:0  1y ago                                             │
+│  │  PNG   │ Read the rules before posting.                                                       │
+│  │   …    │                                                                                      │
+│  └────────┘                                                                                      │
+│                                                                                                  │
+│▌ ┌────────┐ 1000  /lmg/ - Local Models General  R:312 I:58  5h ago                               │
+│  │  JPG   │ Previous threads: >>900 & >>800                                                      │
+│  │   …    │                                                                                      │
+│  └────────┘                                                                                      │
+│                                                                                                  │
+│             1100  R:12 I:0  40m ago                                                              │
+│             >be me >write tests                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│  ┌────────┐ 1200  Rust or C++?  R:45 I:3  2d ago                                                 │
+│  │  WEBM  │ Which one and why? [spoiler]                                                         │
+│  │   …    │                                                                                      │
+│  └────────┘                                                                                      │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+ j/k move · enter open · esc back · / filter · v view · w watch · s sort · c compact · r reload · ?

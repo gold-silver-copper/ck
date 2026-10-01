@@ -1,0 +1,34 @@
+---
+source: src/ui_tests.rs
+expression: snapshot(&mut a)
+---
+ ck                    ╭ Help ──────────────────────────────────────────────╮
+╭ Sites ───────────────│Everywhere                                          │──────────────────────╮
+│▌ ★ Watched       3 th│  j / k, ↓ / ↑        move                          │                      │
+│  ◷ History       2 re│  g / G               top / bottom                  │                      │
+│  4chan           four│  ctrl-d / ctrl-u     half page down / up           │                      │
+│  lainchan        vich│  enter, l            open                          │                      │
+│  wizchan         vich│  esc, h, backspace   back                          │                      │
+│  uboachan        vich│  /                   filter list                   │                      │
+│  endchan         lynx│  r                   reload                        │                      │
+│  kohlchan        lynx│  o                   open in browser               │                      │
+│  desuarchive     fool│  q, ctrl-c           quit                          │                      │
+│  zzzchan         jsch│  mouse               wheel scroll, click, dbl-click│                      │
+│                      │                                                    │                      │
+│                      │Catalog                                             │                      │
+│                      │  v                   view the OP's images          │                      │
+│                      │  w                   watch / unwatch the thread    │                      │
+│                      │  s                   cycle sort order              │                      │
+│                      │  c                   compact layout on / off       │                      │
+│                      │                                                    │                      │
+│                      │Thread                                              │                      │
+│                      │  j / k               next / previous post          │                      │
+│                      │  J / K, space        scroll by line / page         │                      │
+│                      │  enter, l            follow quote (any thread)     │                      │
+│                      │  p                   preview the quoted posts      │                      │
+│                      │  b                   jump to first reply           │                      │
+│                      │  u                   back (also to last thread)    │                      │
+│                      │  /                   search the thread             │                      │
+│                      │  n / N               next / previous match         │                      │
+╰──────────────────────│  s / S               show spoilers: post / all     │──────────────────────╯
+ j/k move · enter open ╰ j/k scroll ─────────────────────────── images: off ╯· q quit

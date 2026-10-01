@@ -67,12 +67,25 @@ impl Images {
         Self { picker, slots: HashMap::new(), queue, rx, frame: Vec::new(), tick: 0, bytes: 0 }
     }
 
+    /// Images "on", but nothing is ever fetched: everything stays a placeholder.
+    #[cfg(test)]
+    pub fn offline() -> Self {
+        let (_tx, rx) = channel();
+        let picker = Some(Picker::halfblocks());
+        Self { picker, slots: HashMap::new(), queue: Arc::new(Queue::default()), rx, frame: Vec::new(), tick: 0, bytes: 0 }
+    }
+
     pub fn enabled(&self) -> bool {
         self.picker.is_some()
     }
 
     pub fn protocol_name(&self) -> String {
         self.picker.as_ref().map_or("off".into(), |p| format!("{:?}", p.protocol_type()).to_lowercase())
+    }
+
+    #[cfg(test)]
+    pub fn queued(&self) -> usize {
+        self.queue.state.lock().unwrap().0.len()
     }
 
     /// The image at `url` fitted into `size` cells, starting a fetch if needed.

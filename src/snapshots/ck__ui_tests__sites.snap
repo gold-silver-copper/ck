@@ -1,0 +1,34 @@
+---
+source: src/ui_tests.rs
+expression: snapshot(&mut a)
+---
+ ck
+╭ Sites ───────────────────────────────────────────────────────────────────────────────────────────╮
+│▌ ★ Watched       3 threads  2 new                                                                │
+│  ◷ History       2 recent threads                                                                │
+│  4chan           fourchan  https://4chan.org                                                     │
+│  lainchan        vichan    https://lainchan.org                                                  │
+│  wizchan         vichan    https://wizchan.org                                                   │
+│  uboachan        vichan    https://uboachan.net                                                  │
+│  endchan         lynxchan  https://endchan.net                                                   │
+│  kohlchan        lynxchan  https://kohlchan.net                                                  │
+│  desuarchive     foolfuuka https://desuarchive.org                                               │
+│  zzzchan         jschan    https://zzzchan.xyz                                                   │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+ j/k move · enter open · esc back · / filter · o browser · r reload · ? help · q quit

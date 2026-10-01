@@ -130,7 +130,7 @@ pub struct ThreadLayout {
 }
 
 impl ThreadView {
-    fn new(board: String, no: u64, posts: Vec<Post>) -> Self {
+    pub fn new(board: String, no: u64, posts: Vec<Post>) -> Self {
         let index: HashMap<u64, usize> = posts.iter().enumerate().map(|(i, p)| (p.no, i)).collect();
         let mut backlinks = vec![Vec::new(); posts.len()];
         for p in &posts {
@@ -167,7 +167,7 @@ impl ThreadView {
     }
 
     /// Recompute matches for the current query and re-render.
-    fn set_search(&mut self, query: String) {
+    pub fn set_search(&mut self, query: String) {
         let needle = query.to_lowercase();
         self.matches = if needle.is_empty() {
             Vec::new()
@@ -256,6 +256,19 @@ impl ThreadView {
             }
             None => false,
         }
+    }
+}
+
+/// Wall clock for timestamps and "3h ago". Tests fix it (and format in UTC) so snapshots
+/// don't depend on when or where they run.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Clock {
+    pub fixed: Option<i64>,
+}
+
+impl Clock {
+    pub fn now(&self) -> i64 {
+        self.fixed.unwrap_or_else(|| chrono::Utc::now().timestamp())
     }
 }
 
@@ -359,6 +372,7 @@ pub struct App {
     /// After a thread 404'd: the same thread on the site's configured archive.
     archive_offer: Option<ThreadKey>,
     pub keys: KeyMap,
+    pub clock: Clock,
     pub downloads: Downloads,
     download_dir: Option<String>,
     /// Set by the UI every frame.
@@ -419,6 +433,7 @@ impl App {
             catalog_board: String::new(),
             archive_offer: None,
             keys,
+            clock: Clock::default(),
             downloads: Downloads::default(),
             download_dir: cfg.download_dir.clone(),
             hit: None,
@@ -665,7 +680,7 @@ impl App {
         }
         let max_no = tv.posts.iter().map(|p| p.no).max().unwrap_or(0);
         let subject = thread_subject(&tv.posts);
-        self.store.visit(&key, &subject, tv.posts.len(), max_no, chrono::Utc::now().timestamp());
+        self.store.visit(&key, &subject, tv.posts.len(), max_no, self.clock.now());
         self.save();
         self.thread = Some(tv);
     }

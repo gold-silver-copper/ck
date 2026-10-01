@@ -113,6 +113,38 @@ impl Futaba {
     }
 }
 
+/// Boards from `boards.json`.
+pub fn parse_boards(v: &Value) -> Vec<Board> {
+    let list = v["boards"].as_array().cloned().unwrap_or_default();
+    list.iter()
+        .filter_map(|b| {
+            Some(Board {
+                uri: as_str(&b["board"]).or_else(|| as_str(&b["uri"]))?,
+                title: as_str(&b["title"]).map(|t| markup::decode(&t)).unwrap_or_default(),
+                nsfw: b.get("ws_board").map(|w| !as_bool(w)),
+            })
+        })
+        .collect()
+}
+
+impl Futaba {
+    /// Thread OPs from `catalog.json`: an array of pages with `threads`.
+    pub fn parse_catalog(&self, board: &str, v: &Value) -> Vec<Post> {
+        let pages = v.as_array().cloned().unwrap_or_default();
+        pages
+            .iter()
+            .flat_map(|p| p["threads"].as_array().cloned().unwrap_or_default())
+            .map(|t| self.post(board, &t))
+            .collect()
+    }
+
+    /// Posts from a thread's JSON: `{ "posts": [...] }`, OP first.
+    pub fn parse_thread(&self, board: &str, v: &Value) -> Vec<Post> {
+        let posts = v["posts"].as_array().cloned().unwrap_or_default();
+        posts.iter().map(|p| self.post(board, p)).collect()
+    }
+}
+
 impl Backend for Futaba {
     fn boards(&self) -> Result<Vec<Board>> {
         if let Some(b) = &self.boards {
@@ -125,34 +157,18 @@ impl Backend for Futaba {
             Err(e) if self.is_4chan => return Err(e),
             Err(_) => bail!("this site has no board list API; add `boards = [...]` to its config"),
         };
-        let list = v["boards"].as_array().cloned().unwrap_or_default();
-        Ok(list
-            .iter()
-            .filter_map(|b| {
-                Some(Board {
-                    uri: as_str(&b["board"]).or_else(|| as_str(&b["uri"]))?,
-                    title: as_str(&b["title"]).map(|t| markup::decode(&t)).unwrap_or_default(),
-                    nsfw: b.get("ws_board").map(|w| !as_bool(w)),
-                })
-            })
-            .collect())
+        Ok(parse_boards(&v))
     }
 
     fn catalog(&self, board: &str) -> Result<Vec<Post>> {
         let v = get_json(&format!("{}/{}/catalog.json", self.api, enc(board)))?;
-        let pages = v.as_array().cloned().unwrap_or_default();
-        Ok(pages
-            .iter()
-            .flat_map(|p| p["threads"].as_array().cloned().unwrap_or_default())
-            .map(|t| self.post(board, &t))
-            .collect())
+        Ok(self.parse_catalog(board, &v))
     }
 
     fn thread(&self, board: &str, no: u64) -> Result<Vec<Post>> {
         let path = if self.is_4chan { "thread" } else { "res" };
         let v = get_json(&format!("{}/{}/{path}/{no}.json", self.api, enc(board)))?;
-        let posts = v["posts"].as_array().cloned().unwrap_or_default();
-        Ok(posts.iter().map(|p| self.post(board, p)).collect())
+        Ok(self.parse_thread(board, &v))
     }
 
     fn board_url(&self, board: &str) -> String {
@@ -182,6 +198,38 @@ mod tests {
     fn catalog_thread(v: &Value, no: u64) -> Value {
         let threads = v[0]["threads"].as_array().unwrap();
         threads.iter().find(|t| t["no"].as_u64() == Some(no)).unwrap().clone()
+    }
+
+    #[test]
+    fn fourchan_boards_catalog_thread() {
+        let boards = super::parse_boards(&fixture("4chan_boards.json"));
+        let g = boards.iter().find(|b| b.uri == "g").unwrap();
+        assert_eq!((g.title.as_str(), g.nsfw), ("Technology", Some(false)));
+        assert_eq!(boards.iter().find(|b| b.uri == "b").unwrap().nsfw, Some(true));
+
+        let b = Futaba::fourchan(None);
+        let cat = b.parse_catalog("g", &fixture("4chan_catalog.json"));
+        assert_eq!(cat.len(), 6);
+        assert!(cat[0].sticky && cat[0].locked);
+        assert!(cat.iter().all(|p| p.replies.is_some()));
+
+        let posts = b.parse_thread("g", &fixture("4chan_thread.json"));
+        assert_eq!(posts[0].no, 109949798);
+        assert!(posts.len() > 5);
+        // Replies quote the OP, and the OP collects them as backlinks later.
+        assert!(posts.iter().skip(1).any(|p| p.quotes.contains(&109949798)));
+    }
+
+    #[test]
+    fn vichan_catalog_thread() {
+        let b = Futaba::vichan("https://lainchan.org".into(), Some("png".into()), None);
+        let cat = b.parse_catalog("λ", &fixture("vichan_catalog.json"));
+        assert_eq!(cat[0].subject.as_deref(), Some("Programming Employment"));
+        let posts = b.parse_thread("λ", &fixture("vichan_thread.json"));
+        assert_eq!(posts[0].no, 30364);
+        // vichan marks deleted files with ext "deleted"; they're dropped.
+        assert!(posts.iter().flat_map(|p| &p.files).all(|f| !f.url.ends_with("deleted")));
+        assert!(posts.iter().any(|p| p.links.iter().any(|l| l.thread == Some(30364))));
     }
 
     #[test]
