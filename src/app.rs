@@ -11,7 +11,8 @@ use ratatui::widgets::ListState;
 use crate::backend::{self, Backend};
 use crate::config::{Config, SiteConfig};
 use crate::http;
-use crate::model::{Board, Post};
+use crate::images::Images;
+use crate::model::{Attachment, Board, Post};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum View {
@@ -69,6 +70,8 @@ pub struct ThreadLayout {
     pub lines: Vec<Line<'static>>,
     /// `starts[i]` is the first line of post `i`; has one extra entry for the end.
     pub starts: Vec<usize>,
+    /// `(line, post)` for each post drawn with a thumbnail in the left column.
+    pub thumbs: Vec<(usize, usize)>,
 }
 
 impl ThreadView {
@@ -129,6 +132,12 @@ impl ThreadView {
     }
 }
 
+/// Full-screen viewer over one post's files.
+pub struct Viewer {
+    pub files: Vec<Attachment>,
+    pub index: usize,
+}
+
 enum Msg {
     /// The request was answered from the cache without hitting the network.
     Cached(u64, Duration),
@@ -153,6 +162,9 @@ pub struct App {
     pub loading: Option<String>,
     pub status: Option<(String, bool)>,
     pub show_help: bool,
+    pub help_scroll: u16,
+    pub images: Images,
+    pub viewer: Option<Viewer>,
     pub tick: usize,
     pub quit: bool,
     req: u64,
@@ -161,7 +173,7 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(cfg: Config) -> Self {
+    pub fn new(cfg: Config, picker: Option<ratatui_image::picker::Picker>) -> Self {
         let sites = cfg
             .sites
             .into_iter()
@@ -182,6 +194,9 @@ impl App {
             loading: None,
             status: None,
             show_help: false,
+            help_scroll: 0,
+            images: Images::new(picker),
+            viewer: None,
             tick: 0,
             quit: false,
             req: 0,
@@ -236,6 +251,7 @@ impl App {
     // ----- background loading -----
 
     pub fn poll(&mut self) {
+        self.images.poll();
         while let Ok(msg) = self.rx.try_recv() {
             match msg {
                 Msg::Cached(id, age) if id == self.req && self.status.is_none() => {
@@ -345,7 +361,18 @@ impl App {
             return;
         }
         if self.show_help {
-            self.show_help = false;
+            match key.code {
+                KeyCode::Char('j') | KeyCode::Down => self.help_scroll = self.help_scroll.saturating_add(1),
+                KeyCode::Char('k') | KeyCode::Up => self.help_scroll = self.help_scroll.saturating_sub(1),
+                _ => {
+                    self.show_help = false;
+                    self.help_scroll = 0;
+                }
+            }
+            return;
+        }
+        if self.viewer.is_some() {
+            self.on_viewer_key(key.code);
             return;
         }
         if self.filtering {
@@ -359,6 +386,7 @@ impl App {
             KeyCode::Char('/') if self.view != View::Thread => self.filtering = true,
             KeyCode::Char('r') | KeyCode::F(5) => self.refresh(),
             KeyCode::Char('o') => self.open_in_browser(),
+            KeyCode::Char('v') if matches!(self.view, View::Catalog | View::Thread) => self.open_viewer(),
             KeyCode::Esc => {
                 if let Some((p, _)) = self.picker().filter(|(p, _)| !p.filter.is_empty()) {
                     p.filter.clear();
@@ -443,17 +471,65 @@ impl App {
                     t.select(i);
                 }
             }
-            KeyCode::Char('i') => {
-                let files = &t.posts[t.selected].files;
-                match files.first() {
-                    Some(f) => {
-                        let url = f.url.clone();
-                        self.open_url(&url);
-                    }
-                    None => self.status = Some(("Post has no file".into(), false)),
-                }
+            KeyCode::Char('i') => match t.posts[t.selected].files.first().cloned() {
+                Some(f) => self.open_file(&f),
+                None => self.status = Some(("Post has no file".into(), false)),
+            },
+            _ => {}
+        }
+    }
+
+    fn on_viewer_key(&mut self, code: KeyCode) {
+        let Some(v) = &mut self.viewer else { return };
+        let n = v.files.len();
+        match code {
+            KeyCode::Esc | KeyCode::Char('q' | 'v') => self.viewer = None,
+            KeyCode::Char('h' | 'k') | KeyCode::Left | KeyCode::Up => v.index = (v.index + n - 1) % n,
+            KeyCode::Char('l' | 'j' | ' ') | KeyCode::Right | KeyCode::Down => v.index = (v.index + 1) % n,
+            KeyCode::Char('i') | KeyCode::Enter => {
+                let f = v.files[v.index].clone();
+                self.open_file(&f);
             }
             _ => {}
+        }
+    }
+
+    /// The post whose files `v`, `i`, `d` act on: the selected catalog entry or thread post.
+    fn selected_post(&self) -> Option<&Post> {
+        match self.view {
+            View::Catalog => self.selected_index().map(|i| &self.catalog[i]),
+            View::Thread => self.thread.as_ref().map(|t| &t.posts[t.selected]),
+            _ => None,
+        }
+    }
+
+    fn open_viewer(&mut self) {
+        if !self.images.enabled() {
+            self.status = Some(("Images are off (images = \"off\" in the config); i opens the file".into(), false));
+            return;
+        }
+        match self.selected_post().map(|p| p.files.clone()) {
+            Some(files) if !files.is_empty() => self.viewer = Some(Viewer { files, index: 0 }),
+            _ => self.status = Some(("Post has no file".into(), false)),
+        }
+    }
+
+    /// Open a file externally: videos in mpv when it's installed, everything else in the default opener.
+    fn open_file(&mut self, f: &Attachment) {
+        if f.is_video() && on_path("mpv") {
+            let mut cmd = std::process::Command::new("mpv");
+            cmd.arg(&f.url)
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null());
+            #[cfg(unix)]
+            std::os::unix::process::CommandExt::process_group(&mut cmd, 0);
+            self.status = Some(match cmd.spawn() {
+                Ok(_) => (format!("Playing {} in mpv", f.filename), false),
+                Err(e) => (format!("Couldn't start mpv: {e}"), true),
+            });
+        } else {
+            self.open_url(&f.url);
         }
     }
 
@@ -553,6 +629,10 @@ impl App {
     }
 }
 
+fn on_path(program: &str) -> bool {
+    std::env::var_os("PATH").is_some_and(|paths| std::env::split_paths(&paths).any(|dir| dir.join(program).is_file()))
+}
+
 fn filtered(filter: &str, items: impl Iterator<Item = String>) -> Vec<usize> {
     let needle = filter.to_lowercase();
     items
@@ -560,4 +640,13 @@ fn filtered(filter: &str, items: impl Iterator<Item = String>) -> Vec<usize> {
         .filter(|(_, s)| needle.is_empty() || s.to_lowercase().contains(&needle))
         .map(|(i, _)| i)
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn finds_programs_on_path() {
+        assert!(super::on_path("sh"));
+        assert!(!super::on_path("ck-no-such-program"));
+    }
 }

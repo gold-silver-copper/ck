@@ -7,8 +7,18 @@ pub const DEFAULT_CONFIG: &str = include_str!("../config.example.toml");
 
 #[derive(Debug, Deserialize)]
 pub struct Config {
+    #[serde(default)]
+    pub images: ImagesMode,
     #[serde(rename = "site")]
     pub sites: Vec<SiteConfig>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ImagesMode {
+    #[default]
+    Auto,
+    Off,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -21,6 +31,9 @@ pub struct SiteConfig {
     /// Board list override. Required for vichan sites, which have no board-list API.
     #[serde(default)]
     pub boards: Option<Vec<BoardConfig>>,
+    /// vichan only: the site's fixed thumbnail extension (e.g. "png"), if it has one.
+    #[serde(default)]
+    pub thumb_ext: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]

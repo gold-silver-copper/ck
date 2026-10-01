@@ -36,16 +36,19 @@ impl Lynxchan {
         if let Some(role) = as_str(&v["signedRole"]) {
             name.push_str(&format!(" ## {role}"));
         }
-        let files = v["files"]
+        let mut files: Vec<Attachment> = v["files"]
             .as_array()
             .map(|fs| {
                 fs.iter()
                     .filter_map(|f| {
                         let path = as_str(&f["path"])?;
+                        let (thumb, spoiler) = thumb(&f["thumb"]);
                         Some(Attachment {
                             filename: as_str(&f["originalName"])
                                 .unwrap_or_else(|| path.rsplit('/').next().unwrap_or("").into()),
                             url: format!("{}{path}", self.base),
+                            thumb: thumb.map(|t| format!("{}{t}", self.base)),
+                            spoiler,
                             width: as_u64(&f["width"]).map(|n| n as u32),
                             height: as_u64(&f["height"]).map(|n| n as u32),
                             size: as_u64(&f["size"]),
@@ -54,6 +57,21 @@ impl Lynxchan {
                     .collect()
             })
             .unwrap_or_default();
+        // Some catalogs (endchan) only give the OP's thumbnail, not its files.
+        if files.is_empty()
+            && let Some(path) = as_str(&v["thumb"])
+        {
+            let (thumb, spoiler) = thumb(&v["thumb"]);
+            files.push(Attachment {
+                filename: "catalog thumbnail (open the thread for the file)".into(),
+                url: format!("{}{path}", self.base),
+                thumb: thumb.map(|t| format!("{}{t}", self.base)),
+                spoiler,
+                width: None,
+                height: None,
+                size: None,
+            });
+        }
         Post {
             no: as_u64(&v[no_key]).unwrap_or(0),
             name,
@@ -69,6 +87,14 @@ impl Lynxchan {
             locked: as_bool(&v["locked"]),
         }
     }
+}
+
+/// A file's thumbnail path and whether it's a spoiler. Spoilers and non-images point at
+/// shared placeholder images, which aren't worth showing.
+fn thumb(v: &Value) -> (Option<String>, bool) {
+    let thumb = as_str(v);
+    let spoiler = thumb.as_deref() == Some("/spoiler.png");
+    (thumb.filter(|t| !spoiler && t != "/genericThumb.png"), spoiler)
 }
 
 fn parse_time(v: &Value) -> Option<i64> {
@@ -119,5 +145,44 @@ impl Backend for Lynxchan {
 
     fn thread_url(&self, board: &str, no: u64) -> String {
         format!("{}/{}/res/{no}.html", self.base, enc(board))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::Value;
+
+    use super::Lynxchan;
+
+    fn fixture(name: &str) -> Vec<Value> {
+        let path = format!("{}/tests/fixtures/{name}", env!("CARGO_MANIFEST_DIR"));
+        serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
+    }
+
+    fn find(v: &[Value], no: u64) -> &Value {
+        v.iter().find(|t| t["threadId"].as_u64() == Some(no)).unwrap()
+    }
+
+    #[test]
+    fn catalog_thumbnails() {
+        // endchan's catalog has only a thumbnail per thread.
+        let end = Lynxchan::new("https://endchan.net".into(), None);
+        let cat = fixture("lynxchan_catalog.json");
+        let p = end.post(find(&cat, 867082), "threadId");
+        let thumb = "https://endchan.net/.media/t_53781bea8476800b093c909d2f0902d2-imagejpeg";
+        assert_eq!(p.files[0].thumb.as_deref(), Some(thumb));
+        let p = end.post(find(&cat, 128014), "threadId");
+        assert!(p.files[0].spoiler && p.files[0].thumb.is_none());
+        let p = end.post(find(&cat, 837516), "threadId");
+        assert!(!p.files[0].spoiler && p.files[0].thumb.is_none());
+
+        // kohlchan's lists the files.
+        let kohl = Lynxchan::new("https://kohlchan.net".into(), None);
+        let cat = fixture("kohlchan_catalog.json");
+        let p = kohl.post(find(&cat, 28870642), "threadId");
+        assert_eq!(p.files.len(), 4);
+        assert!(p.files[0].url.ends_with(".jpg") || p.files[0].url.contains("/.media/"));
+        let p = kohl.post(find(&cat, 28874644), "threadId");
+        assert!(p.files[0].spoiler && p.files[0].thumb.is_none());
     }
 }

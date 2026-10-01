@@ -25,7 +25,7 @@ pub fn build(cfg: &SiteConfig) -> Arc<dyn Backend> {
     let boards = cfg.boards.as_ref().map(|bs| bs.iter().map(to_board).collect());
     match cfg.kind {
         SiteKind::Fourchan => Arc::new(futaba::Futaba::fourchan(boards)),
-        SiteKind::Vichan => Arc::new(futaba::Futaba::vichan(url.unwrap_or_default(), boards)),
+        SiteKind::Vichan => Arc::new(futaba::Futaba::vichan(url.unwrap_or_default(), cfg.thumb_ext.clone(), boards)),
         SiteKind::Lynxchan => Arc::new(lynxchan::Lynxchan::new(url.unwrap_or_default(), boards)),
     }
 }
@@ -57,13 +57,19 @@ mod tests {
                 let posts = b.thread(board, op.no)?;
                 anyhow::ensure!(!posts.is_empty() && posts[0].no == op.no, "thread mismatch");
                 let files: usize = posts.iter().map(|p| p.files.len()).sum();
+                // The first thumbnail must exist and decode.
+                let thumb = posts.iter().flat_map(|p| &p.files).find_map(|f| f.thumb.clone());
+                if let Some(url) = &thumb {
+                    let bytes = crate::http::get_bytes(url, 4 * 1024 * 1024)?;
+                    image::load_from_memory(&bytes).map_err(|e| anyhow::anyhow!("thumbnail {url}: {e}"))?;
+                }
                 Ok(format!(
-                    "{} boards, /{board}/ {} threads, thread {} has {} posts / {files} files; first file: {:?}",
+                    "{} boards, /{board}/ {} threads, thread {} has {} posts / {files} files; first thumb: {:?}",
                     boards.len(),
                     cat.len(),
                     op.no,
                     posts.len(),
-                    posts.iter().flat_map(|p| &p.files).next().map(|f| &f.url)
+                    thumb
                 ))
             })();
             match result {

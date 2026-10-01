@@ -86,6 +86,16 @@ fn throttle(url: &str) {
     }
 }
 
+/// Like `throttle`, but never books a future slot: background media fetches wait until the
+/// host is idle, so they can't delay API requests by more than one interval.
+fn throttle_low(url: &str) {
+    let host = host(url);
+    let interval = if MEDIA_HOSTS.lock().unwrap().contains(host) { MEDIA_INTERVAL } else { API_INTERVAL };
+    while !LIMITER.try_reserve(host, interval, Instant::now()) {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
 /// Per-host request scheduler. Each caller reserves the next free slot and sleeps until it,
 /// so the lock is never held while waiting.
 #[derive(Default)]
@@ -100,6 +110,16 @@ impl Limiter {
         let slot = next.get(host).copied().filter(|&t| t > now).unwrap_or(now);
         next.insert(host.to_string(), slot + interval);
         slot - now
+    }
+
+    /// Reserve a slot for `host` only if one is free right now.
+    pub fn try_reserve(&self, host: &str, interval: Duration, now: Instant) -> bool {
+        let mut next = self.next.lock().unwrap();
+        if next.get(host).is_some_and(|&t| t > now) {
+            return false;
+        }
+        next.insert(host.to_string(), now + interval);
+        true
     }
 }
 
@@ -220,6 +240,19 @@ pub fn get_json(url: &str) -> Result<Value> {
     Ok(body)
 }
 
+/// GET raw bytes (images, downloads) at low priority through the rate limiter. Not cached.
+pub fn get_bytes(url: &str, limit: u64) -> Result<Vec<u8>> {
+    throttle_low(url);
+    let mut resp = AGENT.get(url).call().with_context(|| format!("GET {url}"))?;
+    match resp.status().as_u16() {
+        200..=299 => {}
+        404 | 410 => return Err(HttpError::NotFound(url.to_string()).into()),
+        429 => return Err(HttpError::RateLimited.into()),
+        code => return Err(HttpError::Status(code, url.to_string()).into()),
+    }
+    resp.body_mut().with_config().limit(limit).read_to_vec().with_context(|| format!("reading {url}"))
+}
+
 /// Percent-encode a single path segment (board names can be non-ASCII, e.g. `λ`).
 pub fn encode_segment(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
@@ -293,6 +326,19 @@ mod tests {
         // Once time has passed, slots free up again.
         assert_eq!(l.reserve("a", s, t0 + 10 * s), Duration::ZERO);
         assert_eq!(l.reserve("a", s, t0 + 10 * s + s / 2), s / 2);
+    }
+
+    #[test]
+    fn low_priority_never_books_ahead() {
+        let l = Limiter::default();
+        let t0 = Instant::now();
+        let s = Duration::from_secs(1);
+        assert!(l.try_reserve("a", s, t0));
+        assert!(!l.try_reserve("a", s, t0 + s / 2));
+        // A normal request still gets the next slot, not one behind queued media.
+        assert_eq!(l.reserve("a", s, t0 + s / 2), s / 2);
+        assert!(!l.try_reserve("a", s, t0 + s + s / 2));
+        assert!(l.try_reserve("a", s, t0 + 2 * s));
     }
 
     fn raw(status: u16, lm: Option<&str>, body: &str) -> Raw {

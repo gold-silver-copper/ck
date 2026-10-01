@@ -8,6 +8,14 @@
 #                      fetched automatically unless `boards` is given.
 #
 # `boards` entries are either a bare URI ("g") or { uri = "g", title = "Technology" }.
+#
+# vichan sites may set `thumb_ext` when the site renders every thumbnail in one format
+# (vichan's own `thumb_ext` setting). Leave it out if thumbnails keep the file's extension.
+
+# Thumbnails in the catalog and thread views, and the `v` image viewer.
+#   "auto"  detect the terminal's image protocol (kitty, sixel, iTerm2), else half-blocks
+#   "off"   no images, no image requests
+images = "auto"
 
 [[site]]
 name = "4chan"
@@ -17,6 +25,7 @@ kind = "4chan"
 name = "lainchan"
 kind = "vichan"
 url = "https://lainchan.org"
+thumb_ext = "png"
 boards = [
   { uri = "λ", title = "Programming" },
   { uri = "Δ", title = "Do It Yourself" },
@@ -55,6 +64,7 @@ boards = [
 name = "uboachan"
 kind = "vichan"
 url = "https://uboachan.net"
+thumb_ext = "png"
 boards = [{ uri = "yn", title = "Yume Nikki" }]
 
 [[site]]

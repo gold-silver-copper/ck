@@ -15,9 +15,29 @@ pub struct Board {
 pub struct Attachment {
     pub filename: String,
     pub url: String,
+    /// Thumbnail image, if the site makes one we can show (not for spoilers or generic icons).
+    pub thumb: Option<String>,
+    pub spoiler: bool,
     pub width: Option<u32>,
     pub height: Option<u32>,
     pub size: Option<u64>,
+}
+
+impl Attachment {
+    /// Lowercase file extension of the full file, without the dot.
+    pub fn ext(&self) -> String {
+        let name = self.url.rsplit('/').next().unwrap_or("");
+        name.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).unwrap_or_default()
+    }
+
+    pub fn is_video(&self) -> bool {
+        matches!(self.ext().as_str(), "webm" | "mp4" | "mov" | "m4v" | "mkv")
+    }
+
+    /// Whether the full file is something we can decode and show in the terminal.
+    pub fn is_image(&self) -> bool {
+        matches!(self.ext().as_str(), "jpg" | "jpeg" | "png" | "gif" | "webp")
+    }
 }
 
 #[derive(Debug, Clone, Default)]

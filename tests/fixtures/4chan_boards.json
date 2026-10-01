@@ -1,0 +1,106 @@
+{
+ "boards": [
+  {
+   "board": "3",
+   "title": "3DCG",
+   "ws_board": 1,
+   "per_page": 15,
+   "pages": 10,
+   "max_filesize": 4194304,
+   "max_webm_filesize": 4194304,
+   "max_comment_chars": 2000,
+   "max_webm_duration": 120,
+   "bump_limit": 310,
+   "image_limit": 150,
+   "cooldowns": {
+    "threads": 600,
+    "replies": 60,
+    "images": 60
+   },
+   "meta_description": "&quot;/3/ - 3DCG&quot; is 4chan's board for 3D modeling and imagery.",
+   "is_archived": 1
+  },
+  {
+   "board": "a",
+   "title": "Anime & Manga",
+   "ws_board": 1,
+   "per_page": 15,
+   "pages": 10,
+   "max_filesize": 4194304,
+   "max_webm_filesize": 4194304,
+   "max_comment_chars": 2000,
+   "max_webm_duration": 120,
+   "bump_limit": 500,
+   "image_limit": 300,
+   "cooldowns": {
+    "threads": 600,
+    "replies": 60,
+    "images": 60
+   },
+   "meta_description": "&quot;/a/ - Anime &amp; Manga&quot; is 4chan's imageboard dedicated to the discussion of Japanese animation and manga.",
+   "spoilers": 1,
+   "custom_spoilers": 1,
+   "is_archived": 1
+  },
+  {
+   "board": "b",
+   "title": "Random",
+   "ws_board": 0,
+   "per_page": 15,
+   "pages": 10,
+   "max_filesize": 2097152,
+   "max_webm_filesize": 2097152,
+   "max_comment_chars": 2000,
+   "max_webm_duration": 120,
+   "bump_limit": 300,
+   "image_limit": 150,
+   "cooldowns": {
+    "threads": 90,
+    "replies": 30,
+    "images": 30
+   },
+   "meta_description": "&quot;/b/ - Random&quot; is the birthplace of Anonymous, and where people go to discuss random topics and create memes on 4chan."
+  },
+  {
+   "board": "g",
+   "title": "Technology",
+   "ws_board": 1,
+   "per_page": 15,
+   "pages": 10,
+   "max_filesize": 4194304,
+   "max_webm_filesize": 4194304,
+   "max_comment_chars": 2000,
+   "max_webm_duration": 120,
+   "bump_limit": 310,
+   "image_limit": 150,
+   "cooldowns": {
+    "threads": 600,
+    "replies": 60,
+    "images": 60
+   },
+   "meta_description": "&quot;/g/ - Technology&quot; is 4chan's imageboard for discussing computer hardware and software, programming, and general technology.",
+   "is_archived": 1,
+   "code_tags": 1
+  },
+  {
+   "board": "po",
+   "title": "Papercraft & Origami",
+   "ws_board": 1,
+   "per_page": 15,
+   "pages": 10,
+   "max_filesize": 8388608,
+   "max_webm_filesize": 4194304,
+   "max_comment_chars": 2000,
+   "max_webm_duration": 120,
+   "bump_limit": 310,
+   "image_limit": 150,
+   "cooldowns": {
+    "threads": 600,
+    "replies": 60,
+    "images": 60
+   },
+   "meta_description": "&quot;/po/ - Papercraft &amp; Origami&quot; is 4chan's imageboard for posting papercraft and origami templates and instructions.",
+   "is_archived": 1
+  }
+ ]
+}

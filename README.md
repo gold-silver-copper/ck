@@ -30,11 +30,28 @@ If-Modified-Since on every refetch, and no refetching the same page within 10 se
 | ctrl-d / ctrl-u, space | page                                 |
 | `J`/`K`                | scroll a thread by line              |
 | `b` / `u`              | jump to first reply / jump back      |
-| `i`                    | open the post's file                 |
+| `i`                    | open the post's file (videos in mpv if it's installed) |
+| `v`                    | image viewer for the post's files (catalog: the OP's) |
 | `o`                    | open the board/thread in a browser   |
 | `r`                    | reload                               |
 | `?`                    | help                                 |
 | `q`                    | quit                                 |
+
+In the image viewer: `h`/`l` or arrows for the previous/next file, `i` to open it externally,
+`esc` or `q` to close.
+
+## Images
+
+Catalog and thread views show thumbnails, and `v` opens a full-screen viewer. ck asks the
+terminal which image protocol it supports (kitty, sixel, iTerm2) and falls back to unicode
+half-blocks, which work everywhere. The detected protocol is shown at the bottom of the `?`
+help. Thumbnails are skipped in terminals narrower than 60 columns.
+
+Images load in the background through the same rate limiter as everything else, only for
+what's on screen (or about to be), and are kept in a bounded in-memory cache.
+
+To turn images off entirely (no image requests at all), put `images = "off"` at the top of
+your config.
 
 ## Adding sites
 
@@ -48,6 +65,7 @@ name = "somechan"
 kind = "vichan"
 url = "https://somechan.org"
 boards = ["b", { uri = "tech", title = "Technology" }]
+thumb_ext = "png"   # only if the site renders every thumbnail as png (vichan's `thumb_ext`)
 ```
 
 ## Tests

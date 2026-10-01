@@ -1,21 +1,33 @@
 use chrono::{Local, TimeZone};
 use ratatui::Frame;
-use ratatui::layout::{Constraint, Layout, Rect};
+use ratatui::layout::{Constraint, Layout, Rect, Size};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, BorderType, Borders, Clear, List, ListItem, Paragraph, Wrap};
+use ratatui::widgets::{Block, BorderType, Borders, Clear, List, ListItem, Paragraph};
+use ratatui_image::Image;
 use unicode_width::UnicodeWidthStr;
 
 use crate::app::{App, ThreadLayout, ThreadView, View};
+use crate::images::{Images, State};
 use crate::markup;
-use crate::model::Post;
+use crate::model::{Attachment, Post};
 
 const ACCENT: Color = Color::Yellow;
 const DIM: Style = Style::new().fg(Color::DarkGray);
 const SELECTED: Style = Style::new().bg(Color::Rgb(45, 45, 60)).add_modifier(Modifier::BOLD);
 const SPINNER: [&str; 8] = ["⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"];
+/// Thumbnail sizes in cells (roughly square at a 1:2 cell aspect).
+const THUMB: Size = Size::new(16, 8);
+const CAT_THUMB: Size = Size::new(10, 4);
+/// Below this width there's no room for thumbnails next to text.
+const MIN_THUMB_WIDTH: u16 = 60;
 
 pub fn draw(f: &mut Frame, app: &mut App) {
+    if app.viewer.is_some() {
+        draw_viewer(f, app);
+        app.images.end_frame();
+        return;
+    }
     let [header, body, footer] =
         Layout::vertical([Constraint::Length(1), Constraint::Min(1), Constraint::Length(1)]).areas(f.area());
 
@@ -38,8 +50,9 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     draw_footer(f, app, footer);
 
     if app.show_help {
-        draw_help(f);
+        draw_help(f, app);
     }
+    app.images.end_frame();
 }
 
 fn draw_header(f: &mut Frame, app: &App, area: Rect) {
@@ -107,7 +120,8 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
         Line::styled(format!(" {msg}"), style)
     } else {
         let keys = match app.view {
-            View::Thread => "j/k post · J/K line · enter follow quote · b replies · u back · i image · o browser · r reload · ? help",
+            View::Thread => "j/k post · J/K line · enter quote · b replies · u back · v view · i open · o browser · r reload · ? help",
+            View::Catalog => "j/k move · enter open · esc back · / filter · v view · o browser · r reload · ? help · q quit",
             _ => "j/k move · enter open · esc back · / filter · o browser · r reload · ? help · q quit",
         };
         Line::styled(format!(" {keys}"), DIM)
@@ -163,11 +177,12 @@ fn draw_boards(f: &mut Frame, app: &mut App, area: Rect) {
 }
 
 fn draw_catalog(f: &mut Frame, app: &mut App, area: Rect) {
+    let thumbs = app.images.enabled() && area.width >= MIN_THUMB_WIDTH;
     let width = area.width.saturating_sub(3) as usize;
-    let items: Vec<ListItem> = app
-        .visible_catalog()
-        .into_iter()
-        .map(|i| {
+    let visible = app.visible_catalog();
+    let items: Vec<ListItem> = visible
+        .iter()
+        .map(|&i| {
             let p = &app.catalog[i];
             let mut head = Vec::new();
             if p.sticky {
@@ -187,12 +202,121 @@ fn draw_catalog(f: &mut Frame, app: &mut App, area: Rect) {
                 Style::new().fg(Color::Blue),
             ));
             head.push(Span::styled(format!("  {}", ago(p.time)), DIM));
-            let preview = truncate(&p.plain_text(), width);
-            ListItem::new(Text::from(vec![Line::from(head), Line::styled(preview, Style::new().fg(Color::Gray)), Line::raw("")]))
+            if !thumbs {
+                let preview = truncate(&p.plain_text(), width);
+                return ListItem::new(Text::from(vec![Line::from(head), Line::styled(preview, Style::new().fg(Color::Gray)), Line::raw("")]));
+            }
+            // Thumbnail on the left, header and up to three preview lines beside it.
+            let text_w = width.saturating_sub(CAT_THUMB.width as usize + 1).max(1);
+            let mut text = markup::wrap(&Line::from(head), text_w);
+            text.truncate(1);
+            let mut preview = markup::wrap(&Line::styled(p.plain_text(), Style::new().fg(Color::Gray)), text_w);
+            let rows = CAT_THUMB.height as usize - 1;
+            if preview.len() > rows {
+                preview.truncate(rows);
+                let last = preview.pop().map(|l| format!("{}…", line_text(&l))).unwrap_or_default();
+                preview.push(Line::styled(truncate(&last, text_w), Style::new().fg(Color::Gray)));
+            }
+            text.extend(preview);
+            text.resize(CAT_THUMB.height as usize, Line::raw(""));
+            let left = p.files.first().map(|f| placeholder(f, p.files.len(), CAT_THUMB)).unwrap_or_default();
+            let mut lines = beside(left, text, CAT_THUMB.width);
+            lines.push(Line::raw(""));
+            ListItem::new(Text::from(lines))
         })
         .collect();
     let empty = if app.loading.is_some() { "" } else { "No threads" };
     render_list(f, area, items, &mut app.catalog_list.state, empty);
+    if !thumbs {
+        return;
+    }
+    // Draw thumbnails over the placeholders of fully visible entries; prefetch the next page.
+    let per = CAT_THUMB.height + 1;
+    let on_screen = (area.height / per) as usize;
+    let offset = app.catalog_list.state.offset();
+    for (k, &i) in visible.iter().enumerate().skip(offset).take(on_screen * 2 + 1) {
+        let Some(file) = app.catalog[i].files.first() else { continue };
+        let row = (k - offset) as u16 * per;
+        if row + CAT_THUMB.height <= area.height {
+            draw_thumb(f, &mut app.images, file, Rect::new(area.x + 2, area.y + row, CAT_THUMB.width, CAT_THUMB.height));
+        } else if let Some(url) = &file.thumb {
+            app.images.want(url);
+        }
+    }
+}
+
+fn line_text(l: &Line) -> String {
+    l.spans.iter().map(|s| s.content.as_ref()).collect()
+}
+
+/// A dim box standing in for a thumbnail: shown while it loads, or for files without one.
+fn placeholder(file: &Attachment, count: usize, size: Size) -> Vec<Line<'static>> {
+    let (w, h) = (size.width as usize, size.height as usize);
+    let mut label = if file.spoiler {
+        "spoiler".to_string()
+    } else {
+        Some(file.ext().to_uppercase()).filter(|e| !e.is_empty()).unwrap_or_else(|| "FILE".into())
+    };
+    if count > 1 {
+        label.push_str(&format!(" +{}", count - 1));
+    }
+    let label = truncate(&label, w - 2);
+    (0..h)
+        .map(|r| {
+            let s = if r == 0 {
+                format!("┌{}┐", "─".repeat(w - 2))
+            } else if r == h - 1 {
+                format!("└{}┘", "─".repeat(w - 2))
+            } else if r == (h - 1) / 2 {
+                format!("│{label:^0$}│", w - 2)
+            } else {
+                format!("│{}│", " ".repeat(w - 2))
+            };
+            Line::styled(s, DIM)
+        })
+        .collect()
+}
+
+/// Put `left` (exactly `width` columns per line, or nothing) beside `right`, one column apart.
+fn beside(left: Vec<Line<'static>>, right: Vec<Line<'static>>, width: u16) -> Vec<Line<'static>> {
+    let n = left.len().max(right.len());
+    let blank = " ".repeat(width as usize + 1);
+    let (mut left, mut right) = (left.into_iter(), right.into_iter());
+    (0..n)
+        .map(|_| {
+            let mut spans = match left.next() {
+                Some(l) => {
+                    let mut s = l.spans;
+                    s.push(Span::raw(" "));
+                    s
+                }
+                None => vec![Span::raw(blank.clone())],
+            };
+            if let Some(r) = right.next() {
+                spans.extend(r.spans);
+            }
+            Line::from(spans)
+        })
+        .collect()
+}
+
+/// Draw `file`'s thumbnail over its placeholder in `area`, or a loading/failed marker.
+fn draw_thumb(f: &mut Frame, images: &mut Images, file: &Attachment, area: Rect) {
+    let Some(url) = &file.thumb else { return };
+    let mark = |f: &mut Frame, s: &str, style: Style| {
+        let r = Rect::new(area.x + 1, area.y + area.height / 2, area.width - 2, 1);
+        f.render_widget(Line::styled(s.to_string(), style).centered(), r);
+    };
+    match images.get(url, Size::new(area.width, area.height)) {
+        State::Ready(p) => {
+            let s = p.size();
+            f.render_widget(Clear, area);
+            let r = Rect::new(area.x + (area.width - s.width.min(area.width)) / 2, area.y, s.width, s.height);
+            f.render_widget(Image::new(p), r.intersection(area));
+        }
+        State::Loading => mark(f, "…", DIM),
+        State::Failed => mark(f, "✗", Style::new().fg(Color::Red)),
+    }
 }
 
 fn render_list(f: &mut Frame, area: Rect, items: Vec<ListItem>, state: &mut ratatui::widgets::ListState, empty: &str) {
@@ -211,8 +335,9 @@ fn draw_thread(f: &mut Frame, app: &mut App, area: Rect) {
         return;
     };
     t.viewport = area.height as usize;
+    let thumbs = app.images.enabled() && area.width >= MIN_THUMB_WIDTH;
     if t.layout.as_ref().is_none_or(|l| l.width != area.width) {
-        t.layout = Some(layout_thread(t, area.width));
+        t.layout = Some(layout_thread(t, area.width, thumbs));
         t.scroll_to_selected();
     }
     let l = t.layout.as_ref().unwrap();
@@ -235,20 +360,98 @@ fn draw_thread(f: &mut Frame, app: &mut App, area: Rect) {
         })
         .collect();
     f.render_widget(Paragraph::new(lines), area);
+
+    // Thumbnails go over their placeholders only when fully on screen, so they never draw
+    // outside the thread area; the ones within a screen of the view are prefetched.
+    let (top, h, view) = (t.scroll, THUMB.height as usize, area.height as usize);
+    for &(line, i) in &l.thumbs {
+        let file = &t.posts[i].files[0];
+        if line >= top && line + h <= top + view {
+            let r = Rect::new(area.x + 2, area.y + (line - top) as u16, THUMB.width, THUMB.height);
+            draw_thumb(f, &mut app.images, file, r);
+        } else if line + h + view > top && line < top + 2 * view
+            && let Some(url) = &file.thumb
+        {
+            app.images.want(url);
+        }
+    }
 }
 
 /// Lay out every post of a thread as wrapped lines, recording where each post starts.
-fn layout_thread(t: &ThreadView, width: u16) -> ThreadLayout {
+/// With `thumbs`, posts with files get a fixed-size thumbnail column on the left.
+fn layout_thread(t: &ThreadView, width: u16, thumbs: bool) -> ThreadLayout {
     let text_width = width.saturating_sub(2).max(10) as usize;
     let mut lines = Vec::new();
     let mut starts = Vec::with_capacity(t.posts.len() + 1);
+    let mut thumb_at = Vec::new();
     for (i, p) in t.posts.iter().enumerate() {
         starts.push(lines.len());
-        lines.extend(post_lines(p, i == 0, &t.backlinks[i], t.no, text_width));
+        match p.files.first().filter(|_| thumbs) {
+            Some(file) => {
+                thumb_at.push((lines.len(), i));
+                let text = post_lines(p, i == 0, &t.backlinks[i], t.no, text_width - THUMB.width as usize - 1);
+                lines.extend(beside(placeholder(file, p.files.len(), THUMB), text, THUMB.width));
+            }
+            None => lines.extend(post_lines(p, i == 0, &t.backlinks[i], t.no, text_width)),
+        }
         lines.push(Line::raw(""));
     }
     starts.push(lines.len());
-    ThreadLayout { width, lines, starts }
+    ThreadLayout { width, lines, starts, thumbs: thumb_at }
+}
+
+fn draw_viewer(f: &mut Frame, app: &mut App) {
+    let Some(v) = &app.viewer else { return };
+    let file = &v.files[v.index];
+    let area = f.area();
+    f.render_widget(Clear, area);
+    let mut meta = Vec::new();
+    if let (Some(w), Some(h)) = (file.width, file.height) {
+        meta.push(format!("{w}x{h}"));
+    }
+    if let Some(s) = file.size {
+        meta.push(human_size(s));
+    }
+    let title = format!(" {} ({}/{}) {} ", file.filename, v.index + 1, v.files.len(), meta.join(", "));
+    let block = Block::bordered()
+        .border_type(BorderType::Rounded)
+        .border_style(Style::new().fg(ACCENT))
+        .title(Line::styled(title, Style::new().fg(ACCENT).bold()))
+        .title_bottom(Line::styled(" h/l previous/next · i open externally · esc close ", DIM).right_aligned());
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+    // Non-images (videos, pdfs, ...) show their thumbnail, if any, with a hint.
+    let url = if file.is_image() { Some(&file.url) } else { file.thumb.as_ref() };
+    let mut inner = inner;
+    if !file.is_image() {
+        let hint = match file.ext().to_uppercase() {
+            e if e.is_empty() => "Showing the thumbnail. Press i to open the file externally.".to_string(),
+            e => format!("{e} files can't be shown here; showing the thumbnail. Press i to open it externally."),
+        };
+        let r = Rect::new(inner.x, inner.bottom().saturating_sub(1), inner.width, 1);
+        f.render_widget(Line::styled(hint, DIM).centered(), r);
+        inner.height = inner.height.saturating_sub(2);
+    }
+    let msg = |f: &mut Frame, s: String, style: Style| {
+        let r = Rect::new(inner.x, inner.y + inner.height / 2, inner.width, 1);
+        f.render_widget(Line::styled(s, style).centered(), r);
+    };
+    let Some(url) = url else { return };
+    let spinner = SPINNER[app.tick % SPINNER.len()];
+    match app.images.get(url, Size::new(inner.width, inner.height)) {
+        State::Ready(p) => {
+            let s = p.size();
+            let r = Rect::new(
+                inner.x + inner.width.saturating_sub(s.width) / 2,
+                inner.y + inner.height.saturating_sub(s.height) / 2,
+                s.width,
+                s.height,
+            );
+            f.render_widget(Image::new(p), r.intersection(inner));
+        }
+        State::Loading => msg(f, format!("{spinner} Loading…"), Style::new().fg(ACCENT)),
+        State::Failed => msg(f, "Couldn't load this image".into(), Style::new().fg(Color::Red)),
+    }
 }
 
 fn post_lines(p: &Post, is_op: bool, backlinks: &[u64], op_no: u64, width: usize) -> Vec<Line<'static>> {
@@ -310,48 +513,84 @@ fn post_lines(p: &Post, is_op: bool, backlinks: &[u64], op_no: u64, width: usize
     out
 }
 
-fn draw_help(f: &mut Frame) {
-    let rows = [
-        ("Everywhere", ""),
-        ("j / k, ↓ / ↑", "move"),
-        ("g / G", "top / bottom"),
-        ("ctrl-d / ctrl-u", "half page down / up"),
-        ("enter, l", "open"),
-        ("esc, h, backspace", "back"),
-        ("/", "filter list"),
-        ("r", "reload"),
-        ("o", "open in browser"),
-        ("q, ctrl-c", "quit"),
-        ("", ""),
-        ("Thread", ""),
-        ("j / k", "next / previous post"),
-        ("J / K, space", "scroll by line / page"),
-        ("enter, l", "jump to quoted post"),
-        ("b", "jump to first reply"),
-        ("u", "jump back"),
-        ("i", "open post's file"),
-    ];
-    let lines: Vec<Line> = rows
+/// Key help, by section. Keep in sync with the README and the footer hints.
+const HELP: &[(&str, &[(&str, &str)])] = &[
+    (
+        "Everywhere",
+        &[
+            ("j / k, ↓ / ↑", "move"),
+            ("g / G", "top / bottom"),
+            ("ctrl-d / ctrl-u", "half page down / up"),
+            ("enter, l", "open"),
+            ("esc, h, backspace", "back"),
+            ("/", "filter list"),
+            ("r", "reload"),
+            ("o", "open in browser"),
+            ("q, ctrl-c", "quit"),
+        ],
+    ),
+    ("Catalog", &[("v", "view the OP's images")]),
+    (
+        "Thread",
+        &[
+            ("j / k", "next / previous post"),
+            ("J / K, space", "scroll by line / page"),
+            ("enter, l", "jump to quoted post"),
+            ("b", "jump to first reply"),
+            ("u", "jump back"),
+            ("i", "open file (videos in mpv)"),
+            ("v", "view the post's images"),
+        ],
+    ),
+    ("Image viewer", &[("h / l, ← / →", "previous / next file"), ("i", "open externally"), ("esc, q", "close")]),
+];
+
+fn draw_help(f: &mut Frame, app: &App) {
+    const COL: u16 = 48;
+    let sections: Vec<Vec<Line>> = HELP
         .iter()
-        .map(|(k, v)| {
-            if v.is_empty() {
-                Line::styled(*k, Style::new().fg(ACCENT).bold())
-            } else {
-                Line::from(vec![Span::styled(format!("  {k:<20}"), Style::new().fg(Color::Cyan)), Span::raw(*v)])
-            }
+        .map(|&(title, rows)| {
+            let mut lines = vec![Line::styled(title, Style::new().fg(ACCENT).bold())];
+            lines.extend(rows.iter().map(|&(k, v)| {
+                Line::from(vec![Span::styled(format!("  {k:<20}"), Style::new().fg(Color::Cyan)), Span::raw(v)])
+            }));
+            lines.push(Line::raw(""));
+            lines
         })
         .collect();
+    let total: usize = sections.iter().map(Vec::len).sum();
     let area = f.area();
-    let w = 46.min(area.width);
-    let h = (lines.len() as u16 + 2).min(area.height);
+    // Two columns when one doesn't fit, split at the section boundary nearest the middle.
+    let two = total as u16 + 2 > area.height && area.width >= 2 * COL + 3;
+    let mut cols = vec![Vec::new(), Vec::new()];
+    for s in sections {
+        let c = usize::from(two && cols[0].len() + s.len() / 2 >= total / 2);
+        cols[c].extend(s);
+    }
+    for c in &mut cols {
+        if c.last().is_some_and(|l| l.width() == 0) {
+            c.pop();
+        }
+    }
+    let rows = cols.iter().map(Vec::len).max().unwrap_or(0) as u16;
+    let w = if two { 2 * COL + 3 } else { COL + 2 }.min(area.width);
+    let h = (rows + 2).min(area.height);
     let popup = Rect::new(area.x + (area.width - w) / 2, area.y + (area.height - h) / 2, w, h);
     f.render_widget(Clear, popup);
-    f.render_widget(
-        Paragraph::new(lines).wrap(Wrap { trim: false }).block(
-            Block::bordered().border_type(BorderType::Rounded).title(" Help ").border_style(Style::new().fg(ACCENT)),
-        ),
-        popup,
-    );
+    let block = Block::bordered()
+        .border_type(BorderType::Rounded)
+        .title(" Help ")
+        .title_bottom(Line::styled(format!(" images: {} ", app.images.protocol_name()), DIM).right_aligned())
+        .border_style(Style::new().fg(ACCENT));
+    let block = if rows + 2 > h { block.title_bottom(Line::styled(" j/k scroll ", DIM).left_aligned()) } else { block };
+    let inner = block.inner(popup);
+    f.render_widget(block, popup);
+    let [left, right] = Layout::horizontal([Constraint::Length(COL + 1), Constraint::Min(0)]).areas(inner);
+    // In small terminals the help scrolls (j/k).
+    let scroll = app.help_scroll.min(rows.saturating_sub(inner.height));
+    let [c0, c1] = [std::mem::take(&mut cols[0]), std::mem::take(&mut cols[1])];
+    f.render_widget(Paragraph::new(c0).scroll((scroll, 0)), left);
+    f.render_widget(Paragraph::new(c1).scroll((scroll, 0)), right);
 }
 
 fn truncate(s: &str, width: usize) -> String {
