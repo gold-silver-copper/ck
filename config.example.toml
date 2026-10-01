@@ -1,0 +1,68 @@
+# ck configuration. Copy to ~/.config/ck/config.toml and edit.
+#
+# Each [[site]] needs a `name` and a `kind`:
+#   kind = "4chan"     the official 4chan API (no url needed)
+#   kind = "vichan"    vichan / tinyboard / infinity engines (lainchan, wizchan, ...).
+#                      These have no board-list API, so `boards` is required.
+#   kind = "lynxchan"  LynxChan engines (endchan, kohlchan, ...). Boards are
+#                      fetched automatically unless `boards` is given.
+#
+# `boards` entries are either a bare URI ("g") or { uri = "g", title = "Technology" }.
+
+[[site]]
+name = "4chan"
+kind = "4chan"
+
+[[site]]
+name = "lainchan"
+kind = "vichan"
+url = "https://lainchan.org"
+boards = [
+  { uri = "λ", title = "Programming" },
+  { uri = "Δ", title = "Do It Yourself" },
+  { uri = "sec", title = "Security" },
+  { uri = "Ω", title = "Technology" },
+  { uri = "inter", title = "Games and Interactive Media" },
+  { uri = "lit", title = "Literature" },
+  { uri = "music", title = "Musical and Audible Media" },
+  { uri = "vis", title = "Visual Media" },
+  { uri = "hum", title = "Humanity" },
+  { uri = "drg", title = "Drugs 3.0" },
+  { uri = "zzz", title = "Consciousness and Dreams" },
+  { uri = "layer", title = "Layer" },
+  { uri = "q", title = "Questions and Complaints" },
+  { uri = "r", title = "Random" },
+  { uri = "psy", title = "Psychopharmacology" },
+  { uri = "mega", title = "Overboard" },
+]
+
+[[site]]
+name = "wizchan"
+kind = "vichan"
+url = "https://wizchan.org"
+boards = [
+  { uri = "wiz", title = "General" },
+  { uri = "dep", title = "Depression" },
+  { uri = "hob", title = "Hobbies" },
+  { uri = "lounge", title = "Lounge" },
+  { uri = "jp", title = "Japan" },
+  { uri = "games", title = "Games" },
+  { uri = "music", title = "Music" },
+  { uri = "meta", title = "Meta" },
+]
+
+[[site]]
+name = "uboachan"
+kind = "vichan"
+url = "https://uboachan.net"
+boards = [{ uri = "yn", title = "Yume Nikki" }]
+
+[[site]]
+name = "endchan"
+kind = "lynxchan"
+url = "https://endchan.net"
+
+[[site]]
+name = "kohlchan"
+kind = "lynxchan"
+url = "https://kohlchan.net"
