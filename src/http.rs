@@ -253,6 +253,31 @@ pub fn get_bytes(url: &str, limit: u64) -> Result<Vec<u8>> {
     resp.body_mut().with_config().limit(limit).read_to_vec().with_context(|| format!("reading {url}"))
 }
 
+/// Download `url` into `path` at low priority, through a temp file renamed into place.
+pub fn download_to(url: &str, path: &std::path::Path) -> Result<()> {
+    throttle_low(url);
+    let mut resp = AGENT.get(url).call().with_context(|| format!("GET {url}"))?;
+    match resp.status().as_u16() {
+        200..=299 => {}
+        404 | 410 => return Err(HttpError::NotFound(url.to_string()).into()),
+        429 => return Err(HttpError::RateLimited.into()),
+        code => return Err(HttpError::Status(code, url.to_string()).into()),
+    }
+    let mut tmp = path.as_os_str().to_owned();
+    tmp.push(".part");
+    let tmp = std::path::PathBuf::from(tmp);
+    let result = (|| -> Result<()> {
+        let mut file = std::fs::File::create(&tmp).with_context(|| format!("creating {}", tmp.display()))?;
+        let mut body = resp.body_mut().with_config().limit(1 << 30).reader();
+        std::io::copy(&mut body, &mut file).with_context(|| format!("downloading {url}"))?;
+        std::fs::rename(&tmp, path).with_context(|| format!("renaming to {}", path.display()))
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    result
+}
+
 /// Percent-encode a single path segment (board names can be non-ASCII, e.g. `λ`).
 pub fn encode_segment(s: &str) -> String {
     let mut out = String::with_capacity(s.len());

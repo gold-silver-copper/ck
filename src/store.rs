@@ -39,12 +39,20 @@ pub struct Visit {
     pub opened: i64,
 }
 
+/// UI settings that couldn't be saved in config.toml.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct Settings {
+    #[serde(default)]
+    pub compact_catalog: Option<bool>,
+}
+
 #[derive(Default)]
 pub struct Store {
     dir: Option<PathBuf>,
     pub watched: Vec<Watched>,
     /// Most recent first.
     pub history: Vec<Visit>,
+    pub settings: Settings,
 }
 
 impl Store {
@@ -63,6 +71,7 @@ impl Store {
         if let Some(dir) = &store.dir {
             store.watched = load_file(&dir.join("watched.json"), &mut warnings);
             store.history = load_file(&dir.join("history.json"), &mut warnings);
+            store.settings = load_file(&dir.join("settings.json"), &mut warnings);
         }
         (store, warnings)
     }
@@ -71,7 +80,11 @@ impl Store {
         let Some(dir) = &self.dir else { return Ok(()) };
         std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
         write_atomic(&dir.join("watched.json"), &serde_json::to_vec_pretty(&self.watched)?)?;
-        write_atomic(&dir.join("history.json"), &serde_json::to_vec_pretty(&self.history)?)
+        write_atomic(&dir.join("history.json"), &serde_json::to_vec_pretty(&self.history)?)?;
+        if self.settings.compact_catalog.is_some() {
+            write_atomic(&dir.join("settings.json"), &serde_json::to_vec_pretty(&self.settings)?)?;
+        }
+        Ok(())
     }
 
     pub fn watched(&self, key: &ThreadKey) -> Option<&Watched> {

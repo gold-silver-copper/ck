@@ -7,15 +7,32 @@ use ratatui::widgets::{Block, BorderType, Borders, Clear, List, ListItem, Paragr
 use ratatui_image::Image;
 use unicode_width::UnicodeWidthStr;
 
-use crate::app::{App, SiteRow, ThreadLayout, ThreadView, View};
+use crate::app::{App, Hit, SiteRow, Sort, ThreadLayout, ThreadView, View};
 use crate::images::{Images, State};
+use crate::keys::{Action, KeyMap};
 use crate::markup;
 use crate::model::{Attachment, Post};
+use crate::theme::theme;
 
-const ACCENT: Color = Color::Yellow;
-const DIM: Style = Style::new().fg(Color::DarkGray);
-const SELECTED: Style = Style::new().bg(Color::Rgb(45, 45, 60)).add_modifier(Modifier::BOLD);
-const SEARCH_HL: Style = Style::new().fg(Color::Black).bg(Color::Yellow);
+fn accent() -> Color {
+    theme().accent
+}
+
+fn dim() -> Style {
+    Style::new().fg(theme().dim)
+}
+
+fn selected() -> Style {
+    Style::new().bg(theme().selected).add_modifier(Modifier::BOLD)
+}
+
+fn search_hl() -> Style {
+    Style::new().fg(Color::Black).bg(theme().search)
+}
+
+fn new_style() -> Style {
+    Style::new().fg(theme().new).bold()
+}
 const SPINNER: [&str; 8] = ["⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"];
 /// Thumbnail sizes in cells (roughly square at a 1:2 cell aspect).
 const THUMB: Size = Size::new(16, 8);
@@ -36,9 +53,9 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     let block = Block::new()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(DIM)
+        .border_style(dim())
         .title(view_title(app))
-        .title_style(Style::new().fg(ACCENT).bold());
+        .title_style(Style::new().fg(accent()).bold());
     let inner = block.inner(body);
     f.render_widget(block, body);
 
@@ -62,8 +79,8 @@ pub fn draw(f: &mut Frame, app: &mut App) {
 }
 
 fn draw_header(f: &mut Frame, app: &App, area: Rect) {
-    let sep = Span::styled(" › ", DIM);
-    let mut spans = vec![Span::styled(" ck ", Style::new().fg(Color::Black).bg(ACCENT).bold())];
+    let sep = Span::styled(" › ", dim());
+    let mut spans = vec![Span::styled(" ck ", Style::new().fg(Color::Black).bg(accent()).bold())];
     match app.view {
         View::Sites => {}
         View::Watched | View::History => {
@@ -99,7 +116,8 @@ fn view_title(app: &App) -> Line<'static> {
             let b = app.board.as_ref().map(|b| {
                 if b.title.is_empty() { format!("/{}/", b.uri) } else { format!("/{}/ - {}", b.uri, b.title) }
             });
-            (format!("{} ({} threads)", b.unwrap_or_default(), app.catalog.len()), &app.catalog_list.filter)
+            let sort = if app.catalog_sort == Sort::Bump { String::new() } else { format!(" · {}", app.catalog_sort.label()) };
+            (format!("{} ({} threads){sort}", b.unwrap_or_default(), app.catalog.len()), &app.catalog_list.filter)
         }
         View::Thread => {
             let t = app.thread.as_ref();
@@ -113,7 +131,7 @@ fn view_title(app: &App) -> Line<'static> {
                 spans.push(Span::styled(s, Style::new().fg(Color::Cyan)));
             }
             if t.is_some_and(|t| t.reveal_all) {
-                spans.push(Span::styled("[spoilers shown] ", DIM));
+                spans.push(Span::styled("[spoilers shown] ", dim()));
             }
             return Line::from(spans);
         }
@@ -134,39 +152,85 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
             Span::styled(" search: ", Style::new().fg(Color::Cyan)),
             Span::raw(q.to_string()),
             Span::styled("█", Style::new().fg(Color::Cyan)),
-            Span::styled("  enter accept · esc clear", DIM),
+            Span::styled("  enter accept · esc clear", dim()),
         ])
     } else if app.filtering {
         Line::from(vec![
             Span::styled(" filter: ", Style::new().fg(Color::Cyan)),
             Span::raw(current_filter(app).to_string()),
             Span::styled("█", Style::new().fg(Color::Cyan)),
-            Span::styled("  enter accept · esc clear", DIM),
+            Span::styled("  enter accept · esc clear", dim()),
         ])
     } else if let Some(label) = &app.loading {
         Line::from(vec![
-            Span::styled(format!(" {} ", SPINNER[app.tick % SPINNER.len()]), Style::new().fg(ACCENT)),
+            Span::styled(format!(" {} ", SPINNER[app.tick % SPINNER.len()]), Style::new().fg(accent())),
             Span::raw(format!("{label}…")),
         ])
     } else if let Some((msg, is_err)) = &app.status {
         let style = if *is_err { Style::new().fg(Color::Red) } else { Style::new().fg(Color::Green) };
         Line::styled(format!(" {msg}"), style)
     } else {
-        let keys = match app.view {
-            View::Thread => "j/k post · enter quote · p preview · u back · / search · s spoiler · U unread · v view · w watch · ? help",
-            View::Catalog => "j/k move · enter open · esc back · / filter · v view · w watch · o browser · r reload · ? help",
-            View::Watched | View::History => "j/k move · enter open · x remove · esc back · / filter · o browser · ? help",
-            _ => "j/k move · enter open · esc back · / filter · o browser · r reload · ? help · q quit",
-        };
-        Line::styled(format!(" {keys}"), DIM)
+        Line::styled(format!(" {}", footer_hints(app)), dim())
     };
-    // Background refreshes are shown at the right without hiding the rest of the footer.
-    let indicator = (!app.refreshing.is_empty()).then(|| format!(" ↻ refreshing {} ", app.refreshing.len()));
+    // Background work is shown at the right without hiding the rest of the footer.
+    let d = &app.downloads;
+    let mut indicator = String::new();
+    if d.running > 0 {
+        indicator.push_str(&format!(" ⇣ {}/{} ", d.done + d.skipped + d.failed, d.total));
+    }
+    if !app.refreshing.is_empty() {
+        indicator.push_str(&format!(" ↻ refreshing {} ", app.refreshing.len()));
+    }
+    let indicator = (!indicator.is_empty()).then_some(indicator);
     let width = indicator.as_ref().map_or(0, |s| s.width() as u16);
     let [left, right] = Layout::horizontal([Constraint::Min(0), Constraint::Length(width)]).areas(area);
     f.render_widget(line, left);
     if let Some(s) = indicator {
         f.render_widget(Line::styled(s, Style::new().fg(Color::Cyan)), right);
+    }
+}
+
+/// Key hints for the footer, with the configured keys.
+fn footer_hints(app: &App) -> String {
+    let k = |a| app.keys.key(a);
+    match app.view {
+        View::Thread => format!(
+            "j/k post · enter quote · {} preview · {} back · {} search · {} spoiler · {} unread · {} view · {} save · {} watch · {} help",
+            k(Action::Preview),
+            k(Action::JumpBack),
+            k(Action::Search),
+            k(Action::Spoiler),
+            k(Action::Unread),
+            k(Action::View),
+            k(Action::Download),
+            k(Action::Watch),
+            k(Action::Help)
+        ),
+        View::Catalog => format!(
+            "j/k move · enter open · esc back · {} filter · {} view · {} watch · {} sort · {} compact · {} reload · {} help",
+            k(Action::Search),
+            k(Action::View),
+            k(Action::Watch),
+            k(Action::Sort),
+            k(Action::Compact),
+            k(Action::Reload),
+            k(Action::Help)
+        ),
+        View::Watched | View::History => format!(
+            "j/k move · enter open · {} remove · esc back · {} filter · {} browser · {} help",
+            k(Action::Remove),
+            k(Action::Search),
+            k(Action::Browser),
+            k(Action::Help)
+        ),
+        _ => format!(
+            "j/k move · enter open · esc back · {} filter · {} browser · {} reload · {} help · {} quit",
+            k(Action::Search),
+            k(Action::Browser),
+            k(Action::Reload),
+            k(Action::Help),
+            k(Action::Quit)
+        ),
     }
 }
 
@@ -190,19 +254,19 @@ fn draw_sites(f: &mut Frame, app: &mut App, area: Rect) {
                 let n = app.store.watched.len();
                 let unread: usize = app.store.watched.iter().map(|w| w.unread).sum();
                 let mut spans = vec![
-                    Span::styled(format!("{:<16}", "★ Watched"), Style::new().fg(ACCENT).bold()),
-                    Span::styled(format!("{n} thread{}", if n == 1 { "" } else { "s" }), DIM),
+                    Span::styled(format!("{:<16}", "★ Watched"), Style::new().fg(accent()).bold()),
+                    Span::styled(format!("{n} thread{}", if n == 1 { "" } else { "s" }), dim()),
                 ];
                 if unread > 0 {
-                    spans.push(Span::styled(format!("  {unread} new"), Style::new().fg(Color::Green).bold()));
+                    spans.push(Span::styled(format!("  {unread} new"), new_style()));
                 }
                 ListItem::new(Line::from(spans))
             }
             SiteRow::History => ListItem::new(Line::from(vec![
-                Span::styled(format!("{:<16}", "◷ History"), Style::new().fg(ACCENT).bold()),
+                Span::styled(format!("{:<16}", "◷ History"), Style::new().fg(accent()).bold()),
                 Span::styled(
                     format!("{} recent thread{}", app.store.history.len(), if app.store.history.len() == 1 { "" } else { "s" }),
-                    DIM,
+                    dim(),
                 ),
             ])),
             SiteRow::Site(i) => {
@@ -211,20 +275,20 @@ fn draw_sites(f: &mut Frame, app: &mut App, area: Rect) {
                 ListItem::new(Line::from(vec![
                     Span::styled(format!("{:<16}", s.cfg.name), Style::new().bold()),
                     Span::styled(format!("{:<10}", format!("{:?}", s.cfg.kind).to_lowercase()), Style::new().fg(Color::Blue)),
-                    Span::styled(url, DIM),
+                    Span::styled(url, dim()),
                 ]))
             }
         })
         .collect();
-    render_list(f, area, items, &mut app.site_list.state, "No sites match");
+    app.hit = render_list(f, area, items, &mut app.site_list.state, "No sites match", 1);
 }
 
 /// `site  /board/  no  subject`, the shared start of Watched and History rows.
 fn thread_row(key: &crate::store::ThreadKey, subject: &str) -> Vec<Span<'static>> {
     vec![
         Span::styled(format!("{:<10} ", key.site), Style::new().fg(Color::Blue)),
-        Span::styled(format!("{:<9} ", format!("/{}/", key.board)), Style::new().fg(ACCENT)),
-        Span::styled(format!("{:<10} ", key.no), DIM),
+        Span::styled(format!("{:<9} ", format!("/{}/", key.board)), Style::new().fg(accent())),
+        Span::styled(format!("{:<10} ", key.no), dim()),
         Span::raw(truncate(subject, 50)),
     ]
 }
@@ -236,11 +300,11 @@ fn draw_watched(f: &mut Frame, app: &mut App, area: Rect) {
         .map(|i| {
             let w = &app.store.watched[i];
             let mut spans = thread_row(&w.key, &w.subject);
-            spans.push(Span::styled(format!("  {} post{}", w.posts, if w.posts == 1 { "" } else { "s" }), DIM));
+            spans.push(Span::styled(format!("  {} post{}", w.posts, if w.posts == 1 { "" } else { "s" }), dim()));
             if w.dead {
                 spans.push(Span::styled("  archived/deleted", Style::new().fg(Color::Red)));
             } else if w.unread > 0 {
-                spans.push(Span::styled(format!("  {} new", w.unread), Style::new().fg(Color::Green).bold()));
+                spans.push(Span::styled(format!("  {} new", w.unread), new_style()));
             }
             if app.refreshing.contains(&w.key) {
                 spans.push(Span::styled("  ↻", Style::new().fg(Color::Cyan)));
@@ -248,7 +312,8 @@ fn draw_watched(f: &mut Frame, app: &mut App, area: Rect) {
             ListItem::new(Line::from(spans))
         })
         .collect();
-    render_list(f, area, items, &mut app.watched_list.state, "No watched threads. Press w in a catalog or thread to watch one.");
+    let empty = format!("No watched threads. Press {} in a catalog or thread to watch one.", app.keys.key(Action::Watch));
+    app.hit = render_list(f, area, items, &mut app.watched_list.state, &empty, 1);
 }
 
 fn draw_history(f: &mut Frame, app: &mut App, area: Rect) {
@@ -258,11 +323,11 @@ fn draw_history(f: &mut Frame, app: &mut App, area: Rect) {
         .map(|i| {
             let v = &app.store.history[i];
             let mut spans = thread_row(&v.key, &v.subject);
-            spans.push(Span::styled(format!("  {}", ago(v.opened)), DIM));
+            spans.push(Span::styled(format!("  {}", ago(v.opened)), dim()));
             ListItem::new(Line::from(spans))
         })
         .collect();
-    render_list(f, area, items, &mut app.history_list.state, "No history yet");
+    app.hit = render_list(f, area, items, &mut app.history_list.state, "No history yet", 1);
 }
 
 fn draw_boards(f: &mut Frame, app: &mut App, area: Rect) {
@@ -273,7 +338,7 @@ fn draw_boards(f: &mut Frame, app: &mut App, area: Rect) {
         .map(|i| {
             let b = &app.boards()[i];
             let mut spans = vec![
-                Span::styled(format!("{:<width$}", format!("/{}/", b.uri)), Style::new().fg(ACCENT).bold()),
+                Span::styled(format!("{:<width$}", format!("/{}/", b.uri)), Style::new().fg(accent()).bold()),
                 Span::raw(b.title.clone()),
             ];
             if b.nsfw == Some(true) {
@@ -283,11 +348,11 @@ fn draw_boards(f: &mut Frame, app: &mut App, area: Rect) {
         })
         .collect();
     let empty = if app.loading.is_some() { "" } else { "No boards" };
-    render_list(f, area, items, &mut app.board_list.state, empty);
+    app.hit = render_list(f, area, items, &mut app.board_list.state, empty, 1);
 }
 
 fn draw_catalog(f: &mut Frame, app: &mut App, area: Rect) {
-    let thumbs = app.images.enabled() && area.width >= MIN_THUMB_WIDTH;
+    let thumbs = app.images.enabled() && area.width >= MIN_THUMB_WIDTH && !app.compact;
     let width = area.width.saturating_sub(3) as usize;
     let visible = app.visible_catalog();
     let items: Vec<ListItem> = visible
@@ -301,26 +366,32 @@ fn draw_catalog(f: &mut Frame, app: &mut App, area: Rect) {
             if p.locked {
                 head.push(Span::styled("🔒 ", Style::new().fg(Color::Red)));
             }
-            head.push(Span::styled(format!("{}", p.no), DIM));
+            head.push(Span::styled(format!("{}", p.no), dim()));
             head.push(Span::raw("  "));
             if let Some(s) = &p.subject {
-                head.push(Span::styled(s.clone(), Style::new().fg(ACCENT).bold()));
+                head.push(Span::styled(s.clone(), Style::new().fg(accent()).bold()));
                 head.push(Span::raw("  "));
             }
             head.push(Span::styled(
                 format!("R:{} I:{}", p.replies.unwrap_or(0), p.images.unwrap_or(0)),
                 Style::new().fg(Color::Blue),
             ));
-            head.push(Span::styled(format!("  {}", ago(p.time)), DIM));
+            head.push(Span::styled(format!("  {}", ago(p.time)), dim()));
+            if app.compact {
+                // One line: the header, then as much of the text as fits.
+                let used: usize = head.iter().map(|s| s.content.width()).sum();
+                head.push(Span::styled(format!("  {}", truncate(p.plain_text(), width.saturating_sub(used + 2))), Style::new().fg(Color::Gray)));
+                return ListItem::new(Line::from(head));
+            }
             if !thumbs {
-                let preview = truncate(&p.plain_text(), width);
+                let preview = truncate(p.plain_text(), width);
                 return ListItem::new(Text::from(vec![Line::from(head), Line::styled(preview, Style::new().fg(Color::Gray)), Line::raw("")]));
             }
             // Thumbnail on the left, header and up to three preview lines beside it.
             let text_w = width.saturating_sub(CAT_THUMB.width as usize + 1).max(1);
             let mut text = markup::wrap(&Line::from(head), text_w);
             text.truncate(1);
-            let mut preview = markup::wrap(&Line::styled(p.plain_text(), Style::new().fg(Color::Gray)), text_w);
+            let mut preview = markup::wrap(&Line::styled(p.plain_text().to_string(), Style::new().fg(Color::Gray)), text_w);
             let rows = CAT_THUMB.height as usize - 1;
             if preview.len() > rows {
                 preview.truncate(rows);
@@ -336,7 +407,8 @@ fn draw_catalog(f: &mut Frame, app: &mut App, area: Rect) {
         })
         .collect();
     let empty = if app.loading.is_some() { "" } else { "No threads" };
-    render_list(f, area, items, &mut app.catalog_list.state, empty);
+    let item_height = if app.compact { 1 } else if thumbs { CAT_THUMB.height + 1 } else { 3 };
+    app.hit = render_list(f, area, items, &mut app.catalog_list.state, empty, item_height);
     if !thumbs {
         return;
     }
@@ -382,7 +454,7 @@ fn placeholder(file: &Attachment, count: usize, size: Size) -> Vec<Line<'static>
             } else {
                 format!("│{}│", " ".repeat(w - 2))
             };
-            Line::styled(s, DIM)
+            Line::styled(s, dim())
         })
         .collect()
 }
@@ -424,27 +496,37 @@ fn draw_thumb(f: &mut Frame, images: &mut Images, file: &Attachment, area: Rect)
             let r = Rect::new(area.x + (area.width - s.width.min(area.width)) / 2, area.y, s.width, s.height);
             f.render_widget(Image::new(p), r.intersection(area));
         }
-        State::Loading => mark(f, "…", DIM),
+        State::Loading => mark(f, "…", dim()),
         State::Failed => mark(f, "✗", Style::new().fg(Color::Red)),
     }
 }
 
-fn render_list(f: &mut Frame, area: Rect, items: Vec<ListItem>, state: &mut ratatui::widgets::ListState, empty: &str) {
+/// Draw a list of items `item_height` rows tall; returns where it went, for mouse clicks.
+fn render_list(
+    f: &mut Frame,
+    area: Rect,
+    items: Vec<ListItem>,
+    state: &mut ratatui::widgets::ListState,
+    empty: &str,
+    item_height: u16,
+) -> Option<Hit> {
     if items.is_empty() {
-        f.render_widget(Paragraph::new(Span::styled(format!(" {empty}"), DIM)), area);
-        return;
+        f.render_widget(Paragraph::new(Span::styled(format!(" {empty}"), dim())), area);
+        return None;
     }
-    let list = List::new(items).highlight_style(SELECTED).highlight_symbol("▌ ");
+    let list = List::new(items).highlight_style(selected()).highlight_symbol("▌ ");
     f.render_stateful_widget(list, area, state);
+    Some(Hit::List { area, offset: state.offset(), item_height })
 }
 
 fn draw_thread(f: &mut Frame, app: &mut App, area: Rect) {
     let Some(t) = &mut app.thread else {
         let msg = if app.loading.is_some() { "" } else { "Thread not loaded" };
-        f.render_widget(Paragraph::new(Span::styled(format!(" {msg}"), DIM)), area);
+        f.render_widget(Paragraph::new(Span::styled(format!(" {msg}"), dim())), area);
         return;
     };
     t.viewport = area.height as usize;
+    app.hit = Some(Hit::Thread { area });
     let thumbs = app.images.enabled() && area.width >= MIN_THUMB_WIDTH;
     if t.layout.as_ref().is_none_or(|l| l.width != area.width) {
         let l = layout_thread(t, area.width, thumbs);
@@ -465,7 +547,7 @@ fn draw_thread(f: &mut Frame, app: &mut App, area: Rect) {
         .take(area.height as usize)
         .map(|(i, line)| {
             let gutter = if (sel_start..sel_end).contains(&i) {
-                Span::styled("▌ ", Style::new().fg(ACCENT))
+                Span::styled("▌ ", Style::new().fg(accent()))
             } else {
                 Span::raw("  ")
             };
@@ -526,7 +608,7 @@ fn draw_preview(f: &mut Frame, app: &App) {
         lines.push(Line::raw(""));
     }
     for n in &p.elsewhere {
-        lines.push(Line::styled(format!(">>{n} is in another thread or board; enter in the thread follows it"), DIM));
+        lines.push(Line::styled(format!(">>{n} is in another thread or board; enter in the thread follows it"), dim()));
     }
     while lines.last().is_some_and(|l| l.width() == 0) {
         lines.pop();
@@ -538,9 +620,9 @@ fn draw_preview(f: &mut Frame, app: &App) {
     f.render_widget(Clear, popup);
     let block = Block::bordered()
         .border_type(BorderType::Rounded)
-        .border_style(Style::new().fg(ACCENT))
-        .title(Line::styled(" Quoted posts ", Style::new().fg(ACCENT).bold()))
-        .title_bottom(Line::styled(" j/k scroll · enter jump · esc close ", DIM).right_aligned());
+        .border_style(Style::new().fg(accent()))
+        .title(Line::styled(" Quoted posts ", Style::new().fg(accent()).bold()))
+        .title_bottom(Line::styled(" j/k scroll · enter jump · esc close ", dim()).right_aligned());
     f.render_widget(Paragraph::new(lines).scroll((scroll, 0)).block(block), popup);
 }
 
@@ -559,9 +641,9 @@ fn draw_viewer(f: &mut Frame, app: &mut App) {
     let title = format!(" {} ({}/{}) {} ", file.filename, v.index + 1, v.files.len(), meta.join(", "));
     let block = Block::bordered()
         .border_type(BorderType::Rounded)
-        .border_style(Style::new().fg(ACCENT))
-        .title(Line::styled(title, Style::new().fg(ACCENT).bold()))
-        .title_bottom(Line::styled(" h/l previous/next · i open externally · esc close ", DIM).right_aligned());
+        .border_style(Style::new().fg(accent()))
+        .title(Line::styled(title, Style::new().fg(accent()).bold()))
+        .title_bottom(Line::styled(" h/l previous/next · i open externally · esc close ", dim()).right_aligned());
     let inner = block.inner(area);
     f.render_widget(block, area);
     // Non-images (videos, pdfs, ...) show their thumbnail, if any, with a hint.
@@ -573,7 +655,7 @@ fn draw_viewer(f: &mut Frame, app: &mut App) {
             e => format!("{e} files can't be shown here; showing the thumbnail. Press i to open it externally."),
         };
         let r = Rect::new(inner.x, inner.bottom().saturating_sub(1), inner.width, 1);
-        f.render_widget(Line::styled(hint, DIM).centered(), r);
+        f.render_widget(Line::styled(hint, dim()).centered(), r);
         inner.height = inner.height.saturating_sub(2);
     }
     let msg = |f: &mut Frame, s: String, style: Style| {
@@ -593,7 +675,7 @@ fn draw_viewer(f: &mut Frame, app: &mut App) {
             );
             f.render_widget(Image::new(p), r.intersection(inner));
         }
-        State::Loading => msg(f, format!("{spinner} Loading…"), Style::new().fg(ACCENT)),
+        State::Loading => msg(f, format!("{spinner} Loading…"), Style::new().fg(accent())),
         State::Failed => msg(f, "Couldn't load this image".into(), Style::new().fg(Color::Red)),
     }
 }
@@ -623,21 +705,21 @@ fn post_ctx(t: &ThreadView, i: usize) -> PostCtx<'_> {
 fn post_lines(p: &Post, ctx: &PostCtx, width: usize) -> Vec<Line<'static>> {
     let (is_op, is_new, backlinks) = (ctx.is_op, ctx.is_new, ctx.backlinks);
     let mut head = vec![
-        Span::styled(p.name.clone(), Style::new().fg(Color::Green).bold()),
+        Span::styled(p.name.clone(), Style::new().fg(theme().name).bold()),
         Span::raw("  "),
-        Span::styled(fmt_time(p.time), DIM),
+        Span::styled(fmt_time(p.time), dim()),
         Span::raw("  "),
         Span::styled(format!("No.{}", p.no), Style::new().fg(Color::Blue)),
     ];
     if is_op {
-        head.push(Span::styled(" OP", Style::new().fg(ACCENT).bold()));
+        head.push(Span::styled(" OP", Style::new().fg(accent()).bold()));
     }
     if is_new {
-        head.push(Span::styled(" ● new", Style::new().fg(Color::Green).bold()));
+        head.push(Span::styled(" ● new", new_style()));
     }
     let mut out = markup::wrap(&Line::from(head), width);
     if let Some(s) = &p.subject {
-        let subject = markup::highlight(&Line::styled(s.clone(), Style::new().fg(ACCENT).bold()), &ctx.search, SEARCH_HL);
+        let subject = markup::highlight(&Line::styled(s.clone(), Style::new().fg(accent()).bold()), &ctx.search, search_hl());
         out.extend(markup::wrap(&subject, width));
     }
     for file in &p.files {
@@ -651,9 +733,9 @@ fn post_lines(p: &Post, ctx: &PostCtx, width: usize) -> Vec<Line<'static>> {
         let meta = if meta.is_empty() { String::new() } else { format!(" ({})", meta.join(", ")) };
         out.extend(markup::wrap(
             &Line::from(vec![
-                Span::styled("File: ", DIM),
+                Span::styled("File: ", dim()),
                 Span::styled(file.filename.clone(), Style::new().fg(Color::Cyan)),
-                Span::styled(meta, DIM),
+                Span::styled(meta, dim()),
             ]),
             width,
         ));
@@ -667,14 +749,14 @@ fn post_lines(p: &Post, ctx: &PostCtx, width: usize) -> Vec<Line<'static>> {
             }
         }
         if !ctx.search.is_empty() {
-            line = markup::highlight(&line, &ctx.search, SEARCH_HL);
+            line = markup::highlight(&line, &ctx.search, search_hl());
         }
         out.extend(markup::wrap(&line, width));
     }
     if !backlinks.is_empty() {
-        let mut spans = vec![Span::styled("Replies: ", DIM)];
+        let mut spans = vec![Span::styled("Replies: ", dim())];
         for no in backlinks {
-            spans.push(Span::styled(format!(">>{no}"), markup::QUOTELINK.fg(Color::DarkGray)));
+            spans.push(Span::styled(format!(">>{no}"), markup::quotelink().fg(theme().dim)));
             spans.push(Span::raw(" "));
         }
         out.extend(markup::wrap(&Line::from(spans), width));
@@ -682,52 +764,74 @@ fn post_lines(p: &Post, ctx: &PostCtx, width: usize) -> Vec<Line<'static>> {
     out
 }
 
-/// Key help, by section. Keep in sync with the README and the footer hints.
-const HELP: &[(&str, &[(&str, &str)])] = &[
-    (
-        "Everywhere",
-        &[
-            ("j / k, ↓ / ↑", "move"),
-            ("g / G", "top / bottom"),
-            ("ctrl-d / ctrl-u", "half page down / up"),
-            ("enter, l", "open"),
-            ("esc, h, backspace", "back"),
-            ("/", "filter list"),
-            ("r", "reload"),
-            ("o", "open in browser"),
-            ("q, ctrl-c", "quit"),
-        ],
-    ),
-    ("Catalog", &[("v", "view the OP's images"), ("w", "watch / unwatch the thread")]),
-    (
-        "Thread",
-        &[
-            ("j / k", "next / previous post"),
-            ("J / K, space", "scroll by line / page"),
-            ("enter, l", "follow quote (any thread)"),
-            ("p", "preview the quoted posts"),
-            ("b", "jump to first reply"),
-            ("u", "back (also to last thread)"),
-            ("/", "search the thread"),
-            ("n / N", "next / previous match"),
-            ("s / S", "show spoilers: post / all"),
-            ("i", "open file (videos in mpv)"),
-            ("v", "view the post's images"),
-            ("w", "watch / unwatch the thread"),
-            ("U", "jump to the first unread post"),
-        ],
-    ),
-    ("Watched, History", &[("x", "remove the entry")]),
-    ("Image viewer", &[("h / l, ← / →", "previous / next file"), ("i", "open externally"), ("esc, q", "close")]),
-];
+/// Key help, by section, with the configured keys. Keep in sync with the README.
+fn help_sections(keys: &KeyMap) -> Vec<(&'static str, Vec<(String, &'static str)>)> {
+    let k = |a| keys.key(a).to_string();
+    let pair = |a, b| format!("{} / {}", keys.key(a), keys.key(b));
+    vec![
+        (
+            "Everywhere",
+            vec![
+                ("j / k, ↓ / ↑".into(), "move"),
+                ("g / G".into(), "top / bottom"),
+                ("ctrl-d / ctrl-u".into(), "half page down / up"),
+                ("enter, l".into(), "open"),
+                ("esc, h, backspace".into(), "back"),
+                (k(Action::Search), "filter list"),
+                (k(Action::Reload), "reload"),
+                (k(Action::Browser), "open in browser"),
+                (format!("{}, ctrl-c", k(Action::Quit)), "quit"),
+                ("mouse".into(), "wheel scroll, click, dbl-click"),
+            ],
+        ),
+        (
+            "Catalog",
+            vec![
+                (k(Action::View), "view the OP's images"),
+                (k(Action::Watch), "watch / unwatch the thread"),
+                (k(Action::Sort), "cycle sort order"),
+                (k(Action::Compact), "compact layout on / off"),
+            ],
+        ),
+        (
+            "Thread",
+            vec![
+                ("j / k".into(), "next / previous post"),
+                ("J / K, space".into(), "scroll by line / page"),
+                ("enter, l".into(), "follow quote (any thread)"),
+                (k(Action::Preview), "preview the quoted posts"),
+                (k(Action::Replies), "jump to first reply"),
+                (k(Action::JumpBack), "back (also to last thread)"),
+                (k(Action::Search), "search the thread"),
+                (pair(Action::NextMatch, Action::PrevMatch), "next / previous match"),
+                (pair(Action::Spoiler, Action::AllSpoilers), "show spoilers: post / all"),
+                (k(Action::OpenFile), "open file (videos in mpv)"),
+                (k(Action::View), "view the post's images"),
+                (pair(Action::Download, Action::DownloadThread), "save files: post / thread"),
+                (k(Action::Watch), "watch / unwatch the thread"),
+                (k(Action::Unread), "jump to the first unread post"),
+                (k(Action::Archive), "open 404'd thread in archive"),
+            ],
+        ),
+        ("Watched, History", vec![(k(Action::Remove), "remove the entry")]),
+        (
+            "Image viewer",
+            vec![
+                ("h / l, ← / →".into(), "previous / next file"),
+                ("i".into(), "open externally"),
+                ("esc, q".into(), "close"),
+            ],
+        ),
+    ]
+}
 
 fn draw_help(f: &mut Frame, app: &App) {
     const COL: u16 = 52;
-    let sections: Vec<Vec<Line>> = HELP
-        .iter()
-        .map(|&(title, rows)| {
-            let mut lines = vec![Line::styled(title, Style::new().fg(ACCENT).bold())];
-            lines.extend(rows.iter().map(|&(k, v)| {
+    let sections: Vec<Vec<Line>> = help_sections(&app.keys)
+        .into_iter()
+        .map(|(title, rows)| {
+            let mut lines = vec![Line::styled(title, Style::new().fg(accent()).bold())];
+            lines.extend(rows.into_iter().map(|(k, v)| {
                 Line::from(vec![Span::styled(format!("  {k:<20}"), Style::new().fg(Color::Cyan)), Span::raw(v)])
             }));
             lines.push(Line::raw(""));
@@ -756,9 +860,9 @@ fn draw_help(f: &mut Frame, app: &App) {
     let block = Block::bordered()
         .border_type(BorderType::Rounded)
         .title(" Help ")
-        .title_bottom(Line::styled(format!(" images: {} ", app.images.protocol_name()), DIM).right_aligned())
-        .border_style(Style::new().fg(ACCENT));
-    let block = if rows + 2 > h { block.title_bottom(Line::styled(" j/k scroll ", DIM).left_aligned()) } else { block };
+        .title_bottom(Line::styled(format!(" images: {} ", app.images.protocol_name()), dim()).right_aligned())
+        .border_style(Style::new().fg(accent()));
+    let block = if rows + 2 > h { block.title_bottom(Line::styled(" j/k scroll ", dim()).left_aligned()) } else { block };
     let inner = block.inner(popup);
     f.render_widget(block, popup);
     let [left, right] = Layout::horizontal([Constraint::Length(COL + 1), Constraint::Min(0)]).areas(inner);

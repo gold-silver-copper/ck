@@ -1,0 +1,49 @@
+{
+ "status": "ok",
+ "data": {
+  "pageCount": 1,
+  "boards": [
+   {
+    "boardUri": "int",
+    "boardName": "International",
+    "boardDescription": ".",
+    "lastPostId": 28883870,
+    "postsPerHour": 199,
+    "tags": [],
+    "inactive": false
+   },
+   {
+    "boardUri": "b",
+    "boardName": "Zurück",
+    "boardDescription": ".",
+    "lastPostId": 11247431,
+    "postsPerHour": 66,
+    "tags": [],
+    "inactive": false
+   },
+   {
+    "boardUri": "admin",
+    "boardName": "admin",
+    "boardDescription": "Contact the administration",
+    "lastPostId": 19840,
+    "postsPerHour": 0,
+    "tags": []
+   },
+   {
+    "boardUri": "s",
+    "boardName": "Schönes",
+    "boardDescription": ".",
+    "tags": [
+     "menu-2/n/allgemein-23"
+    ],
+    "lastPostId": 26295,
+    "postsPerHour": 0,
+    "specialSettings": [
+     "sfw"
+    ]
+   }
+  ],
+  "overboard": "alle",
+  "sfwOverboard": "nvip"
+ }
+}

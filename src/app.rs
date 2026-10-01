@@ -4,14 +4,17 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+use ratatui::layout::Rect;
 use ratatui::text::Line;
 use ratatui::widgets::ListState;
 
 use crate::backend::{self, Backend};
-use crate::config::{Config, SiteConfig};
+use crate::config::{self, Config, SiteConfig};
+use crate::download;
 use crate::http;
 use crate::images::Images;
+use crate::keys::{Action, KeyMap, Scope};
 use crate::model::{Attachment, Board, Link, Post};
 use crate::store::{Store, ThreadKey};
 
@@ -23,6 +26,37 @@ pub enum View {
     Thread,
     Watched,
     History,
+}
+
+/// Catalog sort orders, cycled with `s`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Sort {
+    /// The site's order (by last bump).
+    #[default]
+    Bump,
+    Replies,
+    Newest,
+    Oldest,
+}
+
+impl Sort {
+    pub fn next(self) -> Self {
+        match self {
+            Sort::Bump => Sort::Replies,
+            Sort::Replies => Sort::Newest,
+            Sort::Newest => Sort::Oldest,
+            Sort::Oldest => Sort::Bump,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Sort::Bump => "bump order",
+            Sort::Replies => "most replies",
+            Sort::Newest => "newest",
+            Sort::Oldest => "oldest",
+        }
+    }
 }
 
 /// A row of the Sites view: the Watched and History lists come first.
@@ -158,7 +192,7 @@ impl ThreadView {
                 s.push(' ');
             }
         } else {
-            s.push_str(&p.plain_text());
+            s.push_str(p.plain_text());
         }
         s.to_lowercase()
     }
@@ -225,6 +259,34 @@ impl ThreadView {
     }
 }
 
+/// Progress of the downloads started with `d`/`D`.
+#[derive(Default)]
+pub struct Downloads {
+    pub total: usize,
+    pub done: usize,
+    pub skipped: usize,
+    pub failed: usize,
+    /// Download jobs still running.
+    pub running: usize,
+    pub dir: Option<std::path::PathBuf>,
+    pub last_error: Option<String>,
+}
+
+enum DlEvent {
+    Done,
+    Skipped,
+    Failed(String),
+    Finished,
+}
+
+/// Where the list or thread was last drawn, for mouse clicks.
+#[derive(Debug, Clone, Copy)]
+pub enum Hit {
+    /// A list: its area, first visible item, and rows per item.
+    List { area: Rect, offset: usize, item_height: u16 },
+    Thread { area: Rect },
+}
+
 /// Popup with the posts the selected post quotes.
 pub struct Preview {
     /// Indices of quoted posts in this thread.
@@ -250,6 +312,7 @@ enum Msg {
     Refreshed(ThreadKey, Result<Vec<Post>>),
     /// The thread a quoted post is in: (board, post, thread).
     Found(u64, Board, u64, Result<Option<u64>>),
+    Download(DlEvent),
 }
 
 pub struct App {
@@ -258,6 +321,8 @@ pub struct App {
     pub site_list: Picker,
     pub board_list: Picker,
     pub catalog_list: Picker,
+    pub catalog_sort: Sort,
+    pub compact: bool,
     pub watched_list: Picker,
     pub history_list: Picker,
     pub store: Store,
@@ -293,6 +358,13 @@ pub struct App {
     catalog_board: String,
     /// After a thread 404'd: the same thread on the site's configured archive.
     archive_offer: Option<ThreadKey>,
+    pub keys: KeyMap,
+    pub downloads: Downloads,
+    download_dir: Option<String>,
+    /// Set by the UI every frame.
+    pub hit: Option<Hit>,
+    /// Last left click: when, and the list index or thread post it hit.
+    last_click: Option<(Instant, usize)>,
     pub tick: usize,
     pub quit: bool,
     req: u64,
@@ -303,7 +375,7 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(cfg: Config, picker: Option<ratatui_image::picker::Picker>, store: Store) -> Self {
+    pub fn new(cfg: Config, keys: KeyMap, picker: Option<ratatui_image::picker::Picker>, store: Store) -> Self {
         let refresh_thread = Duration::from_secs(cfg.refresh_thread_secs.max(10));
         let refresh_watched = Duration::from_secs(cfg.refresh_watched_secs.max(60));
         let sites = cfg
@@ -318,6 +390,8 @@ impl App {
             site_list: Picker::default(),
             board_list: Picker::default(),
             catalog_list: Picker::default(),
+            catalog_sort: Sort::default(),
+            compact: store.settings.compact_catalog.unwrap_or(cfg.compact_catalog),
             watched_list: Picker::default(),
             history_list: Picker::default(),
             store,
@@ -344,6 +418,11 @@ impl App {
             pending_post: None,
             catalog_board: String::new(),
             archive_offer: None,
+            keys,
+            downloads: Downloads::default(),
+            download_dir: cfg.download_dir.clone(),
+            hit: None,
+            last_click: None,
             tick: 0,
             quit: false,
             req: 0,
@@ -389,10 +468,16 @@ impl App {
     }
 
     pub fn visible_catalog(&self) -> Vec<usize> {
-        filtered(
-            &self.catalog_list.filter,
-            self.catalog.iter().map(|p| format!("{} {} {}", p.no, p.subject.as_deref().unwrap_or(""), p.plain_text())),
-        )
+        let needle = self.catalog_list.filter.to_lowercase();
+        let mut v: Vec<usize> = (0..self.catalog.len()).filter(|&i| self.catalog[i].search_text().contains(&needle)).collect();
+        let c = &self.catalog;
+        match self.catalog_sort {
+            Sort::Bump => {}
+            Sort::Replies => v.sort_by_key(|&i| std::cmp::Reverse(c[i].replies.unwrap_or(0))),
+            Sort::Newest => v.sort_by_key(|&i| std::cmp::Reverse((c[i].time, c[i].no))),
+            Sort::Oldest => v.sort_by_key(|&i| (c[i].time, c[i].no)),
+        }
+        v
     }
 
     fn picker(&mut self) -> Option<(&mut Picker, usize)> {
@@ -427,6 +512,7 @@ impl App {
         while let Ok(msg) = self.rx.try_recv() {
             match msg {
                 Msg::Refreshed(key, res) => self.refreshed(key, res),
+                Msg::Download(ev) => self.download_event(ev),
                 Msg::Found(id, board, post, res) if id == self.req => {
                     self.loading = None;
                     match res {
@@ -665,6 +751,163 @@ impl App {
         }
     }
 
+    // ----- downloads and settings -----
+
+    /// Save the selected post's files, or the whole thread's.
+    fn download(&mut self, whole_thread: bool) {
+        let Some(t) = &self.thread else { return };
+        let posts: Vec<&Post> = if whole_thread { t.posts.iter().collect() } else { vec![&t.posts[t.selected]] };
+        let dir = download::dir(self.download_dir.as_deref(), &self.current_site().cfg.name, &t.board, t.no);
+        let jobs = download::jobs(&posts, &dir);
+        if jobs.is_empty() {
+            let msg = if whole_thread { "Thread has no files" } else { "Post has no file" };
+            self.status = Some((msg.into(), false));
+            return;
+        }
+        if let Err(e) = std::fs::create_dir_all(&dir) {
+            self.status = Some((format!("Couldn't create {}: {e}", dir.display()), true));
+            return;
+        }
+        let d = &mut self.downloads;
+        if d.running == 0 {
+            *d = Downloads::default();
+        }
+        d.total += jobs.len();
+        d.running += 1;
+        d.dir = Some(dir);
+        let tx = self.tx.clone();
+        std::thread::spawn(move || {
+            for (url, path) in jobs {
+                let ev = if path.exists() {
+                    DlEvent::Skipped
+                } else {
+                    match http::download_to(&url, &path) {
+                        Ok(()) => DlEvent::Done,
+                        Err(e) => DlEvent::Failed(format!("{e:#}")),
+                    }
+                };
+                if tx.send(Msg::Download(ev)).is_err() {
+                    return;
+                }
+            }
+            let _ = tx.send(Msg::Download(DlEvent::Finished));
+        });
+    }
+
+    fn download_event(&mut self, ev: DlEvent) {
+        let d = &mut self.downloads;
+        match ev {
+            DlEvent::Done => d.done += 1,
+            DlEvent::Skipped => d.skipped += 1,
+            DlEvent::Failed(e) => {
+                d.failed += 1;
+                d.last_error = Some(e);
+            }
+            DlEvent::Finished => {
+                d.running -= 1;
+                if d.running == 0 {
+                    let dir = d.dir.as_ref().map(|p| p.display().to_string()).unwrap_or_default();
+                    let mut msg = format!("Downloaded {} file{} to {dir}", d.done, if d.done == 1 { "" } else { "s" });
+                    if d.skipped > 0 {
+                        msg.push_str(&format!(", {} already there", d.skipped));
+                    }
+                    if d.failed > 0 {
+                        msg.push_str(&format!(", {} failed ({})", d.failed, d.last_error.as_deref().unwrap_or("")));
+                    }
+                    self.status = Some((msg, d.failed > 0));
+                }
+            }
+        }
+    }
+
+    /// Toggle the one-line catalog layout and remember it: in config.toml if there is one
+    /// (keeping its comments), else for the session; in the data directory if the config
+    /// can't be edited.
+    fn toggle_compact(&mut self) {
+        self.compact = !self.compact;
+        let state = if self.compact { "on" } else { "off" };
+        let saved = match config::save_compact(self.compact) {
+            Ok(true) => {
+                self.store.settings.compact_catalog = None;
+                "saved in config.toml".to_string()
+            }
+            Ok(false) => "for this session; there's no config file to save it in".into(),
+            Err(e) => {
+                self.store.settings.compact_catalog = Some(self.compact);
+                self.save();
+                format!("saved in the data directory; couldn't edit config.toml: {e:#}")
+            }
+        };
+        self.status = Some((format!("Compact catalog {state} ({saved})"), false));
+    }
+
+    // ----- mouse -----
+
+    /// Wheel scrolls, a click selects, a double click opens.
+    pub fn on_mouse(&mut self, ev: MouseEvent, now: Instant) {
+        let down = matches!(ev.kind, MouseEventKind::ScrollDown);
+        if matches!(ev.kind, MouseEventKind::ScrollDown | MouseEventKind::ScrollUp) {
+            let key = |c| KeyEvent::from(if c { KeyCode::Down } else { KeyCode::Up });
+            if self.show_help || self.viewer.is_some() || self.preview.is_some() {
+                self.on_key(key(down));
+            } else if self.view == View::Thread {
+                if let Some(t) = &mut self.thread {
+                    t.scroll_lines(if down { 3 } else { -3 });
+                }
+            } else if !self.filtering && !self.searching {
+                self.on_key(key(down));
+            }
+            return;
+        }
+        if ev.kind != MouseEventKind::Down(MouseButton::Left) {
+            return;
+        }
+        if self.show_help || self.preview.is_some() {
+            // Clicking anywhere closes a popup.
+            self.show_help = false;
+            self.preview = None;
+            return;
+        }
+        if self.viewer.is_some() || self.filtering || self.searching {
+            return;
+        }
+        let Some(target) = self.click_target(ev.column, ev.row) else { return };
+        let double = self.last_click.is_some_and(|(t, i)| i == target && now.duration_since(t) < Duration::from_millis(400));
+        self.last_click = if double { None } else { Some((now, target)) };
+        if self.view == View::Thread {
+            if let Some(t) = &mut self.thread {
+                t.selected = target;
+            }
+            if double {
+                self.on_key(KeyEvent::from(KeyCode::Enter));
+            }
+        } else if let Some((p, len)) = self.picker()
+            && target < len
+        {
+            p.state.select(Some(target));
+            if double {
+                self.enter();
+            }
+        }
+    }
+
+    /// The list row or thread post at a screen position.
+    fn click_target(&self, col: u16, row: u16) -> Option<usize> {
+        let pos = ratatui::layout::Position::new(col, row);
+        match self.hit? {
+            Hit::List { area, offset, item_height } if area.contains(pos) => {
+                Some(offset + ((row - area.y) / item_height.max(1)) as usize)
+            }
+            Hit::Thread { area } if area.contains(pos) => {
+                let t = self.thread.as_ref()?;
+                let l = t.layout.as_ref()?;
+                let line = t.scroll + (row - area.y) as usize;
+                (line < l.lines.len()).then(|| l.starts.partition_point(|&s| s <= line).saturating_sub(1))
+            }
+            _ => None,
+        }
+    }
+
     /// A thread 404'd: say so, and offer the site's archive if it has one.
     fn thread_gone(&mut self, key: &ThreadKey) {
         let archive = self.sites.iter().find(|s| s.cfg.name == key.site).and_then(|s| s.cfg.archive.clone());
@@ -754,27 +997,15 @@ impl App {
             return;
         }
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        if let KeyCode::Char(c) = key.code
+            && !ctrl
+            && let Some(action) = self.keys.action(self.scope(), c)
+        {
+            self.act(action);
+            return;
+        }
         match key.code {
-            KeyCode::Char('q') => self.quit = true,
-            KeyCode::Char('?') => self.show_help = true,
-            KeyCode::Char('/') if self.view != View::Thread => self.filtering = true,
-            KeyCode::Char('/') => {
-                if let Some(t) = &mut self.thread {
-                    t.set_search(String::new());
-                    self.searching = true;
-                }
-            }
-            KeyCode::Char('r') | KeyCode::F(5) => self.refresh(),
-            KeyCode::Char('o') => self.open_in_browser(),
-            KeyCode::Char('v') if matches!(self.view, View::Catalog | View::Thread) => self.open_viewer(),
-            KeyCode::Char('w') if matches!(self.view, View::Catalog | View::Thread) => self.toggle_watch(),
-            KeyCode::Char('x') if matches!(self.view, View::Watched | View::History) => self.remove_entry(),
-            KeyCode::Char('a') if self.view == View::Thread && self.archive_offer.is_some() => {
-                if let Some(key) = self.archive_offer.take() {
-                    self.open_key(key);
-                    self.return_to = None;
-                }
-            }
+            KeyCode::F(5) => self.refresh(),
             KeyCode::Esc if self.view == View::Thread && self.thread.as_ref().is_some_and(|t| !t.search.is_empty()) => {
                 if let Some(t) = &mut self.thread {
                     t.set_search(String::new());
@@ -805,6 +1036,59 @@ impl App {
                     _ => {}
                 }
             }
+        }
+    }
+
+    pub fn scope(&self) -> Scope {
+        match self.view {
+            View::Sites | View::Boards => Scope::Lists,
+            View::Catalog => Scope::Catalog,
+            View::Thread => Scope::Thread,
+            View::Watched | View::History => Scope::Saved,
+        }
+    }
+
+    /// Run a (remappable) command.
+    fn act(&mut self, action: Action) {
+        match action {
+            Action::Quit => self.quit = true,
+            Action::Help => self.show_help = true,
+            Action::Search if self.view == View::Thread => {
+                if let Some(t) = &mut self.thread {
+                    t.set_search(String::new());
+                    self.searching = true;
+                }
+            }
+            Action::Search => self.filtering = true,
+            Action::Reload => self.refresh(),
+            Action::Browser => self.open_in_browser(),
+            Action::View => self.open_viewer(),
+            Action::Watch => self.toggle_watch(),
+            Action::Remove => self.remove_entry(),
+            Action::Sort => {
+                self.catalog_sort = self.catalog_sort.next();
+                self.catalog_list.state.select(Some(0));
+                self.status = Some((format!("Sorted by {}", self.catalog_sort.label()), false));
+            }
+            Action::Compact => self.toggle_compact(),
+            Action::Download => self.download(false),
+            Action::DownloadThread => self.download(true),
+            Action::Archive => match self.archive_offer.take() {
+                Some(key) => {
+                    self.open_key(key);
+                    self.return_to = None;
+                }
+                None => self.status = Some(("Nothing to open in an archive".into(), false)),
+            },
+            Action::OpenFile
+            | Action::Replies
+            | Action::JumpBack
+            | Action::Unread
+            | Action::Preview
+            | Action::NextMatch
+            | Action::PrevMatch
+            | Action::Spoiler
+            | Action::AllSpoilers => self.thread_action(action),
         }
     }
 
@@ -850,42 +1134,47 @@ impl App {
                     self.follow_link();
                 }
             }
-            KeyCode::Char('p') => self.open_preview(),
-            KeyCode::Char('n' | 'N') if t.matches.is_empty() => {
-                let msg = if t.search.is_empty() { "No search; press / to search the thread" } else { "No matches" };
-                self.status = Some((msg.into(), false));
+            _ => {}
+        }
+    }
+
+    fn thread_action(&mut self, action: Action) {
+        let search_key = self.keys.key(Action::Search);
+        let Some(t) = &mut self.thread else { return };
+        match action {
+            Action::Preview => self.open_preview(),
+            Action::NextMatch | Action::PrevMatch if t.matches.is_empty() => {
+                let msg = if t.search.is_empty() { format!("No search; press {search_key} to search the thread") } else { "No matches".into() };
+                self.status = Some((msg, false));
             }
-            KeyCode::Char(c @ ('n' | 'N')) => {
-                if let Some(i) = t.next_match(c == 'n') {
+            Action::NextMatch | Action::PrevMatch => {
+                if let Some(i) = t.next_match(action == Action::NextMatch) {
                     t.select(i);
                     let k = t.matches.iter().position(|&m| m == i).unwrap_or(0);
                     self.status = Some((format!("Match {}/{} for \"{}\"", k + 1, t.matches.len(), t.search), false));
                 }
             }
-            KeyCode::Char('s') => {
+            Action::Spoiler => {
                 let i = t.selected;
                 if !t.revealed.remove(&i) {
                     t.revealed.insert(i);
                 }
                 t.layout = None;
             }
-            KeyCode::Char('S') => {
+            Action::AllSpoilers => {
                 t.reveal_all = !t.reveal_all;
                 t.revealed.clear();
                 t.layout = None;
                 let msg = if t.reveal_all { "Showing all spoilers" } else { "Hiding spoilers" };
                 self.status = Some((msg.into(), false));
             }
-            KeyCode::Char('b') => {
-                let replies = t.backlinks[t.selected].clone();
-                match replies.first() {
-                    Some(&no) => {
-                        t.jump_to(no);
-                    }
-                    None => self.status = Some(("No replies to this post".into(), false)),
+            Action::Replies => match t.backlinks[t.selected].first() {
+                Some(&no) => {
+                    t.jump_to(no);
                 }
-            }
-            KeyCode::Char('u') => {
+                None => self.status = Some(("No replies to this post".into(), false)),
+            },
+            Action::JumpBack => {
                 if let Some(i) = t.jumps.pop() {
                     t.select(i);
                 } else if let Some((board, no, post)) = self.trail.pop() {
@@ -893,14 +1182,14 @@ impl App {
                     self.open_thread_at(board, no, Some(post), false);
                 }
             }
-            KeyCode::Char('U') => match (0..t.posts.len()).find(|&i| t.is_new(i)) {
+            Action::Unread => match (0..t.posts.len()).find(|&i| t.is_new(i)) {
                 Some(i) => {
                     t.jumps.push(t.selected);
                     t.select(i);
                 }
                 None => self.status = Some(("No unread posts".into(), false)),
             },
-            KeyCode::Char('i') => match t.posts[t.selected].files.first().cloned() {
+            Action::OpenFile => match t.posts[t.selected].files.first().cloned() {
                 Some(f) => self.open_file(&f),
                 None => self.status = Some(("Post has no file".into(), false)),
             },
@@ -1256,9 +1545,91 @@ fn filtered(filter: &str, items: impl Iterator<Item = String>) -> Vec<usize> {
 
 #[cfg(test)]
 mod tests {
+    use std::time::{Duration, Instant};
+
+    use ratatui::crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+    use ratatui::layout::Rect;
+    use ratatui::text::Line;
+
+    use super::*;
+
+    /// An app over the default config; nothing here touches the network.
+    pub fn test_app() -> App {
+        let cfg: Config = toml::from_str(crate::config::DEFAULT_CONFIG).unwrap();
+        App::new(cfg, KeyMap::default(), None, Store::default())
+    }
+
+    fn mouse(kind: MouseEventKind, column: u16, row: u16) -> MouseEvent {
+        MouseEvent { kind, column, row, modifiers: KeyModifiers::NONE }
+    }
+
     #[test]
     fn finds_programs_on_path() {
         assert!(super::on_path("sh"));
         assert!(!super::on_path("ck-no-such-program"));
+    }
+
+    #[test]
+    fn mouse_wheel_click_and_double_click() {
+        let mut app = test_app();
+        app.hit = Some(Hit::List { area: Rect::new(1, 2, 60, 10), offset: 0, item_height: 1 });
+        let t0 = Instant::now();
+        app.on_mouse(mouse(MouseEventKind::ScrollDown, 5, 5), t0);
+        assert_eq!(app.site_list.state.selected(), Some(1));
+        app.on_mouse(mouse(MouseEventKind::ScrollUp, 5, 5), t0);
+        assert_eq!(app.site_list.state.selected(), Some(0));
+
+        // Row 3 is the second item (History).
+        let left = MouseEventKind::Down(MouseButton::Left);
+        app.on_mouse(mouse(left, 5, 3), t0);
+        assert_eq!(app.site_list.state.selected(), Some(1));
+        assert_eq!(app.view, View::Sites);
+        // A slow second click is just another click; a quick one opens.
+        app.on_mouse(mouse(left, 5, 3), t0 + Duration::from_secs(1));
+        assert_eq!(app.view, View::Sites);
+        app.on_mouse(mouse(left, 5, 3), t0 + Duration::from_millis(1200));
+        assert_eq!(app.view, View::History);
+
+        // Clicks outside the list do nothing.
+        app.view = View::Sites;
+        app.on_mouse(mouse(left, 5, 30), t0);
+        assert_eq!(app.site_list.state.selected(), Some(1));
+    }
+
+    #[test]
+    fn mouse_click_selects_thread_post() {
+        let mut app = test_app();
+        let post = |no| Post { no, body: vec![Line::raw("a"), Line::raw("b")], ..Default::default() };
+        let mut t = ThreadView::new("g".into(), 1, vec![post(1), post(2), post(3)]);
+        // Each post: header, two lines, a blank.
+        t.layout = Some(ThreadLayout { width: 40, lines: vec![Line::raw(""); 12], starts: vec![0, 4, 8, 12], thumbs: vec![] });
+        t.viewport = 10;
+        app.thread = Some(t);
+        app.view = View::Thread;
+        app.hit = Some(Hit::Thread { area: Rect::new(0, 1, 40, 10) });
+        app.on_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 3, 1 + 9), Instant::now());
+        assert_eq!(app.thread.as_ref().unwrap().selected, 2);
+        app.on_mouse(mouse(MouseEventKind::ScrollDown, 3, 3), Instant::now());
+        assert_eq!(app.thread.as_ref().unwrap().scroll, 2);
+    }
+
+    #[test]
+    fn filtering_a_big_catalog_is_fast() {
+        let mut app = test_app();
+        let text = "lorem ipsum dolor sit amet consectetur adipiscing elit ".repeat(20);
+        app.catalog = (0..300)
+            .map(|i| Post { no: i, subject: Some(format!("thread {i}")), body: vec![Line::raw(text.clone())], ..Default::default() })
+            .collect();
+        app.catalog_list.filter = "thread 29".into();
+        assert_eq!(app.visible_catalog().len(), 11); // 29, 290..299
+        app.catalog_sort = Sort::Replies;
+        let start = Instant::now();
+        for _ in 0..100 {
+            std::hint::black_box(app.visible_catalog());
+        }
+        let per_call = start.elapsed() / 100;
+        eprintln!("filter + sort of 300 threads: {per_call:?}");
+        // A frame is ~16ms; even unoptimized, filtering should take a small fraction of it.
+        assert!(per_call < Duration::from_millis(3), "filtering took {per_call:?}");
     }
 }

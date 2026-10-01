@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
@@ -15,6 +16,17 @@ pub struct Config {
     /// Seconds between background refreshes of each watched thread (at least 60).
     #[serde(default = "default_refresh_watched")]
     pub refresh_watched_secs: u64,
+    /// One line per thread in catalogs (toggled with `c`).
+    #[serde(default)]
+    pub compact_catalog: bool,
+    /// Where `d`/`D` save files; `{site}`, `{board}` and `{thread}` are filled in.
+    #[serde(default)]
+    pub download_dir: Option<String>,
+    /// Key overrides: `action = "key"`.
+    #[serde(default)]
+    pub keys: HashMap<String, String>,
+    #[serde(default)]
+    pub theme: crate::theme::ThemeConfig,
     #[serde(rename = "site")]
     pub sites: Vec<SiteConfig>,
 }
@@ -77,6 +89,23 @@ pub enum BoardConfig {
     },
 }
 
+/// Save `compact_catalog` into the user's config file, keeping its comments and layout.
+/// `Ok(false)` when there's no config file to save it in.
+pub fn save_compact(value: bool) -> Result<bool> {
+    let Some(path) = Config::path().filter(|p| p.exists()) else { return Ok(false) };
+    save_compact_to(&path, value)?;
+    Ok(true)
+}
+
+fn save_compact_to(path: &std::path::Path, value: bool) -> Result<()> {
+    let text = std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+    let mut doc: toml_edit::DocumentMut = text.parse().with_context(|| format!("parsing {}", path.display()))?;
+    doc["compact_catalog"] = toml_edit::value(value);
+    let tmp = path.with_extension("toml.tmp");
+    std::fs::write(&tmp, doc.to_string()).with_context(|| format!("writing {}", tmp.display()))?;
+    std::fs::rename(&tmp, path).with_context(|| format!("writing {}", path.display()))
+}
+
 impl Config {
     pub fn path() -> Option<PathBuf> {
         let base = std::env::var_os("XDG_CONFIG_HOME")
@@ -102,5 +131,22 @@ mod tests {
     fn default_config_parses() {
         let c: super::Config = toml::from_str(super::DEFAULT_CONFIG).unwrap();
         assert!(!c.sites.is_empty());
+        assert!(!c.compact_catalog && c.keys.is_empty());
+    }
+
+    #[test]
+    fn saving_compact_keeps_comments_and_tables() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "# keep me\nimages = \"off\"\n\n[[site]]\nname = \"x\" # and me\nkind = \"4chan\"\n").unwrap();
+        super::save_compact_to(&path, true).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("# keep me") && text.contains("# and me"), "{text}");
+        let c: super::Config = toml::from_str(&text).unwrap();
+        assert!(c.compact_catalog);
+        assert_eq!(c.sites.len(), 1);
+        super::save_compact_to(&path, false).unwrap();
+        let c: super::Config = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert!(!c.compact_catalog);
     }
 }

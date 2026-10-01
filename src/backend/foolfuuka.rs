@@ -109,6 +109,7 @@ fn post(v: &Value) -> Option<Post> {
         images: None,
         sticky: as_bool(&v["sticky"]),
         locked: as_bool(&v["locked"]),
+        ..Default::default()
     })
 }
 

@@ -26,6 +26,13 @@ images = "auto"
 refresh_thread_secs = 10
 refresh_watched_secs = 60
 
+# One line per thread in catalogs, no thumbnails. `c` toggles it and saves it here.
+compact_catalog = false
+
+# Where `d` / `D` save files. {site}, {board} and {thread} are filled in, and {downloads}
+# is your Downloads folder. "~/" works too.
+# download_dir = "{downloads}/ck/{site}/{board}/{thread}"
+
 [[site]]
 name = "4chan"
 kind = "4chan"
@@ -96,3 +103,27 @@ url = "https://desuarchive.org"
 name = "zzzchan"
 kind = "jschan"
 url = "https://zzzchan.xyz"
+
+# Remap single-key commands: action = "key". Navigation keys (j/k/g/G/h/l/J/K, arrows,
+# enter, esc, space) are fixed. Actions and their defaults:
+#   everywhere: quit = "q", help = "?", search = "/", reload = "r", browser = "o"
+#   catalog:    view = "v", watch = "w", sort = "s", compact = "c"
+#   thread:     view, watch, open_file = "i", replies = "b", jump_back = "u", unread = "U",
+#               preview = "p", next_match = "n", prev_match = "N", spoiler = "s",
+#               all_spoilers = "S", download = "d", download_thread = "D", archive = "a"
+#   Watched/History: remove = "x"
+[keys]
+# watch = "W"
+
+# Colors: names ("yellow", "light-red"), "#rrggbb", or 256-color indexes ("244").
+[theme]
+# accent = "yellow"         # titles, subjects, the selection gutter
+# dim = "dark-gray"         # times, hints, placeholders
+# selected = "#2d2d3c"      # background of the selected row
+# search = "yellow"         # background of search matches
+# name = "green"            # poster names
+# greentext = "green"
+# quotelink = "magenta"
+# heading = "red"
+# code = "cyan"
+# new = "green"             # "● new" markers and unread counts

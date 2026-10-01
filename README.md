@@ -22,28 +22,41 @@ If-Modified-Since on every refetch, and no refetching the same page within 10 se
 
 ## Keys
 
-| key                    | action                               |
-|------------------------|--------------------------------------|
-| `j`/`k`, arrows        | move (in a thread: next/prev post)   |
-| `enter`, `l`           | open (in a thread: follow `>>quote`, also to other threads and boards) |
-| `esc`, `h`, backspace  | back                                 |
-| `/`                    | filter the current list (in a thread: search) |
-| `n` / `N`              | next / previous search match         |
-| `p`                    | preview the posts a post quotes      |
-| `s` / `S`              | show spoilers in the post / whole thread |
-| `g`/`G`                | top / bottom                         |
-| ctrl-d / ctrl-u, space | page                                 |
-| `J`/`K`                | scroll a thread by line              |
-| `b` / `u`              | jump to first reply / jump back (also to the previous thread) |
-| `U`                    | jump to the first unread post        |
-| `w`                    | watch / unwatch the thread (catalog or thread) |
-| `x`                    | remove an entry from Watched or History |
-| `i`                    | open the post's file (videos in mpv if it's installed) |
-| `v`                    | image viewer for the post's files (catalog: the OP's) |
-| `o`                    | open the board/thread in a browser   |
-| `r`                    | reload                               |
-| `?`                    | help                                 |
-| `q`                    | quit                                 |
+Navigation (fixed):
+
+| key                     | action                                        |
+|-------------------------|-----------------------------------------------|
+| `j`/`k`, arrows         | move (in a thread: next/previous post)        |
+| `g`/`G`                 | top / bottom                                  |
+| ctrl-d / ctrl-u, space  | page                                          |
+| `J`/`K`                 | scroll a thread by line                       |
+| `enter`, `l`            | open (in a thread: follow a `>>quote`, also into other threads and boards) |
+| `esc`, `h`, backspace   | back                                          |
+| mouse                   | wheel scrolls, click selects, double-click opens |
+
+Commands (remappable, see [Configuration](#configuration); the action name is in brackets):
+
+| key  | where                 | action                                                     |
+|------|-----------------------|------------------------------------------------------------|
+| `/`  | everywhere            | filter the list; in a thread, search it [`search`]         |
+| `r`  | everywhere            | reload [`reload`]                                          |
+| `o`  | everywhere            | open the board/thread in a browser [`browser`]             |
+| `?`  | everywhere            | help [`help`]                                              |
+| `q`  | everywhere            | quit [`quit`]                                              |
+| `v`  | catalog, thread       | image viewer for the post's files (catalog: the OP's) [`view`] |
+| `w`  | catalog, thread       | watch / unwatch the thread [`watch`]                       |
+| `s`  | catalog               | cycle the sort: bump order, most replies, newest, oldest [`sort`] |
+| `c`  | catalog               | compact layout, one line per thread [`compact`]            |
+| `p`  | thread                | preview the posts a post quotes [`preview`]                |
+| `b`  | thread                | jump to the first reply [`replies`]                        |
+| `u`  | thread                | jump back, also to the previous thread [`jump_back`]       |
+| `n`/`N` | thread             | next / previous search match [`next_match`, `prev_match`]  |
+| `s`/`S` | thread             | show spoilers in the post / whole thread [`spoiler`, `all_spoilers`] |
+| `U`  | thread                | jump to the first unread post [`unread`]                   |
+| `i`  | thread                | open the post's file (videos in mpv if it's installed) [`open_file`] |
+| `d`/`D` | thread             | save the post's / whole thread's files [`download`, `download_thread`] |
+| `a`  | thread                | after a 404: open the thread in the site's archive [`archive`] |
+| `x`  | Watched, History      | remove the entry [`remove`]                                |
 
 In the image viewer: `h`/`l` or arrows for the previous/next file, `i` to open it externally,
 `esc` or `q` to close.
@@ -75,11 +88,33 @@ what's on screen (or about to be), and are kept in a bounded in-memory cache.
 To turn images off entirely (no image requests at all), put `images = "off"` at the top of
 your config.
 
-## Adding sites
+## Downloads
+
+`d` saves the selected post's files and `D` all of the thread's, into
+`~/Downloads/ck/{site}/{board}/{thread}/` (your system's Downloads folder). Files are named
+`{post}_{original name}` with unsafe characters replaced; files that already exist are
+skipped, so `D` again later only fetches what's new. Progress shows at the right of the
+footer. Downloads go through the same rate limiter as images.
+
+## Configuration
 
     mkdir -p ~/.config/ck && ck --print-config > ~/.config/ck/config.toml
 
-Then add a `[[site]]` entry. vichan sites have no board-list API, so they need an explicit `boards` list:
+All settings are optional; see `config.example.toml` for every option with comments:
+
+- `images = "auto" | "off"`
+- `refresh_thread_secs`, `refresh_watched_secs`
+- `compact_catalog = true` (also toggled with `c`, which saves it here, comments intact)
+- `download_dir = "~/stuff/{site}/{board}/{thread}"`
+- `[keys]`: `action = "key"`, e.g. `watch = "W"`. Unknown actions, keys that aren't a single
+  character, and two commands on one key in the same view are reported at startup.
+- `[theme]`: `accent`, `dim`, `selected`, `search`, `name`, `greentext`, `quotelink`,
+  `heading`, `code`, `new`. Colors are names (`"light-blue"`), `"#rrggbb"`, or 256-color
+  indexes (`"244"`).
+
+## Adding sites
+
+Add a `[[site]]` entry. vichan sites have no board-list API, so they need an explicit `boards` list:
 
 ```toml
 [[site]]

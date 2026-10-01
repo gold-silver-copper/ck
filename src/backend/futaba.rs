@@ -108,6 +108,7 @@ impl Futaba {
             images: as_u64(&v["images"]).map(|n| n as u32),
             sticky: as_bool(&v["sticky"]),
             locked: as_bool(&v["closed"]) || as_bool(&v["locked"]),
+            ..Default::default()
         }
     }
 }

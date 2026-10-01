@@ -90,6 +90,7 @@ impl Lynxchan {
             images: as_u64(&v["fileCount"]).map(|n| n as u32),
             sticky: as_bool(&v["pinned"]),
             locked: as_bool(&v["locked"]),
+            ..Default::default()
         }
     }
 }

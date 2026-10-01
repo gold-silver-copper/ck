@@ -5,13 +5,26 @@ use ratatui::text::{Line, Span};
 use unicode_width::UnicodeWidthStr;
 
 use crate::model::Link;
+use crate::theme::theme;
 
-pub const GREENTEXT: Style = Style::new().fg(Color::Green);
 pub const PINKTEXT: Style = Style::new().fg(Color::LightRed);
-pub const QUOTELINK: Style = Style::new().fg(Color::Magenta).add_modifier(Modifier::UNDERLINED);
 pub const SPOILER: Style = Style::new().fg(Color::DarkGray).bg(Color::DarkGray);
-pub const HEADING: Style = Style::new().fg(Color::Red).add_modifier(Modifier::BOLD);
-pub const CODE: Style = Style::new().fg(Color::Cyan);
+
+pub fn greentext() -> Style {
+    Style::new().fg(theme().greentext)
+}
+
+pub fn quotelink() -> Style {
+    Style::new().fg(theme().quotelink).add_modifier(Modifier::UNDERLINED)
+}
+
+pub fn heading() -> Style {
+    Style::new().fg(theme().heading).add_modifier(Modifier::BOLD)
+}
+
+pub fn code() -> Style {
+    Style::new().fg(theme().code)
+}
 /// Line style marking a line of a code block: `wrap` keeps its whitespace and never word-wraps it.
 pub const CODE_LINE: Style = Style::new().fg(Color::Cyan);
 const CONTINUATION: &str = "↪";
@@ -100,37 +113,37 @@ pub fn parse_html(html: &str, flavor: Flavor) -> Parsed {
             }
             _ => {
                 let class = attr(tag_body, "class").unwrap_or_default().to_ascii_lowercase();
-                let code = name == "pre" || (name == "div" && class.contains("hljs"));
+                let block = name == "pre" || (name == "div" && class.contains("hljs"));
                 let base = stack.last().map(|o| o.style).unwrap_or_default();
                 let style = match name.as_str() {
-                    _ if code => base.patch(CODE),
-                    "a" => base.patch(QUOTELINK),
+                    _ if block => base.patch(code()),
+                    "a" => base.patch(quotelink()),
                     "b" | "strong" => base.add_modifier(Modifier::BOLD),
                     "i" | "em" => base.add_modifier(Modifier::ITALIC),
                     "u" => base.add_modifier(Modifier::UNDERLINED),
                     "s" if flavor == Flavor::Fourchan => base.patch(SPOILER),
                     "s" | "del" | "strike" => base.add_modifier(Modifier::CROSSED_OUT),
-                    "code" => base.patch(CODE),
+                    "code" => base.patch(code()),
                     "span" | "div" | "p" => match class.as_str() {
                         c if c.contains("spoiler") => base.patch(SPOILER),
-                        c if c.contains("quote") || c.contains("greentext") => base.patch(GREENTEXT),
-                        c if c.contains("heading") || c.contains("redtext") || c == "title" => base.patch(HEADING),
+                        c if c.contains("quote") || c.contains("greentext") => base.patch(greentext()),
+                        c if c.contains("heading") || c.contains("redtext") || c == "title" => base.patch(heading()),
                         c if c.contains("pinktext") || c.contains("orangetext") => base.patch(PINKTEXT),
                         // jschan's inline formatting.
                         "bold" => base.add_modifier(Modifier::BOLD),
                         "em" => base.add_modifier(Modifier::ITALIC),
                         "underline" => base.add_modifier(Modifier::UNDERLINED),
                         "strike" => base.add_modifier(Modifier::CROSSED_OUT),
-                        "mono" => base.patch(CODE),
+                        "mono" => base.patch(code()),
                         _ => base,
                     },
                     _ => base,
                 };
-                if code {
+                if block {
                     b.end_line();
                 }
                 let href = if name == "a" { attr(tag_body, "href") } else { None };
-                stack.push(Open { name, style, href, code });
+                stack.push(Open { name, style, href, code: block });
             }
         }
     }
@@ -146,11 +159,11 @@ pub fn parse_plain(text: &str) -> Parsed {
             b.newline();
         }
         let style = if line.starts_with('>') && !line.starts_with(">>") {
-            GREENTEXT
+            greentext()
         } else if line.starts_with('<') {
             PINKTEXT
         } else if line.starts_with("==") && line.ends_with("==") && line.len() > 4 {
-            HEADING
+            heading()
         } else {
             Style::new()
         };
@@ -199,7 +212,7 @@ impl Builder {
             if !self.links.contains(&link) {
                 self.links.push(link);
             }
-            self.cur.push(Span::styled(rest[pos..pos + len].to_string(), style.patch(QUOTELINK)));
+            self.cur.push(Span::styled(rest[pos..pos + len].to_string(), style.patch(quotelink())));
             self.sealed = true;
             rest = &rest[pos + len..];
         }
@@ -322,7 +335,7 @@ pub fn quote_target(span: &str) -> Option<u64> {
 }
 
 pub fn is_quote_link(style: Style) -> bool {
-    style.fg == QUOTELINK.fg && style.add_modifier.contains(Modifier::UNDERLINED)
+    style.fg == Some(theme().quotelink) && style.add_modifier.contains(Modifier::UNDERLINED)
 }
 
 pub fn is_spoiler(style: Style) -> bool {
@@ -507,16 +520,16 @@ mod tests {
         assert_eq!(lines, [">>123", ">be me", "it's fineok"]);
         assert_eq!(p.quotes, [123]);
         assert_eq!(p.links, [link(None, None, Some(123))]);
-        assert_eq!(p.lines[1].spans[0].style, GREENTEXT);
+        assert_eq!(p.lines[1].spans[0].style, greentext());
     }
 
     #[test]
     fn plain() {
         let p = parse_plain(">>42 hello\n>green\n<pink\n>>>/b/7 and >>>/tech/");
         assert_eq!(p.quotes, [42]);
-        assert_eq!(p.lines[1].spans[0].style, GREENTEXT);
+        assert_eq!(p.lines[1].spans[0].style, greentext());
         assert_eq!(p.lines[2].spans[0].style, PINKTEXT);
-        assert_eq!(p.lines[0].spans[0].style, QUOTELINK);
+        assert_eq!(p.lines[0].spans[0].style, quotelink());
         assert_eq!(p.links[1..], [link(Some("b"), None, Some(7)), link(Some("tech"), None, None)]);
     }
 
@@ -588,7 +601,7 @@ mod tests {
         let p = parse_html(&sample("lynx_kohl_spoiler"), Flavor::Lynxchan);
         let spoiler = p.lines.iter().flat_map(|l| &l.spans).find(|s| is_spoiler(s.style)).unwrap();
         assert!(spoiler.content.starts_with("Achtung"));
-        assert!(p.lines.iter().flat_map(|l| &l.spans).any(|s| s.style == HEADING));
+        assert!(p.lines.iter().flat_map(|l| &l.spans).any(|s| s.style == heading()));
 
         // endchan: <br> line breaks, <pre> used inline inside greentext.
         let p = parse_html(&sample("lynx_end_pre"), Flavor::Lynxchan);

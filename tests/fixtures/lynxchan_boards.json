@@ -1,0 +1,1132 @@
+{
+ "pageCount": 38,
+ "boards": [
+  {
+   "_id": "5ceb0b4e109c5a1a89e71ff9",
+   "boardUri": "polru",
+   "boardName": "pol - Russian Edition",
+   "boardDescription": "А у нас всё по-прежнему",
+   "owner": "87",
+   "settings": [
+    "blockDeletion",
+    "requireThreadFile",
+    "allowCode",
+    "disallowTor",
+    "uniquePosts",
+    "locationFlags"
+   ],
+   "uniqueIps": 85,
+   "lastPostId": 909033,
+   "captchaMode": 1,
+   "postsPerHour": 2,
+   "threadCount": 156,
+   "boardMessage": "[Капча](/blockBypass.js)ᅠ ᅠ ᅠ[Разметка](/.static/posting.html)ᅠ ᅠ ᅠ[Донатим на Эндчан](/.static/donations.html)ᅠ ᅠ ᅠ[Бункер](https://wrongthink.net/endchan/) ᅠ ᅠ[Тор зеркало](http://enxx3byspwsdo446jujc52ucy2pf5urdbhqw3kbsfhlfjwmbpj5smdad.onion/polru/)",
+   "boardMarkdown": "<a rel=\"nofollow noopener noreferrer\" href=\"/blockBypass.js\">Капча</a>ᅠ ᅠ ᅠ<a rel=\"nofollow noopener noreferrer\" href=\"/.static/posting.html\">Разметка</a>ᅠ ᅠ ᅠ<a rel=\"nofollow noopener noreferrer\" href=\"/.static/donations.html\">Донатим на Эндчан</a>ᅠ ᅠ ᅠ<a rel=\"nofollow noopener noreferrer\" href=\"https://wrongthink.net/endchan/\">Бункер</a> ᅠ ᅠ<a rel=\"nofollow noopener noreferrer\" href=\"http://enxx3byspwsdo446jujc52ucy2pf5urdbhqw3kbsfhlfjwmbpj5smdad.onion/polru/\">Тор зеркало</a>",
+   "anonymousName": "Путин хуйло",
+   "tags": [],
+   "acceptedMimes": null,
+   "autoSageLimit": 1000,
+   "maxThreadCount": 10000,
+   "maxFileSizeMB": 10000,
+   "maxBumpAgeDays": 0,
+   "maxFiles": 10000,
+   "filters": [
+    {
+     "originalTerm": "Путин",
+     "replacementTerm": "Пидор",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "силовик",
+     "replacementTerm": "слабовик",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "чубат",
+     "replacementTerm": "%я сосу хуи за доширак/%",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "володин",
+     "replacementTerm": "Долбитель",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "всук",
+     "replacementTerm": "%психиатр/%",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "усраин",
+     "replacementTerm": "%выебите меня в рот/%",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "ТЯО",
+     "replacementTerm": "%ТЯФ/%",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "росгвард",
+     "replacementTerm": "пёсгвард",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "хохл",
+     "replacementTerm": "%хозяев/%",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "хахл",
+     "replacementTerm": "%хозяев/%",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "либераст",
+     "replacementTerm": "%я сосу много хуй/%",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "Песков",
+     "replacementTerm": "Письков",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "--",
+     "replacementTerm": "—",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "вагнер",
+     "replacementTerm": "Вафлёр",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "life.ru",
+     "replacementTerm": "%Путин-плешивая-тварь.ru/%",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "2ch.hk",
+     "replacementTerm": "saveukraine.org/donate",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "Двач",
+     "replacementTerm": "%Фсбач/%",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "rusvesna",
+     "replacementTerm": "%клуб анонимных колясок/%",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "Ланцет",
+     "replacementTerm": "%Хуеплёт/%",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "УГИЛ",
+     "replacementTerm": "%РУГИЛ/%",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "Новоросс",
+     "replacementTerm": "%Маняросс/%",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "Наша страна",
+     "replacementTerm": "%ССАНАЯ СНИГЕРИЯ/%",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "Кaкл",
+     "replacementTerm": "%хозяев/%",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "западных наёмников",
+     "replacementTerm": "%западных наёмников/%",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "ixbt",
+     "replacementTerm": "%шлюхи какая просто/%",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "https://vk.com",
+     "replacementTerm": "https:/ фсб . com_",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "r/sr",
+     "replacementTerm": "https://saveukraine.org/donate",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "B WM",
+     "replacementTerm": "https://saveukraine.org/donate",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "ципсо",
+     "replacementTerm": "%Путин ебёт детей/%",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "B BM",
+     "replacementTerm": "https://saveukraine.org/donate",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "Усрин",
+     "replacementTerm": "%выебите меня в рот/%",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "хрюконин",
+     "replacementTerm": "%выебите меня в рот/%",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "Хохол",
+     "replacementTerm": "%хозяин/%",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "xoxл",
+     "replacementTerm": "%хозяев/%",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "xoхл",
+     "replacementTerm": "%хозяев/%",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "хоxл",
+     "replacementTerm": "%хозяев/%",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "хoхл",
+     "replacementTerm": "%хозяев/%",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "xохл",
+     "replacementTerm": "%хозяев/%",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "хoxл",
+     "replacementTerm": "%хозяев/%",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "xоxл",
+     "replacementTerm": "%хозяев/%",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "Ураин",
+     "replacementTerm": "%выебите меня в рот/%",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "В вм",
+     "replacementTerm": "В https://saveukraine.org/donate",
+     "caseInsensitive": false
+    },
+    {
+     "originalTerm": "https://t.me",
+     "replacementTerm": "https://Paha-Ne-Vydast.me",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "ТЯO",
+     "replacementTerm": "%ТЯФ/%",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "подсвин",
+     "replacementTerm": "%коляс/%",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "западной техники",
+     "replacementTerm": "%западной техники/%",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "Купянск",
+     "replacementTerm": "%Купянск/%",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "Тарас",
+     "replacementTerm": "%Тарас/%",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "Укропы",
+     "replacementTerm": "%хозяева/%",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "https://m.youtube.com",
+     "replacementTerm": "https://youtube.com",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "загнивк",
+     "replacementTerm": "%Кириенко лысый чёрт/%",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "в wm",
+     "replacementTerm": "в https://saveukraine.org/donate",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "Орбан",
+     "replacementTerm": "%Орбан/%",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "news.ru",
+     "replacementTerm": "youtube.com/@STERNENKO _",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "Кадыр",
+     "replacementTerm": "Калдыр",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "в:_:м",
+     "replacementTerm": "https://saveukraine.org/donate",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "lenta.ru",
+     "replacementTerm": "youtube.com/@STERNENKO .",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "360tv",
+     "replacementTerm": "youtube.com/@VolodymyrZolkin .",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "overclockers",
+     "replacementTerm": "youtube.com/@dmytrokarpenko /",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "argumenti.ru",
+     "replacementTerm": "/ https://youtube.com/@k2_bat /",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "eadaily.com",
+     "replacementTerm": "youtube.com/@ab3army /",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "лукаш",
+     "replacementTerm": "говнаш",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "Медведев",
+     "replacementTerm": "Пиггер",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "кинжал",
+     "replacementTerm": "%пыньжал/%",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "рагуль",
+     "replacementTerm": "шановний пан",
+     "caseInsensitive": false
+    },
+    {
+     "originalTerm": "рагули",
+     "replacementTerm": "шановне панство",
+     "caseInsensitive": false
+    },
+    {
+     "originalTerm": "рагулю",
+     "replacementTerm": "шановному пану",
+     "caseInsensitive": false
+    },
+    {
+     "originalTerm": "рагулем",
+     "replacementTerm": "шановним паном",
+     "caseInsensitive": false
+    },
+    {
+     "originalTerm": "рагулям",
+     "replacementTerm": "шановному панству",
+     "caseInsensitive": false
+    },
+    {
+     "originalTerm": "Росси",
+     "replacementTerm": "рабси",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "rutube.ru",
+     "replacementTerm": "azov.org.ua",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "ria.ru",
+     "replacementTerm": "https://azov.org.ua/donate/",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "s/boris_rozhin",
+     "replacementTerm": ". https://saveukraine.org/donate",
+     "caseInsensitive": false
+    },
+    {
+     "originalTerm": "орешник",
+     "replacementTerm": "коляс",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "ridus.ru",
+     "replacementTerm": "youtube.com/@VolodymyrZolkin .",
+     "caseInsensitive": false
+    },
+    {
+     "originalTerm": "Копроин",
+     "replacementTerm": "%выебите меня в рот/%",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "news.rambler.ru",
+     "replacementTerm": "youtube.com/@STERNENKO .",
+     "caseInsensitive": false
+    },
+    {
+     "originalTerm": "busification.org",
+     "replacementTerm": "rusvolcorps.com .",
+     "caseInsensitive": false
+    },
+    {
+     "originalTerm": "чюбат",
+     "replacementTerm": "%я сосу хуи за доширак/%",
+     "caseInsensitive": false
+    },
+    {
+     "originalTerm": "копроин",
+     "replacementTerm": "Нефтедырной Пынебабв",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "Оpeшник",
+     "replacementTerm": "коляс",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "topwar.ru",
+     "replacementTerm": "magyarbirds.army/payment_info",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "К0ПР0ИНУ",
+     "replacementTerm": "РАБСИЮ",
+     "caseInsensitive": false
+    },
+    {
+     "originalTerm": ".ru",
+     "replacementTerm": ".sru",
+     "caseInsensitive": false
+    },
+    {
+     "originalTerm": ".su",
+     "replacementTerm": ".sosu",
+     "caseInsensitive": false
+    },
+    {
+     "originalTerm": "Калининград",
+     "replacementTerm": "Кенигсберг",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "Саратов",
+     "replacementTerm": "Сары Тау",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "Краснодарский край",
+     "replacementTerm": "Черкесия",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "Грозный",
+     "replacementTerm": "Джохар",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "Сахалин",
+     "replacementTerm": "Карафуто",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "Новосибирск",
+     "replacementTerm": "Жанасибир",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "Новгород",
+     "replacementTerm": "Хольмгард",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "Форчан",
+     "replacementTerm": "%Вокзал/%",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "БУРЕВЕСТНИК",
+     "replacementTerm": "ПОПАПЫНЯ",
+     "caseInsensitive": false
+    },
+    {
+     "originalTerm": "ОРEШНИК",
+     "replacementTerm": "КОЛЯС",
+     "caseInsensitive": false
+    },
+    {
+     "originalTerm": "?si=",
+     "replacementTerm": "/ si=",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "БРИКС",
+     "replacementTerm": "%SHITS/%",
+     "caseInsensitive": false
+    },
+    {
+     "originalTerm": "/shorts/",
+     "replacementTerm": "/watch?v=",
+     "caseInsensitive": false
+    },
+    {
+     "originalTerm": "2ch.org",
+     "replacementTerm": "saveukraine.org/donate",
+     "caseInsensitive": false
+    }
+   ],
+   "usesCustomCss": true,
+   "volunteers": [
+    "mr_vilko4ist",
+    "vredeno",
+    "a8nGst7xPZon0",
+    "Zubilo",
+    "syjiamw2pe",
+    "rus_swine",
+    "toro_user",
+    "Leskun",
+    "kolyas"
+   ],
+   "inactive": false,
+   "boardLanguage": "",
+   "captchaConfig": {
+    "charsetMode": "hex",
+    "customCharset": "",
+    "excludeAmbiguous": false,
+    "length": 6,
+    "variantMode": "secureMask",
+    "enabledVariants": [
+     "secureMask"
+    ],
+    "fontFamily": "DejaVu-Sans",
+    "fontSize": 70,
+    "width": 302,
+    "height": 100,
+    "distortLimiter": 30,
+    "minDistorts": 6,
+    "maxDistorts": 7,
+    "minCircles": 5,
+    "maxCircles": 7,
+    "minCircleSize": 15,
+    "maxCircleSize": 30,
+    "lineCount": 8,
+    "minLineWidth": 4,
+    "maxLineWidth": 10,
+    "blur": 2,
+    "jitterWidth": 302,
+    "jitterHeight": 120,
+    "jitterMinPointsize": 48,
+    "jitterMaxPointsize": 64,
+    "jitterBlur": 0.7,
+    "difficultyPreset": "medium"
+   },
+   "maxMessageLengthBeforeWarmup": 0,
+   "minPostsBeforeFiles": 0,
+   "minPostsBeforeLinks": 0,
+   "warmupPostsForLength": 0,
+   "hourlyThreadLimit": 1,
+   "lockCountStart": "2026-10-01T09:23:57.256Z",
+   "threadLockCount": 1,
+   "lockedUntil": "2026-10-01T10:23:57.256Z"
+  },
+  {
+   "_id": "5dc4c07599003b1bce937c78",
+   "boardUri": "agatha2",
+   "boardName": "E-Girl Purgatory",
+   "boardDescription": "e-girl gossip & drama",
+   "owner": "Octave",
+   "settings": [
+    "blockDeletion",
+    "requireThreadFile",
+    "disableIds",
+    "allowCode",
+    "locationFlags"
+   ],
+   "uniqueIps": 63,
+   "lastPostId": 200434,
+   "captchaMode": 2,
+   "postsPerHour": 2,
+   "usesCustomCss": true,
+   "usesCustomSpoiler": true,
+   "boardMessage": "@You must have at least one post from your IP on the board before you may post images or links./@",
+   "boardMarkdown": "<span class=\"redMemeText\">You must have at least one post from your IP on the board before you may post images or links.</span>",
+   "anonymousName": "",
+   "tags": [
+    "agatha",
+    "ciara",
+    "marky",
+    "orbiting",
+    "3d waifus"
+   ],
+   "acceptedMimes": null,
+   "autoSageLimit": 1000,
+   "maxThreadCount": 0,
+   "maxFileSizeMB": 0,
+   "maxBumpAgeDays": 0,
+   "maxFiles": 5,
+   "threadCount": 160,
+   "inactive": false,
+   "filters": [
+    {
+     "originalTerm": "/egirls/",
+     "replacementTerm": "/agatha2/",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "u3.ro",
+     "replacementTerm": ".....",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "mii.pm",
+     "replacementTerm": "....",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "tinsy.me",
+     "replacementTerm": ".......",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "mega collection new films cp HD",
+     "replacementTerm": "i'm a retarded faggot",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "vara.jp",
+     "replacementTerm": ".....",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "new studio cp 2023",
+     "replacementTerm": "i suck cocks",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "Lots of new -c h i l d- porn mov",
+     "replacementTerm": ".",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "lukeo.link",
+     "replacementTerm": ".....",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "tt22.in",
+     "replacementTerm": ".......",
+     "caseInsensitive": false
+    },
+    {
+     "originalTerm": "5du.pl",
+     "replacementTerm": "......",
+     "caseInsensitive": false
+    },
+    {
+     "originalTerm": "ľa.eu",
+     "replacementTerm": ".........",
+     "caseInsensitive": false
+    },
+    {
+     "originalTerm": "rentry.co",
+     "replacementTerm": "........",
+     "caseInsensitive": false
+    },
+    {
+     "originalTerm": "telegra.ph",
+     "replacementTerm": ".....",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "gilbert",
+     "replacementTerm": "Gilbert Raborg the Pedophile",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "https://endchan.org/egirls",
+     "replacementTerm": "https://endchan.org/agatha2",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "https://endchan.net/egirls",
+     "replacementTerm": "https://endchan.net/agatha2",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "https://endchan.gg/egirls",
+     "replacementTerm": "https://endchan.gg/agatha2",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "giibert",
+     "replacementTerm": "Gilbert Raborg the Pedophile",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "gilly-kun",
+     "replacementTerm": "childrapist-kun",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "pedo",
+     "replacementTerm": "pedro",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "shurjoka",
+     "replacementTerm": "...",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "hag",
+     "replacementTerm": "angel",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "smallurl.ca",
+     "replacementTerm": "......",
+     "caseInsensitive": false
+    },
+    {
+     "originalTerm": "FEmxdcpH",
+     "replacementTerm": "faggot",
+     "caseInsensitive": false
+    },
+    {
+     "originalTerm": "wEYfRthgek",
+     "replacementTerm": "faggot",
+     "caseInsensitive": false
+    },
+    {
+     "originalTerm": "discord.gg",
+     "replacementTerm": "virus.ru",
+     "caseInsensitive": false
+    },
+    {
+     "originalTerm": "heroin whore",
+     "replacementTerm": "heroin angel",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "/lamb/",
+     "replacementTerm": "/agatha2/",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "4H8KhMk6FQ",
+     "replacementTerm": "4H8khNK8FQ",
+     "caseInsensitive": false
+    },
+    {
+     "originalTerm": "y'all",
+     "replacementTerm": "y'allst folx",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "child pornography",
+     "replacementTerm": "forbidden",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "/Cewl/",
+     "replacementTerm": "/agatha2/",
+     "caseInsensitive": false
+    },
+    {
+     "originalTerm": "/_agatha/",
+     "replacementTerm": "/agatha2/",
+     "caseInsensitive": false
+    },
+    {
+     "originalTerm": "nigga",
+     "replacementTerm": "*nigger",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "constantine grace akre",
+     "replacementTerm": "------------------",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "paste.gd",
+     "replacementTerm": ".....",
+     "caseInsensitive": false
+    },
+    {
+     "originalTerm": "https://mega.nz/folder/HQkwDCqa#",
+     "replacementTerm": ".....",
+     "caseInsensitive": false
+    },
+    {
+     "originalTerm": "https://mega.nz/filerequest/oMrB",
+     "replacementTerm": "......",
+     "caseInsensitive": false
+    },
+    {
+     "originalTerm": ".club",
+     "replacementTerm": ".exe",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "simplex",
+     "replacementTerm": "imaretardedniggerfaggot",
+     "caseInsensitive": true
+    }
+   ],
+   "volunteers": [
+    "zucek",
+    "testacc",
+    "zalo"
+   ],
+   "hourlyThreadLimit": 1,
+   "threadLockCount": 1,
+   "lockCountStart": "2026-09-28T04:07:11.865Z",
+   "lockedUntil": "2026-09-28T05:07:11.865Z",
+   "boardLanguage": "",
+   "minPostsBeforeFiles": 1,
+   "maxMessageLengthBeforeWarmup": 0,
+   "minPostsBeforeLinks": 1,
+   "warmupPostsForLength": 0
+  },
+  {
+   "_id": "5a26c0feb787f94f451aebc9",
+   "boardUri": "bb",
+   "boardName": "b+",
+   "boardDescription": "Наркач",
+   "owner": "bbmocherator",
+   "settings": [
+    "blockDeletion",
+    "requireThreadFile",
+    "disableIds",
+    "allowCode",
+    "forceAnonymity"
+   ],
+   "uniqueIps": 27,
+   "lastPostId": 233799,
+   "captchaMode": 1,
+   "postsPerHour": 2,
+   "boardMessage": "[Тор1](http://enxx3byspwsdo446jujc52ucy2pf5urdbhqw3kbsfhlfjwmbpj5smdad.onion/bb/) [Тор2](http://endchancxfbnrfgauuxlztwlckytq7rgeo5v6pc2zd4nyqo3khfam4ad.onion/bb/) [Капча](/blockBypass.js) [Логи](/logs.js)ᅠ [8моё/б+](https://8chan.moe/bb/)",
+   "boardMarkdown": "<a rel=\"nofollow noopener noreferrer\" href=\"http://enxx3byspwsdo446jujc52ucy2pf5urdbhqw3kbsfhlfjwmbpj5smdad.onion/bb/\">Тор1</a> <a rel=\"nofollow noopener noreferrer\" href=\"http://endchancxfbnrfgauuxlztwlckytq7rgeo5v6pc2zd4nyqo3khfam4ad.onion/bb/\">Тор2</a> <a rel=\"nofollow noopener noreferrer\" href=\"/blockBypass.js\">Капча</a> <a rel=\"nofollow noopener noreferrer\" href=\"/logs.js\">Логи</a>ᅠ <a rel=\"nofollow noopener noreferrer\" href=\"https://8chan.moe/bb/\">8моё/б+</a>",
+   "anonymousName": "",
+   "tags": [
+    "russian",
+    "drugs",
+    "medicaments",
+    "psychedelics",
+    "narcotics"
+   ],
+   "acceptedMimes": null,
+   "autoSageLimit": 0,
+   "maxThreadCount": 0,
+   "maxFileSizeMB": 0,
+   "maxBumpAgeDays": 0,
+   "maxFiles": 0,
+   "inactive": false,
+   "threadCount": 157,
+   "volunteers": [
+    "AnonyMouseFG42",
+    "a8nGst7xPZon0",
+    "mumei",
+    "suigintou",
+    "River",
+    "qwerty19999",
+    "Tkazich"
+   ],
+   "rules": [
+    "Не нарушайте законодательство США.",
+    "Запрещен: аудио-визуальный контент демонстрирующий непристойное с несовершеннолетними, хентай, зоопорно. Loli ok.",
+    "Запрещен: спам, вайп, флуд.",
+    "Аноны не могут удалять свои посты."
+   ],
+   "usesCustomCss": true,
+   "usesCustomSpoiler": false,
+   "filters": [
+    {
+     "originalTerm": "GasilnNoman",
+     "replacementTerm": "я_сосу_хуи",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "https://t.me/+i37qKrYМ6со4MGY0",
+     "replacementTerm": "https://t.me/+i37qКrYМ6со4MGY0",
+     "caseInsensitive": false
+    },
+    {
+     "originalTerm": "pharmterror",
+     "replacementTerm": "рharmterror",
+     "caseInsensitive": true
+    }
+   ],
+   "boardLanguage": "",
+   "hourlyThreadLimit": 1,
+   "lockCountStart": "2026-10-01T14:44:35.050Z",
+   "threadLockCount": 1,
+   "lockedUntil": "2026-10-01T15:44:35.050Z",
+   "maxMessageLengthBeforeWarmup": 0,
+   "minPostsBeforeFiles": 0,
+   "minPostsBeforeLinks": 0,
+   "warmupPostsForLength": 0
+  },
+  {
+   "_id": "67ffa6ef809f80053ffa64f3",
+   "boardUri": "bert",
+   "boardName": "ciclismo",
+   "boardDescription": "home of /cyc/",
+   "owner": "bert",
+   "settings": [
+    "requireThreadFile",
+    "disableIds",
+    "allowCode",
+    "disallowTor",
+    "locationFlags",
+    "blockTorBeforeFiles",
+    "blockTorBeforeLinks"
+   ],
+   "uniqueIps": 27,
+   "lastPostId": 124750,
+   "captchaMode": 0,
+   "postsPerHour": 0,
+   "boardMessage": null,
+   "boardMarkdown": null,
+   "anonymousName": "Bert",
+   "tags": [
+    "wine tasting",
+    "saddle sniffing",
+    "doping",
+    "islamic cult of remco"
+   ],
+   "acceptedMimes": null,
+   "autoSageLimit": 0,
+   "maxThreadCount": 0,
+   "maxFileSizeMB": 0,
+   "maxBumpAgeDays": 0,
+   "maxFiles": 0,
+   "hourlyThreadLimit": 6,
+   "threadLockCount": 1,
+   "lockCountStart": "2026-10-01T04:51:51.284Z",
+   "threadCount": 131,
+   "filters": [
+    {
+     "originalTerm": "http://2zjcvkjivm5ykgnbztdbbeaep",
+     "replacementTerm": "Puck Moonen",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "http://qdvbod4fwky4jfnebbnnegmmf",
+     "replacementTerm": "Puck Moonen",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "http://e3olmoyqx3ljzz2iloicjh6jh",
+     "replacementTerm": "Puck Moonen",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "http://onioneqijkmjzozlnlg47scbs",
+     "replacementTerm": "Puck Moonen",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "http://dgdgorgpym7xmps5t6y4v4pgd",
+     "replacementTerm": "Puck Moonen",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "Data Provider",
+     "replacementTerm": "Remco Evenepoel",
+     "caseInsensitive": false
+    },
+    {
+     "originalTerm": "Tracking Location",
+     "replacementTerm": "Remco Evenepoel",
+     "caseInsensitive": false
+    },
+    {
+     "originalTerm": "Devils Satan Social Netowrk",
+     "replacementTerm": "Remco Evenepoel",
+     "caseInsensitive": false
+    },
+    {
+     "originalTerm": "Online Search Porn",
+     "replacementTerm": "Remco Evenepoel",
+     "caseInsensitive": false
+    },
+    {
+     "originalTerm": "DARK CASINO",
+     "replacementTerm": "Remco Evenepoel",
+     "caseInsensitive": false
+    },
+    {
+     "originalTerm": "https://ur0.link/GlicDT",
+     "replacementTerm": "fuck you spammer",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "https://hola2.me/nc0ftq",
+     "replacementTerm": "I'm a spammer and a huge faggot",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "https://spn.cx/leN3i",
+     "replacementTerm": "Liane Lippert",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "https://lnkz.at/tPHn7",
+     "replacementTerm": "Liane Lippert",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "https://z-l.es/qWmimTVN",
+     "replacementTerm": "fuck you spammer",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "https://shortsurl.net/cx",
+     "replacementTerm": "fuck you spammer",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "C P porn",
+     "replacementTerm": "I am a huge faggot",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "C P studios",
+     "replacementTerm": "I am a huge faggot",
+     "caseInsensitive": false
+    },
+    {
+     "originalTerm": "https://wall.sh/sEP",
+     "replacementTerm": "I'm a fag.",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "http://gourl.gr/c2jfo",
+     "replacementTerm": "I'm a fag",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "https://i9.ma/BQ0vF",
+     "replacementTerm": "Puck Moonen",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "https://bit.ly/4rjtvxp",
+     "replacementTerm": "Puck Moonen",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "https://bit.ly/4qDQqCj",
+     "replacementTerm": "Puck Moonen",
+     "caseInsensitive": false
+    },
+    {
+     "originalTerm": "https://bit.ly/3MvBSqn",
+     "replacementTerm": "Puck Moonen",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "https://gosite.org/g26q9",
+     "replacementTerm": "https://www.remcoev.com/",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "lipipop",
+     "replacementTerm": "Remco",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "http://hyperlinker.io/fk8qf",
+     "replacementTerm": "https://www.remcoev.com/",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "http://trendlinkfy.io/k30qy",
+     "replacementTerm": "https://www.remcoev.com/",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "relink.asia/KDl4V",
+     "replacementTerm": "https://www.remcoev.com/",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "c p. .SiTe.",
+     "replacementTerm": "Remco Evenepoel",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "rklo.nl/1",
+     "replacementTerm": "I&apos;m a fag.",
+     "caseInsensitive": true
+    },
+    {
+     "originalTerm": "link.uzea.uz/bX",
+     "replacementTerm": "Remco Evenepoel",
+     "caseInsensitive": true
+    }
+   ],
+   "inactive": false,
+   "boardLanguage": "",
+   "minPostsBeforeFiles": 1,
+   "minPostsBeforeLinks": 2,
+   "maxMessageLengthBeforeWarmup": 0,
+   "warmupPostsForLength": 0
+  }
+ ],
+ "overboard": "overboard",
+ "sfwOverboard": "overboard_sfw"
+}

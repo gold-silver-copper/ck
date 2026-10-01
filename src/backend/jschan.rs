@@ -76,6 +76,7 @@ pub fn post(base: &str, v: &Value) -> Post {
         images: as_u64(&v["replyfiles"]).map(|n| n as u32),
         sticky: as_bool(&v["sticky"]),
         locked: as_bool(&v["locked"]),
+        ..Default::default()
     }
 }
 

@@ -1,5 +1,7 @@
 //! Site-agnostic data model. Every backend converts its own JSON into these.
 
+use std::sync::OnceLock;
+
 use ratatui::text::Line;
 
 #[derive(Debug, Clone)]
@@ -70,26 +72,40 @@ pub struct Post {
     pub images: Option<u32>,
     pub sticky: bool,
     pub locked: bool,
+    /// `plain_text` and `search_text`, computed once.
+    pub text: OnceLock<(String, String)>,
 }
 
 impl Post {
     /// Body flattened to a single line of plain text, for previews and filtering. Spoilers
-    /// are left out.
-    pub fn plain_text(&self) -> String {
-        let mut out = String::new();
-        for line in &self.body {
-            if !out.is_empty() {
-                out.push(' ');
-            }
-            for span in &line.spans {
-                if crate::markup::is_spoiler(span.style) {
-                    out.push_str("[spoiler]");
-                } else {
-                    out.push_str(&span.content);
+    /// are left out. Computed once.
+    pub fn plain_text(&self) -> &str {
+        &self.texts().0
+    }
+
+    /// Lowercase number, subject and plain text, for case-insensitive filtering.
+    pub fn search_text(&self) -> &str {
+        &self.texts().1
+    }
+
+    fn texts(&self) -> &(String, String) {
+        self.text.get_or_init(|| {
+            let mut plain = String::new();
+            for line in &self.body {
+                if !plain.is_empty() {
+                    plain.push(' ');
+                }
+                for span in &line.spans {
+                    if crate::markup::is_spoiler(span.style) {
+                        plain.push_str("[spoiler]");
+                    } else {
+                        plain.push_str(&span.content);
+                    }
                 }
             }
-        }
-        out
+            let search = format!("{} {} {plain}", self.no, self.subject.as_deref().unwrap_or("")).to_lowercase();
+            (plain, search)
+        })
     }
 }
 
@@ -102,5 +118,6 @@ mod tests {
         let parsed = parse_html(r#"With a <span class="spoiler">SaaS</span> of $5"#, Flavor::Vichan);
         let p = super::Post { body: parsed.lines, ..Default::default() };
         assert_eq!(p.plain_text(), "With a [spoiler] of $5");
+        assert_eq!(p.search_text(), "0  with a [spoiler] of $5");
     }
 }
