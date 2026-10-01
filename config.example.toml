@@ -17,6 +17,11 @@
 #   "off"   no images, no image requests
 images = "auto"
 
+# Background refresh intervals in seconds: the open thread, and each watched thread.
+# Lower values are raised to the minimums (10 and 60).
+refresh_thread_secs = 10
+refresh_watched_secs = 60
+
 [[site]]
 name = "4chan"
 kind = "4chan"

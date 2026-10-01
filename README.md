@@ -30,6 +30,9 @@ If-Modified-Since on every refetch, and no refetching the same page within 10 se
 | ctrl-d / ctrl-u, space | page                                 |
 | `J`/`K`                | scroll a thread by line              |
 | `b` / `u`              | jump to first reply / jump back      |
+| `U`                    | jump to the first unread post        |
+| `w`                    | watch / unwatch the thread (catalog or thread) |
+| `x`                    | remove an entry from Watched or History |
 | `i`                    | open the post's file (videos in mpv if it's installed) |
 | `v`                    | image viewer for the post's files (catalog: the OP's) |
 | `o`                    | open the board/thread in a browser   |
@@ -39,6 +42,20 @@ If-Modified-Since on every refetch, and no refetching the same page within 10 se
 
 In the image viewer: `h`/`l` or arrows for the previous/next file, `i` to open it externally,
 `esc` or `q` to close.
+
+## Watched threads and history
+
+`w` watches the open thread, or the selected one in a catalog. The "Watched" entry at the
+top of the Sites view lists watched threads from all sites with their post counts and how
+many posts are new; threads that 404 stay listed as "archived/deleted". "History" lists the
+last 100 threads you opened. `x` removes an entry from either list.
+
+The open thread refreshes in the background every 10 seconds and watched threads every
+60 seconds (change with `refresh_thread_secs` / `refresh_watched_secs`; those are also the
+minimums). Posts that arrived since your last visit are marked "● new"; `U` jumps to the
+first one.
+
+Both lists are stored as JSON in `$XDG_DATA_HOME/ck` (default `~/.local/share/ck`).
 
 ## Images
 

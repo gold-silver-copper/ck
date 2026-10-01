@@ -7,7 +7,7 @@ use ratatui::widgets::{Block, BorderType, Borders, Clear, List, ListItem, Paragr
 use ratatui_image::Image;
 use unicode_width::UnicodeWidthStr;
 
-use crate::app::{App, ThreadLayout, ThreadView, View};
+use crate::app::{App, SiteRow, ThreadLayout, ThreadView, View};
 use crate::images::{Images, State};
 use crate::markup;
 use crate::model::{Attachment, Post};
@@ -46,6 +46,8 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         View::Boards => draw_boards(f, app, inner),
         View::Catalog => draw_catalog(f, app, inner),
         View::Thread => draw_thread(f, app, inner),
+        View::Watched => draw_watched(f, app, inner),
+        View::History => draw_history(f, app, inner),
     }
     draw_footer(f, app, footer);
 
@@ -58,9 +60,16 @@ pub fn draw(f: &mut Frame, app: &mut App) {
 fn draw_header(f: &mut Frame, app: &App, area: Rect) {
     let sep = Span::styled(" › ", DIM);
     let mut spans = vec![Span::styled(" ck ", Style::new().fg(Color::Black).bg(ACCENT).bold())];
-    if app.view != View::Sites {
-        spans.push(sep.clone());
-        spans.push(Span::raw(app.current_site().cfg.name.clone()));
+    match app.view {
+        View::Sites => {}
+        View::Watched | View::History => {
+            spans.push(sep.clone());
+            spans.push(Span::raw(if app.view == View::Watched { "Watched" } else { "History" }));
+        }
+        _ => {
+            spans.push(sep.clone());
+            spans.push(Span::raw(app.current_site().cfg.name.clone()));
+        }
     }
     if matches!(app.view, View::Catalog | View::Thread)
         && let Some(b) = &app.board
@@ -94,6 +103,8 @@ fn view_title(app: &App) -> Line<'static> {
             let n = t.map_or(0, |t| t.posts.len());
             (format!("{} ({n} post{})", subject.unwrap_or_else(|| "Thread".into()), if n == 1 { "" } else { "s" }), &String::new())
         }
+        View::Watched => (format!("Watched ({})", app.store.watched.len()), &app.watched_list.filter),
+        View::History => (format!("History ({})", app.store.history.len()), &app.history_list.filter),
     };
     let mut spans = vec![Span::raw(format!(" {title} "))];
     if !filter.is_empty() || app.filtering {
@@ -120,13 +131,21 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
         Line::styled(format!(" {msg}"), style)
     } else {
         let keys = match app.view {
-            View::Thread => "j/k post · J/K line · enter quote · b replies · u back · v view · i open · o browser · r reload · ? help",
-            View::Catalog => "j/k move · enter open · esc back · / filter · v view · o browser · r reload · ? help · q quit",
+            View::Thread => "j/k post · J/K line · enter quote · b replies · u back · U unread · v view · w watch · ? help",
+            View::Catalog => "j/k move · enter open · esc back · / filter · v view · w watch · o browser · r reload · ? help",
+            View::Watched | View::History => "j/k move · enter open · x remove · esc back · / filter · o browser · ? help",
             _ => "j/k move · enter open · esc back · / filter · o browser · r reload · ? help · q quit",
         };
         Line::styled(format!(" {keys}"), DIM)
     };
-    f.render_widget(line, area);
+    // Background refreshes are shown at the right without hiding the rest of the footer.
+    let indicator = (!app.refreshing.is_empty()).then(|| format!(" ↻ refreshing {} ", app.refreshing.len()));
+    let width = indicator.as_ref().map_or(0, |s| s.width() as u16);
+    let [left, right] = Layout::horizontal([Constraint::Min(0), Constraint::Length(width)]).areas(area);
+    f.render_widget(line, left);
+    if let Some(s) = indicator {
+        f.render_widget(Line::styled(s, Style::new().fg(Color::Cyan)), right);
+    }
 }
 
 fn current_filter(app: &App) -> &str {
@@ -134,6 +153,8 @@ fn current_filter(app: &App) -> &str {
         View::Sites => &app.site_list.filter,
         View::Boards => &app.board_list.filter,
         View::Catalog => &app.catalog_list.filter,
+        View::Watched => &app.watched_list.filter,
+        View::History => &app.history_list.filter,
         View::Thread => "",
     }
 }
@@ -142,17 +163,84 @@ fn draw_sites(f: &mut Frame, app: &mut App, area: Rect) {
     let items: Vec<ListItem> = app
         .visible_sites()
         .into_iter()
-        .map(|i| {
-            let s = &app.sites[i];
-            let url = s.cfg.url.clone().unwrap_or_else(|| "https://4chan.org".into());
-            ListItem::new(Line::from(vec![
-                Span::styled(format!("{:<16}", s.cfg.name), Style::new().bold()),
-                Span::styled(format!("{:<10}", format!("{:?}", s.cfg.kind).to_lowercase()), Style::new().fg(Color::Blue)),
-                Span::styled(url, DIM),
-            ]))
+        .map(|row| match row {
+            SiteRow::Watched => {
+                let n = app.store.watched.len();
+                let unread: usize = app.store.watched.iter().map(|w| w.unread).sum();
+                let mut spans = vec![
+                    Span::styled(format!("{:<16}", "★ Watched"), Style::new().fg(ACCENT).bold()),
+                    Span::styled(format!("{n} thread{}", if n == 1 { "" } else { "s" }), DIM),
+                ];
+                if unread > 0 {
+                    spans.push(Span::styled(format!("  {unread} new"), Style::new().fg(Color::Green).bold()));
+                }
+                ListItem::new(Line::from(spans))
+            }
+            SiteRow::History => ListItem::new(Line::from(vec![
+                Span::styled(format!("{:<16}", "◷ History"), Style::new().fg(ACCENT).bold()),
+                Span::styled(
+                    format!("{} recent thread{}", app.store.history.len(), if app.store.history.len() == 1 { "" } else { "s" }),
+                    DIM,
+                ),
+            ])),
+            SiteRow::Site(i) => {
+                let s = &app.sites[i];
+                let url = s.cfg.url.clone().unwrap_or_else(|| "https://4chan.org".into());
+                ListItem::new(Line::from(vec![
+                    Span::styled(format!("{:<16}", s.cfg.name), Style::new().bold()),
+                    Span::styled(format!("{:<10}", format!("{:?}", s.cfg.kind).to_lowercase()), Style::new().fg(Color::Blue)),
+                    Span::styled(url, DIM),
+                ]))
+            }
         })
         .collect();
     render_list(f, area, items, &mut app.site_list.state, "No sites match");
+}
+
+/// `site  /board/  no  subject`, the shared start of Watched and History rows.
+fn thread_row(key: &crate::store::ThreadKey, subject: &str) -> Vec<Span<'static>> {
+    vec![
+        Span::styled(format!("{:<10} ", key.site), Style::new().fg(Color::Blue)),
+        Span::styled(format!("{:<9} ", format!("/{}/", key.board)), Style::new().fg(ACCENT)),
+        Span::styled(format!("{:<10} ", key.no), DIM),
+        Span::raw(truncate(subject, 50)),
+    ]
+}
+
+fn draw_watched(f: &mut Frame, app: &mut App, area: Rect) {
+    let items: Vec<ListItem> = app
+        .visible_watched()
+        .into_iter()
+        .map(|i| {
+            let w = &app.store.watched[i];
+            let mut spans = thread_row(&w.key, &w.subject);
+            spans.push(Span::styled(format!("  {} post{}", w.posts, if w.posts == 1 { "" } else { "s" }), DIM));
+            if w.dead {
+                spans.push(Span::styled("  archived/deleted", Style::new().fg(Color::Red)));
+            } else if w.unread > 0 {
+                spans.push(Span::styled(format!("  {} new", w.unread), Style::new().fg(Color::Green).bold()));
+            }
+            if app.refreshing.contains(&w.key) {
+                spans.push(Span::styled("  ↻", Style::new().fg(Color::Cyan)));
+            }
+            ListItem::new(Line::from(spans))
+        })
+        .collect();
+    render_list(f, area, items, &mut app.watched_list.state, "No watched threads. Press w in a catalog or thread to watch one.");
+}
+
+fn draw_history(f: &mut Frame, app: &mut App, area: Rect) {
+    let items: Vec<ListItem> = app
+        .visible_history()
+        .into_iter()
+        .map(|i| {
+            let v = &app.store.history[i];
+            let mut spans = thread_row(&v.key, &v.subject);
+            spans.push(Span::styled(format!("  {}", ago(v.opened)), DIM));
+            ListItem::new(Line::from(spans))
+        })
+        .collect();
+    render_list(f, area, items, &mut app.history_list.state, "No history yet");
 }
 
 fn draw_boards(f: &mut Frame, app: &mut App, area: Rect) {
@@ -337,7 +425,12 @@ fn draw_thread(f: &mut Frame, app: &mut App, area: Rect) {
     t.viewport = area.height as usize;
     let thumbs = app.images.enabled() && area.width >= MIN_THUMB_WIDTH;
     if t.layout.as_ref().is_none_or(|l| l.width != area.width) {
-        t.layout = Some(layout_thread(t, area.width, thumbs));
+        let l = layout_thread(t, area.width, thumbs);
+        // After a refresh, keep the same post at the top even if lines above it changed.
+        if let Some((i, off)) = t.anchor.take() {
+            t.scroll = (l.starts[i] + off).min(l.lines.len().saturating_sub(t.viewport));
+        }
+        t.layout = Some(l);
         t.scroll_to_selected();
     }
     let l = t.layout.as_ref().unwrap();
@@ -389,10 +482,10 @@ fn layout_thread(t: &ThreadView, width: u16, thumbs: bool) -> ThreadLayout {
         match p.files.first().filter(|_| thumbs) {
             Some(file) => {
                 thumb_at.push((lines.len(), i));
-                let text = post_lines(p, i == 0, &t.backlinks[i], t.no, text_width - THUMB.width as usize - 1);
+                let text = post_lines(p, i == 0, t.is_new(i), &t.backlinks[i], t.no, text_width - THUMB.width as usize - 1);
                 lines.extend(beside(placeholder(file, p.files.len(), THUMB), text, THUMB.width));
             }
-            None => lines.extend(post_lines(p, i == 0, &t.backlinks[i], t.no, text_width)),
+            None => lines.extend(post_lines(p, i == 0, t.is_new(i), &t.backlinks[i], t.no, text_width)),
         }
         lines.push(Line::raw(""));
     }
@@ -454,7 +547,7 @@ fn draw_viewer(f: &mut Frame, app: &mut App) {
     }
 }
 
-fn post_lines(p: &Post, is_op: bool, backlinks: &[u64], op_no: u64, width: usize) -> Vec<Line<'static>> {
+fn post_lines(p: &Post, is_op: bool, is_new: bool, backlinks: &[u64], op_no: u64, width: usize) -> Vec<Line<'static>> {
     let mut head = vec![
         Span::styled(p.name.clone(), Style::new().fg(Color::Green).bold()),
         Span::raw("  "),
@@ -464,6 +557,9 @@ fn post_lines(p: &Post, is_op: bool, backlinks: &[u64], op_no: u64, width: usize
     ];
     if is_op {
         head.push(Span::styled(" OP", Style::new().fg(ACCENT).bold()));
+    }
+    if is_new {
+        head.push(Span::styled(" ● new", Style::new().fg(Color::Green).bold()));
     }
     let mut out = markup::wrap(&Line::from(head), width);
     if let Some(s) = &p.subject {
@@ -529,7 +625,7 @@ const HELP: &[(&str, &[(&str, &str)])] = &[
             ("q, ctrl-c", "quit"),
         ],
     ),
-    ("Catalog", &[("v", "view the OP's images")]),
+    ("Catalog", &[("v", "view the OP's images"), ("w", "watch / unwatch the thread")]),
     (
         "Thread",
         &[
@@ -540,13 +636,16 @@ const HELP: &[(&str, &[(&str, &str)])] = &[
             ("u", "jump back"),
             ("i", "open file (videos in mpv)"),
             ("v", "view the post's images"),
+            ("w", "watch / unwatch the thread"),
+            ("U", "jump to the first unread post"),
         ],
     ),
+    ("Watched, History", &[("x", "remove the entry")]),
     ("Image viewer", &[("h / l, ← / →", "previous / next file"), ("i", "open externally"), ("esc, q", "close")]),
 ];
 
 fn draw_help(f: &mut Frame, app: &App) {
-    const COL: u16 = 48;
+    const COL: u16 = 52;
     let sections: Vec<Vec<Line>> = HELP
         .iter()
         .map(|&(title, rows)| {

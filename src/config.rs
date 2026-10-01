@@ -9,8 +9,22 @@ pub const DEFAULT_CONFIG: &str = include_str!("../config.example.toml");
 pub struct Config {
     #[serde(default)]
     pub images: ImagesMode,
+    /// Seconds between background refreshes of the open thread (at least 10).
+    #[serde(default = "default_refresh_thread")]
+    pub refresh_thread_secs: u64,
+    /// Seconds between background refreshes of each watched thread (at least 60).
+    #[serde(default = "default_refresh_watched")]
+    pub refresh_watched_secs: u64,
     #[serde(rename = "site")]
     pub sites: Vec<SiteConfig>,
+}
+
+fn default_refresh_thread() -> u64 {
+    10
+}
+
+fn default_refresh_watched() -> u64 {
+    60
 }
 
 #[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]

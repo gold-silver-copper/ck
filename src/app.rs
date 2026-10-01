@@ -1,7 +1,7 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -13,6 +13,7 @@ use crate::config::{Config, SiteConfig};
 use crate::http;
 use crate::images::Images;
 use crate::model::{Attachment, Board, Post};
+use crate::store::{Store, ThreadKey};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum View {
@@ -20,6 +21,16 @@ pub enum View {
     Boards,
     Catalog,
     Thread,
+    Watched,
+    History,
+}
+
+/// A row of the Sites view: the Watched and History lists come first.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SiteRow {
+    Watched,
+    History,
+    Site(usize),
 }
 
 pub struct Site {
@@ -63,6 +74,10 @@ pub struct ThreadView {
     /// Rendered layout, rebuilt by the UI when the width changes.
     pub layout: Option<ThreadLayout>,
     pub viewport: usize,
+    /// Posts numbered above this arrived since the previous visit (0: first visit, none are new).
+    pub new_after: u64,
+    /// After new posts arrive, keep this post (index, line offset into it) at the top of the view.
+    pub anchor: Option<(usize, usize)>,
 }
 
 pub struct ThreadLayout {
@@ -87,7 +102,31 @@ impl ThreadView {
                 }
             }
         }
-        Self { board, no, posts, index, backlinks, selected: 0, scroll: 0, jumps: Vec::new(), layout: None, viewport: 0 }
+        Self {
+            board,
+            no,
+            posts,
+            index,
+            backlinks,
+            selected: 0,
+            scroll: 0,
+            jumps: Vec::new(),
+            layout: None,
+            viewport: 0,
+            new_after: 0,
+            anchor: None,
+        }
+    }
+
+    pub fn is_new(&self, i: usize) -> bool {
+        self.new_after > 0 && self.posts[i].no > self.new_after
+    }
+
+    /// The post at the top of the view and how many of its lines are scrolled past.
+    fn top_anchor(&self) -> Option<(usize, usize)> {
+        let l = self.layout.as_ref()?;
+        let top = l.starts.partition_point(|&s| s <= self.scroll).saturating_sub(1);
+        Some((top, self.scroll - l.starts[top]))
     }
 
     fn select(&mut self, i: usize) {
@@ -144,6 +183,8 @@ enum Msg {
     Boards(u64, usize, Result<Vec<Board>>),
     Catalog(u64, Result<Vec<Post>>),
     Thread(u64, Result<Vec<Post>>),
+    /// A background refresh of a watched or open thread.
+    Refreshed(ThreadKey, Result<Vec<Post>>),
 }
 
 pub struct App {
@@ -152,6 +193,17 @@ pub struct App {
     pub site_list: Picker,
     pub board_list: Picker,
     pub catalog_list: Picker,
+    pub watched_list: Picker,
+    pub history_list: Picker,
+    pub store: Store,
+    /// Where `back` goes from a thread opened from Watched or History.
+    return_to: Option<View>,
+    refresh_thread: Duration,
+    refresh_watched: Duration,
+    thread_checked: Instant,
+    watched_checked: HashMap<ThreadKey, Instant>,
+    /// Background refreshes in flight.
+    pub refreshing: HashSet<ThreadKey>,
     pub site: usize,
     pub board: Option<Board>,
     pub catalog: Vec<Post>,
@@ -168,12 +220,16 @@ pub struct App {
     pub tick: usize,
     pub quit: bool,
     req: u64,
+    /// The thread number of the last thread load, for 404 handling.
+    pending_thread: u64,
     tx: Sender<Msg>,
     rx: Receiver<Msg>,
 }
 
 impl App {
-    pub fn new(cfg: Config, picker: Option<ratatui_image::picker::Picker>) -> Self {
+    pub fn new(cfg: Config, picker: Option<ratatui_image::picker::Picker>, store: Store) -> Self {
+        let refresh_thread = Duration::from_secs(cfg.refresh_thread_secs.max(10));
+        let refresh_watched = Duration::from_secs(cfg.refresh_watched_secs.max(60));
         let sites = cfg
             .sites
             .into_iter()
@@ -186,6 +242,15 @@ impl App {
             site_list: Picker::default(),
             board_list: Picker::default(),
             catalog_list: Picker::default(),
+            watched_list: Picker::default(),
+            history_list: Picker::default(),
+            store,
+            return_to: None,
+            refresh_thread,
+            refresh_watched,
+            thread_checked: Instant::now(),
+            watched_checked: HashMap::new(),
+            refreshing: HashSet::new(),
             site: 0,
             board: None,
             catalog: Vec::new(),
@@ -200,17 +265,37 @@ impl App {
             tick: 0,
             quit: false,
             req: 0,
+            pending_thread: 0,
             tx,
             rx,
         };
         app.site_list.state.select(Some(0));
+        app.watched_list.state.select(Some(0));
+        app.history_list.state.select(Some(0));
         app
     }
 
     // ----- visible (filtered) items -----
 
-    pub fn visible_sites(&self) -> Vec<usize> {
-        filtered(&self.site_list.filter, self.sites.iter().map(|s| s.cfg.name.clone()))
+    pub fn visible_sites(&self) -> Vec<SiteRow> {
+        let rows: Vec<SiteRow> =
+            [SiteRow::Watched, SiteRow::History].into_iter().chain((0..self.sites.len()).map(SiteRow::Site)).collect();
+        let names = rows.iter().map(|r| match r {
+            SiteRow::Watched => "Watched".to_string(),
+            SiteRow::History => "History".to_string(),
+            SiteRow::Site(i) => self.sites[*i].cfg.name.clone(),
+        });
+        filtered(&self.site_list.filter, names).into_iter().map(|i| rows[i]).collect()
+    }
+
+    pub fn visible_watched(&self) -> Vec<usize> {
+        let items = self.store.watched.iter().map(|w| format!("{} {} {} {}", w.key.site, w.key.board, w.key.no, w.subject));
+        filtered(&self.watched_list.filter, items)
+    }
+
+    pub fn visible_history(&self) -> Vec<usize> {
+        let items = self.store.history.iter().map(|v| format!("{} {} {} {}", v.key.site, v.key.board, v.key.no, v.subject));
+        filtered(&self.history_list.filter, items)
     }
 
     pub fn boards(&self) -> &[Board] {
@@ -233,12 +318,16 @@ impl App {
             View::Sites => self.visible_sites().len(),
             View::Boards => self.visible_boards().len(),
             View::Catalog => self.visible_catalog().len(),
+            View::Watched => self.visible_watched().len(),
+            View::History => self.visible_history().len(),
             View::Thread => return None,
         };
         let p = match self.view {
             View::Sites => &mut self.site_list,
             View::Boards => &mut self.board_list,
             View::Catalog => &mut self.catalog_list,
+            View::Watched => &mut self.watched_list,
+            View::History => &mut self.history_list,
             View::Thread => unreachable!(),
         };
         Some((p, len))
@@ -252,8 +341,10 @@ impl App {
 
     pub fn poll(&mut self) {
         self.images.poll();
+        self.background();
         while let Ok(msg) = self.rx.try_recv() {
             match msg {
+                Msg::Refreshed(key, res) => self.refreshed(key, res),
                 Msg::Cached(id, age) if id == self.req && self.status.is_none() => {
                     self.status = Some((format!("Up to date (checked {}s ago)", age.as_secs()), false));
                 }
@@ -285,10 +376,17 @@ impl App {
                 }
                 Msg::Thread(id, res) if id == self.req => {
                     self.loading = None;
+                    self.thread_checked = Instant::now();
                     match res {
                         Ok(posts) => self.set_thread(posts),
                         Err(e) if http::is_not_found(&e) => {
                             self.status = Some(("Thread was deleted or archived".into(), true));
+                            if let Some(key) = self.board.as_ref().map(|b| self.key(&b.uri, self.pending_thread))
+                                && let Some(w) = self.store.watched_mut(&key)
+                            {
+                                w.dead = true;
+                                self.save();
+                            }
                         }
                         Err(e) => self.error(e),
                     }
@@ -337,20 +435,166 @@ impl App {
 
     fn load_thread(&mut self, no: u64) {
         let Some(board) = self.board.clone() else { return };
+        self.pending_thread = no;
+        self.thread_checked = Instant::now();
         self.spawn(format!("Loading thread {no}"), move |b| b.thread(&board.uri, no), Msg::Thread);
+    }
+
+    fn key(&self, board: &str, no: u64) -> ThreadKey {
+        ThreadKey { site: self.current_site().cfg.name.clone(), board: board.to_string(), no }
+    }
+
+    fn save(&mut self) {
+        if let Err(e) = self.store.save() {
+            self.status = Some((format!("Couldn't save watched threads: {e:#}"), true));
+        }
     }
 
     fn set_thread(&mut self, posts: Vec<Post>) {
         let Some(board) = self.board.as_ref().map(|b| b.uri.clone()) else { return };
         let no = posts.first().map(|p| p.no).unwrap_or(0);
+        let key = self.key(&board, no);
         let mut tv = ThreadView::new(board, no, posts);
-        // On refresh, keep position.
-        if let Some(old) = self.thread.take().filter(|t| t.no == no && t.board == tv.board) {
-            tv.selected = tv.index.get(&old.posts[old.selected].no).copied().unwrap_or(0);
-            tv.scroll = old.scroll;
-            tv.viewport = old.viewport;
+        match self.thread.take().filter(|t| t.no == no && t.board == tv.board) {
+            // On refresh, keep the selected post and what's at the top of the view.
+            Some(old) => {
+                tv.selected = tv.index.get(&old.posts[old.selected].no).copied().unwrap_or(0);
+                tv.anchor = old.top_anchor().and_then(|(i, off)| Some((*tv.index.get(&old.posts[i].no)?, off)));
+                tv.scroll = old.scroll;
+                tv.viewport = old.viewport;
+                tv.jumps = old.jumps;
+                tv.new_after = old.new_after;
+            }
+            None => tv.new_after = self.store.last_seen(&key),
         }
+        let max_no = tv.posts.iter().map(|p| p.no).max().unwrap_or(0);
+        let subject = thread_subject(&tv.posts);
+        self.store.visit(&key, &subject, tv.posts.len(), max_no, chrono::Utc::now().timestamp());
+        self.save();
         self.thread = Some(tv);
+    }
+
+    // ----- watched threads and auto-refresh -----
+
+    /// Start background refreshes that are due: the open thread every `refresh_thread`, and
+    /// each watched thread every `refresh_watched`, a couple at a time.
+    fn background(&mut self) {
+        let open = self.thread.as_ref().filter(|_| self.view == View::Thread).map(|t| self.key(&t.board, t.no));
+        if let Some(key) = &open
+            && self.loading.is_none()
+            && self.thread_checked.elapsed() >= self.refresh_thread
+            && !self.refreshing.contains(key)
+        {
+            self.thread_checked = Instant::now();
+            self.refresh_in_background(key.clone());
+        }
+        if self.refreshing.len() >= 2 {
+            return;
+        }
+        let due = self.store.watched.iter().find(|w| {
+            !w.dead
+                && Some(&w.key) != open.as_ref()
+                && !self.refreshing.contains(&w.key)
+                && self.watched_checked.get(&w.key).is_none_or(|t| t.elapsed() >= self.refresh_watched)
+        });
+        if let Some(key) = due.map(|w| w.key.clone()) {
+            self.watched_checked.insert(key.clone(), Instant::now());
+            self.refresh_in_background(key);
+        }
+    }
+
+    fn refresh_in_background(&mut self, key: ThreadKey) {
+        let Some(site) = self.sites.iter().find(|s| s.cfg.name == key.site) else { return };
+        let backend = site.backend.clone();
+        let tx = self.tx.clone();
+        self.refreshing.insert(key.clone());
+        std::thread::spawn(move || {
+            let res = backend.thread(&key.board, key.no);
+            let _ = tx.send(Msg::Refreshed(key, res));
+        });
+    }
+
+    fn refreshed(&mut self, key: ThreadKey, res: Result<Vec<Post>>) {
+        self.refreshing.remove(&key);
+        let is_open = self.view == View::Thread
+            && self.thread.as_ref().is_some_and(|t| self.key(&t.board, t.no) == key)
+            && self.current_site().cfg.name == key.site;
+        if is_open {
+            // Count the interval from the response, so the next refresh is past the HTTP cache window.
+            self.thread_checked = Instant::now();
+        }
+        match res {
+            Ok(posts) if is_open => self.set_thread(posts),
+            Ok(posts) => {
+                let subject = thread_subject(&posts);
+                let Some(w) = self.store.watched_mut(&key) else { return };
+                let max_no = posts.iter().map(|p| p.no).max().unwrap_or(0);
+                if w.last_seen == 0 {
+                    w.last_seen = max_no;
+                }
+                w.unread = posts.iter().filter(|p| p.no > w.last_seen).count();
+                w.posts = posts.len();
+                w.dead = false;
+                if w.subject.is_empty() {
+                    w.subject = subject;
+                }
+                self.save();
+            }
+            Err(e) if http::is_not_found(&e) => {
+                if let Some(w) = self.store.watched_mut(&key) {
+                    w.dead = true;
+                    self.save();
+                }
+                if is_open {
+                    self.status = Some(("Thread was deleted or archived".into(), true));
+                }
+            }
+            // Other failures (network, rate limits) just wait for the next round.
+            Err(e) if is_open => self.error(e),
+            Err(_) => {}
+        }
+    }
+
+    fn toggle_watch(&mut self) {
+        let (board, no, subject, posts, last_seen) = match (self.view, &self.board) {
+            (View::Thread, _) => {
+                let Some(t) = &self.thread else { return };
+                let max_no = t.posts.iter().map(|p| p.no).max().unwrap_or(0);
+                (t.board.clone(), t.no, thread_subject(&t.posts), t.posts.len(), max_no)
+            }
+            (View::Catalog, Some(b)) => {
+                let Some(i) = self.selected_index() else { return };
+                let op = &self.catalog[i];
+                let posts = op.replies.map_or(1, |r| r as usize + 1);
+                // Unknown until the first refresh, which then counts nothing as unread.
+                (b.uri.clone(), op.no, thread_subject(std::slice::from_ref(op)), posts, 0)
+            }
+            _ => return,
+        };
+        let key = self.key(&board, no);
+        let watching = self.store.toggle_watch(key.clone(), subject, posts, last_seen);
+        self.watched_checked.remove(&key);
+        self.status = Some((if watching { format!("Watching thread {no}") } else { format!("Stopped watching thread {no}") }, false));
+        self.save();
+    }
+
+    /// Open a thread from Watched or History, switching site and board as needed.
+    fn open_key(&mut self, key: ThreadKey) {
+        let Some(site) = self.sites.iter().position(|s| s.cfg.name == key.site) else {
+            self.status = Some((format!("No site named {} in the config", key.site), true));
+            return;
+        };
+        if site != self.site {
+            self.board_list = Picker::default();
+            self.board_list.state.select(Some(0));
+        }
+        self.site = site;
+        let board = self.boards().iter().find(|b| b.uri == key.board).cloned();
+        self.board = Some(board.unwrap_or(Board { uri: key.board, title: String::new(), nsfw: None }));
+        self.return_to = Some(self.view);
+        self.thread = None;
+        self.view = View::Thread;
+        self.load_thread(key.no);
     }
 
     // ----- input -----
@@ -387,6 +631,8 @@ impl App {
             KeyCode::Char('r') | KeyCode::F(5) => self.refresh(),
             KeyCode::Char('o') => self.open_in_browser(),
             KeyCode::Char('v') if matches!(self.view, View::Catalog | View::Thread) => self.open_viewer(),
+            KeyCode::Char('w') if matches!(self.view, View::Catalog | View::Thread) => self.toggle_watch(),
+            KeyCode::Char('x') if matches!(self.view, View::Watched | View::History) => self.remove_entry(),
             KeyCode::Esc => {
                 if let Some((p, _)) = self.picker().filter(|(p, _)| !p.filter.is_empty()) {
                     p.filter.clear();
@@ -471,6 +717,13 @@ impl App {
                     t.select(i);
                 }
             }
+            KeyCode::Char('U') => match (0..t.posts.len()).find(|&i| t.is_new(i)) {
+                Some(i) => {
+                    t.jumps.push(t.selected);
+                    t.select(i);
+                }
+                None => self.status = Some(("No unread posts".into(), false)),
+            },
             KeyCode::Char('i') => match t.posts[t.selected].files.first().cloned() {
                 Some(f) => self.open_file(&f),
                 None => self.status = Some(("Post has no file".into(), false)),
@@ -533,31 +786,50 @@ impl App {
         }
     }
 
+    fn remove_entry(&mut self) {
+        let Some(i) = self.selected_index() else { return };
+        match self.view {
+            View::Watched => {
+                let w = self.store.watched.remove(i);
+                self.status = Some((format!("Stopped watching thread {}", w.key.no), false));
+            }
+            View::History => {
+                self.store.history.remove(i);
+            }
+            _ => return,
+        }
+        self.save();
+        if let Some((p, len)) = self.picker() {
+            p.clamp(len);
+        }
+    }
+
+    /// Index of the selected item in the current list's underlying data (not for Sites).
     fn selected_index(&self) -> Option<usize> {
         match self.view {
-            View::Sites => self.site_list.state.selected().and_then(|i| self.visible_sites().get(i).copied()),
+            View::Sites | View::Thread => None,
             View::Boards => self.board_list.state.selected().and_then(|i| self.visible_boards().get(i).copied()),
             View::Catalog => self.catalog_list.state.selected().and_then(|i| self.visible_catalog().get(i).copied()),
-            View::Thread => None,
+            View::Watched => self.watched_list.state.selected().and_then(|i| self.visible_watched().get(i).copied()),
+            View::History => self.history_list.state.selected().and_then(|i| self.visible_history().get(i).copied()),
         }
     }
 
     fn enter(&mut self) {
+        if self.view == View::Sites {
+            match self.site_list.state.selected().and_then(|i| self.visible_sites().get(i).copied()) {
+                Some(SiteRow::Watched) => self.view = View::Watched,
+                Some(SiteRow::History) => self.view = View::History,
+                Some(SiteRow::Site(i)) => self.enter_site(i),
+                None => {}
+            }
+            return;
+        }
         let Some(i) = self.selected_index() else { return };
         match self.view {
-            View::Sites => {
-                if i != self.site {
-                    self.board_list = Picker::default();
-                }
-                self.site = i;
-                self.view = View::Boards;
-                if self.board_list.state.selected().is_none() {
-                    self.board_list.state.select(Some(0));
-                }
-                if self.current_site().boards.is_none() {
-                    self.load_boards();
-                }
-            }
+            View::Sites | View::Thread => {}
+            View::Watched => self.open_key(self.store.watched[i].key.clone()),
+            View::History => self.open_key(self.store.history[i].key.clone()),
             View::Boards => {
                 let board = self.boards()[i].clone();
                 self.catalog.clear();
@@ -570,19 +842,32 @@ impl App {
             View::Catalog => {
                 let no = self.catalog[i].no;
                 self.thread = None;
+                self.return_to = None;
                 self.view = View::Thread;
                 self.load_thread(no);
             }
-            View::Thread => {}
+        }
+    }
+
+    fn enter_site(&mut self, i: usize) {
+        if i != self.site {
+            self.board_list = Picker::default();
+        }
+        self.site = i;
+        self.view = View::Boards;
+        if self.board_list.state.selected().is_none() {
+            self.board_list.state.select(Some(0));
+        }
+        if self.current_site().boards.is_none() {
+            self.load_boards();
         }
     }
 
     fn back(&mut self) {
         self.view = match self.view {
-            View::Sites => View::Sites,
-            View::Boards => View::Sites,
+            View::Sites | View::Boards | View::Watched | View::History => View::Sites,
             View::Catalog => View::Boards,
-            View::Thread => View::Catalog,
+            View::Thread => self.return_to.take().unwrap_or(View::Catalog),
         };
         // Navigating away cancels any in-flight request (its response will be ignored).
         if self.loading.is_some() {
@@ -593,7 +878,7 @@ impl App {
 
     fn refresh(&mut self) {
         match self.view {
-            View::Sites => {}
+            View::Sites | View::Watched | View::History => {}
             View::Boards => self.load_boards(),
             View::Catalog => self.load_catalog(),
             View::Thread => {
@@ -606,7 +891,13 @@ impl App {
 
     fn open_in_browser(&mut self) {
         let backend = self.current_site().backend.clone();
+        let key_url = |key: &ThreadKey| {
+            let site = self.sites.iter().find(|s| s.cfg.name == key.site)?;
+            Some(site.backend.thread_url(&key.board, key.no))
+        };
         let url = match (self.view, &self.board) {
+            (View::Watched, _) => self.selected_index().and_then(|i| key_url(&self.store.watched[i].key)),
+            (View::History, _) => self.selected_index().and_then(|i| key_url(&self.store.history[i].key)),
             (View::Boards, _) => self.selected_index().map(|i| backend.board_url(&self.boards()[i].uri)),
             (View::Catalog, Some(b)) => self.selected_index().map(|i| backend.thread_url(&b.uri, self.catalog[i].no)),
             (View::Thread, Some(b)) => self.thread.as_ref().map(|t| {
@@ -627,6 +918,12 @@ impl App {
             Err(e) => (format!("Couldn't open {url}: {e}"), true),
         });
     }
+}
+
+/// A thread's subject for lists: its subject, or the start of the OP's text.
+fn thread_subject(posts: &[Post]) -> String {
+    let Some(op) = posts.first() else { return String::new() };
+    op.subject.clone().unwrap_or_else(|| op.plain_text().chars().take(80).collect())
 }
 
 fn on_path(program: &str) -> bool {

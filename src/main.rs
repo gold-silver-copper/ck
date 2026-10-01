@@ -5,6 +5,7 @@ mod http;
 mod images;
 mod markup;
 mod model;
+mod store;
 mod ui;
 
 use std::time::Duration;
@@ -16,6 +17,7 @@ use ratatui_image::picker::cap_parser::QueryStdioOptions;
 
 use crate::app::App;
 use crate::config::{Config, ImagesMode};
+use crate::store::Store;
 
 fn main() -> Result<()> {
     match std::env::args().nth(1).as_deref() {
@@ -36,9 +38,13 @@ fn main() -> Result<()> {
     }
 
     let config = Config::load()?;
+    let (store, warnings) = Store::load(Store::dir());
     let mut terminal = ratatui::init();
     let picker = (config.images == ImagesMode::Auto).then(detect_images);
-    let mut app = App::new(config, picker);
+    let mut app = App::new(config, picker, store);
+    if let Some(w) = warnings.first() {
+        app.status = Some((w.clone(), true));
+    }
     let result = run(&mut terminal, &mut app);
     ratatui::restore();
     result
