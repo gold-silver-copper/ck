@@ -31,7 +31,11 @@ impl Lynxchan {
     }
 
     fn post(&self, v: &Value, no_key: &str) -> Post {
-        let parsed = markup::parse_plain(v["message"].as_str().unwrap_or(""));
+        // `markdown` is the rendered HTML, with link targets; `message` is the raw text.
+        let parsed = match v["markdown"].as_str().filter(|m| !m.is_empty()) {
+            Some(md) => markup::parse_html(md, markup::Flavor::Lynxchan),
+            None => markup::parse_plain(v["message"].as_str().unwrap_or("")),
+        };
         let mut name = as_str(&v["name"]).unwrap_or_else(|| "Anonymous".into());
         if let Some(role) = as_str(&v["signedRole"]) {
             name.push_str(&format!(" ## {role}"));
@@ -79,6 +83,7 @@ impl Lynxchan {
             time: parse_time(&v["creation"]).or_else(|| parse_time(&v["lastBump"])).unwrap_or(0),
             body: parsed.lines,
             quotes: parsed.quotes,
+            links: parsed.links,
             files,
             // postCount excludes the OP, like 4chan's `replies`.
             replies: as_u64(&v["postCount"]).map(|n| n as u32),

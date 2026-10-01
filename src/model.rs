@@ -11,6 +11,17 @@ pub struct Board {
     pub nsfw: Option<bool>,
 }
 
+/// Where a quote link points, as far as the markup tells.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Link {
+    /// `None`: the current board.
+    pub board: Option<String>,
+    /// `None`: unknown, or the current thread for a bare `>>123`.
+    pub thread: Option<u64>,
+    /// `None` for a board link like `>>>/g/`.
+    pub post: Option<u64>,
+}
+
 #[derive(Debug, Clone)]
 pub struct Attachment {
     pub filename: String,
@@ -51,6 +62,8 @@ pub struct Post {
     pub body: Vec<Line<'static>>,
     /// Post numbers this post quotes (`>>123`).
     pub quotes: Vec<u64>,
+    /// All quote links, including ones to other threads and boards.
+    pub links: Vec<Link>,
     pub files: Vec<Attachment>,
     // Catalog-only fields.
     pub replies: Option<u32>,
@@ -60,7 +73,8 @@ pub struct Post {
 }
 
 impl Post {
-    /// Body flattened to a single line of plain text, for previews and filtering.
+    /// Body flattened to a single line of plain text, for previews and filtering. Spoilers
+    /// are left out.
     pub fn plain_text(&self) -> String {
         let mut out = String::new();
         for line in &self.body {
@@ -68,9 +82,25 @@ impl Post {
                 out.push(' ');
             }
             for span in &line.spans {
-                out.push_str(&span.content);
+                if crate::markup::is_spoiler(span.style) {
+                    out.push_str("[spoiler]");
+                } else {
+                    out.push_str(&span.content);
+                }
             }
         }
         out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::markup::{Flavor, parse_html};
+
+    #[test]
+    fn plain_text_hides_spoilers() {
+        let parsed = parse_html(r#"With a <span class="spoiler">SaaS</span> of $5"#, Flavor::Vichan);
+        let p = super::Post { body: parsed.lines, ..Default::default() };
+        assert_eq!(p.plain_text(), "With a [spoiler] of $5");
     }
 }

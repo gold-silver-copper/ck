@@ -12,7 +12,7 @@ use crate::backend::{self, Backend};
 use crate::config::{Config, SiteConfig};
 use crate::http;
 use crate::images::Images;
-use crate::model::{Attachment, Board, Post};
+use crate::model::{Attachment, Board, Link, Post};
 use crate::store::{Store, ThreadKey};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -78,6 +78,12 @@ pub struct ThreadView {
     pub new_after: u64,
     /// After new posts arrive, keep this post (index, line offset into it) at the top of the view.
     pub anchor: Option<(usize, usize)>,
+    /// Search query (as typed) and the posts matching it.
+    pub search: String,
+    pub matches: Vec<usize>,
+    /// Posts whose spoilers are shown, or all of them.
+    pub revealed: HashSet<usize>,
+    pub reveal_all: bool,
 }
 
 pub struct ThreadLayout {
@@ -115,6 +121,54 @@ impl ThreadView {
             viewport: 0,
             new_after: 0,
             anchor: None,
+            search: String::new(),
+            matches: Vec::new(),
+            revealed: HashSet::new(),
+            reveal_all: false,
+        }
+    }
+
+    pub fn is_revealed(&self, i: usize) -> bool {
+        self.reveal_all || self.revealed.contains(&i)
+    }
+
+    /// Recompute matches for the current query and re-render.
+    fn set_search(&mut self, query: String) {
+        let needle = query.to_lowercase();
+        self.matches = if needle.is_empty() {
+            Vec::new()
+        } else {
+            (0..self.posts.len()).filter(|&i| self.post_text(i).contains(&needle)).collect()
+        };
+        self.search = query;
+        self.layout = None;
+    }
+
+    /// Lowercase searchable text of a post: name, subject, files and body (hidden spoilers excluded).
+    fn post_text(&self, i: usize) -> String {
+        let p = &self.posts[i];
+        let mut s = format!("{} {} ", p.name, p.subject.as_deref().unwrap_or(""));
+        for f in &p.files {
+            s.push_str(&f.filename);
+            s.push(' ');
+        }
+        if self.is_revealed(i) {
+            for line in &p.body {
+                s.extend(line.spans.iter().map(|s| s.content.as_ref()));
+                s.push(' ');
+            }
+        } else {
+            s.push_str(&p.plain_text());
+        }
+        s.to_lowercase()
+    }
+
+    /// The next (or previous) matching post after the selection, wrapping around.
+    fn next_match(&self, forward: bool) -> Option<usize> {
+        if forward {
+            self.matches.iter().find(|&&i| i > self.selected).or(self.matches.first()).copied()
+        } else {
+            self.matches.iter().rev().find(|&&i| i < self.selected).or(self.matches.last()).copied()
         }
     }
 
@@ -171,6 +225,15 @@ impl ThreadView {
     }
 }
 
+/// Popup with the posts the selected post quotes.
+pub struct Preview {
+    /// Indices of quoted posts in this thread.
+    pub posts: Vec<usize>,
+    /// Quoted post numbers that aren't in this thread.
+    pub elsewhere: Vec<u64>,
+    pub scroll: u16,
+}
+
 /// Full-screen viewer over one post's files.
 pub struct Viewer {
     pub files: Vec<Attachment>,
@@ -217,6 +280,15 @@ pub struct App {
     pub help_scroll: u16,
     pub images: Images,
     pub viewer: Option<Viewer>,
+    pub preview: Option<Preview>,
+    /// True while typing a thread search.
+    pub searching: bool,
+    /// Threads left by following cross-thread links: (board, thread, selected post), for `u`.
+    trail: Vec<(Board, u64, u64)>,
+    /// Post to select once the loading thread arrives.
+    pending_post: Option<u64>,
+    /// Board the loaded catalog belongs to.
+    catalog_board: String,
     pub tick: usize,
     pub quit: bool,
     req: u64,
@@ -262,6 +334,11 @@ impl App {
             help_scroll: 0,
             images: Images::new(picker),
             viewer: None,
+            preview: None,
+            searching: false,
+            trail: Vec::new(),
+            pending_post: None,
+            catalog_board: String::new(),
             tick: 0,
             quit: false,
             req: 0,
@@ -309,7 +386,7 @@ impl App {
     pub fn visible_catalog(&self) -> Vec<usize> {
         filtered(
             &self.catalog_list.filter,
-            self.catalog.iter().map(|p| format!("{} {}", p.subject.as_deref().unwrap_or(""), p.plain_text())),
+            self.catalog.iter().map(|p| format!("{} {} {}", p.no, p.subject.as_deref().unwrap_or(""), p.plain_text())),
         )
     }
 
@@ -430,6 +507,7 @@ impl App {
 
     fn load_catalog(&mut self) {
         let Some(board) = self.board.clone() else { return };
+        self.catalog_board = board.uri.clone();
         self.spawn(format!("Loading /{}/", board.uri), move |b| b.catalog(&board.uri), Msg::Catalog);
     }
 
@@ -464,8 +542,17 @@ impl App {
                 tv.viewport = old.viewport;
                 tv.jumps = old.jumps;
                 tv.new_after = old.new_after;
+                // Revealed spoilers by post number, since indices can shift.
+                tv.revealed = old.revealed.iter().filter_map(|&i| tv.index.get(&old.posts[i].no).copied()).collect();
+                tv.reveal_all = old.reveal_all;
+                tv.set_search(old.search);
             }
-            None => tv.new_after = self.store.last_seen(&key),
+            None => {
+                tv.new_after = self.store.last_seen(&key);
+                if let Some(i) = self.pending_post.take().and_then(|no| tv.index.get(&no).copied()) {
+                    tv.selected = i;
+                }
+            }
         }
         let max_no = tv.posts.iter().map(|p| p.no).max().unwrap_or(0);
         let subject = thread_subject(&tv.posts);
@@ -619,6 +706,14 @@ impl App {
             self.on_viewer_key(key.code);
             return;
         }
+        if self.preview.is_some() {
+            self.on_preview_key(key.code);
+            return;
+        }
+        if self.searching {
+            self.on_search_key(key);
+            return;
+        }
         if self.filtering {
             self.on_filter_key(key);
             return;
@@ -628,11 +723,22 @@ impl App {
             KeyCode::Char('q') => self.quit = true,
             KeyCode::Char('?') => self.show_help = true,
             KeyCode::Char('/') if self.view != View::Thread => self.filtering = true,
+            KeyCode::Char('/') => {
+                if let Some(t) = &mut self.thread {
+                    t.set_search(String::new());
+                    self.searching = true;
+                }
+            }
             KeyCode::Char('r') | KeyCode::F(5) => self.refresh(),
             KeyCode::Char('o') => self.open_in_browser(),
             KeyCode::Char('v') if matches!(self.view, View::Catalog | View::Thread) => self.open_viewer(),
             KeyCode::Char('w') if matches!(self.view, View::Catalog | View::Thread) => self.toggle_watch(),
             KeyCode::Char('x') if matches!(self.view, View::Watched | View::History) => self.remove_entry(),
+            KeyCode::Esc if self.view == View::Thread && self.thread.as_ref().is_some_and(|t| !t.search.is_empty()) => {
+                if let Some(t) = &mut self.thread {
+                    t.set_search(String::new());
+                }
+            }
             KeyCode::Esc => {
                 if let Some((p, _)) = self.picker().filter(|(p, _)| !p.filter.is_empty()) {
                     p.filter.clear();
@@ -700,8 +806,34 @@ impl App {
             KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right => {
                 let quotes = t.posts[t.selected].quotes.clone();
                 if !quotes.into_iter().any(|q| t.jump_to(q)) {
-                    self.status = Some(("Post quotes nothing in this thread".into(), false));
+                    self.follow_link();
                 }
+            }
+            KeyCode::Char('p') => self.open_preview(),
+            KeyCode::Char('n' | 'N') if t.matches.is_empty() => {
+                let msg = if t.search.is_empty() { "No search; press / to search the thread" } else { "No matches" };
+                self.status = Some((msg.into(), false));
+            }
+            KeyCode::Char(c @ ('n' | 'N')) => {
+                if let Some(i) = t.next_match(c == 'n') {
+                    t.select(i);
+                    let k = t.matches.iter().position(|&m| m == i).unwrap_or(0);
+                    self.status = Some((format!("Match {}/{} for \"{}\"", k + 1, t.matches.len(), t.search), false));
+                }
+            }
+            KeyCode::Char('s') => {
+                let i = t.selected;
+                if !t.revealed.remove(&i) {
+                    t.revealed.insert(i);
+                }
+                t.layout = None;
+            }
+            KeyCode::Char('S') => {
+                t.reveal_all = !t.reveal_all;
+                t.revealed.clear();
+                t.layout = None;
+                let msg = if t.reveal_all { "Showing all spoilers" } else { "Hiding spoilers" };
+                self.status = Some((msg.into(), false));
             }
             KeyCode::Char('b') => {
                 let replies = t.backlinks[t.selected].clone();
@@ -715,6 +847,9 @@ impl App {
             KeyCode::Char('u') => {
                 if let Some(i) = t.jumps.pop() {
                     t.select(i);
+                } else if let Some((board, no, post)) = self.trail.pop() {
+                    // Back to the thread we came from by a cross-thread link.
+                    self.open_thread_at(board, no, Some(post), false);
                 }
             }
             KeyCode::Char('U') => match (0..t.posts.len()).find(|&i| t.is_new(i)) {
@@ -730,6 +865,136 @@ impl App {
             },
             _ => {}
         }
+    }
+
+    fn on_search_key(&mut self, key: KeyEvent) {
+        let Some(t) = &mut self.thread else {
+            self.searching = false;
+            return;
+        };
+        match key.code {
+            KeyCode::Esc => {
+                t.set_search(String::new());
+                self.searching = false;
+            }
+            KeyCode::Enter => {
+                self.searching = false;
+                match t.next_match(true) {
+                    Some(i) => {
+                        t.select(i);
+                        self.status = Some((format!("{} posts match \"{}\" (n/N to move)", t.matches.len(), t.search), false));
+                    }
+                    None if t.search.is_empty() => {}
+                    None => self.status = Some((format!("No posts match \"{}\"", t.search), false)),
+                }
+            }
+            KeyCode::Backspace => {
+                let mut q = t.search.clone();
+                q.pop();
+                t.set_search(q);
+            }
+            KeyCode::Char(c) => {
+                let q = format!("{}{c}", t.search);
+                t.set_search(q);
+            }
+            _ => {}
+        }
+    }
+
+    fn open_preview(&mut self) {
+        let Some(t) = &self.thread else { return };
+        let p = &t.posts[t.selected];
+        let posts: Vec<usize> = p.quotes.iter().filter_map(|q| t.index.get(q).copied()).collect();
+        let elsewhere: Vec<u64> = p.links.iter().filter_map(|l| l.post).filter(|n| !t.index.contains_key(n)).collect();
+        if posts.is_empty() && elsewhere.is_empty() {
+            self.status = Some(("Post quotes nothing".into(), false));
+            return;
+        }
+        self.preview = Some(Preview { posts, elsewhere, scroll: 0 });
+    }
+
+    fn on_preview_key(&mut self, code: KeyCode) {
+        let Some(p) = &mut self.preview else { return };
+        match code {
+            KeyCode::Char('j') | KeyCode::Down => p.scroll = p.scroll.saturating_add(1),
+            KeyCode::Char('k') | KeyCode::Up => p.scroll = p.scroll.saturating_sub(1),
+            KeyCode::Char(' ') | KeyCode::PageDown => p.scroll = p.scroll.saturating_add(10),
+            KeyCode::PageUp => p.scroll = p.scroll.saturating_sub(10),
+            KeyCode::Char('g') => p.scroll = 0,
+            // Jump to the (first) quoted post.
+            KeyCode::Enter => {
+                let first = p.posts.first().copied();
+                self.preview = None;
+                if let (Some(i), Some(t)) = (first, &mut self.thread) {
+                    t.jumps.push(t.selected);
+                    t.select(i);
+                }
+            }
+            _ => self.preview = None,
+        }
+    }
+
+    /// Follow the selected post's first link that leads out of this thread, preferring links
+    /// to posts over links to boards.
+    fn follow_link(&mut self) {
+        let (Some(t), Some(board)) = (&self.thread, self.board.clone()) else { return };
+        let here = |l: &Link| l.board.as_ref().is_none_or(|b| *b == board.uri);
+        let leaves = |l: &&Link| {
+            let in_thread = here(l)
+                && (l.thread == Some(t.no) || (l.thread.is_none() && l.post.is_some_and(|p| t.index.contains_key(&p))));
+            !in_thread
+        };
+        let links = &t.posts[t.selected].links;
+        let out = links.iter().filter(leaves).find(|l| l.post.is_some()).or_else(|| links.iter().find(leaves));
+        let Some(link) = out.cloned() else {
+            self.status = Some(("Post quotes nothing in this thread".into(), false));
+            return;
+        };
+        let target = match &link.board {
+            Some(uri) if *uri != board.uri => self.find_board(uri),
+            _ => board.clone(),
+        };
+        match (link.thread, link.post) {
+            (Some(no), post) => {
+                let from = (board, t.no, t.posts[t.selected].no);
+                self.trail.push(from);
+                self.open_thread_at(target, no, post, true);
+            }
+            (None, None) => {
+                // A board link: open its catalog.
+                self.board = Some(target);
+                self.catalog.clear();
+                self.catalog_list = Picker::default();
+                self.catalog_list.state.select(Some(0));
+                self.return_to = None;
+                self.view = View::Catalog;
+                self.load_catalog();
+            }
+            (None, Some(post)) => {
+                self.status = Some((
+                    format!("Post {post} isn't in this thread, and this site doesn't say which thread it's in"),
+                    true,
+                ));
+            }
+        }
+    }
+
+    /// A board by URI from the site's board list, or a bare one if the list isn't loaded.
+    fn find_board(&self, uri: &str) -> Board {
+        let known = self.boards().iter().find(|b| b.uri == uri).cloned();
+        known.unwrap_or(Board { uri: uri.to_string(), title: String::new(), nsfw: None })
+    }
+
+    /// Open a thread on the current site, selecting `post` when it arrives.
+    fn open_thread_at(&mut self, board: Board, no: u64, post: Option<u64>, announce: bool) {
+        if announce {
+            self.status = Some((format!("Opening /{}/{no} (u goes back)", board.uri), false));
+        }
+        self.board = Some(board);
+        self.pending_post = post;
+        self.thread = None;
+        self.view = View::Thread;
+        self.load_thread(no);
     }
 
     fn on_viewer_key(&mut self, code: KeyCode) {
@@ -869,6 +1134,15 @@ impl App {
             View::Catalog => View::Boards,
             View::Thread => self.return_to.take().unwrap_or(View::Catalog),
         };
+        self.trail.clear();
+        // After following links to another board, the loaded catalog is for the old one.
+        if self.view == View::Catalog && self.board.as_ref().is_some_and(|b| b.uri != self.catalog_board) {
+            self.catalog.clear();
+            self.catalog_list = Picker::default();
+            self.catalog_list.state.select(Some(0));
+            self.load_catalog();
+            return;
+        }
         // Navigating away cancels any in-flight request (its response will be ignored).
         if self.loading.is_some() {
             self.req += 1;

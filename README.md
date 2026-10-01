@@ -23,13 +23,16 @@ If-Modified-Since on every refetch, and no refetching the same page within 10 se
 | key                    | action                               |
 |------------------------|--------------------------------------|
 | `j`/`k`, arrows        | move (in a thread: next/prev post)   |
-| `enter`, `l`           | open (in a thread: follow `>>quote`) |
+| `enter`, `l`           | open (in a thread: follow `>>quote`, also to other threads and boards) |
 | `esc`, `h`, backspace  | back                                 |
-| `/`                    | filter the current list              |
+| `/`                    | filter the current list (in a thread: search) |
+| `n` / `N`              | next / previous search match         |
+| `p`                    | preview the posts a post quotes      |
+| `s` / `S`              | show spoilers in the post / whole thread |
 | `g`/`G`                | top / bottom                         |
 | ctrl-d / ctrl-u, space | page                                 |
 | `J`/`K`                | scroll a thread by line              |
-| `b` / `u`              | jump to first reply / jump back      |
+| `b` / `u`              | jump to first reply / jump back (also to the previous thread) |
 | `U`                    | jump to the first unread post        |
 | `w`                    | watch / unwatch the thread (catalog or thread) |
 | `x`                    | remove an entry from Watched or History |

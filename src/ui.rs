@@ -15,6 +15,7 @@ use crate::model::{Attachment, Post};
 const ACCENT: Color = Color::Yellow;
 const DIM: Style = Style::new().fg(Color::DarkGray);
 const SELECTED: Style = Style::new().bg(Color::Rgb(45, 45, 60)).add_modifier(Modifier::BOLD);
+const SEARCH_HL: Style = Style::new().fg(Color::Black).bg(Color::Yellow);
 const SPINNER: [&str; 8] = ["⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"];
 /// Thumbnail sizes in cells (roughly square at a 1:2 cell aspect).
 const THUMB: Size = Size::new(16, 8);
@@ -51,6 +52,9 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     }
     draw_footer(f, app, footer);
 
+    if app.preview.is_some() {
+        draw_preview(f, app);
+    }
     if app.show_help {
         draw_help(f, app);
     }
@@ -101,7 +105,17 @@ fn view_title(app: &App) -> Line<'static> {
             let t = app.thread.as_ref();
             let subject = t.and_then(|t| t.posts.first()?.subject.clone());
             let n = t.map_or(0, |t| t.posts.len());
-            (format!("{} ({n} post{})", subject.unwrap_or_else(|| "Thread".into()), if n == 1 { "" } else { "s" }), &String::new())
+            let title = format!(" {} ({n} post{}) ", subject.unwrap_or_else(|| "Thread".into()), if n == 1 { "" } else { "s" });
+            let mut spans = vec![Span::raw(title)];
+            if let Some(t) = t.filter(|t| !t.search.is_empty() || app.searching) {
+                let k = t.matches.len();
+                let s = format!("[/{}] {k} match{} ", t.search, if k == 1 { "" } else { "es" });
+                spans.push(Span::styled(s, Style::new().fg(Color::Cyan)));
+            }
+            if t.is_some_and(|t| t.reveal_all) {
+                spans.push(Span::styled("[spoilers shown] ", DIM));
+            }
+            return Line::from(spans);
         }
         View::Watched => (format!("Watched ({})", app.store.watched.len()), &app.watched_list.filter),
         View::History => (format!("History ({})", app.store.history.len()), &app.history_list.filter),
@@ -114,7 +128,15 @@ fn view_title(app: &App) -> Line<'static> {
 }
 
 fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
-    let line = if app.filtering {
+    let line = if app.searching {
+        let q = app.thread.as_ref().map_or("", |t| t.search.as_str());
+        Line::from(vec![
+            Span::styled(" search: ", Style::new().fg(Color::Cyan)),
+            Span::raw(q.to_string()),
+            Span::styled("█", Style::new().fg(Color::Cyan)),
+            Span::styled("  enter accept · esc clear", DIM),
+        ])
+    } else if app.filtering {
         Line::from(vec![
             Span::styled(" filter: ", Style::new().fg(Color::Cyan)),
             Span::raw(current_filter(app).to_string()),
@@ -131,7 +153,7 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
         Line::styled(format!(" {msg}"), style)
     } else {
         let keys = match app.view {
-            View::Thread => "j/k post · J/K line · enter quote · b replies · u back · U unread · v view · w watch · ? help",
+            View::Thread => "j/k post · enter quote · p preview · u back · / search · s spoiler · U unread · v view · w watch · ? help",
             View::Catalog => "j/k move · enter open · esc back · / filter · v view · w watch · o browser · r reload · ? help",
             View::Watched | View::History => "j/k move · enter open · x remove · esc back · / filter · o browser · ? help",
             _ => "j/k move · enter open · esc back · / filter · o browser · r reload · ? help · q quit",
@@ -482,15 +504,44 @@ fn layout_thread(t: &ThreadView, width: u16, thumbs: bool) -> ThreadLayout {
         match p.files.first().filter(|_| thumbs) {
             Some(file) => {
                 thumb_at.push((lines.len(), i));
-                let text = post_lines(p, i == 0, t.is_new(i), &t.backlinks[i], t.no, text_width - THUMB.width as usize - 1);
+                let text = post_lines(p, &post_ctx(t, i), text_width - THUMB.width as usize - 1);
                 lines.extend(beside(placeholder(file, p.files.len(), THUMB), text, THUMB.width));
             }
-            None => lines.extend(post_lines(p, i == 0, t.is_new(i), &t.backlinks[i], t.no, text_width)),
+            None => lines.extend(post_lines(p, &post_ctx(t, i), text_width)),
         }
         lines.push(Line::raw(""));
     }
     starts.push(lines.len());
     ThreadLayout { width, lines, starts, thumbs: thumb_at }
+}
+
+fn draw_preview(f: &mut Frame, app: &App) {
+    let (Some(p), Some(t)) = (&app.preview, &app.thread) else { return };
+    let area = f.area();
+    let w = area.width.saturating_sub(8).clamp(20, 110).min(area.width);
+    let width = w.saturating_sub(4) as usize;
+    let mut lines = Vec::new();
+    for &i in &p.posts {
+        lines.extend(post_lines(&t.posts[i], &post_ctx(t, i), width));
+        lines.push(Line::raw(""));
+    }
+    for n in &p.elsewhere {
+        lines.push(Line::styled(format!(">>{n} is in another thread or board; enter in the thread follows it"), DIM));
+    }
+    while lines.last().is_some_and(|l| l.width() == 0) {
+        lines.pop();
+    }
+    let h = (lines.len() as u16 + 2).min(area.height.saturating_sub(4)).max(3);
+    let popup = Rect::new(area.x + (area.width - w) / 2, area.y + (area.height - h) / 2, w, h);
+    let scroll = p.scroll.min((lines.len() as u16).saturating_sub(h - 2));
+    let lines: Vec<Line> = lines.into_iter().map(|l| Line::from([vec![Span::raw(" ")], l.spans].concat())).collect();
+    f.render_widget(Clear, popup);
+    let block = Block::bordered()
+        .border_type(BorderType::Rounded)
+        .border_style(Style::new().fg(ACCENT))
+        .title(Line::styled(" Quoted posts ", Style::new().fg(ACCENT).bold()))
+        .title_bottom(Line::styled(" j/k scroll · enter jump · esc close ", DIM).right_aligned());
+    f.render_widget(Paragraph::new(lines).scroll((scroll, 0)).block(block), popup);
 }
 
 fn draw_viewer(f: &mut Frame, app: &mut App) {
@@ -547,7 +598,30 @@ fn draw_viewer(f: &mut Frame, app: &mut App) {
     }
 }
 
-fn post_lines(p: &Post, is_op: bool, is_new: bool, backlinks: &[u64], op_no: u64, width: usize) -> Vec<Line<'static>> {
+/// How to render one post of a thread.
+struct PostCtx<'a> {
+    is_op: bool,
+    is_new: bool,
+    backlinks: &'a [u64],
+    op_no: u64,
+    reveal: bool,
+    /// Lowercase search query to highlight.
+    search: String,
+}
+
+fn post_ctx(t: &ThreadView, i: usize) -> PostCtx<'_> {
+    PostCtx {
+        is_op: i == 0,
+        is_new: t.is_new(i),
+        backlinks: &t.backlinks[i],
+        op_no: t.no,
+        reveal: t.is_revealed(i),
+        search: t.search.to_lowercase(),
+    }
+}
+
+fn post_lines(p: &Post, ctx: &PostCtx, width: usize) -> Vec<Line<'static>> {
+    let (is_op, is_new, backlinks) = (ctx.is_op, ctx.is_new, ctx.backlinks);
     let mut head = vec![
         Span::styled(p.name.clone(), Style::new().fg(Color::Green).bold()),
         Span::raw("  "),
@@ -563,7 +637,8 @@ fn post_lines(p: &Post, is_op: bool, is_new: bool, backlinks: &[u64], op_no: u64
     }
     let mut out = markup::wrap(&Line::from(head), width);
     if let Some(s) = &p.subject {
-        out.extend(markup::wrap(&Line::styled(s.clone(), Style::new().fg(ACCENT).bold()), width));
+        let subject = markup::highlight(&Line::styled(s.clone(), Style::new().fg(ACCENT).bold()), &ctx.search, SEARCH_HL);
+        out.extend(markup::wrap(&subject, width));
     }
     for file in &p.files {
         let mut meta = Vec::new();
@@ -584,18 +659,16 @@ fn post_lines(p: &Post, is_op: bool, is_new: bool, backlinks: &[u64], op_no: u64
         ));
     }
     for line in &p.body {
-        // Mark quotes of the OP like 4chan does.
-        let line = if line.spans.iter().any(|s| s.content.contains(&format!(">>{op_no}"))) {
-            let mut l = line.clone();
-            for s in &mut l.spans {
-                if s.content == format!(">>{op_no}").as_str() {
-                    s.content.to_mut().push_str(" (OP)");
-                }
+        let mut line = if ctx.reveal { markup::reveal(line) } else { line.clone() };
+        // Mark quotes of the OP like 4chan does. Quote links are always their own span.
+        for s in &mut line.spans {
+            if markup::is_quote_link(s.style) && markup::quote_target(&s.content) == Some(ctx.op_no) {
+                s.content.to_mut().push_str(" (OP)");
             }
-            l
-        } else {
-            line.clone()
-        };
+        }
+        if !ctx.search.is_empty() {
+            line = markup::highlight(&line, &ctx.search, SEARCH_HL);
+        }
         out.extend(markup::wrap(&line, width));
     }
     if !backlinks.is_empty() {
@@ -631,9 +704,13 @@ const HELP: &[(&str, &[(&str, &str)])] = &[
         &[
             ("j / k", "next / previous post"),
             ("J / K, space", "scroll by line / page"),
-            ("enter, l", "jump to quoted post"),
+            ("enter, l", "follow quote (any thread)"),
+            ("p", "preview the quoted posts"),
             ("b", "jump to first reply"),
-            ("u", "jump back"),
+            ("u", "back (also to last thread)"),
+            ("/", "search the thread"),
+            ("n / N", "next / previous match"),
+            ("s / S", "show spoilers: post / all"),
             ("i", "open file (videos in mpv)"),
             ("v", "view the post's images"),
             ("w", "watch / unwatch the thread"),

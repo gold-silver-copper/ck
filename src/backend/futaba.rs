@@ -81,7 +81,8 @@ impl Futaba {
     }
 
     fn post(&self, board: &str, v: &Value) -> Post {
-        let parsed = markup::parse_html(v["com"].as_str().unwrap_or(""));
+        let flavor = if self.is_4chan { markup::Flavor::Fourchan } else { markup::Flavor::Vichan };
+        let parsed = markup::parse_html(v["com"].as_str().unwrap_or(""), flavor);
         let mut name = as_str(&v["name"]).map(|n| markup::decode(&n)).unwrap_or_else(|| "Anonymous".into());
         if let Some(trip) = as_str(&v["trip"]) {
             name.push(' ');
@@ -101,6 +102,7 @@ impl Futaba {
             time: as_i64(&v["time"]).unwrap_or(0),
             body: parsed.lines,
             quotes: parsed.quotes,
+            links: parsed.links,
             files,
             replies: as_u64(&v["replies"]).map(|n| n as u32),
             images: as_u64(&v["images"]).map(|n| n as u32),
