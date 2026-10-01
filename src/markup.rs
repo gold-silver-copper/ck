@@ -126,10 +126,10 @@ impl Builder {
             self.push(&rest[..pos], style);
             let end = pos + 2 + digits.len();
             self.push(&rest[pos..end], style.patch(QUOTELINK));
-            if let Ok(n) = digits.parse() {
-                if !self.quotes.contains(&n) {
-                    self.quotes.push(n);
-                }
+            if let Ok(n) = digits.parse()
+                && !self.quotes.contains(&n)
+            {
+                self.quotes.push(n);
             }
             rest = &rest[end..];
         }

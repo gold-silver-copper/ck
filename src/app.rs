@@ -75,10 +75,10 @@ impl ThreadView {
         let mut backlinks = vec![Vec::new(); posts.len()];
         for p in &posts {
             for q in &p.quotes {
-                if let Some(&i) = index.get(q) {
-                    if !backlinks[i].contains(&p.no) {
-                        backlinks[i].push(p.no);
-                    }
+                if let Some(&i) = index.get(q)
+                    && !backlinks[i].contains(&p.no)
+                {
+                    backlinks[i].push(p.no);
                 }
             }
         }

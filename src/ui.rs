@@ -49,11 +49,11 @@ fn draw_header(f: &mut Frame, app: &App, area: Rect) {
         spans.push(sep.clone());
         spans.push(Span::raw(app.current_site().cfg.name.clone()));
     }
-    if matches!(app.view, View::Catalog | View::Thread) {
-        if let Some(b) = &app.board {
-            spans.push(sep.clone());
-            spans.push(Span::raw(format!("/{}/", b.uri)));
-        }
+    if matches!(app.view, View::Catalog | View::Thread)
+        && let Some(b) = &app.board
+    {
+        spans.push(sep.clone());
+        spans.push(Span::raw(format!("/{}/", b.uri)));
     }
     if let (View::Thread, Some(t)) = (app.view, &app.thread) {
         spans.push(sep);
