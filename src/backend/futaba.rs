@@ -19,6 +19,7 @@ pub struct Futaba {
 
 impl Futaba {
     pub fn fourchan(boards: Option<Vec<Board>>) -> Self {
+        crate::http::register_media_host("https://i.4cdn.org");
         Self {
             api: "https://a.4cdn.org".into(),
             web: "https://boards.4chan.org".into(),

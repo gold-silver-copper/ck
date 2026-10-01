@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel};
+use std::time::Duration;
 
 use anyhow::Result;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -9,6 +10,7 @@ use ratatui::widgets::ListState;
 
 use crate::backend::{self, Backend};
 use crate::config::{Config, SiteConfig};
+use crate::http;
 use crate::model::{Board, Post};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -128,6 +130,8 @@ impl ThreadView {
 }
 
 enum Msg {
+    /// The request was answered from the cache without hitting the network.
+    Cached(u64, Duration),
     Boards(u64, usize, Result<Vec<Board>>),
     Catalog(u64, Result<Vec<Post>>),
     Thread(u64, Result<Vec<Post>>),
@@ -234,6 +238,9 @@ impl App {
     pub fn poll(&mut self) {
         while let Ok(msg) = self.rx.try_recv() {
             match msg {
+                Msg::Cached(id, age) if id == self.req && self.status.is_none() => {
+                    self.status = Some((format!("Up to date (checked {}s ago)", age.as_secs()), false));
+                }
                 Msg::Boards(id, site, res) => {
                     if id == self.req {
                         self.loading = None;
@@ -264,6 +271,9 @@ impl App {
                     self.loading = None;
                     match res {
                         Ok(posts) => self.set_thread(posts),
+                        Err(e) if http::is_not_found(&e) => {
+                            self.status = Some(("Thread was deleted or archived".into(), true));
+                        }
                         Err(e) => self.error(e),
                     }
                 }
@@ -289,7 +299,12 @@ impl App {
         self.loading = Some(label);
         self.status = None;
         std::thread::spawn(move || {
-            let _ = tx.send(wrap(id, job(&*backend)));
+            let res = job(&*backend);
+            let cached = http::take_cached_age();
+            let _ = tx.send(wrap(id, res));
+            if let Some(age) = cached {
+                let _ = tx.send(Msg::Cached(id, age));
+            }
         });
     }
 

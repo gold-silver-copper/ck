@@ -10,6 +10,10 @@ A terminal imageboard browser built with [ratatui](https://ratatui.rs). One inte
 
 Read-only: browse boards, catalogs, and threads. Files open in your default viewer/browser.
 
+ck follows 4chan's API rules on every site: at most one API request per second per host,
+If-Modified-Since on every refetch, and no refetching the same page within 10 seconds
+(a reload inside that window says "Up to date" and uses the cached copy).
+
 ## Run
 
     cargo run --release
