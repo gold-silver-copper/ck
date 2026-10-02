@@ -16,9 +16,11 @@ ck follows 4chan's API rules on every site: at most one API request per second p
 If-Modified-Since on every refetch, and no refetching the same page within 10 seconds
 (a reload inside that window says "Up to date" and uses the cached copy).
 
-## Run
+## Install
 
-    cargo run --release
+    cargo install ck
+
+Or from a checkout: `cargo run --release`.
 
 ## Keys
 
@@ -137,3 +139,8 @@ The offline tests parse real, trimmed responses from every engine in `tests/fixt
 render every view with fixed data and a fixed clock into the snapshots in `src/snapshots/`
 ([insta](https://insta.rs)). After an intended UI change, review the differences and update
 them with `INSTA_UPDATE=always cargo test` (or `cargo insta review`).
+
+## License
+
+Licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or
+[MIT license](LICENSE-MIT) at your option.
