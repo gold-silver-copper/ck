@@ -74,6 +74,15 @@ fn bench_thread() {
         draw(&mut t, &mut a)
     });
     time("search keystroke", 30, || a.thread.as_mut().unwrap().set_search("the".into()));
+    // Matching posts are laid out again (their highlight changes); the rest aren't.
+    for (label, words) in [("search keystroke, then a frame (most posts match)", ["the", "they"]), ("search keystroke, then a frame (few match)", ["linux", "linu"])] {
+        let mut q = 0;
+        time(label, 30, || {
+            q += 1;
+            a.thread.as_mut().unwrap().set_search(words[q % 2].into());
+            draw(&mut t, &mut a)
+        });
+    }
     a.thread.as_mut().unwrap().set_search(String::new());
     // `e` on the most-replied post, then the frame that lays the thread out again.
     let th = a.thread.as_mut().unwrap();

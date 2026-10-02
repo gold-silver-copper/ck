@@ -9,11 +9,13 @@ use ratatui::layout::{Constraint, Layout, Margin, Rect, Size};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Clear, ListState};
+use std::rc::Rc;
+
 use ratatui_image::Image;
 use unicode_width::UnicodeWidthStr;
 
 use crate::app::{
-    App, Clock, Hit, LinkItem, SETTING_SECTIONS, SettingsPopup, SiteRow, Sort, ThreadLayout, ThreadView, View, key_rows,
+    App, Clock, Hit, LineCache, LinkItem, SETTING_SECTIONS, SettingsPopup, SiteRow, Sort, ThreadLayout, ThreadView, View, key_rows,
     setting_rows,
 };
 use crate::http;
@@ -1050,7 +1052,7 @@ fn draw_thread(f: &mut Frame, app: &mut App, area: Rect) {
         let l = layout_thread(t, area.width, thumbs, app.clock);
         // After a refresh, keep the same post at the top even if lines above it changed.
         if let Some((i, off)) = t.anchor.take() {
-            t.scroll = (l.starts[i] + off).min(l.lines.len().saturating_sub(t.viewport));
+            t.scroll = (l.starts[i] + off).min(l.len().saturating_sub(t.viewport));
         }
         t.layout = Some(l);
         t.scroll_to_selected();
@@ -1059,8 +1061,7 @@ fn draw_thread(f: &mut Frame, app: &mut App, area: Rect) {
     let cursor = t.entry();
     for row in 0..area.height {
         let i = t.scroll + row as usize;
-        let Some(line) = l.lines.get(i) else { break };
-        let e = l.starts.partition_point(|&s| s <= i) - 1;
+        let Some((e, line)) = l.line(i) else { break };
         // Each entry's last line is the gap before the next card.
         if i + 1 == l.starts[e + 1] {
             continue;
@@ -1110,7 +1111,7 @@ fn draw_thread(f: &mut Frame, app: &mut App, area: Rect) {
     }
 
     // A scrollbar in the right margin.
-    let total = l.lines.len();
+    let total = l.len();
     if total > view && area.right() < f.area().right() {
         let len = ((view * view) / total).max(1) as u16;
         let pos = (t.scroll * (view - len as usize) / (total - view).max(1)) as u16;
@@ -1121,38 +1122,72 @@ fn draw_thread(f: &mut Frame, app: &mut App, area: Rect) {
 /// Lay out every entry (post, or reply shown inline) as a card of wrapped lines: a padding
 /// line above and below the content, then a gap line. Posts with files get a thumbnail
 /// tile on the left.
-fn layout_thread(t: &ThreadView, width: u16, thumbs: bool, clock: Clock) -> ThreadLayout {
-    let mut lines = Vec::new();
-    let mut starts = Vec::with_capacity(t.entries.len() + 1);
-    let mut thumb_at = Vec::new();
+fn layout_thread(t: &mut ThreadView, width: u16, thumbs: bool, clock: Clock) -> ThreadLayout {
+    let old = std::mem::take(&mut t.cache);
+    let mut cache = LineCache::new();
+    let (mut blocks, mut starts, mut thumb_at) = (Vec::with_capacity(t.entries.len()), Vec::with_capacity(t.entries.len() + 1), Vec::new());
+    let mut len = 0;
     for (e, entry) in t.entries.iter().enumerate() {
         let (i, p) = (entry.post, &t.posts[entry.post]);
         let text_width = width.saturating_sub(PAD + 2 + INDENT * entry.depth as u16).max(10) as usize;
-        starts.push(lines.len());
-        // A hidden post is one line, so replies to it still make sense.
-        if t.is_collapsed(i) {
+        let thumb = thumbs && !p.files.is_empty() && text_width > THUMB.width as usize + 12;
+        starts.push(len);
+        let block: Rc<[Line<'static>]> = if t.is_collapsed(i) {
+            // A hidden post is one line, so replies to it still make sense.
             let why = t.marks[i].hidden.as_deref().filter(|l| !l.is_empty());
             let why = why.map_or("hidden".to_string(), |l| format!("hidden by the filter \"{l}\""));
-            lines.push(Line::styled(format!("No.{}  {why}", p.no), Style::new().fg(theme().text_dim)));
-            lines.push(Line::raw(""));
-            continue;
-        }
-        lines.push(Line::raw(""));
-        match p.files.first().filter(|_| thumbs && text_width > THUMB.width as usize + 12) {
-            Some(_) => {
-                thumb_at.push((lines.len(), e));
-                let text = post_lines(p, &post_ctx(t, i, clock), text_width - THUMB.width as usize - 2);
-                let mut text = beside(Vec::new(), text, THUMB.width + 2);
-                text.resize(text.len().max(THUMB.height as usize), Line::raw(""));
-                lines.extend(text);
+            vec![Line::styled(format!("No.{}  {why}", p.no), Style::new().fg(theme().text_dim)), Line::raw("")].into()
+        } else {
+            let ctx = post_ctx(t, i, clock);
+            let key = (p.no, text_width as u16, thumb);
+            let shows = shown_with(t, i, p, &ctx);
+            let block = match cache.get(&key).or(old.get(&key)).filter(|(h, _)| *h == shows) {
+                Some((_, block)) => block.clone(),
+                None => {
+                    let mut lines = vec![Line::raw("")];
+                    if thumb {
+                        let text = post_lines(p, &ctx, text_width - THUMB.width as usize - 2);
+                        let mut text = beside(Vec::new(), text, THUMB.width + 2);
+                        text.resize(text.len().max(THUMB.height as usize), Line::raw(""));
+                        lines.extend(text);
+                    } else {
+                        lines.extend(post_lines(p, &ctx, text_width));
+                    }
+                    lines.extend([Line::raw(""), Line::raw("")]);
+                    Rc::from(lines)
+                }
+            };
+            cache.insert(key, (shows, block.clone()));
+            if thumb {
+                thumb_at.push((len + 1, e));
             }
-            None => lines.extend(post_lines(p, &post_ctx(t, i, clock), text_width)),
-        }
-        lines.push(Line::raw(""));
-        lines.push(Line::raw(""));
+            block
+        };
+        len += block.len();
+        blocks.push(block);
     }
-    starts.push(lines.len());
-    ThreadLayout { width, lines, starts, thumbs: thumb_at }
+    starts.push(len);
+    t.cache = cache;
+    ThreadLayout { width, blocks, starts, thumbs: thumb_at }
+}
+
+/// A hash of what a post's lines show besides the post itself, for the line cache: its
+/// "3h ago", OP/new/yours chips, revealed spoilers, filter marks, backlinks, and the search
+/// highlight where it can appear.
+fn shown_with(t: &ThreadView, i: usize, p: &Post, ctx: &PostCtx) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    let quotes_marked = p.quotes.iter().any(|q| *q == ctx.op_no || ctx.mine.contains(q));
+    // Matches are found in the post's own text; the " (OP)" / " (You)" added to quotes can
+    // only be highlighted by a search for (part of) them.
+    let s = ctx.search.as_str();
+    let in_added = !s.is_empty() && (s.contains(['(', ')']) || " (op)".contains(s) || " (you)".contains(s));
+    let highlighted = t.matches.binary_search(&i).is_ok() || (quotes_marked && in_added);
+    (ago(p.time, ctx.clock), ctx.is_op, ctx.is_new, ctx.reveal, ctx.mark, ctx.mine.contains(&p.no), quotes_marked, ctx.backlinks).hash(&mut h);
+    if highlighted {
+        ctx.search.hash(&mut h);
+    }
+    h.finish()
 }
 
 /// How to render one post of a thread.

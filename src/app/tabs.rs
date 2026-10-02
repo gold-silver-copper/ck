@@ -145,6 +145,7 @@ impl App {
     pub fn invalidate_layouts(&mut self) {
         for t in self.thread.iter_mut().chain(self.tabs.iter_mut().filter_map(|tab| tab.thread.as_mut())) {
             t.layout = None;
+            t.cache.clear();
         }
     }
 

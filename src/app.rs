@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::{Duration, Instant};
@@ -157,8 +158,9 @@ pub struct ThreadView {
     pub selected: usize,
     pub scroll: usize,
     jumps: Vec<usize>,
-    /// Rendered layout, rebuilt by the UI when the width changes.
+    /// Rendered layout, rebuilt by the UI when the width changes, from cached post lines.
     pub layout: Option<ThreadLayout>,
+    pub cache: LineCache,
     pub viewport: usize,
     /// Posts numbered above this arrived since the previous visit (0: first visit, none are new).
     pub new_after: u64,
@@ -185,12 +187,29 @@ pub struct ThreadView {
 
 pub struct ThreadLayout {
     pub width: u16,
-    pub lines: Vec<Line<'static>>,
+    /// Each entry's lines: padding, the post, padding, and the gap below it.
+    pub blocks: Vec<Rc<[Line<'static>]>>,
     /// `starts[i]` is the first line of entry `i`; has one extra item for the end.
     pub starts: Vec<usize>,
     /// `(line, entry)` for each entry drawn with a thumbnail in the left column.
     pub thumbs: Vec<(usize, usize)>,
 }
+
+impl ThreadLayout {
+    pub fn len(&self) -> usize {
+        self.starts.last().copied().unwrap_or(0)
+    }
+
+    /// Line `i`, and the entry it's in.
+    pub fn line(&self, i: usize) -> Option<(usize, &Line<'static>)> {
+        let e = self.starts.partition_point(|&s| s <= i).checked_sub(1)?;
+        Some((e, self.blocks.get(e)?.get(i - self.starts.get(e)?)?))
+    }
+}
+
+/// A post's lines as last laid out, by (post, text width, with a thumbnail), with a hash of
+/// what else they show (time, marks, highlights, ...): reused while that's the same.
+pub type LineCache = HashMap<(u64, u16, bool), (u64, Rc<[Line<'static>]>)>;
 
 impl ThreadView {
     pub fn new(board: String, no: u64, posts: Vec<Post>) -> Self {
@@ -219,6 +238,7 @@ impl ThreadView {
             scroll: 0,
             jumps: Vec::new(),
             layout: None,
+            cache: LineCache::new(),
             viewport: 0,
             new_after: 0,
             anchor: None,
@@ -390,7 +410,7 @@ impl ThreadView {
     /// Scroll by lines, then select the entry at the top of the view.
     fn scroll_lines(&mut self, delta: isize) {
         let Some(l) = &self.layout else { return };
-        let max = l.lines.len().saturating_sub(self.viewport);
+        let max = l.len().saturating_sub(self.viewport);
         self.scroll = (self.scroll as isize + delta).clamp(0, max as isize) as usize;
         let top = l.starts.partition_point(|&s| s <= self.scroll).saturating_sub(1);
         // Prefer an entry whose header is on screen.
@@ -1292,6 +1312,7 @@ impl App {
                 tv.anchor = old.top_anchor().and_then(|(i, off)| Some((at(&old.entries.get(i)?.path)?, off)));
                 tv.scroll = old.scroll;
                 tv.viewport = old.viewport;
+                tv.cache = old.cache;
                 tv.jumps = old.jumps;
                 tv.new_after = old.new_after;
                 // Revealed spoilers by post number, since indices can shift.
@@ -1760,7 +1781,7 @@ impl App {
                 let t = self.thread.as_ref()?;
                 let l = t.layout.as_ref()?;
                 let line = t.scroll + (row - area.y) as usize;
-                (line < l.lines.len()).then(|| l.starts.partition_point(|&s| s <= line).saturating_sub(1))
+                l.line(line).map(|(e, _)| e)
             }
             _ => None,
         }
@@ -2756,7 +2777,8 @@ mod tests {
         let post = |no| Post { no, body: vec![Line::raw("a"), Line::raw("b")], ..Default::default() };
         let mut t = ThreadView::new("g".into(), 1, vec![post(1), post(2), post(3)]);
         // Each post: header, two lines, a blank.
-        t.layout = Some(ThreadLayout { width: 40, lines: vec![Line::raw(""); 12], starts: vec![0, 4, 8, 12], thumbs: vec![] });
+        let block: Rc<[Line]> = vec![Line::raw(""); 4].into();
+        t.layout = Some(ThreadLayout { width: 40, blocks: vec![block.clone(), block.clone(), block], starts: vec![0, 4, 8, 12], thumbs: vec![] });
         t.viewport = 10;
         app.thread = Some(t);
         app.view = View::Thread;
@@ -3636,7 +3658,7 @@ mod tests {
     #[test]
     fn tab_switches_keep_layouts_and_theme_changes_redo_them_all() {
         let mut app = local_app();
-        let layout = || Some(ThreadLayout { width: 40, lines: Vec::new(), starts: vec![0, 0], thumbs: Vec::new() });
+        let layout = || Some(ThreadLayout { width: 40, blocks: Vec::new(), starts: vec![0, 0], thumbs: Vec::new() });
         app.thread = Some(ThreadView::new("x".into(), 1, vec![Post { no: 1, ..Default::default() }]));
         app.thread.as_mut().unwrap().layout = layout();
         app.tabs.push(Tab::new(0));

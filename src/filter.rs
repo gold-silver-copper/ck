@@ -61,7 +61,7 @@ struct Filter {
 }
 
 /// What filters (and manual hiding) say about a thread or post.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
 pub struct Mark {
     /// Hidden: by the filter with this label, or by hand (`""`).
     pub hidden: Option<String>,

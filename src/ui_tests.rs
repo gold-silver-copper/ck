@@ -550,3 +550,50 @@ fn watched_generals() {
     a.store.watched[0].at_limit = true;
     insta::assert_snapshot!(snapshot(&mut a));
 }
+
+#[test]
+fn thread_lines_are_cached_but_never_stale() {
+    use ratatui::crossterm::event::{KeyCode, KeyEvent};
+    let mut a = app(false);
+    a.view = View::Thread;
+    a.thread = Some(thread());
+    let blocks = |a: &App| a.thread.as_ref().unwrap().layout.as_ref().unwrap().blocks.clone();
+    render(&mut a);
+    let first = blocks(&a);
+    // Nothing changed: the same lines, not laid out again.
+    a.thread.as_mut().unwrap().layout = None;
+    render(&mut a);
+    assert!(first.iter().zip(blocks(&a)).all(|(x, y)| std::rc::Rc::ptr_eq(x, &y)));
+    // A search re-lays out only what it highlights, including text added to quotes ("(OP)").
+    a.thread.as_mut().unwrap().set_search("(op)".into());
+    let (text, buf) = render(&mut a);
+    let hl: String = buf.content().iter().filter(|c| c.bg == theme().search).map(|c| c.symbol()).collect();
+    assert_eq!(hl, "(OP)", "{text}");
+    let now = blocks(&a);
+    assert!(std::rc::Rc::ptr_eq(&first[0], &now[0]) && !std::rc::Rc::ptr_eq(&first[1], &now[1]));
+    a.thread.as_mut().unwrap().set_search(String::new());
+    // Spoilers shown on one post.
+    a.thread.as_mut().unwrap().selected = 3;
+    a.on_key(KeyEvent::from(KeyCode::Char('s')));
+    let (text, _) = render(&mut a);
+    assert!(text.contains("secret and"), "{text}");
+    // Times move on.
+    a.clock = Clock { fixed: Some(NOW + 3 * HOUR) };
+    a.thread.as_mut().unwrap().layout = None;
+    let (text, _) = render(&mut a);
+    assert!(text.contains("7h ago") && !text.contains("4h ago"), "{text}");
+    // A refresh keeps unchanged posts and redoes those with new replies.
+    let before = blocks(&a);
+    let mut posts = thread().posts;
+    posts.push(crate::model::Post { no: 1005, quotes: vec![1003], time: NOW, ..Default::default() });
+    let mut t = crate::app::ThreadView::new("g".into(), 1000, posts);
+    t.cache = std::mem::take(&mut a.thread.as_mut().unwrap().cache);
+    a.thread = Some(t);
+    render(&mut a);
+    let after = blocks(&a);
+    assert!(std::rc::Rc::ptr_eq(&before[1], &after[1]) && !std::rc::Rc::ptr_eq(&before[3], &after[3]));
+    // A new theme lays everything out again.
+    a.set_theme(crate::theme::BUILTIN[1].1);
+    render(&mut a);
+    assert!(!std::rc::Rc::ptr_eq(&after[1], &blocks(&a)[1]));
+}
