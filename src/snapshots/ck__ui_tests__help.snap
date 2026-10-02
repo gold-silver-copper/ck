@@ -20,15 +20,15 @@ expression: snapshot(&mut a)
 │  kissu           vich│  v                   view the OP's images          │                      │
 │  tvch            vich│  w                   watch / unwatch the thread    │                      │
 │  sushigirl       vich│  s                   cycle sort order              │                      │
-│  alogs           lynx│  c                   compact layout on / off       │                      │
-│  trashchan       jsch│                                                    │                      │
-│  ptchan          jsch│Thread                                              │                      │
-│  erischan        jsch│  j / k               next / previous post          │                      │
-│  junkuchan       jsch│  J / K, space        scroll by line / page         │                      │
-│  nukechan        jsch│  enter, l            follow quote (any thread)     │                      │
-│  palanq          fool│  p                   preview the quoted posts      │                      │
-│  b4k             fool│  b                   jump to first reply           │                      │
-│                      │  u                   back (also to last thread)    │                      │
+│  leftypol        vich│  c                   compact layout on / off       │                      │
+│  alogs           lynx│                                                    │                      │
+│  trashchan       jsch│Thread                                              │                      │
+│  ptchan          jsch│  j / k               next / previous post          │                      │
+│  erischan        jsch│  J / K, space        scroll by line / page         │                      │
+│  junkuchan       jsch│  enter, l            follow quote (any thread)     │                      │
+│  nukechan        jsch│  p                   preview the quoted posts      │                      │
+│  palanq          fool│  b                   jump to first reply           │                      │
+│  b4k             fool│  u                   back (also to last thread)    │                      │
 │                      │  /                   search the thread             │                      │
 │                      │  n / N               next / previous match         │                      │
 ╰──────────────────────│  s / S               show spoilers: post / all     │──────────────────────╯

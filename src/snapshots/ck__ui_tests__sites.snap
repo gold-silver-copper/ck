@@ -20,6 +20,7 @@ expression: snapshot(&mut a)
 │  kissu           vichan    https://kissu.moe                                                     │
 │  tvch            vichan    https://tvch.moe                                                      │
 │  sushigirl       vichan    https://sushigirl.cafe                                                │
+│  leftypol        vichan    https://leftypol.org                                                  │
 │  alogs           lynxchan  https://alogs.space                                                   │
 │  trashchan       jschan    https://trashchan.xyz                                                 │
 │  ptchan          jschan    https://ptch.net                                                      │
@@ -28,7 +29,6 @@ expression: snapshot(&mut a)
 │  nukechan        jschan    https://nukechan.net                                                  │
 │  palanq          foolfuuka https://archive.palanq.win                                            │
 │  b4k             foolfuuka https://arch.b4k.dev                                                  │
-│                                                                                                  │
 │                                                                                                  │
 │                                                                                                  │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯

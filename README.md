@@ -5,7 +5,7 @@ A terminal imageboard browser built with [ratatui](https://ratatui.rs). One inte
 | kind       | engines                                  | examples                         |
 |------------|------------------------------------------|----------------------------------|
 | `4chan`    | the official 4chan API                   | 4chan                            |
-| `vichan`   | vichan, tinyboard, infinity (4chan-style JSON) | lainchan, wizchan, uboachan, smuglo.li, kissu, tvch, sushigirl |
+| `vichan`   | vichan, tinyboard, infinity (4chan-style JSON) | lainchan, wizchan, uboachan, smuglo.li, kissu, tvch, sushigirl, leftypol |
 | `lynxchan` | LynxChan                                 | endchan, kohlchan, alogs         |
 | `foolfuuka`| FoolFuuka 4chan archives                 | desuarchive, palanq, b4k         |
 | `jschan`   | jschan                                   | zzzchan, trashchan, ptchan, erischan, junkuchan, nukechan |

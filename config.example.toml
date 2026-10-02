@@ -147,6 +147,7 @@ boards = [
 name = "tvch"
 kind = "vichan"
 url = "https://tvch.moe"
+thumb_ext = "png"
 boards = [
   { uri = "tv", title = "Movies and Television" },
   { uri = "art", title = "Drawing, Photography, Painting" },
@@ -178,6 +179,30 @@ boards = [
   { uri = "otaku", title = "Japan / Otaku / Anime" },
   { uri = "yakuza", title = "site meta-discussion" },
   { uri = "hell", title = "internet death cult" },
+]
+
+[[site]]
+name = "leftypol"
+kind = "vichan"
+url = "https://leftypol.org"
+# The overboards (overboard, sfw, alt) mix threads from other boards and aren't listed.
+boards = [
+  { uri = "leftypol", title = "Leftist Politically Incorrect" },
+  { uri = "edu", title = "Education" },
+  { uri = "labor", title = "Labor" },
+  { uri = "siberia", title = "Off-topic" },
+  { uri = "lgbt", title = "LGBT" },
+  { uri = "latam", title = "LATAM" },
+  { uri = "hobby", title = "Hobby" },
+  { uri = "tech", title = "Technology" },
+  { uri = "games", title = "Games" },
+  { uri = "anime", title = "Anime" },
+  { uri = "music", title = "Music" },
+  { uri = "draw", title = "Original Art" },
+  { uri = "AKM", title = "Guns, weapons and the art of war." },
+  { uri = "ufo", title = "Paranormal and Conspiracies" },
+  { uri = "420", title = "Drugs and Psychedelics" },
+  { uri = "meta", title = "Ruthless criticism of all that exists (in leftypol.org)" },
 ]
 
 [[site]]

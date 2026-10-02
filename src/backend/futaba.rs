@@ -46,7 +46,8 @@ impl Futaba {
     }
 
     /// 4chan: `{tim}s.jpg` on the media host. vichan: `/{board}/thumb/{tim}.{ext}`, where ext is
-    /// the site's `thumb_ext`, else the file's own extension for images and `jpg` for videos.
+    /// the site's `thumb_ext`, else the file's own extension, for images, and always `jpg` for
+    /// videos (checked on wizchan and tvch, whose thumb_ext is png).
     fn thumb_url(&self, board: &str, tim: &str, ext: &str) -> Option<String> {
         if self.is_4chan {
             return Some(format!("{}/{}/{tim}s.jpg", self.media, enc(board)));
@@ -54,10 +55,26 @@ impl Futaba {
         let ext = ext.trim_start_matches('.').to_ascii_lowercase();
         let thumb_ext = match ext.as_str() {
             "jpg" | "jpeg" | "png" | "gif" | "webp" => self.thumb_ext.clone().unwrap_or(ext),
-            "webm" | "mp4" => self.thumb_ext.clone().unwrap_or_else(|| "jpg".into()),
+            "webm" | "mp4" => "jpg".into(),
             _ => return None, // generic file icon
         };
         Some(format!("{}/{}/thumb/{tim}.{thumb_ext}", self.media, enc(board)))
+    }
+
+    /// A `files` entry with explicit `file_path` and `thumb_path`.
+    fn path_attachment(&self, f: &Value) -> Option<Attachment> {
+        let path = as_str(&f["file_path"])?;
+        let name = as_str(&f["filename"]).map(|n| markup::decode(&n)).unwrap_or_default();
+        let spoiler = as_bool(&f["spoiler"]);
+        Some(Attachment {
+            filename: format!("{name}{}", as_str(&f["ext"]).unwrap_or_default()),
+            url: format!("{}{path}", self.media),
+            thumb: as_str(&f["thumb_path"]).filter(|_| !spoiler).map(|t| format!("{}{t}", self.media)),
+            spoiler,
+            width: as_u64(&f["w"]).map(|n| n as u32),
+            height: as_u64(&f["h"]).map(|n| n as u32),
+            size: as_u64(&f["fsize"]),
+        })
     }
 
     fn attachment(&self, board: &str, v: &Value) -> Option<Attachment> {
@@ -94,6 +111,10 @@ impl Futaba {
         let mut files: Vec<_> = self.attachment(board, v).into_iter().collect();
         if let Some(extra) = v["extra_files"].as_array() {
             files.extend(extra.iter().filter_map(|f| self.attachment(board, f)));
+        }
+        // Newer vichan forks (leftypol) list files with their paths instead.
+        if let Some(list) = v["files"].as_array() {
+            files.extend(list.iter().filter_map(|f| self.path_attachment(f)));
         }
         Post {
             no: as_u64(&v["no"]).unwrap_or(0),
@@ -230,6 +251,22 @@ mod tests {
         // vichan marks deleted files with ext "deleted"; they're dropped.
         assert!(posts.iter().flat_map(|p| &p.files).all(|f| !f.url.ends_with("deleted")));
         assert!(posts.iter().any(|p| p.links.iter().any(|l| l.thread == Some(30364))));
+    }
+
+    #[test]
+    fn files_with_paths() {
+        // leftypol's vichan fork: a `files` list with explicit paths and webp thumbnails.
+        let b = Futaba::vichan("https://leftypol.org".into(), None, None);
+        let posts = b.parse_thread("leftypol", &fixture("leftypol_thread.json"));
+        assert_eq!(posts[0].no, 2923329);
+        let files: Vec<_> = posts.iter().flat_map(|p| &p.files).collect();
+        assert_eq!(files.len(), 7);
+        let f = files.iter().find(|f| f.url.ends_with("1790754948757-9.jpg")).unwrap();
+        assert_eq!(f.url, "https://leftypol.org/leftypol/src/1790754948757-9.jpg");
+        assert_eq!(f.thumb.as_deref(), Some("https://leftypol.org/leftypol/thumb/1790754948757-9.webp"));
+        assert_eq!((f.filename.as_str(), f.width, f.size), ("842251815915.jpg", Some(1080), Some(178528)));
+        let cat = b.parse_catalog("leftypol", &fixture("leftypol_catalog.json"));
+        assert!(cat.iter().any(|p| !p.files.is_empty()));
     }
 
     #[test]
