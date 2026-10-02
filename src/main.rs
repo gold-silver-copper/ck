@@ -28,6 +28,8 @@ mod disk_cache;
 mod download;
 mod export;
 mod filter;
+#[cfg(test)]
+mod fuzz;
 mod http;
 mod images;
 mod keys;

@@ -121,9 +121,13 @@ pub fn host(url: &str) -> &str {
     rest.split(['/', '?', '#']).next().unwrap_or(rest)
 }
 
-/// Block until a request to `url`'s host is allowed at `prio`.
-fn throttle(url: &str, prio: Priority) {
+/// Block until a request to `url`'s host is allowed at `prio`. In tests, `*.invalid` hosts
+/// (the fuzzer's) are refused at once: no lookup, no waiting for a slot.
+fn throttle(url: &str, prio: Priority) -> Result<()> {
     let host = host(url);
+    if cfg!(test) && host.ends_with(".invalid") {
+        anyhow::bail!("{url}: a test host, not fetched");
+    }
     let interval = if lock(&MEDIA_HOSTS).contains(host) { MEDIA_INTERVAL } else { API_INTERVAL };
     let start = Instant::now();
     loop {
@@ -132,7 +136,7 @@ fn throttle(url: &str, prio: Priority) {
         match LIMITER.admit(host, interval, now, prio, now - start, idle) {
             Some(wait) => {
                 std::thread::sleep(wait);
-                return;
+                return Ok(());
             }
             None => std::thread::sleep(Duration::from_millis(50)),
         }
@@ -277,7 +281,7 @@ pub fn cached_get(
 }
 
 fn transport(url: &str, since: Option<&str>) -> Result<Raw> {
-    throttle(url, PRIORITY.get());
+    throttle(url, PRIORITY.get())?;
     let mut req = AGENT.get(url);
     if let Some(s) = since {
         req = req.header("If-Modified-Since", s);
@@ -306,7 +310,7 @@ pub fn get_json(url: &str) -> Result<Value> {
 
 /// GET raw bytes (images, downloads) at low priority through the rate limiter. Not cached.
 pub fn get_bytes(url: &str, limit: u64) -> Result<Vec<u8>> {
-    throttle(url, Priority::Low);
+    throttle(url, Priority::Low)?;
     let mut resp = AGENT.get(url).call().with_context(|| format!("GET {url}"))?;
     match resp.status().as_u16() {
         200..=299 => {}
@@ -319,7 +323,7 @@ pub fn get_bytes(url: &str, limit: u64) -> Result<Vec<u8>> {
 
 /// Download `url` into `path` at low priority, through a temp file renamed into place.
 pub fn download_to(url: &str, path: &std::path::Path) -> Result<()> {
-    throttle(url, Priority::Low);
+    throttle(url, Priority::Low)?;
     let mut resp = AGENT.get(url).call().with_context(|| format!("GET {url}"))?;
     match resp.status().as_u16() {
         200..=299 => {}

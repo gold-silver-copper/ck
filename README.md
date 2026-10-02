@@ -443,13 +443,20 @@ threads 404s, ck offers to open it there (`a`).
 
 ## Tests
 
-    cargo test                           # offline: unit, parsing and snapshot tests
-    cargo test -- --ignored --nocapture  # hit every default site live (rate-limited)
+    cargo test                                         # offline: unit, parsing, snapshot and short fuzz tests
+    cargo test -- --ignored live --nocapture           # hit every default site live (rate-limited)
+    cargo test --release -- --ignored fuzz --nocapture # fuzz for longer (FUZZ_SEED, FUZZ_RUNS, FUZZ_STEPS)
 
 The offline tests parse real, trimmed responses from every engine in `tests/fixtures/`, and
 render every view with fixed data and a fixed clock into the snapshots in `src/snapshots/`
 ([insta](https://insta.rs)). After an intended UI change, review the differences and update
 them with `INSTA_UPDATE=always cargo test` (or `cargo insta review`).
+
+The fuzzer drives the whole app with random keys, clicks, pastes, resizes and restarts
+against fake sites whose answers (and errors) arrive in any order, checking after every
+step that nothing panics, every selection and layout is consistent, and nothing is left
+loading; it also fuzzes the markup parser, routes, the rate limiter and the cache. Nothing
+leaves the machine. A failure prints the steps before it and the seed that replays it.
 
 ## License
 

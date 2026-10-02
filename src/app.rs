@@ -2086,4 +2086,6 @@ fn filtered(filter: &str, n: usize, text: impl Fn(usize) -> String) -> Vec<usize
 }
 
 #[cfg(test)]
+mod fuzz;
+#[cfg(test)]
 pub mod tests;
