@@ -443,20 +443,41 @@ threads 404s, ck offers to open it there (`a`).
 
 ## Tests
 
-    cargo test                                         # offline: unit, parsing, snapshot and short fuzz tests
-    cargo test -- --ignored live --nocapture           # hit every default site live (rate-limited)
-    cargo test --release -- --ignored fuzz --nocapture # fuzz for longer (FUZZ_SEED, FUZZ_RUNS, FUZZ_STEPS)
+    cargo test                                        # offline: unit, parsing, snapshot and short fuzz tests
+    cargo test -- --ignored live --nocapture          # hit every default site live (rate-limited)
 
 The offline tests parse real, trimmed responses from every engine in `tests/fixtures/`, and
 render every view with fixed data and a fixed clock into the snapshots in `src/snapshots/`
 ([insta](https://insta.rs)). After an intended UI change, review the differences and update
 them with `INSTA_UPDATE=always cargo test` (or `cargo insta review`).
 
-The fuzzer drives the whole app with random keys, clicks, pastes, resizes and restarts
-against fake sites whose answers (and errors) arrive in any order, checking after every
-step that nothing panics, every selection and layout is consistent, and nothing is left
-loading; it also fuzzes the markup parser, routes, the rate limiter and the cache. Nothing
-leaves the machine. A failure prints the steps before it and the seed that replays it.
+### Fuzzing
+
+Nothing here leaves the machine: fake sites answer on `*.invalid` hosts or on 127.0.0.1.
+
+    cargo test --profile fuzz -- --ignored _long --nocapture   # every fuzzer, for longer
+    cargo build --release && cargo test -- --ignored e2e_soak --nocapture
+    cd fuzz && cargo fuzz run -O backend_json corpus/backend_json ../tests/fixtures
+
+- **The app** (`src/app/fuzz.rs`): random keys, clicks, pastes, resizes, time passing and
+  restarts, against fake sites (generated data, or the real backends on mangled fixtures)
+  whose answers arrive in any order. After every step it draws a frame and checks the
+  tabs, threads, layouts and popups; nothing may stay loading, no worker thread may panic,
+  nothing may be fetched in the background twice within 10s, and the saved data must load
+  again. A failure prints the seed that replays it and the fewest steps that still fail.
+- **The rest** (`src/fuzz.rs`): every engine's parsers on mangled responses, the markup
+  parser and wrapping, routes, the rate limiter and the cache against a model, broken data
+  directories (nothing the user had may be lost), broken configs, and broken images.
+- **Coverage-guided** (`fuzz/`, [cargo-fuzz](https://github.com/rust-fuzz/cargo-fuzz),
+  nightly): targets for markup, routes, API JSON, the config, data files and images.
+- **End to end** (`src/e2e.rs`): the release binary in tmux, against local servers that
+  answer like the engines, slowly or badly, with random keys, text, resizes and restarts
+  for `E2E_SECS`. It must stay up, quit cleanly, keep its memory flat and leave data that
+  loads. `CK_NO_EXTERNAL=1` keeps ck from opening a browser or player, writing the
+  clipboard or notifying.
+
+`FUZZ_SEED`, `FUZZ_RUNS` or `FUZZ_SECS`, and `FUZZ_STEPS` steer the runs. CI runs the tests
+on every push; the fuzzers run nightly.
 
 ## License
 

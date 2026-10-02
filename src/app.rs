@@ -1807,7 +1807,7 @@ impl App {
 
     /// Open a file externally: videos in mpv when it's installed, everything else in the default opener.
     pub fn open_file(&mut self, f: &Attachment) {
-        if f.is_video() && on_path("mpv") {
+        if f.is_video() && on_path("mpv") && !crate::sandboxed() {
             let mut cmd = std::process::Command::new("mpv");
             cmd.arg(&f.url)
                 .stdin(std::process::Stdio::null())
@@ -2060,7 +2060,7 @@ impl App {
 
     pub fn open_url(&mut self, url: &str) {
         self.opened = Some(url.to_string());
-        if cfg!(test) {
+        if crate::sandboxed() {
             return;
         }
         match open::that_detached(url) {

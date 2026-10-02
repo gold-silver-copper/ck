@@ -60,7 +60,7 @@ pub fn method(mode: NotifyMode, command: Option<&[String]>, env: &dyn Fn(&str) -
 
 /// Send a notification. Escapes go straight to the terminal.
 pub fn send(method: &Method, title: &str, body: &str) -> anyhow::Result<()> {
-    if cfg!(test) {
+    if crate::sandboxed() {
         return Ok(());
     }
     // Control characters (and 777's separator) can't be in the escape.

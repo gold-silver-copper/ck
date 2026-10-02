@@ -1,0 +1,78 @@
+name: Fuzz
+
+# Every night, and by hand. A failure's log has the seed that replays it (and, for the app
+# fuzzer, the fewest steps that still fail); cargo-fuzz crashes are uploaded.
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+    inputs:
+      minutes:
+        description: Minutes per cargo-fuzz target
+        default: "5"
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  long:
+    name: Long runs (app, backends, parsers, files)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Fuzz (overflow and debug checks on)
+        run: cargo test --profile fuzz -- --ignored _long --nocapture --test-threads=2
+        env:
+          FUZZ_SECS: "600"
+          FUZZ_STEPS: "2500"
+
+  cargo-fuzz:
+    name: Coverage-guided (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [markup, route, backend_json, config, data_file, image]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: fuzz
+      - run: cargo install cargo-fuzz --locked
+      - name: Seed the corpus
+        run: |
+          mkdir -p fuzz/corpus/${{ matrix.target }}
+          case ${{ matrix.target }} in
+            backend_json|data_file|markup) cp tests/fixtures/*.json fuzz/corpus/${{ matrix.target }}/ ;;
+            config) cp config.example.toml fuzz/corpus/config/ ;;
+          esac
+      - name: Run
+        working-directory: fuzz
+        run: |
+          secs=$(( ${{ github.event.inputs.minutes || 5 }} * 60 ))
+          cargo fuzz run -O ${{ matrix.target }} corpus/${{ matrix.target }} -- -max_total_time=$secs -rss_limit_mb=2048 -timeout=10 -max_len=65536
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: crash-${{ matrix.target }}
+          path: fuzz/artifacts/${{ matrix.target }}
+
+  e2e:
+    name: The binary in tmux against local servers
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: sudo apt-get install -y tmux
+      - run: cargo build --release
+      - name: Soak for ten minutes
+        run: cargo test -- --ignored e2e_soak --nocapture
+        env:
+          E2E_SECS: "600"

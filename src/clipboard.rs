@@ -6,7 +6,7 @@ use std::process::{Command, Stdio};
 
 /// Copy `text` to the clipboard.
 pub fn copy(text: &str) -> anyhow::Result<()> {
-    if cfg!(test) {
+    if crate::sandboxed() {
         return Ok(());
     }
     let osc = crossterm::execute!(std::io::stdout(), crossterm::clipboard::CopyToClipboard::to_clipboard_from(text));

@@ -3,8 +3,9 @@
 //! in `app::fuzz`.
 //!
 //! Each target has a short run in `cargo test` and a long one that's ignored:
-//! `cargo test --release -- --ignored fuzz --nocapture`, with `FUZZ_SEED` and `FUZZ_RUNS`
-//! to choose. A failure prints the seed that replays it on its own.
+//! `cargo test --profile fuzz -- --ignored _long --nocapture`, with `FUZZ_SEED` and
+//! `FUZZ_RUNS` (or `FUZZ_SECS`, a time budget per target) to choose. A failure prints the
+//! seed that replays it on its own.
 
 use std::cell::Cell;
 use std::collections::HashMap;
@@ -59,27 +60,36 @@ impl Rng {
 /// `long`). A panic is reported with the seed that replays it alone, then re-raised.
 pub fn run(name: &str, long: bool, seed: u64, runs: u64, mut body: impl FnMut(u64)) {
     let env = |k: &str| std::env::var(k).ok().and_then(|v| v.parse::<u64>().ok());
+    let budget = env("FUZZ_SECS").filter(|_| long && env("FUZZ_RUNS").is_none()).map(Duration::from_secs);
     let (seed, runs) = if long {
         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(seed, |d| d.as_nanos() as u64);
-        (env("FUZZ_SEED").unwrap_or(now), env("FUZZ_RUNS").unwrap_or(runs))
+        (env("FUZZ_SEED").unwrap_or(now), if budget.is_some() { u64::MAX } else { env("FUZZ_RUNS").unwrap_or(runs) })
     } else {
         (seed, runs)
     };
     if long {
-        eprintln!("{name}: seed {seed}, {runs} runs");
+        match budget {
+            Some(b) => eprintln!("{name}: seed {seed}, for {b:?}"),
+            None => eprintln!("{name}: seed {seed}, {runs} runs"),
+        }
     }
     let start = Instant::now();
+    let mut done = 0;
     for i in 0..runs {
+        if budget.is_some_and(|b| start.elapsed() >= b) {
+            break;
+        }
+        done += 1;
         // The first run uses the seed itself, so a reported seed replays with FUZZ_RUNS=1.
         let s = if i == 0 { seed } else { Rng::new(seed ^ i.wrapping_mul(0xa076_1d64_78bd_642f)).next() };
         if let Err(panic) = catch_unwind(AssertUnwindSafe(|| body(s))) {
             eprintln!("\n{name} failed on run {i}. Replay it with:");
-            eprintln!("  FUZZ_SEED={s} FUZZ_RUNS=1 cargo test {name}_long -- --ignored --nocapture\n");
+            eprintln!("  FUZZ_SEED={s} FUZZ_RUNS=1 cargo test --profile fuzz {name}_long -- --ignored --nocapture\n");
             resume_unwind(panic);
         }
     }
     if long {
-        eprintln!("{name}: {runs} runs in {:.1?}", start.elapsed());
+        eprintln!("{name}: {done} runs in {:.1?}", start.elapsed());
     }
 }
 
@@ -760,7 +770,7 @@ fn fuzz_config_long() {
 }
 
 /// Small real images of each format, encoded here.
-static IMAGES: std::sync::LazyLock<Vec<Vec<u8>>> = std::sync::LazyLock::new(|| {
+pub static IMAGES: std::sync::LazyLock<Vec<Vec<u8>>> = std::sync::LazyLock::new(|| {
     use image::{DynamicImage, ImageFormat, RgbaImage};
     let img = DynamicImage::ImageRgba8(RgbaImage::from_fn(17, 11, |x, y| image::Rgba([x as u8 * 15, y as u8 * 20, 99, 255])));
     [ImageFormat::Png, ImageFormat::Jpeg, ImageFormat::Gif, ImageFormat::WebP]

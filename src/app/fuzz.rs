@@ -5,8 +5,9 @@
 //! sites answer from generated data, and their file URLs are on `fuzz.invalid`, which
 //! `http` refuses in tests.
 //!
-//! `cargo test fuzz_app` runs a short pass; `cargo test --release -- --ignored fuzz_app_long
-//! --nocapture` a long one (`FUZZ_SEED`, `FUZZ_RUNS`, `FUZZ_STEPS`).
+//! `cargo test fuzz_app` runs a short pass; `cargo test --profile fuzz -- --ignored
+//! fuzz_app_long --nocapture` a long one (`FUZZ_SEED`, `FUZZ_RUNS` or `FUZZ_SECS`,
+//! `FUZZ_STEPS`, and `FUZZ_SHRINK=0` to skip shrinking a failure).
 
 use std::collections::{HashMap, HashSet};
 use std::panic::{AssertUnwindSafe, catch_unwind};

@@ -21,6 +21,12 @@ macro_rules! cycle {
     };
 }
 
+/// Whether ck may reach outside itself: open a browser or player, write the clipboard, send
+/// notifications. Not in tests, nor with `CK_NO_EXTERNAL` set (the end-to-end fuzzer).
+pub fn sandboxed() -> bool {
+    cfg!(test) || std::env::var_os("CK_NO_EXTERNAL").is_some()
+}
+
 pub mod app;
 pub mod backend;
 pub mod clipboard;
@@ -29,6 +35,8 @@ mod bench;
 pub mod config;
 pub mod disk_cache;
 pub mod download;
+#[cfg(test)]
+mod e2e;
 pub mod export;
 pub mod filter;
 #[doc(hidden)]
