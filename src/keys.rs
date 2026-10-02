@@ -9,51 +9,6 @@ use anyhow::{Result, bail};
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use serde::Deserialize;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Action {
-    Quit,
-    Help,
-    Settings,
-    Search,
-    Reload,
-    Browser,
-    View,
-    Watch,
-    Sort,
-    Compact,
-    OpenFile,
-    Replies,
-    JumpBack,
-    Unread,
-    Preview,
-    NextMatch,
-    PrevMatch,
-    Spoiler,
-    AllSpoilers,
-    Download,
-    DownloadThread,
-    Archive,
-    Remove,
-    Copy,
-    CopyLink,
-    Goto,
-    Links,
-    Hide,
-    ShowHidden,
-    Mine,
-    Expand,
-    Gallery,
-    Export,
-    ArchiveSearch,
-    ImageSearch,
-    NewTab,
-    NextTab,
-    PrevTab,
-    CloseTab,
-    Favorite,
-    Follow,
-}
-
 /// Where a key applies. Global keys work in every view but the image viewer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Scope {
@@ -83,50 +38,62 @@ impl Scope {
 
 const VIEWS: [Scope; 5] = [Scope::Lists, Scope::Catalog, Scope::Thread, Scope::Saved, Scope::Viewer];
 
-/// Every action: config name, default key, scopes, and what it does.
-pub const ACTIONS: &[(Action, &str, Key, &[Scope], &str)] = &[
-    (Action::Quit, "quit", Key::char('q'), &[Scope::Global], "quit"),
-    (Action::Help, "help", Key::char('?'), &[Scope::Global], "help"),
-    (Action::Settings, "settings", Key::char(','), &[Scope::Global], "settings: theme, colors, keys, …"),
-    (Action::Search, "search", Key::char('/'), &[Scope::Global], "filter the list; search a thread"),
-    (Action::Reload, "reload", Key::char('r'), &[Scope::Global], "reload"),
-    (Action::Browser, "browser", Key::char('o'), &[Scope::Global], "open in the browser"),
-    (Action::Goto, "goto", Key::char(':'), &[Scope::Global], "go to a URL or site/board/thread"),
-    (Action::NextTab, "next_tab", Key::code(KeyCode::Tab), &[Scope::Global], "next tab"),
-    (Action::PrevTab, "prev_tab", Key::code(KeyCode::BackTab), &[Scope::Global], "previous tab"),
-    (Action::CloseTab, "close_tab", Key::ctrl('w'), &[Scope::Global], "close the tab"),
-    (Action::View, "view", Key::char('v'), &[Scope::Catalog, Scope::Thread], "view the post's images"),
-    (Action::Watch, "watch", Key::char('w'), &[Scope::Catalog, Scope::Thread], "watch / unwatch the thread"),
-    (Action::Sort, "sort", Key::char('s'), &[Scope::Catalog], "cycle the sort order"),
-    (Action::Compact, "compact", Key::char('c'), &[Scope::Catalog], "layout: cards, compact, grid"),
-    (Action::OpenFile, "open_file", Key::char('i'), &[Scope::Thread], "open the file (videos in mpv)"),
-    (Action::Replies, "replies", Key::char('b'), &[Scope::Thread], "jump to the first reply"),
-    (Action::JumpBack, "jump_back", Key::char('u'), &[Scope::Thread], "jump back (also to the last thread)"),
-    (Action::Unread, "unread", Key::char('U'), &[Scope::Thread], "jump to the first unread post"),
-    (Action::Preview, "preview", Key::char('p'), &[Scope::Thread], "preview the quoted posts"),
-    (Action::NextMatch, "next_match", Key::char('n'), &[Scope::Thread], "next search match"),
-    (Action::PrevMatch, "prev_match", Key::char('N'), &[Scope::Thread], "previous search match"),
-    (Action::Spoiler, "spoiler", Key::char('s'), &[Scope::Thread], "show the post's spoilers"),
-    (Action::AllSpoilers, "all_spoilers", Key::char('S'), &[Scope::Thread], "show all spoilers"),
-    (Action::Download, "download", Key::char('d'), &[Scope::Thread], "save the post's files"),
-    (Action::DownloadThread, "download_thread", Key::char('D'), &[Scope::Thread], "save the thread's files"),
-    (Action::Archive, "archive", Key::char('a'), &[Scope::Thread], "open a 404'd thread in the archive"),
-    (Action::ArchiveSearch, "archive_search", Key::char('f'), &[Scope::Catalog], "search the board's archive"),
-    (Action::Links, "links", Key::char('O'), &[Scope::Catalog, Scope::Thread], "the post's links and files"),
-    (Action::Hide, "hide", Key::char('H'), &[Scope::Catalog, Scope::Thread], "hide / unhide the thread or post"),
-    (Action::ShowHidden, "show_hidden", Key::char('Z'), &[Scope::Catalog, Scope::Thread], "show hidden threads and posts"),
-    (Action::ImageSearch, "image_search", Key::char('R'), &[Scope::Thread, Scope::Viewer], "reverse image search"),
-    (Action::Gallery, "gallery", Key::char('V'), &[Scope::Thread], "the thread's files as a grid"),
-    (Action::Export, "export", Key::char('E'), &[Scope::Thread], "save the thread as HTML and JSON"),
-    (Action::Expand, "expand", Key::char('e'), &[Scope::Thread], "show / hide the post's replies under it"),
-    (Action::Mine, "mine", Key::char('m'), &[Scope::Thread], "mark the post as yours (notified of replies)"),
-    (Action::NewTab, "new_tab", Key::char('T'), &[Scope::Catalog, Scope::Thread, Scope::Saved], "open the thread (or link) in a new tab"),
-    (Action::Favorite, "favorite", Key::char('*'), &[Scope::Lists, Scope::Catalog], "favorite board: on / off"),
-    (Action::Follow, "follow", Key::char('F'), &[Scope::Catalog, Scope::Thread, Scope::Saved], "follow as a general: watch its next thread"),
-    (Action::Remove, "remove", Key::char('x'), &[Scope::Saved, Scope::Lists], "remove the entry (home: a favorite)"),
-    (Action::Copy, "copy", Key::char('y'), &[Scope::Catalog, Scope::Thread, Scope::Saved, Scope::Viewer], "copy the text (viewer: file URL)"),
-    (Action::CopyLink, "copy_link", Key::char('Y'), &[Scope::Catalog, Scope::Thread, Scope::Saved, Scope::Viewer], "copy the link"),
-];
+/// Declares `Action` and `ACTIONS` (every action: config name, default key, scopes, and
+/// what it does) from one list.
+macro_rules! actions {
+    ($($action:ident, $name:literal, $key:expr, $scopes:expr, $what:literal;)*) => {
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+        pub enum Action {
+            $($action,)*
+        }
+
+        pub const ACTIONS: &[(Action, &str, Key, &[Scope], &str)] = &[$((Action::$action, $name, $key, $scopes, $what),)*];
+    };
+}
+
+actions! {
+    Quit, "quit", Key::char('q'), &[Scope::Global], "quit";
+    Help, "help", Key::char('?'), &[Scope::Global], "help";
+    Settings, "settings", Key::char(','), &[Scope::Global], "settings: theme, colors, keys, …";
+    Search, "search", Key::char('/'), &[Scope::Global], "filter the list; search a thread";
+    Reload, "reload", Key::char('r'), &[Scope::Global], "reload";
+    Browser, "browser", Key::char('o'), &[Scope::Global], "open in the browser";
+    Goto, "goto", Key::char(':'), &[Scope::Global], "go to a URL or site/board/thread";
+    NextTab, "next_tab", Key::code(KeyCode::Tab), &[Scope::Global], "next tab";
+    PrevTab, "prev_tab", Key::code(KeyCode::BackTab), &[Scope::Global], "previous tab";
+    CloseTab, "close_tab", Key::ctrl('w'), &[Scope::Global], "close the tab";
+    View, "view", Key::char('v'), &[Scope::Catalog, Scope::Thread], "view the post's images";
+    Watch, "watch", Key::char('w'), &[Scope::Catalog, Scope::Thread], "watch / unwatch the thread";
+    Sort, "sort", Key::char('s'), &[Scope::Catalog], "cycle the sort order";
+    Compact, "compact", Key::char('c'), &[Scope::Catalog], "layout: cards, compact, grid";
+    OpenFile, "open_file", Key::char('i'), &[Scope::Thread], "open the file (videos in mpv)";
+    Replies, "replies", Key::char('b'), &[Scope::Thread], "jump to the first reply";
+    JumpBack, "jump_back", Key::char('u'), &[Scope::Thread], "jump back (also to the last thread)";
+    Unread, "unread", Key::char('U'), &[Scope::Thread], "jump to the first unread post";
+    Preview, "preview", Key::char('p'), &[Scope::Thread], "preview the quoted posts";
+    NextMatch, "next_match", Key::char('n'), &[Scope::Thread], "next search match";
+    PrevMatch, "prev_match", Key::char('N'), &[Scope::Thread], "previous search match";
+    Spoiler, "spoiler", Key::char('s'), &[Scope::Thread], "show the post's spoilers";
+    AllSpoilers, "all_spoilers", Key::char('S'), &[Scope::Thread], "show all spoilers";
+    Download, "download", Key::char('d'), &[Scope::Thread], "save the post's files";
+    DownloadThread, "download_thread", Key::char('D'), &[Scope::Thread], "save the thread's files";
+    Archive, "archive", Key::char('a'), &[Scope::Thread], "open a 404'd thread in the archive";
+    ArchiveSearch, "archive_search", Key::char('f'), &[Scope::Catalog], "search the board's archive";
+    Links, "links", Key::char('O'), &[Scope::Catalog, Scope::Thread], "the post's links and files";
+    Hide, "hide", Key::char('H'), &[Scope::Catalog, Scope::Thread], "hide / unhide the thread or post";
+    ShowHidden, "show_hidden", Key::char('Z'), &[Scope::Catalog, Scope::Thread], "show hidden threads and posts";
+    ImageSearch, "image_search", Key::char('R'), &[Scope::Thread, Scope::Viewer], "reverse image search";
+    Gallery, "gallery", Key::char('V'), &[Scope::Thread], "the thread's files as a grid";
+    Export, "export", Key::char('E'), &[Scope::Thread], "save the thread as HTML and JSON";
+    Expand, "expand", Key::char('e'), &[Scope::Thread], "show / hide the post's replies under it";
+    Mine, "mine", Key::char('m'), &[Scope::Thread], "mark the post as yours (notified of replies)";
+    NewTab, "new_tab", Key::char('T'), &[Scope::Catalog, Scope::Thread, Scope::Saved], "open the thread (or link) in a new tab";
+    Favorite, "favorite", Key::char('*'), &[Scope::Lists, Scope::Catalog], "favorite board: on / off";
+    Follow, "follow", Key::char('F'), &[Scope::Catalog, Scope::Thread, Scope::Saved], "follow as a general: watch its next thread";
+    Remove, "remove", Key::char('x'), &[Scope::Saved, Scope::Lists], "remove the entry (home: a favorite)";
+    Copy, "copy", Key::char('y'), &[Scope::Catalog, Scope::Thread, Scope::Saved, Scope::Viewer], "copy the text (viewer: file URL)";
+    CopyLink, "copy_link", Key::char('Y'), &[Scope::Catalog, Scope::Thread, Scope::Saved, Scope::Viewer], "copy the link";
+}
 
 /// A key with its modifiers: `w`, `W`, `ctrl-w`, `alt-x`, `tab`, `shift-tab`, `f5`, ...
 /// Shift is part of a character (`W`), so it's only kept for tab (`shift-tab`).
