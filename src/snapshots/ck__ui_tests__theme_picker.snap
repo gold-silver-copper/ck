@@ -22,13 +22,13 @@ expression: snapshot(&mut a)
   Downloads               solarized-light
     Folder            ~/  terminal                                          es
 
+  Startup
+    Last place        restored                          Start where you left off (ck URL starts …
+
   Keys
     Key bindings      defaults                          Rebind any command
 
   There's no config file to save to (no home directory); changes last until ck quits.
-
-
-
 
 
  enter change   esc back   , settings   ? help

@@ -65,6 +65,33 @@ pub struct SeenThread {
 /// Threads gone from the catalog this long are forgotten.
 const SEEN_FOR: i64 = 7 * 24 * 3600;
 
+/// Where you were: one place per tab.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Session {
+    pub tabs: Vec<Place>,
+    #[serde(default)]
+    pub active: usize,
+}
+
+/// A view and what's open in it, by name and number (indices change between runs).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Place {
+    /// sites, boards, catalog, thread, watched, history.
+    pub view: String,
+    pub site: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub board: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread: Option<u64>,
+    /// The selected post (thread) or thread (catalog).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selected: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sort: Option<String>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub filter: String,
+}
+
 /// UI settings that couldn't be saved in config.toml.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Settings {
@@ -183,6 +210,17 @@ impl Store {
     /// Replies the thread had when it was last opened.
     pub fn replies_seen(&self, site: &str, board: &str, no: u64) -> Option<u32> {
         self.seen.get(&format!("{site}/{board}"))?.get(&no)?.replies
+    }
+
+    pub fn load_session(&self) -> Option<Session> {
+        let path = self.dir.as_ref()?.join("session.json");
+        serde_json::from_slice(&std::fs::read(path).ok()?).ok()
+    }
+
+    pub fn save_session(&self, session: &Session) -> Result<()> {
+        let Some(dir) = &self.dir else { return Ok(()) };
+        std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
+        write_atomic(&dir.join("session.json"), &serde_json::to_vec_pretty(session)?)
     }
 
     pub fn is_hidden(&self, site: &str, board: &str, no: u64) -> bool {

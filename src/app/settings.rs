@@ -23,6 +23,7 @@ pub enum Item {
     RefreshWatched,
     Notify,
     DownloadDir,
+    Restore,
     Keys,
 }
 
@@ -32,6 +33,7 @@ pub const SECTIONS: &[(&str, &[Item])] = &[
     ("Catalog", &[Item::Compact, Item::Images, Item::Filters]),
     ("Background refresh", &[Item::RefreshThread, Item::RefreshWatched, Item::Notify]),
     ("Downloads", &[Item::DownloadDir]),
+    ("Startup", &[Item::Restore]),
     ("Keys", &[Item::Keys]),
 ];
 
@@ -73,6 +75,7 @@ impl Item {
             Item::RefreshWatched => "Watched threads",
             Item::Notify => "Notifications",
             Item::DownloadDir => "Folder",
+            Item::Restore => "Last place",
             Item::Keys => "Key bindings",
         }
     }
@@ -89,6 +92,7 @@ impl Item {
             Item::RefreshWatched => "How often each watched thread updates",
             Item::Notify => "New posts in watched threads, replies to yours (m)",
             Item::DownloadDir => "Where d / D save files",
+            Item::Restore => "Start where you left off (ck URL starts elsewhere)",
             Item::Keys => "Rebind any command",
         }
     }
@@ -188,6 +192,7 @@ impl App {
                 }
             }
             Item::DownloadDir => self.download_dir.clone().unwrap_or_else(|| "~/Downloads/ck/{site}/{board}/{thread}".into()),
+            Item::Restore => if self.restore_session { "restored" } else { "not restored" }.into(),
             Item::Keys => match ACTIONS.iter().filter(|e| !self.keys.is_default(e.0)).count() {
                 0 => "defaults".into(),
                 n => format!("{n} changed"),
@@ -251,6 +256,13 @@ impl App {
             }
             Item::DownloadDir => {
                 self.settings.popup = Some(Popup::Folder { value: self.download_dir.clone().unwrap_or_default() });
+            }
+            Item::Restore => {
+                self.restore_session = !self.restore_session;
+                let on = self.restore_session;
+                self.save_config(if on { "restoring the last place" } else { "not restoring the last place" }, |d| {
+                    d["restore_session"] = toml_edit::value(on)
+                });
             }
             Item::Keys => {
                 let mut list = ListState::default();

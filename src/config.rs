@@ -21,6 +21,9 @@ pub struct Config {
     /// Seconds between background refreshes of each watched thread (at least 60).
     #[serde(default = "default_refresh_watched")]
     pub refresh_watched_secs: u64,
+    /// Start where the last run left off.
+    #[serde(default = "default_true")]
+    pub restore_session: bool,
     /// Catalog layout (cycled with `c`).
     #[serde(default)]
     pub catalog_layout: Option<CatalogLayout>,
@@ -55,6 +58,10 @@ pub struct Config {
     pub filters: Vec<crate::filter::FilterConfig>,
     #[serde(rename = "site")]
     pub sites: Vec<SiteConfig>,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 fn default_refresh_thread() -> u64 {

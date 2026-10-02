@@ -74,10 +74,13 @@ fn main() -> Result<()> {
     if let Some(w) = warnings.first() {
         app.status = Some((w.clone(), true));
     }
-    if let Some(at) = start_at {
-        app.goto_str(&at);
+    match start_at {
+        Some(at) => app.goto_str(&at),
+        None if app.restore_session => app.restore_session(),
+        None => {}
     }
     let result = run(&mut terminal, &mut app);
+    app.save_session(None);
     let _ = execute!(stdout(), DisableMouseCapture, DisableBracketedPaste);
     ratatui::restore();
     result

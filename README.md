@@ -305,6 +305,9 @@ All settings are optional; see `config.example.toml` for every option with comme
   here, comments intact). In the grid, `h`/`l` move between columns (`h` in the first
   column goes back) and `j`/`k` between rows; without images it's shown as cards.
 - `download_dir = "~/stuff/{site}/{board}/{thread}"`
+- `restore_session = false` to start at the site list instead of where you left off (the
+  view, thread and selected post, catalog sort and filter, saved in the data directory
+  as `session.json`). `ck URL` always starts at the URL.
 - `[[filter]]`: hide or highlight threads and posts, see [Filters](#filters-and-hiding).
 - `[keys]`: `action = "key"` or `action = ["key", ...]`, e.g. `watch = "W"`; see
   [Remapping keys](#remapping-keys). Unknown actions, things that aren't keys, and two

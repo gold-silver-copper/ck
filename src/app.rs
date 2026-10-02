@@ -27,6 +27,7 @@ mod gallery;
 mod goto;
 mod links;
 mod search;
+mod session;
 mod settings;
 pub use gallery::Gallery;
 pub use links::{ImageSearchPanel, LinkItem, LinksPanel};
@@ -559,6 +560,14 @@ pub struct App {
     pub image_search_panel: Option<ImageSearchPanel>,
     /// The thread's files as a grid (`V`), over the thread.
     pub gallery: Option<Gallery>,
+    /// Save where you are and start there next time.
+    pub restore_session: bool,
+    /// The session as last saved, and when that was checked.
+    session_saved: (Option<crate::store::Session>, Instant),
+    /// Thread to select in the catalog once it loads (restoring a session).
+    pending_catalog: Option<u64>,
+    /// The open thread is being restored from the last session.
+    restoring: bool,
     /// Archive search: its results, the list over them, and the query being typed.
     pub search: Option<Search>,
     pub search_list: Picker,
@@ -693,6 +702,10 @@ impl App {
             image_search: if cfg.image_search.is_empty() { crate::config::ImageSearch::defaults() } else { cfg.image_search.clone() },
             image_search_panel: None,
             gallery: None,
+            restore_session: cfg.restore_session,
+            session_saved: (None, Instant::now()),
+            pending_catalog: None,
+            restoring: false,
             search: None,
             search_list: Picker::default(),
             search_input: None,
@@ -826,6 +839,7 @@ impl App {
         }
         self.background();
         self.flush_notes(Instant::now());
+        self.save_session(Some(Instant::now()));
         self.expire_status(Instant::now());
     }
 
@@ -979,6 +993,11 @@ impl App {
                             self.catalog = posts;
                             self.remark_catalog();
                             self.catalog_seen();
+                            if let Some(no) = self.pending_catalog.take()
+                                && let Some(i) = self.visible_catalog().iter().position(|&k| self.catalog[k].no == no)
+                            {
+                                self.catalog_list.state.select(Some(i));
+                            }
                             let len = self.visible_catalog().len();
                             self.catalog_list.clamp(len);
                         }
@@ -988,8 +1007,15 @@ impl App {
                 Msg::Thread(id, res) if id == self.req => {
                     self.loading = None;
                     self.thread_checked = Instant::now();
+                    let restoring = std::mem::take(&mut self.restoring);
                     match res {
                         Ok(posts) => self.set_thread(posts),
+                        // Last session's thread is gone: its catalog instead.
+                        Err(e) if restoring && http::is_not_found(&e) => {
+                            self.view = View::Catalog;
+                            self.load_catalog();
+                            self.status = Some(("The thread you had open last time is gone (archived or deleted)".into(), false));
+                        }
                         Err(e) if http::is_not_found(&e) => {
                             let Some(key) = self.board.as_ref().map(|b| self.key(&b.uri, self.pending_thread)) else {
                                 return;
@@ -3104,6 +3130,48 @@ mod tests {
         let app = App::new(cfg, KeyMap::default(), None, Store::default());
         assert_eq!(app.image_search.len(), 1);
         assert_eq!(app.image_search[0].link("http://x/y z"), "https://s.example/?u=http%3A%2F%2Fx%2Fy%20z");
+    }
+
+    #[test]
+    fn sessions_save_and_restore() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = local_app();
+        app.store = Store::load(Some(dir.path().to_path_buf())).0;
+        // A thread on the second site, with a post selected.
+        app.goto_str("b/y/5");
+        app.set_thread(vec![Post { no: 5, ..Default::default() }, Post { no: 6, ..Default::default() }]);
+        app.thread.as_mut().unwrap().selected = 1;
+        app.catalog_sort = Sort::Newest;
+        app.save_session(None);
+        let saved = app.store.load_session().unwrap();
+        assert_eq!(saved.tabs[0], crate::store::Place {
+            view: "thread".into(),
+            site: "b".into(),
+            board: Some("y".into()),
+            thread: Some(5),
+            selected: Some(6),
+            sort: Some("newest".into()),
+            filter: String::new(),
+        });
+        // The next run starts there.
+        let mut next = local_app();
+        next.store = Store::load(Some(dir.path().to_path_buf())).0;
+        next.restore_session();
+        assert_eq!((next.site, next.view, next.pending_thread, next.pending_post, next.catalog_sort), (1, View::Thread, 5, Some(6), Sort::Newest));
+        // If the thread is gone, its catalog instead.
+        next.handle(Msg::Thread(next.req, Err(anyhow::Error::new(http::HttpError::NotFound("x".into())))));
+        assert_eq!(next.view, View::Catalog);
+        // A catalog with its selected thread.
+        next.handle(Msg::Catalog(next.req, Ok(vec![])));
+        next.catalog = (1..4).map(|no| Post { no, ..Default::default() }).collect();
+        next.catalog_list.state.select(Some(2));
+        let place = next.place();
+        assert_eq!((place.view.as_str(), place.selected), ("catalog", Some(1)));
+        // Newest first: index 2 is thread 1.
+        let mut third = local_app();
+        third.go_to_place(&place);
+        third.handle(Msg::Catalog(third.req, Ok((1..4).map(|no| Post { no, time: no as i64, ..Default::default() }).collect())));
+        assert_eq!(third.selected_index().map(|i| third.catalog[i].no), Some(1));
     }
 
     #[test]

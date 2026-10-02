@@ -44,6 +44,9 @@ color = "auto"
 refresh_thread_secs = 10
 refresh_watched_secs = 60
 
+# Start where you left off: the same view, thread and selected post as when ck quit.
+restore_session = true
+
 # Catalog layout: "cards" (a card per thread with a thumbnail), "compact" (a line per
 # thread) or "grid" (thumbnails in columns). `c` cycles it and saves it here.
 catalog_layout = "cards"
