@@ -17,6 +17,11 @@ const MEDIA_INTERVAL: Duration = Duration::from_millis(250);
 /// Don't refetch the same URL more often than this; answer from the cache instead.
 pub const MIN_REFETCH: Duration = Duration::from_secs(10);
 const CACHE_ENTRIES: usize = 48;
+/// Background refreshes wait until the user has been idle this long, so what they're about
+/// to open isn't queued behind them.
+const USER_QUIET: Duration = Duration::from_millis(1500);
+/// Low-priority requests that have waited this long take the next slot like anything else.
+const MAX_LOW_WAIT: Duration = Duration::from_secs(15);
 
 static AGENT: LazyLock<ureq::Agent> = LazyLock::new(|| {
     ureq::Agent::config_builder()
@@ -30,10 +35,37 @@ static AGENT: LazyLock<ureq::Agent> = LazyLock::new(|| {
 static LIMITER: LazyLock<Limiter> = LazyLock::new(Limiter::default);
 static CACHE: LazyLock<Mutex<Cache>> = LazyLock::new(|| Mutex::new(Cache::new(CACHE_ENTRIES)));
 static MEDIA_HOSTS: LazyLock<Mutex<HashSet<String>>> = LazyLock::new(Default::default);
+static LAST_INPUT: Mutex<Option<Instant>> = Mutex::new(None);
 
 thread_local! {
     /// Set when the last `get_json` on this thread was answered from the cache without a request.
     static CACHED_AGE: Cell<Option<Duration>> = const { Cell::new(None) };
+    /// Priority of `get_json` calls on this thread.
+    static PRIORITY: Cell<Priority> = const { Cell::new(Priority::User) };
+}
+
+/// Who a request is for. Only user requests book future rate-limit slots.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Priority {
+    /// Something the user asked for: takes the next slot, even if that's in the future.
+    User,
+    /// Images and downloads: go when the host is free right now.
+    Low,
+    /// Auto-refreshes: go when the host is free and the user has been idle for a moment.
+    Background,
+}
+
+/// Run `f` with its `get_json` calls at background priority.
+pub fn background<T>(f: impl FnOnce() -> T) -> T {
+    PRIORITY.set(Priority::Background);
+    let r = f();
+    PRIORITY.set(Priority::User);
+    r
+}
+
+/// Note user input (keys, clicks), which holds background refreshes back briefly.
+pub fn user_input() {
+    *LAST_INPUT.lock().unwrap() = Some(Instant::now());
 }
 
 /// HTTP failures worth telling apart from generic errors.
@@ -76,23 +108,21 @@ fn host(url: &str) -> &str {
     rest.split(['/', '?', '#']).next().unwrap_or(rest)
 }
 
-/// Block until a request to `url`'s host is allowed.
-fn throttle(url: &str) {
+/// Block until a request to `url`'s host is allowed at `prio`.
+fn throttle(url: &str, prio: Priority) {
     let host = host(url);
     let interval = if MEDIA_HOSTS.lock().unwrap().contains(host) { MEDIA_INTERVAL } else { API_INTERVAL };
-    let wait = LIMITER.reserve(host, interval, Instant::now());
-    if !wait.is_zero() {
-        std::thread::sleep(wait);
-    }
-}
-
-/// Like `throttle`, but never books a future slot: background media fetches wait until the
-/// host is idle, so they can't delay API requests by more than one interval.
-fn throttle_low(url: &str) {
-    let host = host(url);
-    let interval = if MEDIA_HOSTS.lock().unwrap().contains(host) { MEDIA_INTERVAL } else { API_INTERVAL };
-    while !LIMITER.try_reserve(host, interval, Instant::now()) {
-        std::thread::sleep(Duration::from_millis(50));
+    let start = Instant::now();
+    loop {
+        let now = Instant::now();
+        let idle = LAST_INPUT.lock().unwrap().map_or(Duration::MAX, |t| now.saturating_duration_since(t));
+        match LIMITER.admit(host, interval, now, prio, now - start, idle) {
+            Some(wait) => {
+                std::thread::sleep(wait);
+                return;
+            }
+            None => std::thread::sleep(Duration::from_millis(50)),
+        }
     }
 }
 
@@ -110,6 +140,27 @@ impl Limiter {
         let slot = next.get(host).copied().filter(|&t| t > now).unwrap_or(now);
         next.insert(host.to_string(), slot + interval);
         slot - now
+    }
+
+    /// Whether a request may go: `Some(wait)` to sleep for its slot, `None` to check again
+    /// shortly. Only user requests book slots ahead, so others never delay them by more than
+    /// one interval; `waiting` and `user_idle` are how long this request has waited and how
+    /// long since the user's last input.
+    pub fn admit(
+        &self,
+        host: &str,
+        interval: Duration,
+        now: Instant,
+        prio: Priority,
+        waiting: Duration,
+        user_idle: Duration,
+    ) -> Option<Duration> {
+        match prio {
+            Priority::User => Some(self.reserve(host, interval, now)),
+            _ if waiting >= MAX_LOW_WAIT => Some(self.reserve(host, interval, now)),
+            Priority::Background if user_idle < USER_QUIET => None,
+            _ => self.try_reserve(host, interval, now).then_some(Duration::ZERO),
+        }
     }
 
     /// Reserve a slot for `host` only if one is free right now.
@@ -213,7 +264,7 @@ pub fn cached_get(
 }
 
 fn transport(url: &str, since: Option<&str>) -> Result<Raw> {
-    throttle(url);
+    throttle(url, PRIORITY.get());
     let mut req = AGENT.get(url);
     if let Some(s) = since {
         req = req.header("If-Modified-Since", s);
@@ -242,7 +293,7 @@ pub fn get_json(url: &str) -> Result<Value> {
 
 /// GET raw bytes (images, downloads) at low priority through the rate limiter. Not cached.
 pub fn get_bytes(url: &str, limit: u64) -> Result<Vec<u8>> {
-    throttle_low(url);
+    throttle(url, Priority::Low);
     let mut resp = AGENT.get(url).call().with_context(|| format!("GET {url}"))?;
     match resp.status().as_u16() {
         200..=299 => {}
@@ -255,7 +306,7 @@ pub fn get_bytes(url: &str, limit: u64) -> Result<Vec<u8>> {
 
 /// Download `url` into `path` at low priority, through a temp file renamed into place.
 pub fn download_to(url: &str, path: &std::path::Path) -> Result<()> {
-    throttle_low(url);
+    throttle(url, Priority::Low);
     let mut resp = AGENT.get(url).call().with_context(|| format!("GET {url}"))?;
     match resp.status().as_u16() {
         200..=299 => {}
@@ -352,6 +403,39 @@ mod tests {
         // Once time has passed, slots free up again.
         assert_eq!(l.reserve("a", s, t0 + 10 * s), Duration::ZERO);
         assert_eq!(l.reserve("a", s, t0 + 10 * s + s / 2), s / 2);
+    }
+
+    #[test]
+    fn user_requests_never_queue_behind_background_ones() {
+        let l = Limiter::default();
+        let t0 = Instant::now();
+        let s = Duration::from_secs(1);
+        let (idle, busy) = (Duration::from_secs(5), Duration::from_millis(200));
+        let bg = |now, waiting, user_idle| l.admit("a", s, now, Priority::Background, waiting, user_idle);
+        // The user was just typing: background waits even though the host is free.
+        assert_eq!(bg(t0, Duration::ZERO, busy), None);
+        // Once the user is idle, it goes, without booking anything ahead.
+        assert_eq!(bg(t0, Duration::ZERO, idle), Some(Duration::ZERO));
+        assert_eq!(bg(t0 + s / 2, Duration::ZERO, idle), None);
+        // A user request then waits only for the one request already made...
+        assert_eq!(l.admit("a", s, t0 + s / 2, Priority::User, Duration::ZERO, busy), Some(s / 2));
+        // ...and background ones stay behind it.
+        assert_eq!(bg(t0 + s + s / 2, Duration::ZERO, idle), None);
+        assert_eq!(bg(t0 + 2 * s, Duration::ZERO, idle), Some(Duration::ZERO));
+        // Images don't wait for the user to be idle.
+        assert_eq!(l.admit("a", s, t0 + 3 * s, Priority::Low, Duration::ZERO, busy), Some(Duration::ZERO));
+    }
+
+    #[test]
+    fn low_priority_does_not_starve() {
+        let l = Limiter::default();
+        let t0 = Instant::now();
+        let s = Duration::from_secs(1);
+        let busy = Duration::ZERO;
+        // A busy host and a busy user: after MAX_LOW_WAIT a background request books a slot.
+        l.reserve("a", s, t0);
+        assert_eq!(l.admit("a", s, t0, Priority::Background, MAX_LOW_WAIT - s, busy), None);
+        assert_eq!(l.admit("a", s, t0, Priority::Background, MAX_LOW_WAIT, busy), Some(s));
     }
 
     #[test]

@@ -743,7 +743,7 @@ impl App {
         let tx = self.tx.clone();
         self.refreshing.insert(key.clone());
         std::thread::spawn(move || {
-            let res = backend.thread(&key.board, key.no);
+            let res = http::background(|| backend.thread(&key.board, key.no));
             let _ = tx.send(Msg::Refreshed(key, res));
         });
     }
@@ -883,6 +883,7 @@ impl App {
 
     /// Wheel scrolls, a click selects, a double click opens.
     pub fn on_mouse(&mut self, ev: MouseEvent, now: Instant) {
+        http::user_input();
         let down = matches!(ev.kind, MouseEventKind::ScrollDown);
         if matches!(ev.kind, MouseEventKind::ScrollDown | MouseEventKind::ScrollUp) {
             let key = |c| KeyEvent::from(if c { KeyCode::Down } else { KeyCode::Up });
@@ -1003,6 +1004,7 @@ impl App {
     // ----- input -----
 
     pub fn on_key(&mut self, key: KeyEvent) {
+        http::user_input();
         if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
             self.quit = true;
             return;
