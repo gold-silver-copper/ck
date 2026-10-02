@@ -55,7 +55,7 @@ pub enum Action {
 }
 
 /// Where a key applies. Global keys work in every view but the image viewer.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Scope {
     Global,
     /// Sites, Boards and Settings.
@@ -285,11 +285,17 @@ fn applies(scopes: &[Scope], view: Scope) -> bool {
 #[derive(Debug, Clone)]
 pub struct KeyMap {
     keys: HashMap<Action, Vec<Key>>,
+    /// What each key does in each view, as `check` found it.
+    actions: HashMap<(Scope, Key), Action>,
 }
 
 impl Default for KeyMap {
     fn default() -> Self {
-        Self { keys: ACTIONS.iter().map(|&(a, _, key, ..)| (a, vec![key])).collect() }
+        let keys = ACTIONS.iter().map(|&(a, _, key, ..)| (a, vec![key])).collect();
+        let mut map = Self { keys, actions: HashMap::new() };
+        // The defaults don't clash (a test checks), so this can't fail.
+        let _ = map.check();
+        map
     }
 }
 
@@ -320,8 +326,9 @@ impl KeyMap {
         Ok(map)
     }
 
-    /// No key does two things in one view.
-    fn check(&self) -> Result<()> {
+    /// No key does two things in one view. Fills in the lookup from keys to actions.
+    fn check(&mut self) -> Result<()> {
+        self.actions.clear();
         for view in VIEWS {
             let mut seen: HashMap<Key, &str> = fixed(view).into_iter().map(|k| (k, "navigation")).collect();
             for &(action, name, _, scopes, _) in ACTIONS {
@@ -334,6 +341,7 @@ impl KeyMap {
                     {
                         bail!("`{name}` and `{other}` both use '{key}' in the {} view", view.label());
                     }
+                    self.actions.insert((view, key), action);
                 }
             }
         }
@@ -360,11 +368,7 @@ impl KeyMap {
 
     /// The action bound to a key in `scope` (or a global one).
     pub fn action(&self, scope: Scope, ev: &KeyEvent) -> Option<Action> {
-        let key = Key::from_event(ev);
-        ACTIONS
-            .iter()
-            .find(|&&(a, _, _, scopes, _)| applies(scopes, scope) && self.keys[&a].contains(&key))
-            .map(|&(a, ..)| a)
+        self.actions.get(&(scope, Key::from_event(ev))).copied()
     }
 
     /// A copy with an action's keys replaced (`None`: the default), if that leaves no
