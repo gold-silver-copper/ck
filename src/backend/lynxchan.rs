@@ -4,7 +4,7 @@ use anyhow::Result;
 use serde_json::Value;
 
 use super::{Backend, Partial};
-use crate::http::{as_bool, as_str, as_u64, encode_segment as enc, get_json, is_not_found};
+use crate::http::{as_bool, as_str, as_u64, encode_segment as enc, get_json, items, is_not_found};
 use crate::markup;
 use crate::model::{Attachment, Board, Post};
 
@@ -27,20 +27,17 @@ impl Lynxchan {
 
     /// Thread OPs from `/{board}/catalog.json`.
     pub fn parse_catalog(&self, v: &Value) -> Vec<Post> {
-        v.as_array().into_iter().flatten().map(|t| self.post(t, "threadId")).collect()
+        items(v).map(|t| self.post(t, "threadId")).collect()
     }
 
     /// Page 1 of a board's index (`/{board}/1.json`), which is how overboards are served:
     /// threads from many boards, each with its `boardUri` and its last few replies.
     pub fn parse_index(&self, v: &Value) -> Vec<Post> {
-        v["threads"]
-            .as_array()
-            .into_iter()
-            .flatten()
+        items(&v["threads"])
             .map(|t| {
                 let mut p = self.post(t, "threadId");
                 let shown = t["posts"].as_array().map_or(0, |a| a.len()) as u64;
-                let shown_files: u64 = t["posts"].as_array().into_iter().flatten().map(|r| r["files"].as_array().map_or(0, |f| f.len()) as u64).sum();
+                let shown_files: u64 = items(&t["posts"]).map(|r| r["files"].as_array().map_or(0, |f| f.len()) as u64).sum();
                 p.replies = Some((as_u64(&t["omittedPosts"]).unwrap_or(0) + shown) as u32);
                 p.images = Some((as_u64(&t["omittedFiles"]).unwrap_or(0) + shown_files) as u32);
                 p
@@ -51,7 +48,7 @@ impl Lynxchan {
     /// A thread from `/{board}/res/{no}.json`: the OP's fields plus `posts`.
     pub fn parse_thread(&self, v: &Value) -> Vec<Post> {
         let mut posts = vec![self.post(v, "threadId")];
-        posts.extend(v["posts"].as_array().into_iter().flatten().map(|p| self.post(p, "postId")));
+        posts.extend(items(&v["posts"]).map(|p| self.post(p, "postId")));
         posts
     }
 
@@ -65,28 +62,22 @@ impl Lynxchan {
         if let Some(role) = as_str(&v["signedRole"]) {
             name.push_str(&format!(" ## {role}"));
         }
-        let mut files: Vec<Attachment> = v["files"]
-            .as_array()
-            .map(|fs| {
-                fs.iter()
-                    .filter_map(|f| {
-                        let path = as_str(&f["path"])?;
-                        let (thumb, spoiler) = thumb(&f["thumb"]);
-                        Some(Attachment {
-                            filename: as_str(&f["originalName"])
-                                .unwrap_or_else(|| path.rsplit('/').next().unwrap_or("").into()),
-                            url: format!("{}{path}", self.base),
-                            thumb: thumb.map(|t| format!("{}{t}", self.base)),
-                            spoiler,
-                            width: as_u64(&f["width"]).map(|n| n as u32),
-                            height: as_u64(&f["height"]).map(|n| n as u32),
-                            size: as_u64(&f["size"]),
-                            md5: None,
-                        })
-                    })
-                    .collect()
+        let mut files: Vec<Attachment> = items(&v["files"])
+            .filter_map(|f| {
+                let path = as_str(&f["path"])?;
+                let (thumb, spoiler) = thumb(&f["thumb"]);
+                Some(Attachment {
+                    filename: as_str(&f["originalName"]).unwrap_or_else(|| path.rsplit('/').next().unwrap_or("").into()),
+                    url: format!("{}{path}", self.base),
+                    thumb: thumb.map(|t| format!("{}{t}", self.base)),
+                    spoiler,
+                    width: as_u64(&f["width"]).map(|n| n as u32),
+                    height: as_u64(&f["height"]).map(|n| n as u32),
+                    size: as_u64(&f["size"]),
+                    md5: None,
+                })
             })
-            .unwrap_or_default();
+            .collect();
         // Some catalogs (endchan) only give the OP's thumbnail, not its files.
         if files.is_empty()
             && let Some(path) = as_str(&v["thumb"])
@@ -131,10 +122,7 @@ pub fn unwrap(mut v: Value) -> Value {
 
 /// One page of `/boards.js?json=1` (already unwrapped): boards and the page count.
 pub fn parse_boards(v: &Value) -> (Vec<Board>, u64) {
-    let boards = v["boards"]
-        .as_array()
-        .into_iter()
-        .flatten()
+    let boards = items(&v["boards"])
         .filter_map(|b| {
             let uri = as_str(&b["boardUri"])?;
             let nsfw = b["specialSettings"].as_array().map(|s| !s.iter().any(|x| x.as_str() == Some("sfw")));

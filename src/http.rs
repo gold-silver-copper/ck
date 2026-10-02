@@ -373,6 +373,11 @@ pub fn as_i64(v: &Value) -> Option<i64> {
     }
 }
 
+/// The items of a JSON array (none if it isn't one).
+pub fn items(v: &Value) -> impl Iterator<Item = &Value> {
+    v.as_array().into_iter().flatten()
+}
+
 pub fn as_str(v: &Value) -> Option<String> {
     match v {
         Value::String(s) if !s.is_empty() => Some(s.clone()),

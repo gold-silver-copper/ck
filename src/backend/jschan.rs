@@ -4,7 +4,7 @@ use anyhow::Result;
 use serde_json::Value;
 
 use super::{Backend, Partial};
-use crate::http::{as_bool, as_i64, as_str, as_u64, encode_segment as enc, get_json};
+use crate::http::{as_bool, as_i64, as_str, as_u64, encode_segment as enc, get_json, items};
 use crate::markup::{self, Flavor};
 use crate::model::{Attachment, Board, Post};
 
@@ -27,7 +27,7 @@ impl Jschan {
 /// Local boards from one page of `/boards.json?local_first=true`, and whether the page
 /// already reached the webring entries (so later pages have no local boards).
 pub fn parse_boards(v: &Value) -> (Vec<Board>, bool) {
-    let list = v["boards"].as_array().cloned().unwrap_or_default();
+    let list = v["boards"].as_array().map_or(&[][..], Vec::as_slice);
     let reached_webring = list.iter().any(|b| as_bool(&b["webring"]));
     let boards = list
         .iter()
@@ -45,13 +45,13 @@ pub fn parse_boards(v: &Value) -> (Vec<Board>, bool) {
 
 /// The site-wide catalog: `{ "threads": [...] }`, each thread with its `board`.
 pub fn parse_overboard(base: &str, v: &Value) -> Vec<Post> {
-    v["threads"].as_array().into_iter().flatten().map(|t| post(base, t)).collect()
+    items(&v["threads"]).map(|t| post(base, t)).collect()
 }
 
 /// A thread from `/{board}/thread/{no}.json`: the OP with its `replies`.
 pub fn parse_thread(base: &str, v: &Value) -> Vec<Post> {
     let mut posts = vec![post(base, v)];
-    posts.extend(v["replies"].as_array().into_iter().flatten().map(|p| post(base, p)));
+    posts.extend(items(&v["replies"]).map(|p| post(base, p)));
     posts
 }
 
@@ -69,7 +69,7 @@ pub fn post(base: &str, v: &Value) -> Post {
         .map(|ms| ms / 1000)
         .or_else(|| v["date"].as_str().and_then(|d| chrono::DateTime::parse_from_rfc3339(d).ok()).map(|t| t.timestamp()))
         .unwrap_or(0);
-    let files = v["files"].as_array().into_iter().flatten().filter_map(|f| attachment(base, f)).collect();
+    let files = items(&v["files"]).filter_map(|f| attachment(base, f)).collect();
     Post {
         no: as_u64(&v["postId"]).unwrap_or(0),
         name,
@@ -134,7 +134,7 @@ impl Backend for Jschan {
             return Ok(parse_overboard(&self.base, &get_json(&format!("{}/catalog.json", self.base))?));
         }
         let v = get_json(&format!("{}/{}/catalog.json", self.base, enc(board)))?;
-        Ok(v.as_array().into_iter().flatten().map(|t| post(&self.base, t)).collect())
+        Ok(items(&v).map(|t| post(&self.base, t)).collect())
     }
 
     fn thread(&self, board: &str, no: u64) -> Result<Vec<Post>> {

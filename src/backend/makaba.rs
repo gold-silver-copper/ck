@@ -5,7 +5,7 @@ use anyhow::Result;
 use serde_json::Value;
 
 use super::{Backend, Partial};
-use crate::http::{as_bool, as_i64, as_str, as_u64, encode_segment as enc, get_json, register_media_host};
+use crate::http::{as_bool, as_i64, as_str, as_u64, encode_segment as enc, get_json, items, register_media_host};
 use crate::markup::{self, Flavor};
 use crate::model::{Attachment, Board, Post};
 
@@ -30,10 +30,7 @@ impl Makaba {
 
     /// Thread OPs from `catalog.json`.
     pub fn parse_catalog(&self, v: &Value) -> Vec<Post> {
-        v["threads"]
-            .as_array()
-            .into_iter()
-            .flatten()
+        items(&v["threads"])
             .map(|t| {
                 let mut p = self.post(t);
                 // posts_count includes the OP.
@@ -46,7 +43,7 @@ impl Makaba {
 
     /// Posts from `res/{no}.json`: `{ "threads": [{ "posts": [...] }] }`, OP first.
     pub fn parse_thread(&self, v: &Value) -> Vec<Post> {
-        v["threads"][0]["posts"].as_array().into_iter().flatten().map(|p| self.post(p)).collect()
+        items(&v["threads"][0]["posts"]).map(|p| self.post(p)).collect()
     }
 
     fn post(&self, v: &Value) -> Post {
@@ -65,7 +62,7 @@ impl Makaba {
             quotes: parsed.quotes,
             links: parsed.links,
             urls: parsed.urls,
-            files: v["files"].as_array().into_iter().flatten().filter_map(|f| self.attachment(f)).collect(),
+            files: items(&v["files"]).filter_map(|f| self.attachment(f)).collect(),
             sticky: as_bool(&v["sticky"]),
             board: as_str(&v["board"]),
             locked: as_bool(&v["closed"]),

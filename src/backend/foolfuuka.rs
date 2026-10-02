@@ -4,7 +4,7 @@ use anyhow::Result;
 use serde_json::Value;
 
 use super::{Backend, Partial, SearchPage};
-use crate::http::{as_bool, as_i64, as_str, as_u64, encode_segment as enc, get_json, register_media_host};
+use crate::http::{as_bool, as_i64, as_str, as_u64, encode_segment as enc, get_json, items, register_media_host};
 use crate::markup::{self, Flavor};
 use crate::model::{Attachment, Board, Post};
 
@@ -53,7 +53,7 @@ pub fn parse_index(v: &Value) -> Vec<Post> {
         .flat_map(|m| m.values())
         .filter_map(|t| {
             let mut op = post(&t["op"])?;
-            let last = t["posts"].as_array().cloned().unwrap_or_default();
+            let last = t["posts"].as_array().map_or(&[][..], Vec::as_slice);
             let bumped = last.iter().filter_map(|p| as_i64(&p["timestamp"])).max().unwrap_or(op.time);
             let shown_images = last.iter().filter(|p| p["media"].is_object()).count() as u64;
             op.replies = Some((as_u64(&t["omitted"]).unwrap_or(0) + last.len() as u64) as u32);
@@ -84,10 +84,7 @@ pub fn parse_search(v: &Value) -> Result<SearchPage> {
         }
         anyhow::bail!("{}", markup::decode(&e));
     }
-    let hits = v["0"]["posts"]
-        .as_array()
-        .into_iter()
-        .flatten()
+    let hits = items(&v["0"]["posts"])
         .filter_map(|p| Some((as_u64(&p["thread_num"])?, post(p)?)))
         .collect();
     Ok(SearchPage { hits, total: as_u64(&v["meta"]["total_found"]) })

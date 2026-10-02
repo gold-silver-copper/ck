@@ -4,7 +4,7 @@ use anyhow::{Result, bail};
 use serde_json::Value;
 
 use super::{Backend, Partial};
-use crate::http::{as_bool, as_i64, as_str, as_u64, encode_segment as enc, get_json};
+use crate::http::{as_bool, as_i64, as_str, as_u64, encode_segment as enc, get_json, items};
 use crate::markup;
 use crate::model::{Attachment, Board, Post};
 
@@ -127,13 +127,9 @@ impl Futaba {
         let own_board = as_str(&v["board"]);
         let board = own_board.as_deref().unwrap_or(board);
         let mut files: Vec<_> = self.attachment(board, v).into_iter().collect();
-        if let Some(extra) = v["extra_files"].as_array() {
-            files.extend(extra.iter().filter_map(|f| self.attachment(board, f)));
-        }
+        files.extend(items(&v["extra_files"]).filter_map(|f| self.attachment(board, f)));
         // Newer vichan forks (leftypol) list files with their paths instead.
-        if let Some(list) = v["files"].as_array() {
-            files.extend(list.iter().filter_map(|f| self.path_attachment(f)));
-        }
+        files.extend(items(&v["files"]).filter_map(|f| self.path_attachment(f)));
         Post {
             no: as_u64(&v["no"]).unwrap_or(0),
             name,
@@ -157,33 +153,26 @@ impl Futaba {
 
 /// Boards from `boards.json`: `{ "boards": [...] }` (4chan), or a bare list (8kun).
 pub fn parse_boards(v: &Value) -> Vec<Board> {
-    let list = v["boards"].as_array().or(v.as_array()).cloned().unwrap_or_default();
-    list.iter()
-        .filter_map(|b| {
-            Some(Board {
-                uri: as_str(&b["board"]).or_else(|| as_str(&b["uri"]))?,
-                title: as_str(&b["title"]).map(|t| markup::decode(t.trim())).unwrap_or_default(),
-                nsfw: b.get("ws_board").or(b.get("sfw")).map(|w| !as_bool(w)),
-            })
+    let list = v["boards"].as_array().or(v.as_array()).into_iter().flatten();
+    list.filter_map(|b| {
+        Some(Board {
+            uri: as_str(&b["board"]).or_else(|| as_str(&b["uri"]))?,
+            title: as_str(&b["title"]).map(|t| markup::decode(t.trim())).unwrap_or_default(),
+            nsfw: b.get("ws_board").or(b.get("sfw")).map(|w| !as_bool(w)),
         })
-        .collect()
+    })
+    .collect()
 }
 
 impl Futaba {
     /// Thread OPs from `catalog.json`: an array of pages with `threads`.
     pub fn parse_catalog(&self, board: &str, v: &Value) -> Vec<Post> {
-        let pages = v.as_array().cloned().unwrap_or_default();
-        pages
-            .iter()
-            .flat_map(|p| p["threads"].as_array().cloned().unwrap_or_default())
-            .map(|t| self.post(board, &t))
-            .collect()
+        items(v).flat_map(|p| items(&p["threads"])).map(|t| self.post(board, t)).collect()
     }
 
     /// Posts from a thread's JSON: `{ "posts": [...] }`, OP first.
     pub fn parse_thread(&self, board: &str, v: &Value) -> Vec<Post> {
-        let posts = v["posts"].as_array().cloned().unwrap_or_default();
-        posts.iter().map(|p| self.post(board, p)).collect()
+        items(&v["posts"]).map(|p| self.post(board, p)).collect()
     }
 }
 
