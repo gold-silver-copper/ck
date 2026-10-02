@@ -272,9 +272,9 @@ impl App {
         }
     }
 
-    /// Keys while a settings popup is open. Returns false if there's none.
-    pub fn on_settings_popup_key(&mut self, key: KeyEvent) -> bool {
-        let Some(popup) = self.settings.popup.take() else { return false };
+    /// Keys while a settings popup is open.
+    pub fn on_settings_popup_key(&mut self, key: KeyEvent) {
+        let Some(popup) = self.settings.popup.take() else { return };
         self.settings.popup = match popup {
             Popup::Themes { mut list, names, before } => match key.code {
                 KeyCode::Esc | KeyCode::Char('q') => {
@@ -412,7 +412,6 @@ impl App {
                 _ => Some(Popup::Folder { value }),
             },
         };
-        true
     }
 
     /// Bind a key to the action selected in the key editor (replacing its keys, or added to

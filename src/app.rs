@@ -450,6 +450,22 @@ pub enum Hit {
     Settings { area: Rect, offset: usize },
 }
 
+/// A popup or input box that takes the keys (see `App::modal`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Modal {
+    Settings,
+    Help,
+    ImageSearch,
+    Viewer,
+    Preview,
+    Gallery,
+    Links,
+    Goto,
+    SearchInput,
+    Searching,
+    Filtering,
+}
+
 /// A message in the footer, for a moment (errors a little longer).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Status {
@@ -1687,14 +1703,15 @@ impl App {
         let down = matches!(ev.kind, MouseEventKind::ScrollDown);
         if matches!(ev.kind, MouseEventKind::ScrollDown | MouseEventKind::ScrollUp) {
             let key = |c| KeyEvent::from(if c { KeyCode::Down } else { KeyCode::Up });
-            if self.show_help || self.viewer.is_some() || self.preview.is_some() || self.links.is_some() || self.image_search_panel.is_some() {
-                self.on_key(key(down));
-            } else if self.view == View::Thread {
-                if let Some(t) = &mut self.thread {
-                    t.scroll_lines(if down { 3 } else { -3 });
+            match self.modal() {
+                Some(Modal::Help | Modal::Viewer | Modal::Preview | Modal::Links | Modal::ImageSearch) => self.on_key(key(down)),
+                _ if self.view == View::Thread => {
+                    if let Some(t) = &mut self.thread {
+                        t.scroll_lines(if down { 3 } else { -3 });
+                    }
                 }
-            } else if !self.filtering && !self.searching {
-                self.on_key(key(down));
+                _ if !self.filtering && !self.searching => self.on_key(key(down)),
+                _ => {}
             }
             return;
         }
@@ -1706,18 +1723,22 @@ impl App {
             self.switch_tab(i);
             return;
         }
-        if self.links.is_some() {
-            self.on_links_click(ev.column, ev.row, now);
-            return;
+        match self.modal() {
+            Some(Modal::Links) => return self.on_links_click(ev.column, ev.row, now),
+            Some(Modal::ImageSearch) => return self.on_image_search_click(ev.column, ev.row),
+            Some(Modal::Help | Modal::Preview) => {
+                // Clicking anywhere closes a popup.
+                self.show_help = false;
+                self.preview = None;
+                return;
+            }
+            Some(Modal::Viewer | Modal::Searching | Modal::Filtering) => return,
+            Some(Modal::Gallery | Modal::Settings | Modal::Goto | Modal::SearchInput) | None => {}
         }
-        if self.image_search_panel.is_some() {
-            self.on_image_search_click(ev.column, ev.row);
-            return;
-        }
-        if self.gallery.is_some() && self.view == View::Thread && self.viewer.is_none() {
-            let Some(target) = self.click_target(ev.column, ev.row) else { return };
-            let double = self.last_click.is_some_and(|(t, i)| i == target && now.duration_since(t) < Duration::from_millis(400));
-            self.last_click = if double { None } else { Some((now, target)) };
+        let Some(target) = self.click_target(ev.column, ev.row) else { return };
+        let double = self.last_click.is_some_and(|(t, i)| i == target && now.duration_since(t) < Duration::from_millis(400));
+        self.last_click = if double { None } else { Some((now, target)) };
+        if self.modal() == Some(Modal::Gallery) {
             if let Some(g) = &mut self.gallery
                 && target < g.files.len()
             {
@@ -1726,21 +1747,7 @@ impl App {
                     self.view_from_gallery(target);
                 }
             }
-            return;
-        }
-        if self.show_help || self.preview.is_some() {
-            // Clicking anywhere closes a popup.
-            self.show_help = false;
-            self.preview = None;
-            return;
-        }
-        if self.viewer.is_some() || self.filtering || self.searching {
-            return;
-        }
-        let Some(target) = self.click_target(ev.column, ev.row) else { return };
-        let double = self.last_click.is_some_and(|(t, i)| i == target && now.duration_since(t) < Duration::from_millis(400));
-        self.last_click = if double { None } else { Some((now, target)) };
-        if self.view == View::Thread {
+        } else if self.view == View::Thread {
             if let Some(t) = &mut self.thread {
                 t.set_cursor(target);
             }
@@ -1755,6 +1762,25 @@ impl App {
                 self.enter();
             }
         }
+    }
+
+    /// What's capturing input, topmost first (the viewer can be open over the gallery, and
+    /// image search over the viewer). It gets every key; clicks go to it or close it.
+    fn modal(&self) -> Option<Modal> {
+        let open = [
+            (self.settings.popup.is_some(), Modal::Settings),
+            (self.show_help, Modal::Help),
+            (self.image_search_panel.is_some(), Modal::ImageSearch),
+            (self.viewer.is_some(), Modal::Viewer),
+            (self.preview.is_some(), Modal::Preview),
+            (self.gallery.is_some() && self.view == View::Thread, Modal::Gallery),
+            (self.links.is_some(), Modal::Links),
+            (self.goto.is_some(), Modal::Goto),
+            (self.search_input.is_some(), Modal::SearchInput),
+            (self.searching, Modal::Searching),
+            (self.filtering, Modal::Filtering),
+        ];
+        open.into_iter().find_map(|(on, modal)| on.then_some(modal))
     }
 
     /// The list row or thread post at a screen position.
@@ -1887,57 +1913,30 @@ impl App {
             self.quit = true;
             return;
         }
-        if self.on_settings_popup_key(key) {
-            return;
-        }
-        if self.show_help {
-            match key.code {
-                KeyCode::Char('j') | KeyCode::Down => self.help_scroll = self.help_scroll.saturating_add(1),
-                KeyCode::Char('k') | KeyCode::Up => self.help_scroll = self.help_scroll.saturating_sub(1),
-                _ => {
-                    self.show_help = false;
-                    self.help_scroll = 0;
-                }
+        if let Some(modal) = self.modal() {
+            match modal {
+                Modal::Settings => self.on_settings_popup_key(key),
+                Modal::Help => match key.code {
+                    KeyCode::Char('j') | KeyCode::Down => self.help_scroll = self.help_scroll.saturating_add(1),
+                    KeyCode::Char('k') | KeyCode::Up => self.help_scroll = self.help_scroll.saturating_sub(1),
+                    _ => {
+                        self.show_help = false;
+                        self.help_scroll = 0;
+                    }
+                },
+                Modal::ImageSearch => self.on_image_search_key(key.code),
+                Modal::Viewer => match self.keys.action(Scope::Viewer, &key) {
+                    Some(action) => self.act(action),
+                    None => self.on_viewer_key(key.code),
+                },
+                Modal::Preview => self.on_preview_key(key.code),
+                Modal::Gallery => self.on_gallery_key(key),
+                Modal::Links => self.on_links_key(key.code),
+                Modal::Goto => self.on_goto_key(key),
+                Modal::SearchInput => self.on_search_input_key(key),
+                Modal::Searching => self.on_search_key(key),
+                Modal::Filtering => self.on_filter_key(key),
             }
-            return;
-        }
-        if self.image_search_panel.is_some() {
-            self.on_image_search_key(key.code);
-            return;
-        }
-        if self.viewer.is_some() {
-            match self.keys.action(Scope::Viewer, &key) {
-                Some(action) => self.act(action),
-                None => self.on_viewer_key(key.code),
-            }
-            return;
-        }
-        if self.preview.is_some() {
-            self.on_preview_key(key.code);
-            return;
-        }
-        if self.gallery.is_some() && self.view == View::Thread {
-            self.on_gallery_key(key);
-            return;
-        }
-        if self.links.is_some() {
-            self.on_links_key(key.code);
-            return;
-        }
-        if self.goto.is_some() {
-            self.on_goto_key(key);
-            return;
-        }
-        if self.search_input.is_some() {
-            self.on_search_input_key(key);
-            return;
-        }
-        if self.searching {
-            self.on_search_key(key);
-            return;
-        }
-        if self.filtering {
-            self.on_filter_key(key);
             return;
         }
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
