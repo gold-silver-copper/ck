@@ -271,8 +271,9 @@ impl Store {
         write_atomic(&dir.join("session.json"), &serde_json::to_vec_pretty(session)?)
     }
 
-    pub fn is_hidden(&self, site: &str, board: &str, no: u64) -> bool {
-        self.hidden.get(&format!("{site}/{board}")).is_some_and(|v| v.contains(&no))
+    /// What's hidden by hand on a board.
+    pub fn hidden_on(&self, site: &str, board: &str) -> std::collections::HashSet<u64> {
+        self.hidden.get(&format!("{site}/{board}")).into_iter().flatten().copied().collect()
     }
 
     /// Hide a thread or post, or unhide it; returns whether it's hidden now.
@@ -416,17 +417,17 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let (mut s, _) = Store::load(Some(dir.path().to_path_buf()));
         assert!(s.toggle_hidden("4chan", "g", 5));
-        assert!(s.is_hidden("4chan", "g", 5) && !s.is_hidden("4chan", "v", 5));
+        assert!(s.hidden_on("4chan", "g").contains(&5) && !s.hidden_on("4chan", "v").contains(&5));
         s.save().unwrap();
         let (mut s, w) = Store::load(Some(dir.path().to_path_buf()));
-        assert!(w.is_empty() && s.is_hidden("4chan", "g", 5));
+        assert!(w.is_empty() && s.hidden_on("4chan", "g").contains(&5));
         assert!(!s.toggle_hidden("4chan", "g", 5));
         assert!(s.hidden.is_empty());
         // Bounded per board, oldest out first.
         for no in 0..HIDDEN_PER_BOARD as u64 + 2 {
             s.toggle_hidden("4chan", "g", no);
         }
-        assert!(!s.is_hidden("4chan", "g", 0) && !s.is_hidden("4chan", "g", 1) && s.is_hidden("4chan", "g", 2));
+        assert!(!s.hidden_on("4chan", "g").contains(&0) && !s.hidden_on("4chan", "g").contains(&1) && s.hidden_on("4chan", "g").contains(&2));
     }
 
     #[test]

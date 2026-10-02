@@ -1345,13 +1345,20 @@ impl App {
 
     // ----- filters and hiding -----
 
-    fn mark(&self, board: &str, p: &Post) -> Mark {
+    /// What filters and hiding by hand say about posts (on the board `board_of` gives each).
+    fn marks(&self, posts: &[Post], board_of: impl Fn(&Post) -> String) -> Vec<Mark> {
         let site = &self.current_site().cfg.name;
-        let mut m = self.filters.check(site, board, p);
-        if m.hidden.is_none() && self.store.is_hidden(site, board, p.no) {
-            m.hidden = Some(String::new());
-        }
-        m
+        let mut hidden: HashMap<String, HashSet<u64>> = HashMap::new();
+        let mark = |p: &Post| {
+            let board = board_of(p);
+            let mut m = self.filters.check(site, &board, p);
+            let by_hand = hidden.entry(board).or_insert_with_key(|b| self.store.hidden_on(site, b));
+            if m.hidden.is_none() && by_hand.contains(&p.no) {
+                m.hidden = Some(String::new());
+            }
+            m
+        };
+        posts.iter().map(mark).collect()
     }
 
     /// Note which catalog threads are new since the last visit (and remember them all).
@@ -1372,7 +1379,7 @@ impl App {
     }
 
     pub fn remark_catalog(&mut self) {
-        let marks = self.catalog.iter().map(|p| self.mark(&self.board_of(p), p)).collect();
+        let marks = self.marks(&self.catalog, |p| self.board_of(p));
         self.catalog_marks = marks;
     }
 
@@ -1384,7 +1391,7 @@ impl App {
 
     pub fn remark_thread(&mut self) {
         let Some(t) = &self.thread else { return };
-        let marks = t.posts.iter().map(|p| self.mark(&t.board, p)).collect();
+        let marks = self.marks(&t.posts, |_| t.board.clone());
         let mine = self.store.watched(&self.key(&t.board, t.no)).map(|w| w.mine.iter().copied().collect()).unwrap_or_default();
         let show = self.show_hidden;
         if let Some(t) = &mut self.thread {
@@ -3082,7 +3089,7 @@ mod tests {
         app.catalog_list.state.select(Some(1));
         app.act(Action::Hide);
         assert_eq!(app.visible_catalog(), [1]);
-        assert!(app.store.is_hidden("a", "x", 3));
+        assert!(app.store.hidden_on("a", "x").contains(&3));
         // Z shows them all, keeping the selection on the same thread.
         app.act(Action::ShowHidden);
         assert_eq!(app.visible_catalog(), [0, 1, 2]);
@@ -3092,7 +3099,7 @@ mod tests {
         assert!(app.status.as_ref().unwrap().0.contains("filter \"spam\""));
         app.catalog_list.state.select(Some(2));
         app.act(Action::Hide);
-        assert!(!app.store.is_hidden("a", "x", 3));
+        assert!(!app.store.hidden_on("a", "x").contains(&3));
         app.act(Action::ShowHidden);
         // In a thread, hidden posts collapse (never the OP).
         let mut reply = op(11, "");
