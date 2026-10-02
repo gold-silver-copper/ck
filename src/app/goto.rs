@@ -20,7 +20,7 @@ impl App {
         }
     }
 
-    fn go(&mut self, target: Target) {
+    pub(super) fn go(&mut self, target: Target) {
         let from_thread = self.view == View::Thread;
         // `u` comes back to the thread this was opened from.
         if let (Some(t), Some(b)) = (&self.thread, &self.board)

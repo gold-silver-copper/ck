@@ -50,6 +50,7 @@ pub enum Action {
     NextTab,
     PrevTab,
     CloseTab,
+    Favorite,
 }
 
 /// Where a key applies. Global keys work in every view but the image viewer.
@@ -119,7 +120,8 @@ pub const ACTIONS: &[(Action, &str, &str, &[Scope], &str)] = &[
     (Action::Expand, "expand", "e", &[Scope::Thread], "show / hide the post's replies under it"),
     (Action::Mine, "mine", "m", &[Scope::Thread], "mark the post as yours (notified of replies)"),
     (Action::NewTab, "new_tab", "T", &[Scope::Catalog, Scope::Thread, Scope::Saved], "open the thread (or link) in a new tab"),
-    (Action::Remove, "remove", "x", &[Scope::Saved], "remove the entry"),
+    (Action::Favorite, "favorite", "*", &[Scope::Lists, Scope::Catalog], "favorite board: on / off"),
+    (Action::Remove, "remove", "x", &[Scope::Saved, Scope::Lists], "remove the entry (home: a favorite)"),
     (Action::Copy, "copy", "y", &[Scope::Catalog, Scope::Thread, Scope::Saved, Scope::Viewer], "copy the text (viewer: file URL)"),
     (Action::CopyLink, "copy_link", "Y", &[Scope::Catalog, Scope::Thread, Scope::Saved, Scope::Viewer], "copy the link"),
 ];
@@ -263,6 +265,8 @@ fn fixed(scope: Scope) -> Vec<Key> {
     let chars: &[char] = match scope {
         Scope::Thread => &['j', 'k', 'g', 'G', 'h', 'l', 'J', 'K', ' '],
         Scope::Viewer => &['j', 'k', 'h', 'l', 'i', 'q', 'v', ' '],
+        // The home screen opens favorites with 1-9.
+        Scope::Lists => &['j', 'k', 'g', 'G', 'h', 'l', '1', '2', '3', '4', '5', '6', '7', '8', '9'],
         _ => &['j', 'k', 'g', 'G', 'h', 'l'],
     };
     keys.extend(chars.iter().map(|&c| Key::char(c)));
@@ -403,7 +407,7 @@ mod tests {
         assert_eq!(m.action(Scope::Catalog, &ch('s')), Some(Action::Sort));
         assert_eq!(m.action(Scope::Thread, &ch('s')), Some(Action::Spoiler));
         assert_eq!(m.action(Scope::Saved, &ch('q')), Some(Action::Quit));
-        assert_eq!(m.action(Scope::Lists, &ch('x')), None);
+        assert_eq!(m.action(Scope::Lists, &ch('z')), None);
         // Global keys don't apply in the image viewer, which has its own.
         assert_eq!(m.action(Scope::Viewer, &ch('q')), None);
         // Shift is part of the character.

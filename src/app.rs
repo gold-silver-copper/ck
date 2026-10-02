@@ -25,12 +25,14 @@ use crate::theme::{self, ThemeDef, ThemeSetting};
 
 mod gallery;
 mod goto;
+mod home;
 mod links;
 mod search;
 mod session;
 mod tabs;
 mod settings;
 pub use gallery::Gallery;
+pub use home::BoardRef;
 pub use links::{ImageSearchPanel, LinkItem, LinksPanel};
 pub use search::Search;
 pub use tabs::{MAX_TABS, Tab};
@@ -86,11 +88,13 @@ impl Sort {
     }
 }
 
-/// A row of the Sites view: the Watched and History lists come first.
+/// A row of the home screen (the Sites view): Watched and History, favorite boards, then
+/// the sites.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SiteRow {
     Watched,
     History,
+    Favorite(usize),
     Site(usize),
 }
 
@@ -512,6 +516,9 @@ pub struct App {
     pub sites: Vec<Site>,
     pub view: View,
     pub site_list: Picker,
+    /// Favorite boards (from the config), and board titles for the home screen.
+    pub favorites: Vec<BoardRef>,
+    pub home_titles: HashMap<String, String>,
     pub board_list: Picker,
     pub catalog_list: Picker,
     pub catalog_sort: Sort,
@@ -671,6 +678,8 @@ impl App {
             sites,
             view: View::Sites,
             site_list: Picker::default(),
+            favorites: cfg.favorites.iter().filter_map(|f| BoardRef::parse(f)).collect(),
+            home_titles: HashMap::new(),
             board_list: Picker::default(),
             catalog_list: Picker::default(),
             catalog_sort: Sort::default(),
@@ -765,6 +774,7 @@ impl App {
             rx,
         };
         app.site_list.state.select(Some(0));
+        app.refresh_home_titles();
         app.watched_list.state.select(Some(0));
         app.history_list.state.select(Some(0));
         app.settings_list.state.select(Some(0));
@@ -774,11 +784,18 @@ impl App {
     // ----- visible (filtered) items -----
 
     pub fn visible_sites(&self) -> Vec<SiteRow> {
-        let rows: Vec<SiteRow> =
-            [SiteRow::Watched, SiteRow::History].into_iter().chain((0..self.sites.len()).map(SiteRow::Site)).collect();
+        let rows: Vec<SiteRow> = [SiteRow::Watched, SiteRow::History]
+            .into_iter()
+            .chain((0..self.favorites.len()).map(SiteRow::Favorite))
+            .chain((0..self.sites.len()).map(SiteRow::Site))
+            .collect();
         let names = rows.iter().map(|r| match r {
             SiteRow::Watched => "Watched".to_string(),
             SiteRow::History => "History".to_string(),
+            SiteRow::Favorite(i) => {
+                let f = &self.favorites[*i];
+                format!("{} /{}/ {}", f.site, f.board, self.board_title(f))
+            }
             SiteRow::Site(i) => self.sites[*i].cfg.name.clone(),
         });
         filtered(&self.site_list.filter, names).into_iter().map(|i| rows[i]).collect()
@@ -1134,6 +1151,9 @@ impl App {
         if site == self.site {
             let len = self.visible_boards().len();
             self.board_list.clamp(len);
+        }
+        if complete {
+            self.refresh_home_titles();
         }
     }
 
@@ -1840,6 +1860,7 @@ impl App {
                 }
             }
             _ if self.view == View::Catalog && self.grid_cols > 0 && self.on_grid_key(key.code) => {}
+            KeyCode::Char(c @ '1'..='9') if self.view == View::Sites => self.open_favorite(c as usize - '1' as usize),
             KeyCode::Char('h') | KeyCode::Left | KeyCode::Backspace => self.back(),
             _ if self.view == View::Thread => self.on_thread_key(key.code, ctrl),
             KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right => self.enter(),
@@ -1900,6 +1921,7 @@ impl App {
             Action::ArchiveSearch => self.start_archive_search(),
             Action::ImageSearch => self.open_image_search(),
             Action::NewTab => self.new_tab(),
+            Action::Favorite => self.toggle_favorite(),
             Action::NextTab => self.cycle_tab(true),
             Action::PrevTab => self.cycle_tab(false),
             Action::CloseTab => self.close_tab(),
@@ -2281,6 +2303,13 @@ impl App {
     }
 
     fn remove_entry(&mut self) {
+        if self.view == View::Sites {
+            if let Some(SiteRow::Favorite(i)) = self.selected_site_row() {
+                let f = self.favorites.remove(i);
+                self.save_favorites(&format!("/{}/ off the favorites", f.board));
+            }
+            return;
+        }
         let Some(i) = self.selected_index() else { return };
         match self.view {
             View::Watched => {
@@ -2322,6 +2351,7 @@ impl App {
             match self.site_list.state.selected().and_then(|i| self.visible_sites().get(i).copied()) {
                 Some(SiteRow::Watched) => self.view = View::Watched,
                 Some(SiteRow::History) => self.view = View::History,
+                Some(SiteRow::Favorite(i)) => self.open_favorite(i),
                 Some(SiteRow::Site(i)) => self.enter_site(i),
                 None => {}
             }
@@ -3301,6 +3331,42 @@ mod tests {
         assert_eq!((next.tabs.len(), next.active, next.view, next.pending_thread), (2, 1, View::Thread, 2));
         next.switch_tab(0);
         assert_eq!((next.view, next.board.as_ref().unwrap().uri.as_str()), (View::Catalog, "x"));
+    }
+
+    #[test]
+    fn favorite_boards_on_the_home_screen() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = local_app();
+        app.config_path = Some(dir.path().join("config.toml"));
+        // * in Boards on the selected board, and in a catalog on its board.
+        app.switch_site(1);
+        app.view = View::Boards;
+        app.board_list.state.select(Some(0));
+        app.act(Action::Favorite);
+        app.goto_str("a/xy");
+        app.act(Action::Favorite);
+        assert_eq!(app.favorites.iter().map(BoardRef::key).collect::<Vec<_>>(), ["b/y", "a/xy"]);
+        let c: Config = toml::from_str(&std::fs::read_to_string(dir.path().join("config.toml")).unwrap()).unwrap();
+        assert_eq!(c.favorites, ["b/y", "a/xy"]);
+        // They're on the home screen after Watched and History; 2 opens the second.
+        app.view = View::Sites;
+        assert_eq!(app.visible_sites()[2..4], [SiteRow::Favorite(0), SiteRow::Favorite(1)]);
+        app.on_key(KeyEvent::from(KeyCode::Char('1')));
+        assert_eq!((app.site, app.view, app.board.as_ref().unwrap().uri.as_str()), (1, View::Catalog, "y"));
+        app.view = View::Sites;
+        app.on_key(KeyEvent::from(KeyCode::Char('2')));
+        assert_eq!((app.site, app.board.as_ref().unwrap().uri.as_str()), (0, "xy"));
+        // x on a favorite row takes it off; * again on the board does too.
+        app.view = View::Sites;
+        app.site_list.state.select(Some(2));
+        app.act(Action::Remove);
+        assert_eq!(app.favorites.len(), 1);
+        app.goto_str("a/xy");
+        app.act(Action::Favorite);
+        assert!(app.favorites.is_empty());
+        app.view = View::Sites;
+        app.on_key(KeyEvent::from(KeyCode::Char('3')));
+        assert!(app.status.as_ref().unwrap().0.contains("No favorites yet"));
     }
 
     #[test]

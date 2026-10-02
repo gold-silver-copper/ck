@@ -76,6 +76,14 @@ the action name is in brackets. The `?` help lists the same, with your keys.
 | `?`  | help [`help`] |
 | `q`, ctrl-c | quit [`quit`] |
 
+**Home screen, Boards**
+
+| key  | action |
+|------|--------|
+| `1`–`9` | open a favorite board (home screen) |
+| `*`  | favorite board on / off (also in a catalog) [`favorite`] |
+| `x`  | on the home screen: take a favorite off [`remove`] |
+
 **Watched, History**
 
 | key  | action |
@@ -135,6 +143,13 @@ file of the thread), `d` saves the file, `esc` returns to its post.
 Copying uses the terminal's clipboard escape (OSC 52), which also works over SSH; in tmux it
 needs `set -g set-clipboard on`. On a local machine ck also uses `pbcopy`, `wl-copy`,
 `xclip` or `xsel` when one is installed.
+
+### The home screen
+
+`ck` starts on the home screen: Watched and History, your favorite boards, then the sites.
+`*` on a board (in the Boards list, or in its catalog) makes it a favorite; favorites are
+listed at the top, and `1`–`9` open the first nine directly. `x` on a favorite takes it
+off. They're kept in the config as `favorites = ["4chan/g", "lainchan/λ"]`.
 
 ### Tabs
 
@@ -370,6 +385,7 @@ All settings are optional; see `config.example.toml` for every option with comme
 - `restore_session = false` to start at the site list instead of where you left off (the
   view, thread and selected post, catalog sort and filter, saved in the data directory
   as `session.json`). `ck URL` always starts at the URL.
+- `favorites = ["4chan/g", ...]`: favorite boards, see [The home screen](#the-home-screen).
 - `notify = "auto" | "bell" | "off"`, `notify_command = [...]`: see
   [Notifications](#notifications).
 - `[[filter]]`: hide or highlight threads and posts, see [Filters](#filters-and-hiding).

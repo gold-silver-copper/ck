@@ -21,6 +21,9 @@ pub struct Config {
     /// Seconds between background refreshes of each watched thread (at least 60).
     #[serde(default = "default_refresh_watched")]
     pub refresh_watched_secs: u64,
+    /// Favorite boards, `site/board`, shown at the top of the home screen.
+    #[serde(default)]
+    pub favorites: Vec<String>,
     /// Start where the last run left off.
     #[serde(default = "default_true")]
     pub restore_session: bool,

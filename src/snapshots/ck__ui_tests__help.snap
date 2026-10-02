@@ -4,7 +4,7 @@ expression: snapshot(&mut a)
 ---
  ck  Sites                                                                                 23 sites
                          Keys                       images: off · esc close
-    ★  Watched
+    ◉  Watched
     ◷  History           Everywhere
        4chan               j k g G, ↑ ↓       move, top / bottom
        lainchan            ctrl-d / ctrl-u    half page down / up

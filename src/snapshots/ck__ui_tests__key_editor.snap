@@ -18,15 +18,15 @@ expression: snapshot(&mut a)
       shift-tab       prev_tab         previous tab                         everywhere
       ctrl-w          close_tab        close the tab                        everywhere
 
+    Lists
+      *               favorite         favorite board: on / off             lists, catalog
+
     Catalog
       v               view             view the post's images               catalog, thread
       w               watch            watch / unwatch the thread           catalog, thread
       s               sort             cycle the sort order                 catalog
       c               compact          layout: cards, compact, grid         catalog
       f               archive_search   search the board's archive           catalog
-      O               links            the post's links and files           catalog, thread
-      H               hide             hide / unhide the thread or post     catalog, thread
-      Z               show_hidden      show hidden threads and posts        catalog, thread
 
     Changed keys are saved in [keys]; navigation keys are fixed.
 

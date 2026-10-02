@@ -44,6 +44,10 @@ color = "auto"
 refresh_thread_secs = 10
 refresh_watched_secs = 60
 
+# Favorite boards, shown at the top of the home screen (1-9 open them). * on a board adds
+# or removes one, and saves the list here.
+favorites = []
+
 # Start where you left off: the same view, thread and selected post as when ck quit.
 restore_session = true
 
@@ -294,6 +298,7 @@ url = "https://arch.b4k.dev"
 #               all_spoilers = "S", download = "d", download_thread = "D", export = "E",
 #               archive = "a"
 #   catalog, thread, Watched/History: new_tab = "T"
+#   home screen, Boards: favorite = "*"; remove = "x" takes a favorite off
 #   Watched/History: remove = "x"
 #   catalog, thread, Watched/History, image viewer: copy = "y", copy_link = "Y"
 [keys]

@@ -522,3 +522,12 @@ fn narrow_screens() {
     let (text, _) = render_at(&mut a, 40, 20);
     assert!(text.contains("Search for this image") && !text.contains("imageenter"), "{text}");
 }
+
+#[test]
+fn home_with_favorites() {
+    let mut a = app(false);
+    a.favorites = vec![crate::app::BoardRef::parse("4chan/g").unwrap(), crate::app::BoardRef::parse("lainchan/λ").unwrap()];
+    a.home_titles.insert("4chan/g".into(), "Technology".into());
+    a.site_list.state.select(Some(2));
+    insta::assert_snapshot!(snapshot(&mut a));
+}

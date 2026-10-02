@@ -495,6 +495,7 @@ fn spread(mut left: Vec<Span<'static>>, right: Vec<Span<'static>>, width: usize)
 
 fn draw_sites(f: &mut Frame, app: &mut App, area: Rect) {
     let t = theme();
+    let width = area.width.saturating_sub(PAD + 1) as usize;
     let items: Vec<Vec<Line>> = app
         .visible_sites()
         .into_iter()
@@ -503,7 +504,7 @@ fn draw_sites(f: &mut Frame, app: &mut App, area: Rect) {
                 let n = app.store.watched.len();
                 let unread: usize = app.store.watched.iter().map(|w| w.unread).sum();
                 let mut spans = vec![
-                    Span::styled("★  ", Style::new().fg(t.primary)),
+                    Span::styled("◉  ", Style::new().fg(t.primary)),
                     Span::styled(format!("{:<16}", "Watched"), bold(t.text)),
                     Span::styled(plural(n, "thread"), dim()),
                 ];
@@ -518,6 +519,17 @@ fn draw_sites(f: &mut Frame, app: &mut App, area: Rect) {
                 Span::styled(format!("{:<16}", "History"), bold(t.text)),
                 Span::styled(format!("{} recent", plural(app.store.history.len(), "thread")), dim()),
             ])],
+            SiteRow::Favorite(i) => {
+                let b = &app.favorites[i];
+                let left = vec![
+                    Span::styled("★  ", Style::new().fg(t.primary)),
+                    Span::styled(format!("{:<16}", truncate(&format!("{} /{}/", b.site, b.board), 15)), bold(t.text)),
+                    Span::styled(app.board_title(b).to_string(), dim()),
+                ];
+                // 1-9 open the first nine.
+                let key = if i < 9 { vec![chip(format!("{}", i + 1), t.text_dim, t.surface_high)] } else { Vec::new() };
+                vec![spread(left, key, width)]
+            }
             SiteRow::Site(i) => {
                 let s = &app.sites[i];
                 let url = s.cfg.url.clone().unwrap_or_else(|| "https://4chan.org".into());
