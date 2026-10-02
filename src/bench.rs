@@ -113,9 +113,11 @@ fn file(url: &str) -> Attachment {
 fn bench_images() {
     eprintln!("\n== images: UI-thread cost of the first frame showing a decoded image ==");
     for proto in [ProtocolType::Halfblocks, ProtocolType::Sixel, ProtocolType::Kitty] {
-        // The viewer showing a 2048x1536 image for the first time.
+        // The viewer showing a 2048x1536 image for the first time, and the frame that first
+        // draws the finished encoding (encoding itself runs on the encoder thread).
         let mut worst = Duration::ZERO;
         let mut total = Duration::ZERO;
+        let mut shown = Duration::ZERO;
         let runs = 5;
         for _ in 0..runs {
             let mut a = app();
@@ -128,9 +130,23 @@ fn bench_images() {
             let d = start.elapsed();
             worst = worst.max(d);
             total += d;
+            // Wait for the encoder, then time the frame that shows the image.
+            for _ in 0..500 {
+                a.images.poll();
+                let text: String = t.backend().buffer().content().iter().map(|c| c.symbol()).collect();
+                if !text.contains("Rendering") {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(2));
+                draw(&mut t, &mut a);
+            }
+            let start = Instant::now();
+            draw(&mut t, &mut a);
+            shown += start.elapsed();
         }
         report(&format!("{proto:?}: viewer, first frame (avg)"), total / runs);
         report(&format!("{proto:?}: viewer, first frame (worst)"), worst);
+        report(&format!("{proto:?}: viewer, frame showing the encoded image"), shown / runs);
 
         // A thread screen where 3 thumbnails just finished loading.
         let posts: Vec<Post> = (0..3)

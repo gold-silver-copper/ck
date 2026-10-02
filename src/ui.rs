@@ -496,7 +496,7 @@ fn draw_thumb(f: &mut Frame, images: &mut Images, file: &Attachment, area: Rect)
             let r = Rect::new(area.x + (area.width - s.width.min(area.width)) / 2, area.y, s.width, s.height);
             f.render_widget(Image::new(p), r.intersection(area));
         }
-        State::Loading => mark(f, "…", dim()),
+        State::Loading | State::Rendering => mark(f, "…", dim()),
         State::Failed => mark(f, "✗", Style::new().fg(Color::Red)),
     }
 }
@@ -679,6 +679,7 @@ fn draw_viewer(f: &mut Frame, app: &mut App) {
             f.render_widget(Image::new(p), r.intersection(inner));
         }
         State::Loading => msg(f, format!("{spinner} Loading…"), Style::new().fg(accent())),
+        State::Rendering => msg(f, format!("{spinner} Rendering…"), Style::new().fg(accent())),
         State::Failed => msg(f, "Couldn't load this image".into(), Style::new().fg(Color::Red)),
     }
 }
