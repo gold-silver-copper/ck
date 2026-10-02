@@ -2,33 +2,33 @@
 source: src/ui_tests.rs
 expression: snapshot(&mut a)
 ---
- ck  › 4chan
-╭ Boards (3) ──────────────────────────────────────────────────────────────────────────────────────╮
-│  /a/ Anime & Manga                                                                               │
-│  /b/ Random nsfw                                                                                 │
-│▌ /g/ Technology                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
- j/k move · enter open · esc back · / filter · o browser · r reload · ? help · q quit
+ ck  4chan  ›  Boards                                                                      3 boards
+
+    /a/  Anime & Manga
+    /b/  Random  nsfw
+    /g/  Technology
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ enter open   / filter   o browser   r reload   , settings   ? help

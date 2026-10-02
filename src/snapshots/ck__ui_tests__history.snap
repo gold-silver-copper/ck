@@ -2,33 +2,33 @@
 source: src/ui_tests.rs
 expression: snapshot(&mut a)
 ---
- ck  › History
-╭ History (2) ─────────────────────────────────────────────────────────────────────────────────────╮
-│▌ 4chan      /g/       1000       Snapshot thread  2m ago                                         │
-│  4chan      /b/       5          Random thread  1d ago                                           │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
- j/k move · enter open · x remove · esc back · / filter · o browser · ? help
+ ck  History                                                                              2 threads
+
+    4chan      /g/       Snapshot thread                                                   2m ago
+    4chan      /b/       Random thread                                                     1d ago
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ enter open   x remove   / filter   o browser   , settings   ? help

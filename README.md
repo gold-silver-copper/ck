@@ -52,6 +52,7 @@ Commands (remappable, see [Configuration](#configuration); the action name is in
 | `/`  | everywhere            | filter the list; in a thread, search it [`search`]         |
 | `r`  | everywhere            | reload [`reload`]                                          |
 | `o`  | everywhere            | open the board/thread in a browser [`browser`]             |
+| `,`  | everywhere            | settings: theme, colors, and more [`settings`]             |
 | `?`  | everywhere            | help [`help`]                                              |
 | `q`  | everywhere            | quit [`quit`]                                              |
 | `v`  | catalog, thread       | image viewer for the post's files (catalog: the OP's) [`view`] |
@@ -81,7 +82,7 @@ last 100 threads you opened. `x` removes an entry from either list.
 
 The open thread refreshes in the background every 10 seconds and watched threads every
 60 seconds (change with `refresh_thread_secs` / `refresh_watched_secs`; those are also the
-minimums). Posts that arrived since your last visit are marked "● new"; `U` jumps to the
+minimums). Posts that arrived since your last visit are marked "new"; `U` jumps to the
 first one.
 
 Both lists are stored as JSON in `$XDG_DATA_HOME/ck` (default `~/.local/share/ck`). Board
@@ -115,6 +116,43 @@ your config.
 skipped, so `D` again later only fetches what's new. Progress shows at the right of the
 footer. Downloads go through the same rate limiter as images.
 
+## Themes and settings
+
+ck draws flat: no lines or boxes, just areas of color. The screen is the darkest tone,
+catalog entries and posts are cards a step lighter, and popups another step up; the
+selected row, card or post is tinted and marked by a stripe in the theme's accent color.
+
+`,` opens Settings. Its options are saved to your config file, keeping your comments,
+and the file is created from the default if you don't have one yet:
+
+- **Theme**: pick from the built-in themes (material, material-light, nord, gruvbox,
+  catppuccin, tokyo-night, solarized-light, and terminal, which uses your terminal's own
+  colors) and your own. The screen changes as you move through the list; `enter` keeps
+  the theme, `esc` goes back.
+- **Colors**: every color the theme uses, with a swatch and what it's for. `enter` edits
+  one (`#rrggbb`, a name, or a 256-color index), `x` resets it. Changing a built-in theme
+  saves your changes as a copy, `[themes.NAME-custom]`.
+- Color depth, the compact catalog, images, the refresh intervals, and the download folder.
+
+Custom themes go in the config as `[themes.NAME]` tables. Start from a built-in theme and
+change some colors, or generate a whole theme from one color:
+
+```toml
+theme = "ocean"
+
+[themes.mine]
+base = "nord"
+primary = "#ebcb8b"
+
+[themes.ocean]
+seed = "#2a9d8f"   # tones for every role are derived from this
+mode = "dark"      # or "light"
+```
+
+The roles are listed at the end of `config.example.toml`. Terminals that don't support
+24-bit color (when `COLORTERM` isn't `truecolor`) get the nearest of 256 colors; set
+`color = "truecolor"` or `"256"` to choose.
+
 ## Configuration
 
     mkdir -p ~/.config/ck && ck --print-config > ~/.config/ck/config.toml
@@ -127,9 +165,9 @@ All settings are optional; see `config.example.toml` for every option with comme
 - `download_dir = "~/stuff/{site}/{board}/{thread}"`
 - `[keys]`: `action = "key"`, e.g. `watch = "W"`. Unknown actions, keys that aren't a single
   character, and two commands on one key in the same view are reported at startup.
-- `[theme]`: `accent`, `dim`, `selected`, `search`, `name`, `greentext`, `quotelink`,
-  `heading`, `code`, `new`. Colors are names (`"light-blue"`), `"#rrggbb"`, or 256-color
-  indexes (`"244"`).
+- `theme = "nord"`, `[themes.NAME]`, `color = "auto" | "truecolor" | "256"`: see
+  [Themes and settings](#themes-and-settings). A ck 0.2 `[theme]` table of colors still
+  works, on top of the default theme.
 
 ## Adding sites
 

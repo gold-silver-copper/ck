@@ -2,33 +2,33 @@
 source: src/ui_tests.rs
 expression: snapshot(&mut a)
 ---
-╭ op.png (1/2) 800x600, 121 KB ────────────────────────────────────────────────────────────────────╮
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                            ⣾ Loading…                                            │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-╰─────────────────────────────────────────────── h/l previous/next · i open externally · esc close ╯
+ ck   op.png    800x600  ·  121 KB  ·  1 of 2
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                                             ⣾ Loading…
+
+
+
+
+
+
+
+
+
+
+
+
+
+ h/l previous / next   i open externally   esc close

@@ -2,33 +2,33 @@
 source: src/ui_tests.rs
 expression: snapshot(&mut a)
 ---
- ck  › 4chan › /g/ › 1000
-╭ Snapshot thread (5 posts) ───────────────────────────────────────────────────────────────────────╮
-│  Anonymous  2026-09-21 09:13 (5h ago)  No.1000 OP                                                │
-│  Snapshot thread                                                                                 │
-│  File: op.png (800x600, 121 KB)                                                                  │
-│  A thread for snapshot tests.                                                                    │
-│  It has a few replies.                                                                           │
-│  Replies: >>1001                                                                                 │
-│                                                                                                  │
-│  Anonymous  2026-09-21 10:13 (4h ago)  No.1001                                                   │
-│  >>1000 (OP)                                                                                     │
-│  >implying                                                                                       │
-│  R╭ Quoted posts ────────────────────────────────────────────────────────────────────────────╮   │
-│   │ Anonymous  2026-09-21 10:13 (4h ago)  No.1001                                            │   │
-│  A│ >>1000 (OP)                                                                              │   │
-│  C│ >implying                                                                                │   │
-│  f│ Replies: >>1003                                                                          │   │
-│   ╰───────────────────────────────────────────────────── j/k scroll · enter jump · esc close ╯   │
-│  }                                                                                               │
-│                                                                                                  │
-│▌ Anonymous  2026-09-21 12:13 (2h ago)  No.1003 ● new                                             │
-│▌ secret and >>1001                                                                               │
-│▌                                                                                                 │
-│  Anonymous  2026-09-21 13:13 (1h ago)  No.1004 ● new                                             │
-│  See >>901 in the old thread                                                                     │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
- j/k post · enter quote · p preview · u back · / search · U unread · v view · w watch · ? help
+ ck  4chan  ›  /g/  ›  Snapshot thread                                            5 posts  ·  2 new
+
+    Replies  >>1001
+
+
+
+    Anonymous  2026-09-21 10:13 · 4h ago  No.1001
+
+    >>1000 (OP)
+    >implying
+      Quoted posts                                         j/k scroll · enter jump · esc close
+
+      Anonymous  2026-09-21 10:13 · 4h ago  No.1001
+
+      >>1000 (OP)
+      >implying
+
+      Replies  >>1003
+
+        println!("snapshot");
+    }
+
+
+
+    Anonymous   new  2026-09-21 12:13 · 2h ago  No.1003
+
+    secret and >>1001
+
+
+ j/k post   enter quote   p preview   u back   / search   U unread   v view   w watch   , settings

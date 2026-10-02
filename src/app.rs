@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::{Duration, Instant};
@@ -12,7 +12,7 @@ use ratatui::text::Line;
 use ratatui::widgets::ListState;
 
 use crate::backend::{self, Backend};
-use crate::config::{self, Config, SiteConfig};
+use crate::config::{self, ColorMode, Config, ImagesMode, SiteConfig};
 use crate::disk_cache::DiskCache;
 use crate::download;
 use crate::http;
@@ -20,6 +20,10 @@ use crate::images::Images;
 use crate::keys::{Action, KeyMap, Scope};
 use crate::model::{Attachment, Board, Link, Post};
 use crate::store::{Store, ThreadKey};
+use crate::theme::{self, ThemeDef, ThemeSetting};
+
+mod settings;
+pub use settings::{Popup as SettingsPopup, SECTIONS as SETTING_SECTIONS, rows as setting_rows, tilde};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum View {
@@ -29,6 +33,7 @@ pub enum View {
     Thread,
     Watched,
     History,
+    Settings,
 }
 
 /// Saved board lists older than this (seconds) are refreshed in the background.
@@ -307,6 +312,8 @@ pub enum Hit {
     /// A list: its area, first visible item, and rows per item.
     List { area: Rect, offset: usize, item_height: u16 },
     Thread { area: Rect },
+    /// The settings screen, laid out as `settings::rows()`.
+    Settings { area: Rect },
 }
 
 /// Popup with the posts the selected post quotes.
@@ -353,6 +360,15 @@ pub struct App {
     pub catalog_list: Picker,
     pub catalog_sort: Sort,
     pub compact: bool,
+    pub settings: settings::Settings,
+    pub settings_list: Picker,
+    /// The current theme's name, and the config's custom themes.
+    pub theme_name: String,
+    pub themes: BTreeMap<String, ThemeDef>,
+    pub color_mode: ColorMode,
+    /// Draw 24-bit colors (else the nearest of 256).
+    pub truecolor: bool,
+    pub images_mode: ImagesMode,
     pub watched_list: Picker,
     pub history_list: Picker,
     pub store: Store,
@@ -416,6 +432,24 @@ pub struct App {
 
 impl App {
     pub fn new(cfg: Config, keys: KeyMap, picker: Option<ratatui_image::picker::Picker>, store: Store) -> Self {
+        // ck 0.2's [theme] table of overrides becomes a theme of its own, "legacy".
+        let mut themes = cfg.themes.clone();
+        let theme_name = match &cfg.theme {
+            None => theme::DEFAULT_THEME.to_string(),
+            Some(ThemeSetting::Name(n)) => n.clone(),
+            Some(ThemeSetting::Legacy(old)) => {
+                let colors = old
+                    .iter()
+                    .map(|(k, v)| {
+                        let role = theme::LEGACY_KEYS.iter().find(|(l, _)| l == k).map_or(k.as_str(), |(_, r)| r);
+                        (role.to_string(), v.clone())
+                    })
+                    .collect();
+                let def = ThemeDef { base: Some(theme::DEFAULT_THEME.into()), colors, ..Default::default() };
+                themes.insert("legacy".into(), def);
+                "legacy".into()
+            }
+        };
         let refresh_thread = Duration::from_secs(cfg.refresh_thread_secs.max(10));
         let refresh_watched = Duration::from_secs(cfg.refresh_watched_secs.max(60));
         let sites = cfg
@@ -432,6 +466,13 @@ impl App {
             catalog_list: Picker::default(),
             catalog_sort: Sort::default(),
             compact: store.settings.compact_catalog.unwrap_or(cfg.compact_catalog),
+            settings: settings::Settings::default(),
+            settings_list: Picker::default(),
+            theme_name,
+            themes,
+            color_mode: cfg.color,
+            truecolor: cfg.color.truecolor(),
+            images_mode: cfg.images,
             watched_list: Picker::default(),
             history_list: Picker::default(),
             store,
@@ -483,6 +524,7 @@ impl App {
         app.site_list.state.select(Some(0));
         app.watched_list.state.select(Some(0));
         app.history_list.state.select(Some(0));
+        app.settings_list.state.select(Some(0));
         app
     }
 
@@ -537,6 +579,7 @@ impl App {
             View::Catalog => self.visible_catalog().len(),
             View::Watched => self.visible_watched().len(),
             View::History => self.visible_history().len(),
+            View::Settings => settings::items().len(),
             View::Thread => return None,
         };
         let p = match self.view {
@@ -545,6 +588,7 @@ impl App {
             View::Catalog => &mut self.catalog_list,
             View::Watched => &mut self.watched_list,
             View::History => &mut self.history_list,
+            View::Settings => &mut self.settings_list,
             View::Thread => unreachable!(),
         };
         Some((p, len))
@@ -1013,19 +1057,20 @@ impl App {
     fn toggle_compact(&mut self) {
         self.compact = !self.compact;
         let state = if self.compact { "on" } else { "off" };
-        let saved = match config::save_compact(self.compact) {
-            Ok(true) => {
+        let value = self.compact;
+        match config::edit(|d| d["compact_catalog"] = toml_edit::value(value)) {
+            Ok(path) => {
                 self.store.settings.compact_catalog = None;
-                "saved in config.toml".to_string()
+                let path = settings::tilde(&path.display().to_string());
+                self.status = Some((format!("Compact catalog {state} (saved in {path})"), false));
             }
-            Ok(false) => "for this session; there's no config file to save it in".into(),
+            // The config can't be edited: keep the choice in the data directory instead.
             Err(e) => {
-                self.store.settings.compact_catalog = Some(self.compact);
+                self.store.settings.compact_catalog = Some(value);
                 self.save();
-                format!("saved in the data directory; couldn't edit config.toml: {e:#}")
+                self.status = Some((format!("Compact catalog {state} (kept in the data directory: {e:#})"), false));
             }
-        };
-        self.status = Some((format!("Compact catalog {state} ({saved})"), false));
+        }
     }
 
     // ----- mouse -----
@@ -1086,6 +1131,7 @@ impl App {
             Hit::List { area, offset, item_height } if area.contains(pos) => {
                 Some(offset + ((row - area.y) / item_height.max(1)) as usize)
             }
+            Hit::Settings { area } if area.contains(pos) => settings::rows().get((row - area.y) as usize)?.ok(),
             Hit::Thread { area } if area.contains(pos) => {
                 let t = self.thread.as_ref()?;
                 let l = t.layout.as_ref()?;
@@ -1160,6 +1206,9 @@ impl App {
             self.quit = true;
             return;
         }
+        if self.on_settings_popup_key(key) {
+            return;
+        }
         if self.show_help {
             match key.code {
                 KeyCode::Char('j') | KeyCode::Down => self.help_scroll = self.help_scroll.saturating_add(1),
@@ -1232,7 +1281,7 @@ impl App {
 
     pub fn scope(&self) -> Scope {
         match self.view {
-            View::Sites | View::Boards => Scope::Lists,
+            View::Sites | View::Boards | View::Settings => Scope::Lists,
             View::Catalog => Scope::Catalog,
             View::Thread => Scope::Thread,
             View::Watched | View::History => Scope::Saved,
@@ -1244,6 +1293,8 @@ impl App {
         match action {
             Action::Quit => self.quit = true,
             Action::Help => self.show_help = true,
+            Action::Settings => self.open_settings(),
+            Action::Search if self.view == View::Settings => {}
             Action::Search if self.view == View::Thread => {
                 if let Some(t) = &mut self.thread {
                     t.set_search(String::new());
@@ -1594,7 +1645,7 @@ impl App {
     /// Index of the selected item in the current list's underlying data (not for Sites).
     fn selected_index(&self) -> Option<usize> {
         match self.view {
-            View::Sites | View::Thread => None,
+            View::Sites | View::Thread | View::Settings => None,
             View::Boards => self.board_list.state.selected().and_then(|i| self.visible_boards().get(i).copied()),
             View::Catalog => self.catalog_list.state.selected().and_then(|i| self.visible_catalog().get(i).copied()),
             View::Watched => self.watched_list.state.selected().and_then(|i| self.visible_watched().get(i).copied()),
@@ -1603,6 +1654,10 @@ impl App {
     }
 
     fn enter(&mut self) {
+        if self.view == View::Settings {
+            self.activate_setting();
+            return;
+        }
         if self.view == View::Sites {
             match self.site_list.state.selected().and_then(|i| self.visible_sites().get(i).copied()) {
                 Some(SiteRow::Watched) => self.view = View::Watched,
@@ -1614,7 +1669,7 @@ impl App {
         }
         let Some(i) = self.selected_index() else { return };
         match self.view {
-            View::Sites | View::Thread => {}
+            View::Sites | View::Thread | View::Settings => {}
             View::Watched => self.open_key(self.store.watched[i].key.clone()),
             View::History => self.open_key(self.store.history[i].key.clone()),
             View::Boards => {
@@ -1671,6 +1726,7 @@ impl App {
     fn back(&mut self) {
         self.view = match self.view {
             View::Sites | View::Boards | View::Watched | View::History => View::Sites,
+            View::Settings => self.settings.back.take().unwrap_or(View::Sites),
             View::Catalog => View::Boards,
             View::Thread => self.return_to.take().unwrap_or(View::Catalog),
         };
@@ -1696,7 +1752,7 @@ impl App {
 
     fn refresh(&mut self) {
         match self.view {
-            View::Sites | View::Watched | View::History => {}
+            View::Sites | View::Watched | View::History | View::Settings => {}
             View::Boards => self.load_boards(),
             View::Catalog => self.load_catalog(),
             View::Thread => {

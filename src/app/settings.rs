@@ -1,0 +1,378 @@
+//! The settings screen: theme, colors and other options, saved to the config file (comments
+//! kept; created from the default config if there isn't one yet).
+
+use std::time::Duration;
+
+use ratatui::crossterm::event::{KeyCode, KeyEvent};
+use ratatui::widgets::ListState;
+
+use super::{App, View};
+use crate::config::{self, ColorMode, ImagesMode};
+use crate::theme::{self, ROLES, Theme, ThemeDef};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Item {
+    Theme,
+    Colors,
+    ColorDepth,
+    Compact,
+    Images,
+    RefreshThread,
+    RefreshWatched,
+    DownloadDir,
+}
+
+/// The settings, by section, in display order.
+pub const SECTIONS: &[(&str, &[Item])] = &[
+    ("Appearance", &[Item::Theme, Item::Colors, Item::ColorDepth]),
+    ("Catalog", &[Item::Compact, Item::Images]),
+    ("Background refresh", &[Item::RefreshThread, Item::RefreshWatched]),
+    ("Downloads", &[Item::DownloadDir]),
+];
+
+const REFRESH_THREAD: &[u64] = &[10, 15, 30, 60, 120];
+const REFRESH_WATCHED: &[u64] = &[60, 120, 300, 600, 1800];
+
+pub fn items() -> Vec<Item> {
+    SECTIONS.iter().flat_map(|(_, items)| items.iter().copied()).collect()
+}
+
+/// The screen's rows, top to bottom: `Err(section title)` for headers, `Ok(index)` for
+/// settings, with a blank row between sections. Shared by drawing and mouse clicks.
+pub fn rows() -> Vec<Result<usize, &'static str>> {
+    let mut out = Vec::new();
+    let mut i = 0;
+    for (k, (title, items)) in SECTIONS.iter().enumerate() {
+        if k > 0 {
+            out.push(Err(""));
+        }
+        out.push(Err(*title));
+        for _ in *items {
+            out.push(Ok(i));
+            i += 1;
+        }
+    }
+    out
+}
+
+impl Item {
+    pub fn label(self) -> &'static str {
+        match self {
+            Item::Theme => "Theme",
+            Item::Colors => "Colors",
+            Item::ColorDepth => "Color depth",
+            Item::Compact => "Compact layout",
+            Item::Images => "Images",
+            Item::RefreshThread => "Open thread",
+            Item::RefreshWatched => "Watched threads",
+            Item::DownloadDir => "Folder",
+        }
+    }
+
+    pub fn hint(self) -> &'static str {
+        match self {
+            Item::Theme => "Live preview while choosing",
+            Item::Colors => "Change any color of the current theme",
+            Item::ColorDepth => "24-bit color, or the nearest of 256",
+            Item::Compact => "One line per thread",
+            Item::Images => "Thumbnails and the image viewer (after a restart)",
+            Item::RefreshThread => "How often the open thread updates",
+            Item::RefreshWatched => "How often each watched thread updates",
+            Item::DownloadDir => "Where d / D save files",
+        }
+    }
+}
+
+pub enum Popup {
+    /// Choosing a theme; moving previews it, `before` is restored on esc.
+    Themes { list: ListState, names: Vec<String>, before: (String, Theme) },
+    /// The current theme's colors; `editing` holds a color being typed.
+    Colors { list: ListState, editing: Option<String> },
+    /// Typing the download folder.
+    Folder { value: String },
+}
+
+#[derive(Default)]
+pub struct Settings {
+    pub popup: Option<Popup>,
+    /// Where esc goes back to.
+    pub back: Option<View>,
+}
+
+impl App {
+    pub fn open_settings(&mut self) {
+        if self.view != View::Settings {
+            self.settings.back = Some(self.view);
+            self.view = View::Settings;
+        }
+    }
+
+    pub fn selected_setting(&self) -> Option<Item> {
+        self.settings_list.state.selected().and_then(|i| items().get(i).copied())
+    }
+
+    /// A setting's current value, as shown.
+    pub fn setting_value(&self, item: Item) -> String {
+        let on = |b: bool| if b { "on" } else { "off" }.to_string();
+        match item {
+            Item::Theme => self.theme_name.clone(),
+            Item::Colors => match self.themes.get(&self.theme_name) {
+                Some(def) if !def.colors.is_empty() => format!("{} changed", def.colors.len()),
+                _ => "as the theme has them".into(),
+            },
+            Item::ColorDepth => match self.color_mode {
+                ColorMode::Auto => format!("auto ({})", if self.truecolor { "24-bit" } else { "256" }),
+                m => m.as_str().into(),
+            },
+            Item::Compact => on(self.compact),
+            Item::Images => match self.images_mode {
+                ImagesMode::Auto => "on".into(),
+                ImagesMode::Off => "off".into(),
+            },
+            Item::RefreshThread => format!("every {}s", self.refresh_thread.as_secs()),
+            Item::RefreshWatched => format!("every {}s", self.refresh_watched.as_secs()),
+            Item::DownloadDir => self.download_dir.clone().unwrap_or_else(|| "~/Downloads/ck/{site}/{board}/{thread}".into()),
+        }
+    }
+
+    /// Enter on a setting.
+    pub fn activate_setting(&mut self) {
+        let Some(item) = self.selected_setting() else { return };
+        match item {
+            Item::Theme => {
+                let names = theme::names(&self.themes);
+                let mut list = ListState::default();
+                list.select(Some(names.iter().position(|n| *n == self.theme_name).unwrap_or(0)));
+                let before = (self.theme_name.clone(), theme::theme());
+                self.settings.popup = Some(Popup::Themes { list, names, before });
+            }
+            Item::Colors => {
+                let mut list = ListState::default();
+                list.select(Some(0));
+                self.settings.popup = Some(Popup::Colors { list, editing: None });
+            }
+            Item::ColorDepth => {
+                self.color_mode = match self.color_mode {
+                    ColorMode::Auto => ColorMode::Truecolor,
+                    ColorMode::Truecolor => ColorMode::Ansi256,
+                    ColorMode::Ansi256 => ColorMode::Auto,
+                };
+                self.truecolor = self.color_mode.truecolor();
+                let mode = self.color_mode.as_str();
+                self.save_config(&format!("color depth {mode}"), |d| d["color"] = toml_edit::value(mode));
+            }
+            Item::Compact => self.toggle_compact(),
+            Item::Images => {
+                self.images_mode = match self.images_mode {
+                    ImagesMode::Auto => ImagesMode::Off,
+                    ImagesMode::Off => ImagesMode::Auto,
+                };
+                let mode = if self.images_mode == ImagesMode::Auto { "auto" } else { "off" };
+                self.save_config("images (from the next start)", |d| d["images"] = toml_edit::value(mode));
+            }
+            Item::RefreshThread => {
+                let secs = next(REFRESH_THREAD, self.refresh_thread.as_secs());
+                self.refresh_thread = Duration::from_secs(secs);
+                self.save_config(&format!("refresh every {secs}s"), |d| d["refresh_thread_secs"] = toml_edit::value(secs as i64));
+            }
+            Item::RefreshWatched => {
+                let secs = next(REFRESH_WATCHED, self.refresh_watched.as_secs());
+                self.refresh_watched = Duration::from_secs(secs);
+                self.save_config(&format!("refresh every {secs}s"), |d| d["refresh_watched_secs"] = toml_edit::value(secs as i64));
+            }
+            Item::DownloadDir => {
+                self.settings.popup = Some(Popup::Folder { value: self.download_dir.clone().unwrap_or_default() });
+            }
+        }
+    }
+
+    /// Keys while a settings popup is open. Returns false if there's none.
+    pub fn on_settings_popup_key(&mut self, key: KeyEvent) -> bool {
+        let Some(popup) = self.settings.popup.take() else { return false };
+        self.settings.popup = match popup {
+            Popup::Themes { mut list, names, before } => match key.code {
+                KeyCode::Esc | KeyCode::Char('q') => {
+                    self.theme_name = before.0;
+                    self.set_theme(before.1);
+                    None
+                }
+                KeyCode::Enter => {
+                    let name = list.selected().and_then(|i| names.get(i)).cloned().unwrap_or(before.0);
+                    self.choose_theme(&name);
+                    None
+                }
+                code => {
+                    let len = names.len();
+                    let cur = list.selected().unwrap_or(0);
+                    let to = match code {
+                        KeyCode::Char('j') | KeyCode::Down => (cur + 1).min(len - 1),
+                        KeyCode::Char('k') | KeyCode::Up => cur.saturating_sub(1),
+                        KeyCode::Char('g') | KeyCode::Home => 0,
+                        KeyCode::Char('G') | KeyCode::End => len - 1,
+                        _ => cur,
+                    };
+                    list.select(Some(to));
+                    // Live preview.
+                    if let Ok(t) = theme::resolve(&names[to], &self.themes) {
+                        self.set_theme(t);
+                    }
+                    Some(Popup::Themes { list, names, before })
+                }
+            },
+            Popup::Colors { list, editing: Some(mut text) } => match key.code {
+                KeyCode::Esc => Some(Popup::Colors { list, editing: None }),
+                KeyCode::Enter => {
+                    let role = ROLES[list.selected().unwrap_or(0)].0;
+                    match theme::parse_color(&text) {
+                        Ok(c) => {
+                            self.set_role_color(role, Some(theme::color_string(c)));
+                            Some(Popup::Colors { list, editing: None })
+                        }
+                        Err(e) => {
+                            self.status = Some((format!("{e:#}"), true));
+                            Some(Popup::Colors { list, editing: Some(text) })
+                        }
+                    }
+                }
+                KeyCode::Backspace => {
+                    text.pop();
+                    Some(Popup::Colors { list, editing: Some(text) })
+                }
+                KeyCode::Char(c) => {
+                    text.push(c);
+                    Some(Popup::Colors { list, editing: Some(text) })
+                }
+                _ => Some(Popup::Colors { list, editing: Some(text) }),
+            },
+            Popup::Colors { mut list, editing: None } => {
+                let cur = list.selected().unwrap_or(0);
+                let role = ROLES[cur].0;
+                match key.code {
+                    KeyCode::Esc | KeyCode::Char('q' | 'h') | KeyCode::Left => None,
+                    // The field starts empty; the current color is on the row above it.
+                    KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right => {
+                        Some(Popup::Colors { list, editing: Some(String::new()) })
+                    }
+                    // Back to what the base theme has.
+                    KeyCode::Char('x') | KeyCode::Delete => {
+                        self.set_role_color(role, None);
+                        Some(Popup::Colors { list, editing: None })
+                    }
+                    code => {
+                        let to = match code {
+                            KeyCode::Char('j') | KeyCode::Down => (cur + 1).min(ROLES.len() - 1),
+                            KeyCode::Char('k') | KeyCode::Up => cur.saturating_sub(1),
+                            KeyCode::Char('g') | KeyCode::Home => 0,
+                            KeyCode::Char('G') | KeyCode::End => ROLES.len() - 1,
+                            _ => cur,
+                        };
+                        list.select(Some(to));
+                        Some(Popup::Colors { list, editing: None })
+                    }
+                }
+            }
+            Popup::Folder { mut value } => match key.code {
+                KeyCode::Esc => None,
+                KeyCode::Enter => {
+                    let dir = Some(value.trim().to_string()).filter(|v| !v.is_empty());
+                    self.download_dir = dir.clone();
+                    self.save_config("the download folder", |d| match &dir {
+                        Some(v) => d["download_dir"] = toml_edit::value(v.as_str()),
+                        None => {
+                            d.remove("download_dir");
+                        }
+                    });
+                    None
+                }
+                KeyCode::Backspace => {
+                    value.pop();
+                    Some(Popup::Folder { value })
+                }
+                KeyCode::Char(c) => {
+                    value.push(c);
+                    Some(Popup::Folder { value })
+                }
+                _ => Some(Popup::Folder { value }),
+            },
+        };
+        true
+    }
+
+    /// Switch the look now; cached thread layouts carry colors, so they're redone.
+    pub fn set_theme(&mut self, t: Theme) {
+        theme::set(t);
+        if let Some(th) = &mut self.thread {
+            th.layout = None;
+        }
+    }
+
+    fn choose_theme(&mut self, name: &str) {
+        match theme::resolve(name, &self.themes) {
+            Ok(t) => {
+                self.theme_name = name.to_string();
+                self.set_theme(t);
+                self.save_config(&format!("theme {name}"), |d| config::set_theme(d, name));
+            }
+            Err(e) => self.status = Some((format!("{e:#}"), true)),
+        }
+    }
+
+    /// Change (or with `None`, reset) one color of the current theme. A built-in theme is
+    /// first copied to `NAME-custom`, which becomes the current theme.
+    fn set_role_color(&mut self, role: &str, color: Option<String>) {
+        let builtin = !self.themes.contains_key(&self.theme_name);
+        let (name, base) = if builtin {
+            (format!("{}-custom", self.theme_name), Some(self.theme_name.clone()))
+        } else {
+            (self.theme_name.clone(), None)
+        };
+        if builtin && color.is_none() {
+            return; // nothing to reset
+        }
+        let def = self.themes.entry(name.clone()).or_insert_with(|| ThemeDef { base: base.clone(), ..Default::default() });
+        match &color {
+            Some(c) => {
+                def.colors.insert(role.to_string(), c.clone());
+            }
+            None => {
+                def.colors.remove(role);
+            }
+        }
+        match theme::resolve(&name, &self.themes) {
+            Ok(t) => {
+                self.theme_name = name.clone();
+                self.set_theme(t);
+                let what = match &color {
+                    Some(c) => format!("{role} = {c} in theme {name}"),
+                    None => format!("{role} reset in theme {name}"),
+                };
+                self.save_config(&what, |d| {
+                    config::set_theme(d, &name);
+                    config::set_theme_color(d, &name, base.as_deref(), role, color.as_deref());
+                });
+            }
+            Err(e) => self.status = Some((format!("{e:#}"), true)),
+        }
+    }
+
+    /// Write a change to the config file and say where it went.
+    pub fn save_config(&mut self, what: &str, f: impl FnOnce(&mut toml_edit::DocumentMut)) {
+        self.status = Some(match config::edit(f) {
+            Ok(path) => (format!("Saved {what} in {}", tilde(&path.display().to_string())), false),
+            Err(e) => (format!("Changed {what} for now; couldn't save it: {e:#}"), true),
+        });
+    }
+}
+
+/// The next value in a cycle of choices.
+fn next(choices: &[u64], current: u64) -> u64 {
+    choices.iter().copied().find(|&c| c > current).unwrap_or(choices[0])
+}
+
+/// A path with the home directory shown as `~`.
+pub fn tilde(path: &str) -> String {
+    match dirs::home_dir().map(|h| h.display().to_string()) {
+        Some(home) if path.starts_with(&home) => format!("~{}", &path[home.len()..]),
+        _ => path.to_string(),
+    }
+}

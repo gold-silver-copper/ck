@@ -5,28 +5,29 @@ use ratatui::text::{Line, Span};
 use unicode_width::UnicodeWidthStr;
 
 use crate::model::Link;
-use crate::theme::theme;
+use crate::theme::mark;
 
-pub const PINKTEXT: Style = Style::new().fg(Color::LightRed);
-pub const SPOILER: Style = Style::new().fg(Color::DarkGray).bg(Color::DarkGray);
+// Parsed posts carry marker colors, mapped to the current theme when drawn (`theme::paint`).
+pub const PINKTEXT: Style = Style::new().fg(mark::PINKTEXT);
+pub const SPOILER: Style = Style::new().fg(mark::SPOILER).bg(mark::SPOILER);
 
 pub fn greentext() -> Style {
-    Style::new().fg(theme().greentext)
+    Style::new().fg(mark::GREENTEXT)
 }
 
 pub fn quotelink() -> Style {
-    Style::new().fg(theme().quotelink).add_modifier(Modifier::UNDERLINED)
+    Style::new().fg(mark::QUOTELINK).add_modifier(Modifier::UNDERLINED)
 }
 
 pub fn heading() -> Style {
-    Style::new().fg(theme().heading).add_modifier(Modifier::BOLD)
+    Style::new().fg(mark::HEADING).add_modifier(Modifier::BOLD)
 }
 
 pub fn code() -> Style {
-    Style::new().fg(theme().code)
+    Style::new().fg(mark::CODE)
 }
 /// Line style marking a line of a code block: `wrap` keeps its whitespace and never word-wraps it.
-pub const CODE_LINE: Style = Style::new().fg(Color::Cyan);
+pub const CODE_LINE: Style = Style::new().fg(mark::CODE);
 const CONTINUATION: &str = "↪";
 
 /// Parsed comment: styled lines plus what it links to.
@@ -341,7 +342,7 @@ pub fn quote_target(span: &str) -> Option<u64> {
 }
 
 pub fn is_quote_link(style: Style) -> bool {
-    style.fg == Some(theme().quotelink) && style.add_modifier.contains(Modifier::UNDERLINED)
+    style.fg == Some(mark::QUOTELINK) && style.add_modifier.contains(Modifier::UNDERLINED)
 }
 
 pub fn is_spoiler(style: Style) -> bool {
@@ -353,7 +354,7 @@ pub fn reveal(line: &Line<'static>) -> Line<'static> {
     let mut l = line.clone();
     for s in &mut l.spans {
         if is_spoiler(s.style) {
-            s.style = s.style.fg(Color::White);
+            s.style = s.style.fg(mark::REVEALED);
         }
     }
     l

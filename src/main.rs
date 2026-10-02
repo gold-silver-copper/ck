@@ -30,7 +30,6 @@ use ratatui_image::picker::cap_parser::QueryStdioOptions;
 use crate::app::App;
 use crate::config::{Config, ImagesMode};
 use crate::keys::KeyMap;
-use crate::theme::Theme;
 use crate::store::Store;
 
 fn main() -> Result<()> {
@@ -49,7 +48,8 @@ fn main() -> Result<()> {
     let config = Config::load()?;
     // Config errors are reported before the terminal is taken over.
     let keys = KeyMap::new(&config.keys)?;
-    theme::init(Theme::from_config(&config.theme)?);
+    // The theme is checked now, so a bad one is reported before the terminal is taken over.
+    theme::set(theme::from_config(config.theme.as_ref(), &config.themes)?);
     let (store, warnings) = Store::load(Store::dir());
     let mut terminal = ratatui::init();
     // ratatui::init restores the terminal on panic; also turn mouse capture off first.

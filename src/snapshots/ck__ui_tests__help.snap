@@ -1,35 +1,34 @@
 ---
 source: src/ui_tests.rs
-assertion_line: 183
 expression: snapshot(&mut a)
 ---
- ck                    ╭ Help ──────────────────────────────────────────────╮
-╭ Sites ───────────────│Everywhere                                          │──────────────────────╮
-│▌ ★ Watched       3 th│  j / k, ↓ / ↑        move                          │                      │
-│  ◷ History       2 re│  g / G               top / bottom                  │                      │
-│  4chan           four│  ctrl-d / ctrl-u     half page down / up           │                      │
-│  lainchan        vich│  enter, l            open                          │                      │
-│  wizchan         vich│  esc, h, backspace   back                          │                      │
-│  uboachan        vich│  /                   filter list                   │                      │
-│  endchan         lynx│  r                   reload                        │                      │
-│  kohlchan        lynx│  o                   open in browser               │                      │
-│  desuarchive     fool│  q, ctrl-c           quit                          │                      │
-│  zzzchan         jsch│  mouse               wheel scroll, click, dbl-click│                      │
-│  2ch             maka│                                                    │                      │
-│  smuglo.li       vich│Catalog                                             │                      │
-│  kissu           vich│  v                   view the OP's images          │                      │
-│  tvch            vich│  w                   watch / unwatch the thread    │                      │
-│  sushigirl       vich│  s                   cycle sort order              │                      │
-│  leftypol        vich│  c                   compact layout on / off       │                      │
-│  8kun            vich│                                                    │                      │
-│  alogs           lynx│Thread                                              │                      │
-│  trashchan       jsch│  j / k               next / previous post          │                      │
-│  ptchan          jsch│  J / K, space        scroll by line / page         │                      │
-│  erischan        jsch│  enter, l            follow quote (any thread)     │                      │
-│  junkuchan       jsch│  p                   preview the quoted posts      │                      │
-│  nukechan        jsch│  b                   jump to first reply           │                      │
-│  palanq          fool│  u                   back (also to last thread)    │                      │
-│  b4k             fool│  /                   search the thread             │                      │
-│                      │  n / N               next / previous match         │                      │
-╰──────────────────────│  s / S               show spoilers: post / all     │──────────────────────╯
- j/k move · enter open ╰ j/k scroll ─────────────────────────── images: off ╯· q quit
+ ck  Sites                                                                                 23 sites
+                       Keys                           images: off · esc close
+    ★  Watched
+    ◷  History         Everywhere
+       4chan             j / k, ↓ / ↑        move
+       lainchan          g / G               top / bottom
+       wizchan           ctrl-d / ctrl-u     half page down / up
+       uboachan          enter, l            open
+       endchan           esc, h, backspace   back
+       kohlchan          /                   filter list
+       desuarchive       r                   reload
+       zzzchan           o                   open in browser
+       2ch               ,                   settings: theme, colors, …
+       smuglo.li         q, ctrl-c           quit
+       kissu             mouse               wheel scroll, click, dbl-click
+       tvch
+       sushigirl       Catalog
+       leftypol          v                   view the OP's images
+       8kun              w                   watch / unwatch the thread
+       alogs             s                   cycle sort order
+       trashchan         c                   compact layout on / off
+       ptchan
+       erischan        Thread
+       junkuchan         j / k               next / previous post
+       nukechan          J / K, space        scroll by line / page
+       palanq            enter, l            follow quote (any thread)
+       b4k               p                   preview the quoted posts
+                         b                   jump to first reply
+
+ enter open   / filter   o browser   r reload   , settings   ? help

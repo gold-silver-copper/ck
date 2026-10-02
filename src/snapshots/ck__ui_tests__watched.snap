@@ -2,33 +2,33 @@
 source: src/ui_tests.rs
 expression: snapshot(&mut a)
 ---
- ck  › Watched
-╭ Watched (3) ─────────────────────────────────────────────────────────────────────────────────────╮
-│▌ 4chan      /g/       1000       Snapshot thread  5 posts  2 new                                 │
-│  4chan      /g/       900        Old thread  300 posts  archived/deleted                         │
-│  lainchan   /λ/       42         Programming Employment  92 posts                                │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
- j/k move · enter open · x remove · esc back · / filter · o browser · ? help
+ ck  Watched                                                                    3 threads  ·  2 new
+
+    4chan      /g/       Snapshot thread                                          2 new   5 posts
+    4chan      /g/       Old thread                                  archived/deleted   300 posts
+    lainchan   /λ/       Programming Employment                                          92 posts
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ enter open   x remove   / filter   o browser   , settings   ? help

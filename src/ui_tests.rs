@@ -4,7 +4,7 @@ use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
 
-use crate::app::{App, Clock, Preview, ThreadView, View, Viewer};
+use crate::app::{App, Clock, Preview, SettingsPopup, ThreadView, View, Viewer};
 use crate::config::Config;
 use crate::images::Images;
 use crate::keys::KeyMap;
@@ -39,6 +39,7 @@ fn app(images: bool) -> App {
     ];
     let mut app = App::new(cfg, KeyMap::default(), None, store);
     app.clock = Clock { fixed: Some(NOW) };
+    app.truecolor = true;
     if images {
         app.images = Images::offline();
     }
@@ -129,8 +130,42 @@ fn render(app: &mut App) -> (String, Buffer) {
     (text, buf)
 }
 
+/// Render, checking that nothing is drawn with box-drawing characters.
 fn snapshot(app: &mut App) -> String {
-    render(app).0
+    let text = render(app).0;
+    let boxy: Vec<char> = text.chars().filter(|c| ('\u{2500}'..='\u{259f}').contains(c)).collect();
+    assert!(boxy.is_empty(), "box drawing: {boxy:?}\n{text}");
+    text
+}
+
+/// The frame's backgrounds, one letter per role: the layout of surfaces at a glance.
+fn bg_map(app: &mut App) -> String {
+    let buf = render(app).1;
+    let t = theme();
+    let legend = [
+        (t.background, ' '),
+        (t.bar, 'b'),
+        (t.surface, 's'),
+        (t.surface_high, 'h'),
+        (t.surface_highest, 'H'),
+        (t.selection, 'S'),
+        (t.primary, 'p'),
+        (t.primary_container, 'c'),
+        (t.code_bg, 'k'),
+        (t.search, '/'),
+        (t.new, 'n'),
+        (t.success, '+'),
+        (t.error, '!'),
+    ];
+    let mut out = String::new();
+    for y in 0..buf.area.height {
+        let row: String = (0..buf.area.width)
+            .map(|x| legend.iter().find(|(c, _)| *c == buf[(x, y)].bg).map_or('?', |&(_, l)| l))
+            .collect();
+        out.push_str(row.trim_end());
+        out.push('\n');
+    }
+    out
 }
 
 #[test]
@@ -154,6 +189,7 @@ fn catalog_with_thumbnail_placeholders() {
     a.catalog = catalog();
     a.catalog_list.state.select(Some(1));
     insta::assert_snapshot!(snapshot(&mut a));
+    insta::assert_snapshot!("catalog_backgrounds", bg_map(&mut a));
     // Only what's on screen is asked for.
     assert!(a.images.queued() >= 2);
 }
@@ -174,6 +210,7 @@ fn thread_view() {
     a.view = View::Thread;
     a.thread = Some(thread());
     insta::assert_snapshot!(snapshot(&mut a));
+    insta::assert_snapshot!("thread_backgrounds", bg_map(&mut a));
 }
 
 #[test]
@@ -231,4 +268,46 @@ fn image_viewer_placeholder() {
     a.thread = Some(thread());
     a.viewer = Some(Viewer { files: vec![file("op.png"), file("clip.webm")], index: 0 });
     insta::assert_snapshot!(snapshot(&mut a));
+}
+
+#[test]
+fn settings() {
+    let mut a = app(false);
+    a.open_settings();
+    insta::assert_snapshot!(snapshot(&mut a));
+    insta::assert_snapshot!("settings_backgrounds", bg_map(&mut a));
+}
+
+#[test]
+fn theme_picker() {
+    let mut a = app(false);
+    a.open_settings();
+    a.activate_setting();
+    assert!(matches!(a.settings.popup, Some(SettingsPopup::Themes { .. })));
+    insta::assert_snapshot!(snapshot(&mut a));
+}
+
+#[test]
+fn color_editor() {
+    let mut a = app(false);
+    a.open_settings();
+    a.settings_list.state.select(Some(1));
+    a.activate_setting();
+    assert!(matches!(a.settings.popup, Some(SettingsPopup::Colors { .. })));
+    insta::assert_snapshot!(snapshot(&mut a));
+}
+
+#[test]
+fn other_themes_and_256_colors() {
+    // Every built-in theme draws a thread; in 256-color mode no 24-bit color is left.
+    for (name, t) in crate::theme::BUILTIN {
+        let mut a = app(false);
+        a.view = View::Thread;
+        a.thread = Some(thread());
+        a.set_theme(*t);
+        a.truecolor = false;
+        let (_, buf) = render(&mut a);
+        let rgb = buf.content().iter().any(|c| matches!(c.fg, ratatui::style::Color::Rgb(..)) || matches!(c.bg, ratatui::style::Color::Rgb(..)));
+        assert!(!rgb, "{name}");
+    }
 }

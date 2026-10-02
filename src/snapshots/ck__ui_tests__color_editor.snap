@@ -1,0 +1,34 @@
+---
+source: src/ui_tests.rs
+expression: snapshot(&mut a)
+---
+ ck  Settings
+
+    Colors · material                                           enter edit · x reset · esc close
+
+          background            #141218   Base of the screen, and the gaps between cards
+          surface               #1d1b20   Cards: catalog entries and posts
+          surface_high          #2b2930   Chips and tiles on cards
+          surface_highest       #36343b   Raised panels: help, quote preview, settings pickers
+          bar                   #211f26   The top and bottom bars
+          on_bar                #e6e0e9   Text on the bars
+          text                  #e6e0e9   Body text
+          text_dim              #938f99   Secondary text: times, numbers, hints
+          primary               #d0bcff   Accent: titles, keys, the selection stripe
+          on_primary            #381e72   Text on the accent color
+          primary_container     #4f378b   Emphasis containers: OP and title chips
+          on_primary_container  #eaddff   Text on emphasis containers
+          selection             #3b3549   Background of the selected row, card or post
+          greentext             #a6d49b   Greentext (>quotes)
+          pinktext              #ffb4ab   Pinktext (<quotes) and orange text
+          quotelink             #efb8c8   Quote links (>>123)
+          heading               #f2b8b5   Red text and headings in posts
+          code                  #b0c6ff   Code text
+          code_bg               #0f0d13   Background of code blocks
+          name                  #9cd67d   Poster names
+          new                   #9fe0a8   New posts and unread counts
+
+    Changing a color of a built-in theme saves it as a copy: NAME-custom.
+
+
+ enter change   esc back   , settings   ? help

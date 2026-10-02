@@ -1,0 +1,34 @@
+---
+source: src/ui_tests.rs
+expression: snapshot(&mut a)
+---
+ ck  Settings
+
+  Appearance
+    Theme             material                          Live preview while choosing
+    Colors            as the theme has them             Change any color of the current theme
+    Color depth       auto (24-bit)                     24-bit color, or the nearest of 256
+
+  Catalog
+    Compact layout    off                               One line per thread
+    Images            on  Theme                    enter keep · esc cancel  mage viewer (after a…
+
+  Background refresh      material
+    Open thread       ev  material-light                                    hread updates
+    Watched threads   ev  nord                                              ed thread updates
+                          gruvbox
+  Downloads               catppuccin
+    Folder            ~/  tokyo-night                                       es
+                          solarized-light
+  Saved to ~/.config/ck/  terminal                                           edited there too.
+
+
+
+
+
+
+
+
+
+
+ enter change   esc back   , settings   ? help

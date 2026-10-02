@@ -1,8 +1,11 @@
-use std::collections::HashMap;
-use std::path::PathBuf;
+use std::collections::{BTreeMap, HashMap};
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use serde::Deserialize;
+use toml_edit::{DocumentMut, Item, Table, value};
+
+use crate::theme::{LEGACY_KEYS, ThemeDef, ThemeSetting};
 
 pub const DEFAULT_CONFIG: &str = include_str!("../config.example.toml");
 
@@ -25,8 +28,14 @@ pub struct Config {
     /// Key overrides: `action = "key"`.
     #[serde(default)]
     pub keys: HashMap<String, String>,
+    /// A theme name (or, from ck 0.2, a table of color overrides).
     #[serde(default)]
-    pub theme: crate::theme::ThemeConfig,
+    pub theme: Option<ThemeSetting>,
+    /// Custom themes: `[themes.NAME]`.
+    #[serde(default)]
+    pub themes: BTreeMap<String, ThemeDef>,
+    #[serde(default)]
+    pub color: ColorMode,
     #[serde(rename = "site")]
     pub sites: Vec<SiteConfig>,
 }
@@ -45,6 +54,35 @@ pub enum ImagesMode {
     #[default]
     Auto,
     Off,
+}
+
+/// Color depth: 24-bit if the terminal says it supports it, or forced either way.
+#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ColorMode {
+    #[default]
+    Auto,
+    Truecolor,
+    #[serde(rename = "256")]
+    Ansi256,
+}
+
+impl ColorMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ColorMode::Auto => "auto",
+            ColorMode::Truecolor => "truecolor",
+            ColorMode::Ansi256 => "256",
+        }
+    }
+
+    pub fn truecolor(self) -> bool {
+        match self {
+            ColorMode::Auto => crate::theme::truecolor_terminal(),
+            ColorMode::Truecolor => true,
+            ColorMode::Ansi256 => false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -94,21 +132,75 @@ pub enum BoardConfig {
     },
 }
 
-/// Save `compact_catalog` into the user's config file, keeping its comments and layout.
-/// `Ok(false)` when there's no config file to save it in.
-pub fn save_compact(value: bool) -> Result<bool> {
-    let Some(path) = Config::path().filter(|p| p.exists()) else { return Ok(false) };
-    save_compact_to(&path, value)?;
-    Ok(true)
+/// Change the user's config file, keeping its comments and layout. A missing file is first
+/// created from the default config. Returns the file's path.
+pub fn edit(f: impl FnOnce(&mut DocumentMut)) -> Result<PathBuf> {
+    let path = Config::path().context("no home directory to keep a config file in")?;
+    edit_at(&path, f)?;
+    Ok(path)
 }
 
-fn save_compact_to(path: &std::path::Path, value: bool) -> Result<()> {
-    let text = std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
-    let mut doc: toml_edit::DocumentMut = text.parse().with_context(|| format!("parsing {}", path.display()))?;
-    doc["compact_catalog"] = toml_edit::value(value);
+fn edit_at(path: &Path, f: impl FnOnce(&mut DocumentMut)) -> Result<()> {
+    let text = match std::fs::read_to_string(path) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => DEFAULT_CONFIG.to_string(),
+        Err(e) => return Err(e).with_context(|| format!("reading {}", path.display())),
+    };
+    let mut doc: DocumentMut = text.parse().with_context(|| format!("parsing {}", path.display()))?;
+    f(&mut doc);
+    // Don't write something ck itself couldn't read back.
+    let out = doc.to_string();
+    toml::from_str::<Config>(&out).with_context(|| format!("the edited {} wouldn't load", path.display()))?;
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
+    }
     let tmp = path.with_extension("toml.tmp");
-    std::fs::write(&tmp, doc.to_string()).with_context(|| format!("writing {}", tmp.display()))?;
+    std::fs::write(&tmp, out).with_context(|| format!("writing {}", tmp.display()))?;
     std::fs::rename(&tmp, path).with_context(|| format!("writing {}", path.display()))
+}
+
+/// Make `theme = name` the active theme. A ck 0.2 `[theme]` table is kept as
+/// `[themes.legacy]`, so its colors aren't lost.
+pub fn set_theme(doc: &mut DocumentMut, name: &str) {
+    if let Some(old) = doc.get("theme").and_then(Item::as_table).cloned() {
+        let mut legacy = Table::new();
+        for (k, v) in old.iter() {
+            let role = LEGACY_KEYS.iter().find(|(l, _)| *l == k).map_or(k, |(_, r)| *r);
+            legacy.insert(role, v.clone());
+        }
+        doc.remove("theme");
+        themes_table(doc).insert("legacy", Item::Table(legacy));
+    }
+    doc["theme"] = value(name);
+}
+
+/// Set (or with `None`, remove) one role's color in `[themes.NAME]`, creating the table with
+/// `base = base` if it doesn't exist.
+pub fn set_theme_color(doc: &mut DocumentMut, name: &str, base: Option<&str>, role: &str, color: Option<&str>) {
+    let themes = themes_table(doc);
+    if !themes.contains_key(name) {
+        let mut t = Table::new();
+        if let Some(b) = base {
+            t.insert("base", value(b));
+        }
+        themes.insert(name, Item::Table(t));
+    }
+    let Some(t) = themes[name].as_table_mut() else { return };
+    match color {
+        Some(c) => t[role] = value(c),
+        None => {
+            t.remove(role);
+        }
+    }
+}
+
+fn themes_table(doc: &mut DocumentMut) -> &mut Table {
+    if !doc.contains_key("themes") {
+        let mut t = Table::new();
+        t.set_implicit(true);
+        doc.insert("themes", Item::Table(t));
+    }
+    doc["themes"].as_table_mut().expect("themes is a table")
 }
 
 impl Config {
@@ -139,19 +231,64 @@ mod tests {
         assert!(!c.compact_catalog && c.keys.is_empty());
     }
 
+    use super::{Config, edit_at, set_theme, set_theme_color};
+    use crate::theme::ThemeSetting;
+
     #[test]
-    fn saving_compact_keeps_comments_and_tables() {
+    fn edits_keep_comments_and_tables() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config.toml");
         std::fs::write(&path, "# keep me\nimages = \"off\"\n\n[[site]]\nname = \"x\" # and me\nkind = \"4chan\"\n").unwrap();
-        super::save_compact_to(&path, true).unwrap();
+        edit_at(&path, |d| d["compact_catalog"] = toml_edit::value(true)).unwrap();
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(text.contains("# keep me") && text.contains("# and me"), "{text}");
-        let c: super::Config = toml::from_str(&text).unwrap();
+        let c: Config = toml::from_str(&text).unwrap();
         assert!(c.compact_catalog);
         assert_eq!(c.sites.len(), 1);
-        super::save_compact_to(&path, false).unwrap();
-        let c: super::Config = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-        assert!(!c.compact_catalog);
+    }
+
+    #[test]
+    fn missing_config_starts_from_the_default() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("ck").join("config.toml");
+        edit_at(&path, |d| set_theme(d, "nord")).unwrap();
+        let c: Config = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert!(matches!(c.theme, Some(ThemeSetting::Name(ref n)) if n == "nord"));
+        assert!(c.sites.len() > 5);
+    }
+
+    #[test]
+    fn theme_edits() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        // A ck 0.2 [theme] table becomes [themes.legacy] when another theme is chosen.
+        std::fs::write(&path, "[theme]\naccent = \"cyan\"\n\n[[site]]\nname = \"x\"\nkind = \"4chan\"\n").unwrap();
+        edit_at(&path, |d| set_theme(d, "gruvbox")).unwrap();
+        let c: Config = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert!(matches!(c.theme, Some(ThemeSetting::Name(ref n)) if n == "gruvbox"));
+        assert_eq!(c.themes["legacy"].colors["primary"], "cyan");
+        // Colors go in [themes.NAME], created with a base.
+        edit_at(&path, |d| {
+            set_theme_color(d, "custom", Some("nord"), "primary", Some("#123456"));
+            set_theme_color(d, "custom", Some("nord"), "text", Some("white"));
+            set_theme_color(d, "custom", Some("nord"), "text", None);
+            set_theme(d, "custom");
+        })
+        .unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("[themes.custom]"), "{text}");
+        let c: Config = toml::from_str(&text).unwrap();
+        let t = &c.themes["custom"];
+        assert_eq!((t.base.as_deref(), t.colors.len()), (Some("nord"), 1));
+        assert!(crate::theme::from_config(c.theme.as_ref(), &c.themes).is_ok());
+    }
+
+    #[test]
+    fn edits_that_would_break_the_config_are_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "[[site]]\nname = \"x\"\nkind = \"4chan\"\n").unwrap();
+        assert!(edit_at(&path, |d| d["images"] = toml_edit::value("sometimes")).is_err());
+        assert!(!std::fs::read_to_string(&path).unwrap().contains("sometimes"));
     }
 }

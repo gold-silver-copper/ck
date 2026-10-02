@@ -9,6 +9,7 @@ use anyhow::{Result, bail};
 pub enum Action {
     Quit,
     Help,
+    Settings,
     Search,
     Reload,
     Browser,
@@ -49,6 +50,7 @@ const VIEWS: [Scope; 4] = [Scope::Lists, Scope::Catalog, Scope::Thread, Scope::S
 pub const ACTIONS: &[(Action, &str, char, &[Scope])] = &[
     (Action::Quit, "quit", 'q', &[Scope::Global]),
     (Action::Help, "help", '?', &[Scope::Global]),
+    (Action::Settings, "settings", ',', &[Scope::Global]),
     (Action::Search, "search", '/', &[Scope::Global]),
     (Action::Reload, "reload", 'r', &[Scope::Global]),
     (Action::Browser, "browser", 'o', &[Scope::Global]),

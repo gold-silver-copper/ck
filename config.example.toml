@@ -24,6 +24,15 @@
 #   "off"   no images, no image requests
 images = "auto"
 
+# Colors. Press `,` in ck to pick a theme (with a live preview) or change any color; the
+# settings screen saves to this file. Built-in themes: material, material-light, nord,
+# gruvbox, catppuccin, tokyo-night, solarized-light, and terminal (keeps the terminal's
+# own background and 16 colors). Custom themes are [themes.NAME] tables, see the end.
+theme = "material"
+
+# 24-bit color: "auto" (when the terminal sets COLORTERM=truecolor), "truecolor", or "256".
+color = "auto"
+
 # Background refresh intervals in seconds: the open thread, and each watched thread.
 # Lower values are raised to the minimums (10 and 60).
 refresh_thread_secs = 10
@@ -258,7 +267,7 @@ url = "https://arch.b4k.dev"
 
 # Remap single-key commands: action = "key". Navigation keys (j/k/g/G/h/l/J/K, arrows,
 # enter, esc, space) are fixed. Actions and their defaults:
-#   everywhere: quit = "q", help = "?", search = "/", reload = "r", browser = "o"
+#   everywhere: quit = "q", help = "?", search = "/", reload = "r", browser = "o", settings = ","
 #   catalog:    view = "v", watch = "w", sort = "s", compact = "c"
 #   thread:     view, watch, open_file = "i", replies = "b", jump_back = "u", unread = "U",
 #               preview = "p", next_match = "n", prev_match = "N", spoiler = "s",
@@ -267,15 +276,29 @@ url = "https://arch.b4k.dev"
 [keys]
 # watch = "W"
 
-# Colors: names ("yellow", "light-red"), "#rrggbb", or 256-color indexes ("244").
-[theme]
-# accent = "yellow"         # titles, subjects, the selection gutter
-# dim = "dark-gray"         # times, hints, placeholders
-# selected = "#2d2d3c"      # background of the selected row
-# search = "yellow"         # background of search matches
-# name = "green"            # poster names
-# greentext = "green"
-# quotelink = "magenta"
-# heading = "red"
-# code = "cyan"
-# new = "green"             # "● new" markers and unread counts
+# Custom themes. Start from a built-in (`base`) or generate one from a single color
+# (`seed`, with mode = "dark" or "light"), then override any role. Colors are "#rrggbb",
+# names ("light-blue"), 256-color indexes ("244"), or "default" (the terminal's own).
+#
+# [themes.mine]
+# base = "nord"
+# primary = "#ebcb8b"
+#
+# [themes.ocean]
+# seed = "#2a9d8f"
+# mode = "dark"
+#
+# Roles:
+#   background        base of the screen, and the gaps between cards
+#   surface           cards: catalog entries and posts
+#   surface_high      chips and tiles on cards
+#   surface_highest   raised panels: help, quote preview, settings pickers
+#   bar, on_bar       the top and bottom bars, and their text
+#   text, text_dim    body text; times, numbers, hints
+#   primary, on_primary                        accent, and text on it
+#   primary_container, on_primary_container    OP and title chips, and their text
+#   selection         background of the selected row, card or post
+#   greentext, pinktext, quotelink, heading, code, code_bg, name
+#   new, error, success, warning
+#   search, on_search background and text of search matches
+#   spoiler           hidden spoilers

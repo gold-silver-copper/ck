@@ -1,0 +1,34 @@
+---
+source: src/ui_tests.rs
+expression: snapshot(&mut a)
+---
+ ck  Settings
+
+  Appearance
+    Theme             material                          Live preview while choosing
+    Colors            as the theme has them             Change any color of the current theme
+    Color depth       auto (24-bit)                     24-bit color, or the nearest of 256
+
+  Catalog
+    Compact layout    off                               One line per thread
+    Images            on                                Thumbnails and the image viewer (after a…
+
+  Background refresh
+    Open thread       every 10s                         How often the open thread updates
+    Watched threads   every 60s                         How often each watched thread updates
+
+  Downloads
+    Folder            ~/Downloads/ck/{site}/{board}/{…  Where d / D save files
+
+  Saved to ~/.config/ck/config.toml, comments kept. Themes and colors can be edited there too.
+
+
+
+
+
+
+
+
+
+
+ enter change   esc back   , settings   ? help
