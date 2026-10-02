@@ -154,6 +154,8 @@ boards = [
 name = "kissu"
 kind = "vichan"
 url = "https://kissu.moe"
+# Thumbnails are JPEGs whatever the file (PNG ones redirect to a missing copy).
+thumb_ext = "jpg"
 boards = [
   { uri = "qa", title = "Questions & Answers" },
   { uri = "jp", title = "2D/Random" },
