@@ -1049,111 +1049,115 @@ impl App {
     }
 
     fn handle(&mut self, msg: Msg) {
-        // A response for another tab is handled there.
-        if let Some(i) = msg.id().filter(|&id| id != self.req).and_then(|id| self.tab_of(id)) {
+        // A response to another request: another tab's is handled there, the rest are stale
+        // (but a finished board list is worth keeping anyway).
+        let other = msg.id().filter(|&id| id != self.req);
+        if let Some(i) = other.and_then(|id| self.tab_of(id)) {
             self.handle_in_tab(i, msg);
             return;
         }
-        {
-            match msg {
-                Msg::Wake => {}
-                Msg::Input(Event::Key(key)) if key.kind == KeyEventKind::Press => self.on_key(key),
-                Msg::Input(Event::Mouse(m)) => self.on_mouse(m, Instant::now()),
-                Msg::Input(Event::Paste(text)) => self.paste(&text),
-                Msg::Input(_) => {}
-                Msg::Refreshed(key, res) => self.refreshed(key, res),
-                Msg::GeneralCatalog(key, res) => self.general_catalog(key, res),
-                Msg::Download(ev) => self.download_event(ev),
-                Msg::Found(id, board, post, res) if id == self.req => {
-                    self.loading = None;
-                    match res {
-                        Ok(Some(no)) => {
-                            if let Some(t) = &self.thread {
-                                self.trail.push((self.site, self.board.clone().unwrap_or(board.clone()), t.no, t.current().map_or(t.no, |p| p.no)));
-                            }
-                            self.open_thread_at(board, no, Some(post), true);
+        if other.is_some() && !matches!(msg, Msg::Boards(..)) {
+            return;
+        }
+        match msg {
+            Msg::Wake => {}
+            Msg::Input(Event::Key(key)) if key.kind == KeyEventKind::Press => self.on_key(key),
+            Msg::Input(Event::Mouse(m)) => self.on_mouse(m, Instant::now()),
+            Msg::Input(Event::Paste(text)) => self.paste(&text),
+            Msg::Input(_) => {}
+            Msg::Refreshed(key, res) => self.refreshed(key, res),
+            Msg::GeneralCatalog(key, res) => self.general_catalog(key, res),
+            Msg::Download(ev) => self.download_event(ev),
+            Msg::Found(_, board, post, res) => {
+                self.loading = None;
+                match res {
+                    Ok(Some(no)) => {
+                        if let Some(t) = &self.thread {
+                            self.trail.push((self.site, self.board.clone().unwrap_or(board.clone()), t.no, t.current().map_or(t.no, |p| p.no)));
                         }
-                        Ok(None) => {
-                            let msg = format!("Post {post} isn't in this thread, and this site can't say which thread it's in");
-                            self.error(msg);
-                        }
-                        Err(e) => self.error(e),
+                        self.open_thread_at(board, no, Some(post), true);
                     }
+                    Ok(None) => {
+                        let msg = format!("Post {post} isn't in this thread, and this site can't say which thread it's in");
+                        self.error(msg);
+                    }
+                    Err(e) => self.error(e),
                 }
-                Msg::Search(id, page, res) if id == self.req => {
-                    self.loading = None;
-                    self.search_results(page, res);
-                }
-                Msg::Cached(id, age) if id == self.req && self.status.is_none() => {
+            }
+            Msg::Search(_, page, res) => {
+                self.loading = None;
+                self.search_results(page, res);
+            }
+            Msg::Cached(_, age) => {
+                if self.status.is_none() {
                     self.info(format!("Up to date (checked {}s ago)", age.as_secs()));
                 }
-                Msg::Boards(id, site, res) => {
-                    if id == self.req {
-                        self.loading = None;
-                    }
-                    match res {
-                        Ok(b) => self.set_boards(site, b, true),
-                        Err(e) => self.error(e),
-                    }
-                }
-                Msg::BoardsPartial(id, site, b) if id == self.req => self.set_boards(site, b, false),
-                Msg::BoardsRefreshed(site, res) => {
-                    self.boards_refreshing.remove(&site);
-                    // A failed background refresh keeps the saved list; there's nothing to say.
-                    if let Ok(b) = res {
-                        self.set_boards(site, b, true);
-                    }
-                }
-                Msg::CatalogPartial(id, posts) if id == self.req => {
-                    self.catalog = posts;
-                    self.remark_catalog();
-                    let len = self.visible_catalog().len();
-                    self.catalog_list.clamp(len);
-                }
-                Msg::Catalog(id, res) if id == self.req => {
+            }
+            Msg::Boards(_, site, res) => {
+                if other.is_none() {
                     self.loading = None;
-                    match res {
-                        Ok(posts) => {
-                            self.catalog = posts;
-                            self.remark_catalog();
-                            self.catalog_seen();
-                            if let Some(no) = self.pending_catalog.take()
-                                && let Some(i) = self.visible_catalog().iter().position(|&k| self.catalog[k].no == no)
-                            {
-                                self.catalog_list.state.select(Some(i));
-                            }
-                            let len = self.visible_catalog().len();
-                            self.catalog_list.clamp(len);
-                        }
-                        Err(e) => self.error(e),
-                    }
                 }
-                Msg::Thread(id, res) if id == self.req => {
-                    self.loading = None;
-                    self.thread_checked = Instant::now();
-                    let restoring = std::mem::take(&mut self.restoring);
-                    match res {
-                        Ok(posts) => self.set_thread(posts),
-                        // Last session's thread is gone: its catalog instead.
-                        Err(e) if restoring && http::is_not_found(&e) => {
-                            self.view = View::Catalog;
-                            self.load_catalog();
-                            self.info("The thread you had open last time is gone (archived or deleted)");
-                        }
-                        Err(e) if http::is_not_found(&e) => {
-                            let Some(key) = self.board.as_ref().map(|b| self.key(&b.uri, self.pending_thread)) else {
-                                return;
-                            };
-                            self.thread_gone(&key);
-                            if let Some(w) = self.store.watched_mut(&key) {
-                                w.dead = true;
-                                self.save();
-                            }
-                        }
-                        Err(e) => self.error(e),
-                    }
+                match res {
+                    Ok(b) => self.set_boards(site, b, true),
+                    Err(e) => self.error(e),
                 }
-                _ => {} // stale response
+            }
+            Msg::BoardsPartial(_, site, b) => self.set_boards(site, b, false),
+            Msg::BoardsRefreshed(site, res) => {
+                self.boards_refreshing.remove(&site);
+                // A failed background refresh keeps the saved list; there's nothing to say.
+                if let Ok(b) = res {
+                    self.set_boards(site, b, true);
+                }
+            }
+            Msg::CatalogPartial(_, posts) => {
+                self.catalog = posts;
+                self.remark_catalog();
+                let len = self.visible_catalog().len();
+                self.catalog_list.clamp(len);
+            }
+            Msg::Catalog(_, res) => {
+                self.loading = None;
+                match res {
+                    Ok(posts) => {
+                        self.catalog = posts;
+                        self.remark_catalog();
+                        self.catalog_seen();
+                        if let Some(no) = self.pending_catalog.take()
+                            && let Some(i) = self.visible_catalog().iter().position(|&k| self.catalog[k].no == no)
+                        {
+                            self.catalog_list.state.select(Some(i));
+                        }
+                        let len = self.visible_catalog().len();
+                        self.catalog_list.clamp(len);
+                    }
+                    Err(e) => self.error(e),
+                }
+            }
+            Msg::Thread(_, res) => {
+                self.loading = None;
+                self.thread_checked = Instant::now();
+                let restoring = std::mem::take(&mut self.restoring);
+                match res {
+                    Ok(posts) => self.set_thread(posts),
+                    // Last session's thread is gone: its catalog instead.
+                    Err(e) if restoring && http::is_not_found(&e) => {
+                        self.view = View::Catalog;
+                        self.load_catalog();
+                        self.info("The thread you had open last time is gone (archived or deleted)");
+                    }
+                    Err(e) if http::is_not_found(&e) => {
+                        let Some(key) = self.board.as_ref().map(|b| self.key(&b.uri, self.pending_thread)) else {
+                            return;
+                        };
+                        self.thread_gone(&key);
+                        if let Some(w) = self.store.watched_mut(&key) {
+                            w.dead = true;
+                            self.save();
+                        }
+                    }
+                    Err(e) => self.error(e),
+                }
             }
         }
     }
