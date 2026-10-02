@@ -138,7 +138,8 @@ fn render(app: &mut App) -> (String, Buffer) {
 /// Render, checking that nothing is drawn with box-drawing characters.
 fn snapshot(app: &mut App) -> String {
     let text = render(app).0;
-    let boxy: Vec<char> = text.chars().filter(|c| ('\u{2500}'..='\u{259f}').contains(c)).collect();
+    // Box drawing (U+2500-257F); block elements like the input cursor are fine.
+    let boxy: Vec<char> = text.chars().filter(|c| ('\u{2500}'..='\u{257f}').contains(c)).collect();
     assert!(boxy.is_empty(), "box drawing: {boxy:?}\n{text}");
     text
 }
@@ -435,5 +436,22 @@ fn gallery() {
     a.thread = Some(t);
     a.open_gallery();
     a.on_key(ratatui::crossterm::event::KeyEvent::from(ratatui::crossterm::event::KeyCode::Char('l')));
+    insta::assert_snapshot!(snapshot(&mut a));
+}
+
+#[test]
+fn archive_search_results() {
+    let mut a = app(false);
+    let path = format!("{}/tests/fixtures/foolfuuka_search.json", env!("CARGO_MANIFEST_DIR"));
+    let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    a.site = a.sites.iter().position(|s| s.cfg.name == "desuarchive").unwrap();
+    a.search_input = Some("borrow".into());
+    a.view = View::Catalog;
+    insta::assert_snapshot!("archive_search_typing", snapshot(&mut a));
+    a.search_input = None;
+    a.view = View::Search;
+    let page = crate::backend::foolfuuka::parse_search(&v).unwrap();
+    a.search = Some(crate::app::Search::for_tests("g", "rust borrow checker", page));
+    a.search_list.state.select(Some(0));
     insta::assert_snapshot!(snapshot(&mut a));
 }

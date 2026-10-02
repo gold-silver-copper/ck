@@ -22,13 +22,13 @@ expression: snapshot(&mut a)
        leftypol        Catalog
        8kun              v                   view the OP's images
        alogs             O                   the OP's links and files
-       trashchan         H / Z               hide the thread / show hidden
-       ptchan            w                   watch / unwatch the thread
-       erischan          s                   cycle sort order
-       junkuchan         c                   compact layout on / off
-       nukechan          y / Y               copy the OP's text / link
-       palanq
-       b4k             Thread
-                         j / k               next / previous post
+       trashchan         f                   search the board's archive
+       ptchan            H / Z               hide the thread / show hidden
+       erischan          w                   watch / unwatch the thread
+       junkuchan         s                   cycle sort order
+       nukechan          c                   compact layout on / off
+       palanq            y / Y               copy the OP's text / link
+       b4k
+                       Thread
 
  enter open   / filter   o browser   r reload   , settings   ? help

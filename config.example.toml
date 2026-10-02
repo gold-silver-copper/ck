@@ -281,7 +281,7 @@ url = "https://arch.b4k.dev"
 #   everywhere: quit = "q", help = "?", search = "/", reload = "r", browser = "o", settings = ",",
 #               goto = ":"
 #   catalog:    view = "v", watch = "w", sort = "s", compact = "c", links = "O", hide = "H",
-#               show_hidden = "Z"
+#               show_hidden = "Z", archive_search = "f"
 #   thread:     view, watch, links, hide, show_hidden, mine = "m", expand = "e", gallery = "V",
 #               open_file = "i",
 #               replies = "b", jump_back = "u", unread = "U",

@@ -70,6 +70,7 @@ is in brackets):
 | `i`  | thread                | open the post's file (videos in mpv if it's installed) [`open_file`] |
 | `d`/`D` | thread             | save the post's / whole thread's files [`download`, `download_thread`] |
 | `a`  | thread                | after a 404: open the thread in the site's archive [`archive`] |
+| `f`  | catalog               | search the board's archive (FoolFuuka sites, or the site's `archive`) [`archive_search`] |
 | `O`  | catalog, thread       | the post's links: quotes of other threads, web links, files; `enter` opens, `y` copies [`links`] |
 | `H`  | catalog, thread       | hide / unhide the thread or post [`hide`]                  |
 | `Z`  | catalog, thread       | show hidden threads and posts, dimmed [`show_hidden`]      |
@@ -260,6 +261,15 @@ mode = "dark"      # or "light"
 The roles are listed at the end of `config.example.toml`. Terminals that don't support
 24-bit color (when `COLORTERM` isn't `truecolor`) get the nearest of 256 colors; set
 `color = "truecolor"` or `"256"` to choose.
+
+### Searching archives
+
+`f` in a catalog searches the board's posts on a FoolFuuka archive: the site itself if
+it's one (desuarchive, palanq, b4k), or the archive configured for it with `archive`
+(4chan's boards use desuarchive in the default config). Results show each post with its
+thread; `enter` opens the thread on the archive with the post selected, `esc` goes back.
+Each page of 25 results is one request; going down past the last one (or `n`) loads the
+next. Archives limit how often you can search; when they say no, ck shows their message.
 
 ### Saving a thread
 

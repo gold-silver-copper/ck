@@ -109,6 +109,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             View::Watched => draw_watched(f, app, content),
             View::History => draw_history(f, app, content),
             View::Settings => draw_settings(f, app, content),
+            View::Search => draw_search(f, app, content),
         }
         draw_footer(f, app, footer);
         if app.preview.is_some() {
@@ -218,6 +219,14 @@ fn location(app: &App) -> (Vec<String>, Vec<Span<'static>>) {
             vec!["History".into()]
         }
         View::Settings => vec!["Settings".into()],
+        View::Search => {
+            let Some(s) = &app.search else { return (vec!["Search".into()], Vec::new()) };
+            match s.total {
+                Some(t) => meta.push(format!("{} of {}", s.hits.len(), plural(t as usize, "result"))),
+                None => meta.push(plural(s.hits.len(), "result")),
+            }
+            vec![site(), format!("/{}/", s.board), format!("Search: {}", truncate(&s.query, 40))]
+        }
     };
     let mut spans: Vec<Span> = Vec::new();
     // An active filter or search, unless it's being typed (the footer shows that).
@@ -243,6 +252,8 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
     fill(f, area, t.bar);
     let typing = if let Some(g) = &app.goto {
         Some(("go to", g.as_str()))
+    } else if let Some(q) = &app.search_input {
+        Some(("search the archive", q.as_str()))
     } else if app.searching {
         Some(("search", app.thread.as_ref().map_or("", |th| th.search.as_str())))
     } else if app.filtering {
@@ -338,6 +349,7 @@ fn footer_hints(app: &App) -> Vec<(String, &'static str)> {
             (k(Action::Browser), "browser"),
         ],
         View::Settings => vec![("enter".into(), "change"), ("esc".into(), "back")],
+        View::Search => vec![("enter".into(), "open the thread"), (k(Action::NextMatch), "more results"), ("esc".into(), "back")],
         _ => vec![
             ("enter".into(), "open"),
             (k(Action::Search), "filter"),
@@ -357,7 +369,7 @@ fn current_filter(app: &App) -> &str {
         View::Catalog => &app.catalog_list.filter,
         View::Watched => &app.watched_list.filter,
         View::History => &app.history_list.filter,
-        View::Thread | View::Settings => "",
+        View::Thread | View::Settings | View::Search => "",
     }
 }
 
@@ -702,6 +714,52 @@ fn draw_catalog(f: &mut Frame, app: &mut App, area: Rect) {
 /// A hidden item's chip: by which filter, or by hand.
 fn hidden_label(filter: &str) -> String {
     if filter.is_empty() { "hidden".into() } else { format!("hidden: {filter}") }
+}
+
+/// Archive search results: each post with its thread, as cards.
+fn draw_search(f: &mut Frame, app: &mut App, area: Rect) {
+    let t = theme();
+    let Some(s) = &app.search else { return };
+    let width = area.width.saturating_sub(PAD + 2) as usize;
+    let more = app.more_results();
+    let mut build = |k: usize| -> Vec<Line<'static>> {
+        let (thread, p) = &s.hits[k];
+        let mut head = vec![Span::styled(p.name.clone(), bold(t.name)), Span::raw("  ")];
+        if p.no == *thread {
+            head.push(chip("OP", t.on_primary_container, t.primary_container));
+            head.push(Span::raw(" "));
+        } else {
+            head.push(Span::styled(format!("in thread {thread}  "), dim()));
+        }
+        if let Some(subject) = &p.subject {
+            head.push(Span::styled(subject.clone(), bold(t.text)));
+        }
+        let right = vec![Span::styled(format!("No.{}  ·  {}", p.no, ago(p.time, app.clock)), dim())];
+        let mut lines = vec![spread(head, right, width)];
+        let mut text = markup::wrap(&Line::styled(p.plain_text().to_string(), Style::new().fg(t.text)), width);
+        if text.len() > 2 {
+            text.truncate(2);
+            let last = text.pop().map(|l| format!("{}…", line_text(&l))).unwrap_or_default();
+            text.push(Line::styled(truncate(&last, width), Style::new().fg(t.text)));
+        }
+        lines.extend(text);
+        lines
+    };
+    let mut state = std::mem::take(&mut app.search_list.state);
+    let hit = draw_rows_with(f, area, s.hits.len(), &mut build, &mut state, 3, 1, Some(t.surface), &[]);
+    app.search_list.state = state;
+    if hit.is_none() && app.loading.is_none() {
+        empty(f, area, "No results");
+    }
+    // Below the last card: more to load.
+    if more && let Some(Hit::List { offset, item_height, .. }) = hit {
+        let shown = (s.hits.len() - offset) as u16 * item_height;
+        if shown < area.height {
+            let hint = format!("{} more: {} or go down to load them", s.total.unwrap_or(0) as usize - s.hits.len(), app.keys.key(Action::NextMatch));
+            put(f, area.x, area.y + shown, area.width, Line::styled(hint, dim()).centered());
+        }
+    }
+    app.hit = hit;
 }
 
 /// The thread's files (`V`): thumbnails with their post number and type.
@@ -1248,6 +1306,7 @@ fn help_sections(keys: &KeyMap) -> Vec<(&'static str, Vec<(String, &'static str)
             vec![
                 (k(Action::View), "view the OP's images"),
                 (k(Action::Links), "the OP's links and files"),
+                (k(Action::ArchiveSearch), "search the board's archive"),
                 (pair(Action::Hide, Action::ShowHidden), "hide the thread / show hidden"),
                 (k(Action::Watch), "watch / unwatch the thread"),
                 (k(Action::Sort), "cycle sort order"),

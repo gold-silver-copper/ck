@@ -3,7 +3,7 @@
 use anyhow::Result;
 use serde_json::Value;
 
-use super::{Backend, Partial};
+use super::{Backend, Partial, SearchPage};
 use crate::http::{as_bool, as_i64, as_str, as_u64, encode_segment as enc, get_json, register_media_host};
 use crate::markup::{self, Flavor};
 use crate::model::{Attachment, Board, Post};
@@ -73,6 +73,24 @@ pub fn parse_thread(v: &Value) -> Vec<Post> {
     replies.sort_by_key(|p| p.no);
     posts.extend(replies);
     posts
+}
+
+/// Search results: `{"0": {"posts": [...]}, "meta": {"total_found": N}}`, or
+/// `{"error": "..."}` (no results, searching too often, search turned off).
+pub fn parse_search(v: &Value) -> Result<SearchPage> {
+    if let Some(e) = as_str(&v["error"]) {
+        if e.starts_with("No results") {
+            return Ok(SearchPage { hits: Vec::new(), total: Some(0) });
+        }
+        anyhow::bail!("{}", markup::decode(&e));
+    }
+    let hits = v["0"]["posts"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|p| Some((as_u64(&p["thread_num"])?, post(p)?)))
+        .collect();
+    Ok(SearchPage { hits, total: as_u64(&v["meta"]["total_found"]) })
 }
 
 fn post(v: &Value) -> Option<Post> {
@@ -173,6 +191,10 @@ impl Backend for Foolfuuka {
         Ok(out)
     }
 
+    fn search(&self, board: &str, query: &str, page: u32) -> Result<SearchPage> {
+        parse_search(&self.api(&format!("search/?boards={}&text={}&page={page}", enc(board), enc(query)))?)
+    }
+
     fn thread(&self, board: &str, no: u64) -> Result<Vec<Post>> {
         Ok(parse_thread(&self.api(&format!("thread/?board={}&num={no}", enc(board)))?))
     }
@@ -218,6 +240,20 @@ mod tests {
         assert_eq!(f.thumb.as_deref(), Some("https://desu-usergeneratedcontent.xyz/g/thumb/1790/89/1790897522450s.jpg"));
         assert_eq!((f.width, f.height, f.size), (Some(1536), Some(2048), Some(288112)));
         assert!(!op.sticky && op.replies.is_some());
+    }
+
+    #[test]
+    fn search_results_and_errors() {
+        let page = super::parse_search(&fixture("foolfuuka_search.json")).unwrap();
+        assert_eq!(page.total, Some(4290));
+        assert_eq!(page.hits.len(), 4);
+        let (thread, p) = &page.hits[0];
+        assert_eq!((*thread, p.no, p.board.as_deref()), (109914360, 109920091, Some("g")));
+        assert!(p.plain_text().contains("borrow checking"));
+        let none = super::parse_search(&serde_json::json!({"error": "No results found."})).unwrap();
+        assert_eq!((none.hits.len(), none.total), (0, Some(0)));
+        let err = super::parse_search(&serde_json::json!({"error": "You&#039;re searching too fast."})).err().unwrap();
+        assert_eq!(err.to_string(), "You're searching too fast.");
     }
 
     #[test]

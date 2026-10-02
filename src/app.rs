@@ -26,9 +26,11 @@ use crate::theme::{self, ThemeDef, ThemeSetting};
 mod gallery;
 mod goto;
 mod links;
+mod search;
 mod settings;
 pub use gallery::Gallery;
 pub use links::{LinkItem, LinksPanel};
+pub use search::Search;
 pub use settings::{Popup as SettingsPopup, SECTIONS as SETTING_SECTIONS, key_rows, rows as setting_rows, tilde};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -40,6 +42,8 @@ pub enum View {
     Watched,
     History,
     Settings,
+    /// Archive search results.
+    Search,
 }
 
 /// Saved board lists older than this (seconds) are refreshed in the background.
@@ -474,6 +478,8 @@ enum Msg {
     Thread(u64, Result<Vec<Post>>),
     /// A background refresh of a watched or open thread.
     Refreshed(ThreadKey, Result<Vec<Post>>),
+    /// A page of archive search results.
+    Search(u64, u32, Result<crate::backend::SearchPage>),
     /// The thread a quoted post is in: (board, post, thread).
     Found(u64, Board, u64, Result<Option<u64>>),
     Download(DlEvent),
@@ -550,6 +556,10 @@ pub struct App {
     pub links: Option<LinksPanel>,
     /// The thread's files as a grid (`V`), over the thread.
     pub gallery: Option<Gallery>,
+    /// Archive search: its results, the list over them, and the query being typed.
+    pub search: Option<Search>,
+    pub search_list: Picker,
+    pub search_input: Option<String>,
     /// True while typing a thread search.
     pub searching: bool,
     /// What's typed after `:`, while it's being typed.
@@ -678,6 +688,9 @@ impl App {
             preview: None,
             links: None,
             gallery: None,
+            search: None,
+            search_list: Picker::default(),
+            search_input: None,
             searching: false,
             goto: None,
             trail: Vec::new(),
@@ -763,6 +776,7 @@ impl App {
             View::Watched => self.visible_watched().len(),
             View::History => self.visible_history().len(),
             View::Settings => settings::items().len(),
+            View::Search => self.search.as_ref().map_or(0, |s| s.hits.len()),
             View::Thread => return None,
         };
         let p = match self.view {
@@ -772,6 +786,7 @@ impl App {
             View::Watched => &mut self.watched_list,
             View::History => &mut self.history_list,
             View::Settings => &mut self.settings_list,
+            View::Search => &mut self.search_list,
             View::Thread => unreachable!(),
         };
         Some((p, len))
@@ -921,6 +936,10 @@ impl App {
                         }
                         Err(e) => self.error(e),
                     }
+                }
+                Msg::Search(id, page, res) if id == self.req => {
+                    self.loading = None;
+                    self.search_results(page, res);
                 }
                 Msg::Cached(id, age) if id == self.req && self.status.is_none() => {
                     self.status = Some((format!("Up to date (checked {}s ago)", age.as_secs()), false));
@@ -1697,6 +1716,10 @@ impl App {
             self.on_goto_key(key);
             return;
         }
+        if self.search_input.is_some() {
+            self.on_search_input_key(key);
+            return;
+        }
         if self.searching {
             self.on_search_key(key);
             return;
@@ -1706,6 +1729,12 @@ impl App {
             return;
         }
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        if self.view == View::Search && self.keys.keys(Action::NextMatch).contains(&crate::keys::Key::from_event(&key)) {
+            if self.more_results() {
+                self.load_search_page();
+            }
+            return;
+        }
         if let Some(action) = self.keys.action(self.scope(), &key) {
             self.act(action);
             return;
@@ -1742,13 +1771,16 @@ impl App {
                     KeyCode::Char('G') | KeyCode::End => p.move_by(isize::MAX / 2, len),
                     _ => {}
                 }
+                if self.view == View::Search {
+                    self.search_moved();
+                }
             }
         }
     }
 
     pub fn scope(&self) -> Scope {
         match self.view {
-            View::Sites | View::Boards | View::Settings => Scope::Lists,
+            View::Sites | View::Boards | View::Settings | View::Search => Scope::Lists,
             View::Catalog => Scope::Catalog,
             View::Thread => Scope::Thread,
             View::Watched | View::History => Scope::Saved,
@@ -1780,6 +1812,7 @@ impl App {
             Action::Mine => self.toggle_mine(),
             Action::Gallery => self.open_gallery(),
             Action::Export => self.export_thread(),
+            Action::ArchiveSearch => self.start_archive_search(),
             Action::Expand => {
                 if let Some(t) = &mut self.thread {
                     match t.toggle_expanded() {
@@ -2168,7 +2201,7 @@ impl App {
     /// Index of the selected item in the current list's underlying data (not for Sites).
     fn selected_index(&self) -> Option<usize> {
         match self.view {
-            View::Sites | View::Thread | View::Settings => None,
+            View::Sites | View::Thread | View::Settings | View::Search => None,
             View::Boards => self.board_list.state.selected().and_then(|i| self.visible_boards().get(i).copied()),
             View::Catalog => self.catalog_list.state.selected().and_then(|i| self.visible_catalog().get(i).copied()),
             View::Watched => self.watched_list.state.selected().and_then(|i| self.visible_watched().get(i).copied()),
@@ -2179,6 +2212,10 @@ impl App {
     fn enter(&mut self) {
         if self.view == View::Settings {
             self.activate_setting();
+            return;
+        }
+        if self.view == View::Search {
+            self.open_search_hit();
             return;
         }
         if self.view == View::Sites {
@@ -2192,7 +2229,7 @@ impl App {
         }
         let Some(i) = self.selected_index() else { return };
         match self.view {
-            View::Sites | View::Thread | View::Settings => {}
+            View::Sites | View::Thread | View::Settings | View::Search => {}
             View::Watched => self.open_key(self.store.watched[i].key.clone()),
             View::History => self.open_key(self.store.history[i].key.clone()),
             View::Boards => {
@@ -2251,6 +2288,7 @@ impl App {
         self.view = match self.view {
             View::Sites | View::Boards | View::Watched | View::History => View::Sites,
             View::Settings => self.settings.back.take().unwrap_or(View::Sites),
+            View::Search => self.close_search(),
             View::Catalog => View::Boards,
             View::Thread => self.return_to.take().unwrap_or(View::Catalog),
         };
@@ -2277,6 +2315,13 @@ impl App {
     fn refresh(&mut self) {
         match self.view {
             View::Sites | View::Watched | View::History | View::Settings => {}
+            View::Search => {
+                if let Some(s) = &mut self.search {
+                    s.hits.clear();
+                    s.pages = 0;
+                }
+                self.load_search_page();
+            }
             View::Boards => self.load_boards(),
             View::Catalog => self.load_catalog(),
             View::Thread => {
@@ -2971,6 +3016,49 @@ mod tests {
         press(&mut app, KeyCode::Esc);
         assert!(app.gallery.is_none());
         assert_eq!(app.thread.as_ref().unwrap().selected, 2);
+    }
+
+    #[test]
+    fn archive_search_and_back() {
+        let cfg: Config = toml::from_str(
+            "[[site]]\nname = \"chan\"\nkind = \"vichan\"\nurl = \"http://127.0.0.1:3\"\nboards = [\"g\"]\narchive = \"arch\"\n\
+             [[site]]\nname = \"arch\"\nkind = \"foolfuuka\"\nurl = \"http://localhost:3\"\nboards = [\"g\"]",
+        )
+        .unwrap();
+        let mut app = App::new(cfg, KeyMap::default(), None, Store::default());
+        app.config_path = None;
+        app.board = Some(Board { uri: "g".into(), title: String::new(), nsfw: None });
+        app.view = View::Catalog;
+        app.act(Action::ArchiveSearch);
+        for c in "borrow".chars() {
+            app.on_key(KeyEvent::from(KeyCode::Char(c)));
+        }
+        app.on_key(KeyEvent::from(KeyCode::Enter));
+        assert_eq!((app.view, app.site), (View::Search, 1));
+        let path = format!("{}/tests/fixtures/foolfuuka_search.json", env!("CARGO_MANIFEST_DIR"));
+        let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        app.handle(Msg::Search(app.req, 1, crate::backend::foolfuuka::parse_search(&v)));
+        assert_eq!(app.search.as_ref().unwrap().hits.len(), 4);
+        // Going down to the end asks for the next page.
+        let req = app.req;
+        for _ in 0..4 {
+            app.on_key(KeyEvent::from(KeyCode::Down));
+        }
+        assert_eq!(app.req, req + 1);
+        app.handle(Msg::Search(app.req, 2, Err(anyhow::anyhow!("You're searching too fast."))));
+        assert!(app.status.as_ref().is_some_and(|(m, err)| *err && m.contains("too fast")));
+        // Enter: the thread, on the archive, with the post selected.
+        app.search_list.state.select(Some(1));
+        app.enter();
+        assert_eq!((app.view, app.pending_thread, app.pending_post), (View::Thread, 109912686, Some(109914413)));
+        app.back();
+        assert_eq!(app.view, View::Search);
+        app.back();
+        assert_eq!((app.view, app.site, app.search.is_none()), (View::Catalog, 0, true));
+        // Sites without an archive say so.
+        app.sites[0].cfg.archive = None;
+        app.act(Action::ArchiveSearch);
+        assert!(app.search_input.is_none() && app.status.as_ref().unwrap().0.contains("no archive"));
     }
 
     #[test]

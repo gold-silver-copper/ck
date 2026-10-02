@@ -1,6 +1,6 @@
 //! Imageboard backends. Each one speaks a different engine's JSON API.
 
-mod foolfuuka;
+pub(crate) mod foolfuuka;
 pub(crate) mod futaba;
 mod jschan;
 mod lynxchan;
@@ -16,6 +16,13 @@ use crate::model::{Board, Post};
 /// Receives the results so far while a multi-page load continues.
 pub type Partial<'a, T> = &'a dyn Fn(&[T]);
 
+/// A page of search results: `(thread, post)` pairs, and how many there are in all.
+#[derive(Default)]
+pub struct SearchPage {
+    pub hits: Vec<(u64, Post)>,
+    pub total: Option<u64>,
+}
+
 pub trait Backend: Send + Sync {
     /// All boards. Multi-page lists report each page through `partial` as it arrives.
     fn boards(&self, partial: Partial<Board>) -> Result<Vec<Board>>;
@@ -29,6 +36,10 @@ pub trait Backend: Send + Sync {
     }
     fn board_url(&self, board: &str) -> String;
     fn thread_url(&self, board: &str, no: u64) -> String;
+    /// Search a board's posts (archives can). Pages count from 1.
+    fn search(&self, _board: &str, _query: &str, _page: u32) -> Result<SearchPage> {
+        anyhow::bail!("This site can't be searched")
+    }
     /// A link to one post of a thread.
     fn post_url(&self, board: &str, thread: u64, post: u64) -> String {
         format!("{}#{post}", self.thread_url(board, thread))
