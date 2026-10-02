@@ -20,6 +20,21 @@ with it, threads open on their own board, and going back returns to the overboar
 
 Read-only: browse boards, catalogs, and threads. Files open in your default viewer/browser.
 
+What it does, besides browsing:
+
+- **Images** in catalogs and threads, a full-screen viewer (animated GIFs play), a gallery
+  of a thread's files, downloads, and reverse image search.
+- **Tabs**, and **`:`** to open any thread or board URL; `ck URL` starts there, and ck
+  otherwise starts where you left off.
+- **Watched threads** refreshed in the background, with desktop notifications for new posts
+  and replies to posts you've marked as yours.
+- **Catalogs** as cards, a compact list or a grid, marking threads that are new since your
+  last visit; **filters** to hide or highlight threads and posts.
+- **Threads** with replies expandable inline, quote previews, search, a links panel, and
+  copying text and links to the clipboard; save a thread as a page for offline reading.
+- **Archive search** on FoolFuuka archives (desuarchive and others).
+- **Themes**, all **keys remappable**, and a settings screen that edits the config file.
+
 ck follows 4chan's API rules on every site: at most one API request per second per host,
 If-Modified-Since on every refetch, and no refetching the same page within 10 seconds
 (a reload inside that window says "Up to date" and uses the cached copy).
@@ -45,50 +60,77 @@ Navigation (fixed):
 | `esc`, `h`, backspace   | back                                          |
 | mouse                   | wheel scrolls, click selects, double-click opens |
 
-Commands (remappable in Settings or the config, see [Keys](#remapping-keys); the action name
-is in brackets):
+Commands are remappable in Settings or the config (see [Remapping keys](#remapping-keys));
+the action name is in brackets. The `?` help lists the same, with your keys.
 
-| key  | where                 | action                                                     |
-|------|-----------------------|------------------------------------------------------------|
-| `/`  | everywhere            | filter the list; in a thread, search it [`search`]         |
-| `r`  | everywhere            | reload [`reload`]                                          |
-| `o`  | everywhere            | open the board/thread in a browser [`browser`]             |
-| `:`  | everywhere            | go to a URL or a board/thread, see below [`goto`]           |
-| `T`  | catalog, thread, Watched, History | open the thread in a new tab (in a thread: the quote `enter` would follow) [`new_tab`] |
-| tab / shift-tab | everywhere | next / previous tab [`next_tab`, `prev_tab`]                |
-| ctrl-w | everywhere          | close the tab [`close_tab`]                                |
-| `,`  | everywhere            | settings: theme, colors, and more [`settings`]             |
-| `?`  | everywhere            | help [`help`]                                              |
-| `q`  | everywhere            | quit [`quit`]                                              |
-| `v`  | catalog, thread       | image viewer for the post's files (catalog: the OP's) [`view`] |
-| `w`  | catalog, thread       | watch / unwatch the thread [`watch`]                       |
-| `s`  | catalog               | cycle the sort: bump order, most replies, newest, oldest [`sort`] |
-| `c`  | catalog               | layout: cards, compact (a line per thread), grid (thumbnails in columns) [`compact`] |
-| `p`  | thread                | preview the posts a post quotes [`preview`]                |
-| `b`  | thread                | jump to the first reply [`replies`]                        |
-| `u`  | thread                | jump back, also to the previous thread [`jump_back`]       |
-| `n`/`N` | thread             | next / previous search match [`next_match`, `prev_match`]  |
-| `s`/`S` | thread             | show spoilers in the post / whole thread [`spoiler`, `all_spoilers`] |
-| `U`  | thread                | jump to the first unread post [`unread`]                   |
-| `i`  | thread                | open the post's file (videos in mpv if it's installed) [`open_file`] |
-| `d`/`D` | thread             | save the post's / whole thread's files [`download`, `download_thread`] |
-| `a`  | thread                | after a 404: open the thread in the site's archive [`archive`] |
-| `f`  | catalog               | search the board's archive (FoolFuuka sites, or the site's `archive`) [`archive_search`] |
-| `O`  | catalog, thread       | the post's links: quotes of other threads, web links, files; `enter` opens, `y` copies [`links`] |
-| `H`  | catalog, thread       | hide / unhide the thread or post [`hide`]                  |
-| `Z`  | catalog, thread       | show hidden threads and posts, dimmed [`show_hidden`]      |
-| `E`  | thread                | save the thread as `thread.html` and `thread.json` in its download folder [`export`] |
-| `R`  | thread, viewer        | reverse image search: SauceNAO, Google Lens, Yandex, IQDB (opens the browser) [`image_search`] |
-| `V`  | thread                | gallery: every file of the thread as a grid; `enter` views (h/l go through all of them), `d` saves one, `esc` returns to its post [`gallery`] |
-| `e`  | thread                | show / hide the post's replies under it, indented; again on a reply goes a level deeper (up to 4) [`expand`] |
-| `m`  | thread                | mark the post as yours, to be told about replies [`mine`]  |
-| `x`  | Watched, History      | remove the entry [`remove`]                                |
-| `y`  | catalog, thread, Watched, History, viewer | copy the post's text (catalog: the OP's; Watched/History: subject and link; viewer: the file's URL) [`copy`] |
-| `Y`  | catalog, thread, Watched, History, viewer | copy the link to the post or thread [`copy_link`] |
+**Everywhere**
 
-In the image viewer: `h`/`l` or arrows for the previous/next file (animated GIFs play;
-`space` pauses one), `i` to open it externally,
-`y`/`Y` to copy the file's URL / the post's link, `esc` or `q` to close.
+| key  | action |
+|------|--------|
+| `/`  | filter the list; in a thread, search it [`search`] |
+| `r` / `o` | reload / open the board or thread in a browser [`reload`, `browser`] |
+| `:`  | go to a URL or a site/board/thread, see [Going to a URL](#going-to-a-url) [`goto`] |
+| `,`  | settings: theme, colors, keys, and more [`settings`] |
+| tab / shift-tab | next / previous tab [`next_tab`, `prev_tab`] |
+| ctrl-w | close the tab [`close_tab`] |
+| `?`  | help [`help`] |
+| `q`, ctrl-c | quit [`quit`] |
+
+**Watched, History**
+
+| key  | action |
+|------|--------|
+| `x`  | remove the entry [`remove`] |
+| `T`  | open the thread in a new tab [`new_tab`] |
+| `y` / `Y` | copy the subject and link / the link [`copy`, `copy_link`] |
+
+**Image viewer**
+
+| key  | action |
+|------|--------|
+| `h`/`l`, arrows | previous / next file (animated GIFs play) |
+| space | pause an animated GIF |
+| `i`  | open the file externally |
+| `y` / `Y` | copy the file's URL / the post's link [`copy`, `copy_link`] |
+| `R`  | reverse image search [`image_search`] |
+| `esc`, `q` | close |
+
+**Catalog**
+
+| key  | action |
+|------|--------|
+| `v`  | image viewer for the OP's files [`view`] |
+| `w` / `T` | watch / unwatch the thread; open it in a new tab [`watch`, `new_tab`] |
+| `s`  | cycle the sort: bump order, most replies, newest, oldest [`sort`] |
+| `c`  | cycle the layout: cards, compact (a line per thread), grid (thumbnails in columns) [`compact`] |
+| `O`  | the OP's links and files [`links`] |
+| `H` / `Z` | hide / unhide the thread; show hidden threads, dimmed [`hide`, `show_hidden`] |
+| `f`  | search the board's archive [`archive_search`] |
+| `y` / `Y` | copy the OP's subject and text / the thread's link [`copy`, `copy_link`] |
+
+**Thread**
+
+| key  | action |
+|------|--------|
+| `J`/`K`, space | scroll by line / page |
+| `enter`, `l` | follow a `>>quote`, also into other threads and boards |
+| `p` / `b` | preview the posts a post quotes / jump to the first reply [`preview`, `replies`] |
+| `u` / `U` | jump back (also to the previous thread) / to the first unread post [`jump_back`, `unread`] |
+| `n` / `N` | next / previous search match [`next_match`, `prev_match`] |
+| `s` / `S` | show spoilers in the post / the whole thread [`spoiler`, `all_spoilers`] |
+| `e`  | show / hide the post's replies under it, indented; again on a reply goes a level deeper (up to 4) [`expand`] |
+| `v` / `V` | image viewer for the post's files / gallery of every file in the thread [`view`, `gallery`] |
+| `i` / `R` | open the post's file (videos in mpv if it's installed) / reverse image search [`open_file`, `image_search`] |
+| `O`  | the post's links: quotes of other threads, web links, files; `enter` opens, `y` copies [`links`] |
+| `d` / `D` / `E` | save the post's files / all the thread's files / the thread as a page [`download`, `download_thread`, `export`] |
+| `w` / `T` | watch / unwatch; follow the quote `enter` would follow in a new tab [`watch`, `new_tab`] |
+| `H` / `Z` | hide / unhide the post; show hidden posts [`hide`, `show_hidden`] |
+| `m`  | mark the post as yours, to be told about replies [`mine`] |
+| `a`  | after a 404: open the thread in the site's archive [`archive`] |
+| `y` / `Y` | copy the post's text / its link [`copy`, `copy_link`] |
+
+In the gallery (`V`), `h`/`j`/`k`/`l` move, `enter` views (`h`/`l` there go through every
+file of the thread), `d` saves the file, `esc` returns to its post.
 
 Copying uses the terminal's clipboard escape (OSC 52), which also works over SSH; in tmux it
 needs `set -g set-clipboard on`. On a local machine ck also uses `pbcopy`, `wl-copy`,
@@ -208,11 +250,22 @@ ck never posts, so it can't know which posts are yours: `m` marks the selected p
 yours (and watches the thread). Replies to it are counted in Watched ("1 reply to you"),
 quotes of it read `>>123 (You)`, and they get their own notification.
 
-Both lists are stored as JSON in `$XDG_DATA_HOME/ck` (default `~/.local/share/ck`). Board
-lists fetched from sites are saved there too (`boards/`), so a site's boards show up
-instantly next time; they're refreshed quietly in the background once a day, and `r` in
-the Boards view refreshes them now. Lists that come in several pages (LynxChan and jschan
+ck keeps its state as JSON in `$XDG_DATA_HOME/ck` (default `~/.local/share/ck`):
+`watched.json` and `history.json`, `hidden.json` (what you hid with `H`), `seen.json`
+(catalog threads seen, for "new" and `+N`), and `session.json` (your tabs, for the next
+start). Board lists fetched from sites are saved there too (`boards/`), so a site's boards
+show up instantly next time; they're refreshed quietly in the background once a day, and
+`r` in the Boards view refreshes them now. Lists that come in several pages (LynxChan and jschan
 board lists, FoolFuuka catalogs) show each page as it arrives.
+
+## Searching archives
+
+`f` in a catalog searches the board's posts on a FoolFuuka archive: the site itself if
+it's one (desuarchive, palanq, b4k), or the archive configured for it with `archive`
+(4chan's boards use desuarchive in the default config). Results show each post with its
+thread; `enter` opens the thread on the archive with the post selected, `esc` goes back.
+Each page of 25 results is one request; going down past the last one (or `n`) loads the
+next. Archives limit how often you can search; when they say no, ck shows their message.
 
 ## Images
 
@@ -235,6 +288,19 @@ thumbnails load top to bottom and nothing is prefetched ahead of them.
 To turn images off entirely (no image requests at all), put `images = "off"` at the top of
 your config.
 
+### Reverse image search
+
+`R` lists search engines for the selected post's images (for videos, their thumbnail) or
+the image in the viewer; `enter` opens the search in the browser, `y` copies its link.
+ck itself sends nothing anywhere. The engines can be replaced in the config; `{url}`
+becomes the image's address:
+
+```toml
+[[image_search]]
+name = "SauceNAO"
+url = "https://saucenao.com/search.php?url={url}"
+```
+
 ## Downloads
 
 `d` saves the selected post's files and `D` all of the thread's, into
@@ -242,6 +308,14 @@ your config.
 `{post}_{original name}` with unsafe characters replaced; files that already exist are
 skipped, so `D` again later only fetches what's new. Progress shows at the right of the
 footer. Downloads go through the same rate limiter as images.
+
+### Saving a thread
+
+`E` writes the open thread into its download folder (the same one `D` uses) as
+`thread.html`, a page with the current theme's colors that reads offline, and
+`thread.json`, the posts as data (`"format": 1`). Files already saved there with `d`/`D`
+are shown from the folder; the others link to the site. So `D` then `E` makes a complete
+offline copy. Saving again replaces both.
 
 ## Themes and settings
 
@@ -281,36 +355,6 @@ The roles are listed at the end of `config.example.toml`. Terminals that don't s
 24-bit color (when `COLORTERM` isn't `truecolor`) get the nearest of 256 colors; set
 `color = "truecolor"` or `"256"` to choose.
 
-### Searching archives
-
-`f` in a catalog searches the board's posts on a FoolFuuka archive: the site itself if
-it's one (desuarchive, palanq, b4k), or the archive configured for it with `archive`
-(4chan's boards use desuarchive in the default config). Results show each post with its
-thread; `enter` opens the thread on the archive with the post selected, `esc` goes back.
-Each page of 25 results is one request; going down past the last one (or `n`) loads the
-next. Archives limit how often you can search; when they say no, ck shows their message.
-
-### Reverse image search
-
-`R` lists search engines for the selected post's images (for videos, their thumbnail) or
-the image in the viewer; `enter` opens the search in the browser, `y` copies its link.
-ck itself sends nothing anywhere. The engines can be replaced in the config; `{url}`
-becomes the image's address:
-
-```toml
-[[image_search]]
-name = "SauceNAO"
-url = "https://saucenao.com/search.php?url={url}"
-```
-
-### Saving a thread
-
-`E` writes the open thread into its download folder (the same one `D` uses) as
-`thread.html`, a page with the current theme's colors that reads offline, and
-`thread.json`, the posts as data (`"format": 1`). Files already saved there with `d`/`D`
-are shown from the folder; the others link to the site. So `D` then `E` makes a complete
-offline copy. Saving again replaces both.
-
 ## Configuration
 
     mkdir -p ~/.config/ck && ck --print-config > ~/.config/ck/config.toml
@@ -326,7 +370,12 @@ All settings are optional; see `config.example.toml` for every option with comme
 - `restore_session = false` to start at the site list instead of where you left off (the
   view, thread and selected post, catalog sort and filter, saved in the data directory
   as `session.json`). `ck URL` always starts at the URL.
+- `notify = "auto" | "bell" | "off"`, `notify_command = [...]`: see
+  [Notifications](#notifications).
 - `[[filter]]`: hide or highlight threads and posts, see [Filters](#filters-and-hiding).
+- `[[image_search]]`: reverse image search engines, see
+  [Reverse image search](#reverse-image-search).
+- `archive = "desuarchive"` on a `[[site]]`: the archive for 404'd threads and `f` searches.
 - `[keys]`: `action = "key"` or `action = ["key", ...]`, e.g. `watch = "W"`; see
   [Remapping keys](#remapping-keys). Unknown actions, things that aren't keys, and two
   commands on one key in the same view are reported at startup.

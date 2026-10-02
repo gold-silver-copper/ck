@@ -1340,67 +1340,21 @@ fn draw_image_search(f: &mut Frame, app: &mut App) {
 fn help_sections(keys: &KeyMap) -> Vec<(&'static str, Vec<(String, &'static str)>)> {
     let k = |a| keys.label(a);
     let pair = |a, b| format!("{} / {}", keys.label(a), keys.label(b));
+    // In this order, the two columns split evenly (Everywhere to the viewer, then the rest).
     vec![
         (
             "Everywhere",
             vec![
-                ("j / k, ↓ / ↑".into(), "move"),
-                ("g / G".into(), "top / bottom"),
+                ("j k g G, ↑ ↓".into(), "move, top / bottom"),
                 ("ctrl-d / ctrl-u".into(), "half page down / up"),
-                ("enter, l".into(), "open"),
-                ("esc, h, backspace".into(), "back"),
-                (k(Action::Search), "filter list"),
-                (k(Action::Reload), "reload"),
-                (k(Action::Browser), "open in browser"),
-                (k(Action::Goto), "go to a URL or site/board/thread"),
+                ("enter l / esc h".into(), "open / back"),
+                (k(Action::Search), "filter (thread: search)"),
+                (pair(Action::Reload, Action::Browser), "reload / open in browser"),
+                (k(Action::Goto), "go to a URL or site/board"),
                 (k(Action::Settings), "settings: theme, keys, …"),
                 (pair(Action::NextTab, Action::PrevTab), "next / previous tab"),
                 (k(Action::CloseTab), "close the tab"),
-                (format!("{}, ctrl-c", k(Action::Quit)), "quit"),
-                ("mouse".into(), "wheel scroll, click, dbl-click"),
-            ],
-        ),
-        (
-            "Catalog",
-            vec![
-                (k(Action::View), "view the OP's images"),
-                (k(Action::Links), "the OP's links and files"),
-                (k(Action::ArchiveSearch), "search the board's archive"),
-                (pair(Action::Hide, Action::ShowHidden), "hide the thread / show hidden"),
-                (k(Action::Watch), "watch / unwatch the thread"),
-                (k(Action::NewTab), "open the thread in a new tab"),
-                (k(Action::Sort), "cycle sort order"),
-                (k(Action::Compact), "compact layout on / off"),
-                (pair(Action::Copy, Action::CopyLink), "copy the OP's text / link"),
-            ],
-        ),
-        (
-            "Thread",
-            vec![
-                ("j / k".into(), "next / previous post"),
-                ("J / K, space".into(), "scroll by line / page"),
-                ("enter, l".into(), "follow quote (any thread)"),
-                (k(Action::Preview), "preview the quoted posts"),
-                (k(Action::Replies), "jump to first reply"),
-                (k(Action::JumpBack), "back (also to last thread)"),
-                (k(Action::Search), "search the thread"),
-                (pair(Action::NextMatch, Action::PrevMatch), "next / previous match"),
-                (pair(Action::Spoiler, Action::AllSpoilers), "show spoilers: post / all"),
-                (k(Action::OpenFile), "open file (videos in mpv)"),
-                (k(Action::View), "view the post's images"),
-                (k(Action::Gallery), "all the thread's files, as a grid"),
-                (k(Action::ImageSearch), "reverse image search"),
-                (k(Action::Links), "the post's links and files"),
-                (pair(Action::Hide, Action::ShowHidden), "hide the post / show hidden"),
-                (k(Action::Expand), "show / hide replies under the post"),
-                (k(Action::Mine), "mark as yours: notified of replies"),
-                (pair(Action::Download, Action::DownloadThread), "save files: post / thread"),
-                (k(Action::Export), "save the thread as HTML and JSON"),
-                (k(Action::Watch), "watch / unwatch the thread"),
-                (k(Action::Unread), "jump to the first unread post"),
-                (k(Action::NewTab), "follow the quote in a new tab"),
-                (k(Action::Archive), "open 404'd thread in archive"),
-                (pair(Action::Copy, Action::CopyLink), "copy the post's text / link"),
+                (format!("{}, ctrl-c", k(Action::Quit)), "quit (mouse works too)"),
             ],
         ),
         (
@@ -1408,7 +1362,7 @@ fn help_sections(keys: &KeyMap) -> Vec<(&'static str, Vec<(String, &'static str)
             vec![
                 (k(Action::Remove), "remove the entry"),
                 (k(Action::NewTab), "open in a new tab"),
-                (pair(Action::Copy, Action::CopyLink), "copy subject and link / link"),
+                (pair(Action::Copy, Action::CopyLink), "copy subject+link / link"),
             ],
         ),
         (
@@ -1417,23 +1371,56 @@ fn help_sections(keys: &KeyMap) -> Vec<(&'static str, Vec<(String, &'static str)
                 ("h / l, ← / →".into(), "previous / next file"),
                 ("space".into(), "pause an animated GIF"),
                 ("i".into(), "open externally"),
-                (pair(Action::Copy, Action::CopyLink), "copy the file's URL / post link"),
+                (pair(Action::Copy, Action::CopyLink), "copy file URL / post link"),
                 (k(Action::ImageSearch), "reverse image search"),
                 ("esc, q".into(), "close"),
+            ],
+        ),
+        (
+            "Catalog",
+            vec![
+                (k(Action::View), "view the OP's images"),
+                (pair(Action::Watch, Action::NewTab), "watch / open in a new tab"),
+                (pair(Action::Sort, Action::Compact), "sort / layout (grid, …)"),
+                (k(Action::Links), "the OP's links and files"),
+                (pair(Action::Hide, Action::ShowHidden), "hide / show hidden"),
+                (k(Action::ArchiveSearch), "search the board's archive"),
+                (pair(Action::Copy, Action::CopyLink), "copy text / link"),
+            ],
+        ),
+        (
+            "Thread",
+            vec![
+                ("J / K, space".into(), "scroll by line / page"),
+                ("enter, l".into(), "follow quote (any thread)"),
+                (pair(Action::Preview, Action::Replies), "preview quotes / 1st reply"),
+                (pair(Action::JumpBack, Action::Unread), "jump back / first unread"),
+                (pair(Action::NextMatch, Action::PrevMatch), "next / previous match"),
+                (pair(Action::Spoiler, Action::AllSpoilers), "spoilers: post / all"),
+                (k(Action::Expand), "replies under the post"),
+                (pair(Action::View, Action::Gallery), "view images / gallery"),
+                (pair(Action::OpenFile, Action::ImageSearch), "open file / image search"),
+                (k(Action::Links), "the post's links and files"),
+                (format!("{} / {}", pair(Action::Download, Action::DownloadThread), k(Action::Export)), "save: files / all / page"),
+                (pair(Action::Watch, Action::NewTab), "watch / quote in a new tab"),
+                (pair(Action::Hide, Action::ShowHidden), "hide post / show hidden"),
+                (k(Action::Mine), "mark as yours (replies)"),
+                (k(Action::Archive), "open a 404'd thread archived"),
+                (pair(Action::Copy, Action::CopyLink), "copy text / link"),
             ],
         ),
     ]
 }
 
 fn draw_help(f: &mut Frame, app: &App) {
-    const COL: u16 = 54;
+    const COL: u16 = 50;
     let t = theme();
     let sections: Vec<Vec<Line>> = help_sections(&app.keys)
         .into_iter()
         .map(|(title, rows)| {
             let mut lines = vec![Line::styled(title, bold(t.primary))];
             lines.extend(rows.into_iter().map(|(k, v)| {
-                Line::from(vec![Span::styled(format!("  {k:<20}"), bold(t.text)), Span::styled(v, Style::new().fg(t.text_dim))])
+                Line::from(vec![Span::styled(format!("  {k:<18} "), bold(t.text)), Span::styled(v, Style::new().fg(t.text_dim))])
             }));
             lines.push(Line::raw(""));
             lines

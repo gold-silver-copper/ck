@@ -3,32 +3,32 @@ source: src/ui_tests.rs
 expression: snapshot(&mut a)
 ---
  ck  Sites                                                                                 23 sites
-                       Keys                           images: off · esc close
+                         Keys                       images: off · esc close
     ★  Watched
-    ◷  History         Everywhere
-       4chan             j / k, ↓ / ↑        move
-       lainchan          g / G               top / bottom
-       wizchan           ctrl-d / ctrl-u     half page down / up
-       uboachan          enter, l            open
-       endchan           esc, h, backspace   back
-       kohlchan          /                   filter list
-       desuarchive       r                   reload
-       zzzchan           o                   open in browser
-       2ch               :                   go to a URL or site/board/thread
-       smuglo.li         ,                   settings: theme, keys, …
-       kissu             tab / shift-tab     next / previous tab
-       tvch              ctrl-w              close the tab
-       sushigirl         q, ctrl-c           quit
-       leftypol          mouse               wheel scroll, click, dbl-click
-       8kun
-       alogs           Catalog
-       trashchan         v                   view the OP's images
-       ptchan            O                   the OP's links and files
-       erischan          f                   search the board's archive
-       junkuchan         H / Z               hide the thread / show hidden
-       nukechan          w                   watch / unwatch the thread
-       palanq            T                   open the thread in a new tab
-       b4k               s                   cycle sort order
-                         c                   compact layout on / off
+    ◷  History           Everywhere
+       4chan               j k g G, ↑ ↓       move, top / bottom
+       lainchan            ctrl-d / ctrl-u    half page down / up
+       wizchan             enter l / esc h    open / back
+       uboachan            /                  filter (thread: search)
+       endchan             r / o              reload / open in browser
+       kohlchan            :                  go to a URL or site/board
+       desuarchive         ,                  settings: theme, keys, …
+       zzzchan             tab / shift-tab    next / previous tab
+       2ch                 ctrl-w             close the tab
+       smuglo.li           q, ctrl-c          quit (mouse works too)
+       kissu
+       tvch              Watched, History
+       sushigirl           x                  remove the entry
+       leftypol            T                  open in a new tab
+       8kun                y / Y              copy subject+link / link
+       alogs
+       trashchan         Image viewer
+       ptchan              h / l, ← / →       previous / next file
+       erischan            space              pause an animated GIF
+       junkuchan           i                  open externally
+       nukechan            y / Y              copy file URL / post link
+       palanq              R                  reverse image search
+       b4k                 esc, q             close
+
 
  enter open   / filter   o browser   r reload   , settings   ? help

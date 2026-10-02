@@ -99,7 +99,7 @@ usage: ck                  start
        ck --help           this help
 
 config:  {}{config_state}
-data:    {}   (watched threads, history, saved board lists)
+data:    {}   (watched threads, history, hidden posts, tabs, board lists)
 cache:   {}   (thumbnails, at most 200 MB)
 
 Press ? inside ck for the keys. See the README for configuration.

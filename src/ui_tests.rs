@@ -123,7 +123,11 @@ fn thread() -> ThreadView {
 }
 
 fn render(app: &mut App) -> (String, Buffer) {
-    let mut term = Terminal::new(TestBackend::new(100, 30)).unwrap();
+    render_at(app, 100, 30)
+}
+
+fn render_at(app: &mut App, w: u16, h: u16) -> (String, Buffer) {
+    let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
     term.draw(|f| crate::ui::draw(f, app)).unwrap();
     let buf = term.backend().buffer().clone();
     let mut text = String::new();
@@ -479,3 +483,19 @@ fn tabs_row() {
     insta::assert_snapshot!("tabs_row_backgrounds", bg_map(&mut a));
 }
 
+
+#[test]
+fn help_fits_at_110x32_and_scrolls_when_small() {
+    let mut a = app(false);
+    a.show_help = true;
+    let (text, _) = render_at(&mut a, 110, 32);
+    // Two columns, everything on screen.
+    for line in ["Everywhere", "Image viewer", "Catalog", "Thread", "mark as yours", "copy file URL / post link", "copy text / link"] {
+        assert!(text.contains(line), "{line} missing:\n{text}");
+    }
+    let (text, _) = render_at(&mut a, 60, 20);
+    assert!(text.contains("Everywhere") && !text.contains("mark as yours"), "{text}");
+    a.help_scroll = 100;
+    let (text, _) = render_at(&mut a, 60, 20);
+    assert!(text.contains("copy text / link"), "{text}");
+}
