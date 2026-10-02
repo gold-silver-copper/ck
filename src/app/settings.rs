@@ -6,7 +6,7 @@ use std::time::Duration;
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 use ratatui::widgets::ListState;
 
-use super::{App, View};
+use super::{App, View, edit_text, list_move};
 use crate::config::{self, ColorMode, ImagesMode};
 use crate::keys::{ACTIONS, Key, Scope};
 use crate::theme::{self, ROLES, Theme, ThemeDef};
@@ -286,18 +286,11 @@ impl App {
                     None
                 }
                 code => {
-                    let len = names.len();
                     let cur = list.selected().unwrap_or(0);
-                    let to = match code {
-                        KeyCode::Char('j') | KeyCode::Down => (cur + 1).min(len - 1),
-                        KeyCode::Char('k') | KeyCode::Up => cur.saturating_sub(1),
-                        KeyCode::Char('g') | KeyCode::Home => 0,
-                        KeyCode::Char('G') | KeyCode::End => len - 1,
-                        _ => cur,
-                    };
+                    let to = list_move(code, cur, names.len()).unwrap_or(cur);
                     list.select(Some(to));
                     // Live preview.
-                    if let Ok(t) = theme::resolve(&names[to], &self.themes) {
+                    if let Some(Ok(t)) = names.get(to).map(|name| theme::resolve(name, &self.themes)) {
                         self.set_theme(t);
                     }
                     Some(Popup::Themes { list, names, before })
@@ -318,15 +311,10 @@ impl App {
                         }
                     }
                 }
-                KeyCode::Backspace => {
-                    text.pop();
+                code => {
+                    edit_text(&mut text, code);
                     Some(Popup::Colors { list, editing: Some(text) })
                 }
-                KeyCode::Char(c) => {
-                    text.push(c);
-                    Some(Popup::Colors { list, editing: Some(text) })
-                }
-                _ => Some(Popup::Colors { list, editing: Some(text) }),
             },
             Popup::Colors { mut list, editing: None } => {
                 let cur = list.selected().unwrap_or(0);
@@ -343,14 +331,7 @@ impl App {
                         Some(Popup::Colors { list, editing: None })
                     }
                     code => {
-                        let to = match code {
-                            KeyCode::Char('j') | KeyCode::Down => (cur + 1).min(ROLES.len() - 1),
-                            KeyCode::Char('k') | KeyCode::Up => cur.saturating_sub(1),
-                            KeyCode::Char('g') | KeyCode::Home => 0,
-                            KeyCode::Char('G') | KeyCode::End => ROLES.len() - 1,
-                            _ => cur,
-                        };
-                        list.select(Some(to));
+                        list.select(Some(list_move(code, cur, ROLES.len()).unwrap_or(cur)));
                         Some(Popup::Colors { list, editing: None })
                     }
                 }
@@ -374,15 +355,11 @@ impl App {
                     let actions: Vec<usize> = (0..rows.len()).filter(|&r| rows[r].is_ok()).collect();
                     let cur = actions.iter().position(|&r| Some(r) == list.selected()).unwrap_or(0);
                     let to = match code {
-                        KeyCode::Char('j') | KeyCode::Down => (cur + 1).min(actions.len() - 1),
-                        KeyCode::Char('k') | KeyCode::Up => cur.saturating_sub(1),
-                        KeyCode::Char('g') | KeyCode::Home => 0,
-                        KeyCode::Char('G') | KeyCode::End => actions.len() - 1,
-                        KeyCode::PageDown => (cur + 10).min(actions.len() - 1),
+                        KeyCode::PageDown => (cur + 10).min(actions.len().saturating_sub(1)),
                         KeyCode::PageUp => cur.saturating_sub(10),
-                        _ => cur,
+                        _ => list_move(code, cur, actions.len()).unwrap_or(cur),
                     };
-                    list.select(Some(actions[to]));
+                    list.select(actions.get(to).copied());
                     Some(Popup::Keys { list, capture: None })
                 }
             },
@@ -399,15 +376,10 @@ impl App {
                     });
                     None
                 }
-                KeyCode::Backspace => {
-                    value.pop();
+                code => {
+                    edit_text(&mut value, code);
                     Some(Popup::Folder { value })
                 }
-                KeyCode::Char(c) => {
-                    value.push(c);
-                    Some(Popup::Folder { value })
-                }
-                _ => Some(Popup::Folder { value }),
             },
         };
     }

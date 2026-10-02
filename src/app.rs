@@ -120,6 +120,7 @@ pub struct Entry {
 /// How deep replies can be expanded inline.
 const MAX_DEPTH: u8 = 4;
 
+#[derive(Default)]
 pub struct ThreadView {
     pub board: String,
     pub no: u64,
@@ -197,31 +198,7 @@ impl ThreadView {
             }
         }
         let entries = (0..posts.len()).map(|i| Entry { post: i, depth: 0, path: vec![posts[i].no] }).collect();
-        Self {
-            entries,
-            expanded: HashSet::new(),
-            cursor: 0,
-            board,
-            no,
-            posts,
-            index,
-            backlinks,
-            selected: 0,
-            scroll: 0,
-            jumps: Vec::new(),
-            layout: None,
-            cache: LineCache::new(),
-            viewport: 0,
-            new_after: 0,
-            anchor: None,
-            search: String::new(),
-            matches: Vec::new(),
-            revealed: HashSet::new(),
-            reveal_all: false,
-            marks: Vec::new(),
-            show_hidden: false,
-            mine: HashSet::new(),
-        }
+        Self { entries, board, no, posts, index, backlinks, ..Default::default() }
     }
 
     /// The post is collapsed to a line: hidden, not shown anyway, and not the OP.
@@ -395,14 +372,10 @@ impl ThreadView {
     }
 
     fn jump_to(&mut self, no: u64) -> bool {
-        match self.index.get(&no) {
-            Some(&i) => {
-                self.jumps.push(self.selected);
-                self.select(i);
-                true
-            }
-            None => false,
-        }
+        let Some(&i) = self.index.get(&no) else { return false };
+        self.jumps.push(self.selected);
+        self.select(i);
+        true
     }
 }
 
@@ -841,13 +814,7 @@ impl App {
     /// Block until something happens (input, a finished request, a loaded image) or
     /// `timeout` passes, then handle everything pending. Returns whether anything arrived.
     pub fn wait(&mut self, timeout: Duration) -> bool {
-        let got = match self.rx.recv_timeout(timeout) {
-            Ok(msg) => {
-                self.handle(msg);
-                true
-            }
-            Err(_) => false,
-        };
+        let got = self.rx.recv_timeout(timeout).map(|msg| self.handle(msg)).is_ok();
         self.poll();
         got
     }
@@ -940,10 +907,7 @@ impl App {
         // At capacity, a finished refresh wakes the loop anyway (and due ones mustn't spin it).
         if self.refreshing.len() < MAX_REFRESHING {
             for w in self.store.watched.iter().filter(|w| !w.dead && !self.refreshing.contains(&w.key)) {
-                match self.watched_checked.get(&w.key) {
-                    Some(t) => at(*t + self.refresh_watched),
-                    None => at(now),
-                }
+                at(self.watched_checked.get(&w.key).map_or(now, |t| *t + self.refresh_watched));
             }
         }
         wake
@@ -1660,16 +1624,12 @@ impl App {
             self.store.toggle_watch(key.clone(), thread_subject(&t.posts), t.posts.len(), max_no);
         }
         let Some(w) = self.store.watched_mut(&key) else { return };
-        let mine = match w.mine.iter().position(|&n| n == no) {
-            Some(i) => {
-                w.mine.remove(i);
-                false
-            }
-            None => {
-                w.mine.push(no);
-                true
-            }
-        };
+        let mine = !w.mine.contains(&no);
+        if mine {
+            w.mine.push(no);
+        } else {
+            w.mine.retain(|&n| n != no);
+        }
         self.info(if mine { format!("Marked No.{no} as yours; replies to it will be counted and notified") } else { format!("No.{no} isn't marked as yours any more") });
         self.save_now();
         self.remark_thread();
@@ -2113,6 +2073,30 @@ pub fn on_path(program: &str) -> bool {
 
 /// The indices of `n` items whose `text` contains the filter (any case). The text is only
 /// made while there's a filter.
+/// Where j/k (or the arrows) move one row and g/G (or home/end) jump to the ends of a list
+/// of `len` rows, from row `cur`; `None` for other keys.
+fn list_move(code: KeyCode, cur: usize, len: usize) -> Option<usize> {
+    let last = len.saturating_sub(1);
+    match code {
+        KeyCode::Char('j') | KeyCode::Down => Some((cur + 1).min(last)),
+        KeyCode::Char('k') | KeyCode::Up => Some(cur.saturating_sub(1)),
+        KeyCode::Char('g') | KeyCode::Home => Some(0),
+        KeyCode::Char('G') | KeyCode::End => Some(last),
+        _ => None,
+    }
+}
+
+/// Backspace and typed characters in a text field; other keys do nothing.
+fn edit_text(text: &mut String, code: KeyCode) {
+    match code {
+        KeyCode::Backspace => {
+            text.pop();
+        }
+        KeyCode::Char(c) => text.push(c),
+        _ => {}
+    }
+}
+
 fn filtered(filter: &str, n: usize, text: impl Fn(usize) -> String) -> Vec<usize> {
     let needle = filter.to_lowercase();
     (0..n).filter(|&i| needle.is_empty() || text(i).to_lowercase().contains(&needle)).collect()

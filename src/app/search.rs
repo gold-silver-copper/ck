@@ -57,11 +57,7 @@ impl App {
                     self.search_archive(query);
                 }
             }
-            KeyCode::Backspace => {
-                text.pop();
-            }
-            KeyCode::Char(c) => text.push(c),
-            _ => {}
+            code => super::edit_text(text, code),
         }
     }
 

@@ -70,12 +70,8 @@ impl App {
                 self.goto = None;
                 self.goto_str(&input);
             }
-            KeyCode::Backspace => {
-                text.pop();
-            }
             KeyCode::Tab => self.complete_goto(),
-            KeyCode::Char(c) => text.push(c),
-            _ => {}
+            code => super::edit_text(text, code),
         }
     }
 

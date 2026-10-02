@@ -301,11 +301,7 @@ impl App {
         };
         match key.code {
             KeyCode::Esc => p.filter.clear(),
-            KeyCode::Backspace => {
-                p.filter.pop();
-            }
-            KeyCode::Char(c) => p.filter.push(c),
-            _ => {}
+            code => edit_text(&mut p.filter, code),
         }
         p.state.select(Some(0));
         if matches!(key.code, KeyCode::Esc | KeyCode::Enter) {

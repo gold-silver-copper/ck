@@ -62,17 +62,16 @@ impl App {
         let n = p.items.len();
         let cur = p.list.selected().unwrap_or(0);
         match code {
-            KeyCode::Char('j') | KeyCode::Down => p.list.select(Some((cur + 1).min(n - 1))),
-            KeyCode::Char('k') | KeyCode::Up => p.list.select(Some(cur.saturating_sub(1))),
-            KeyCode::Char('g') | KeyCode::Home => p.list.select(Some(0)),
-            KeyCode::Char('G') | KeyCode::End => p.list.select(Some(n - 1)),
             KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right => self.open_link_item(cur),
             KeyCode::Char('y') => {
                 if let Some(text) = self.link_item_url(cur) {
                     self.copy_text("link", text);
                 }
             }
-            _ => self.tab.links = None,
+            code => match super::list_move(code, cur, n) {
+                Some(to) => p.list.select(Some(to)),
+                None => self.tab.links = None,
+            },
         }
     }
 
@@ -161,15 +160,8 @@ impl App {
         let Some(p) = &mut self.image_search_panel else { return };
         let ok: Vec<usize> = (0..p.rows.len()).filter(|&r| p.rows[r].is_ok()).collect();
         let cur = ok.iter().position(|&r| Some(r) == p.list.selected()).unwrap_or(0);
-        let to = match code {
-            KeyCode::Char('j') | KeyCode::Down => Some((cur + 1).min(ok.len() - 1)),
-            KeyCode::Char('k') | KeyCode::Up => Some(cur.saturating_sub(1)),
-            KeyCode::Char('g') | KeyCode::Home => Some(0),
-            KeyCode::Char('G') | KeyCode::End => Some(ok.len() - 1),
-            _ => None,
-        };
-        if let Some(to) = to {
-            p.list.select(Some(ok[to]));
+        if let Some(&to) = super::list_move(code, cur, ok.len()).and_then(|to| ok.get(to)) {
+            p.list.select(Some(to));
             return;
         }
         let row = p.list.selected().and_then(|r| p.rows.get(r)).and_then(|r| r.as_ref().ok()).cloned();
