@@ -65,9 +65,13 @@ pub fn data_file(data: &[u8]) {
     let _ = serde_json::from_slice::<Vec<Visit>>(data);
     let _ = serde_json::from_slice::<Session>(data);
     let _ = serde_json::from_slice::<Vec<String>>(data);
+    // A saved thread, made back into posts.
+    if let Ok(t) = serde_json::from_slice::<crate::saved::SavedThread>(data) {
+        let _: Vec<crate::model::Post> = t.posts.into_iter().map(Into::into).collect();
+    }
     let dir = std::env::temp_dir().join(format!("ck-fuzz-data-{}", std::process::id()));
     let _ = std::fs::create_dir_all(&dir);
-    for name in ["watched.json", "history.json", "hidden.json", "seen.json", "settings.json", "board_prefs.json", "recent_boards.json"] {
+    for name in ["watched.json", "history.json", "hidden.json", "seen.json", "settings.json", "board_prefs.json", "recent_boards.json", "saved.json"] {
         let _ = std::fs::write(dir.join(name), data);
     }
     let (store, _) = crate::store::Store::load(Some(dir.clone()));

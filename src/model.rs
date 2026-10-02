@@ -14,7 +14,7 @@ pub struct Board {
 }
 
 /// Where a quote link points, as far as the markup tells.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct Link {
     /// `None`: the current board.
     pub board: Option<String>,
@@ -25,7 +25,7 @@ pub struct Link {
 }
 
 /// Where a link in a post's text goes.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum Target {
     Quote(Link),
     Url(String),
@@ -33,7 +33,7 @@ pub enum Target {
 
 /// A link in a post's text: the body line it's on, the byte range of its text in that
 /// line, and where it goes. In the order they appear.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Anchor {
     pub line: usize,
     pub start: usize,
@@ -41,7 +41,7 @@ pub struct Anchor {
     pub to: Target,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Attachment {
     pub filename: String,
     pub url: String,

@@ -302,7 +302,11 @@ impl App {
                         items.push(act(A::Search, "search the thread"));
                         items.push(act(A::Hints, "pick a link or post by its label"));
                         items.push(act(A::Export, "save the thread as HTML and JSON"));
-                        items.push(act(A::Reload, "reload"));
+                        match self.tab.offline {
+                            Some(o) if o.dead => {}
+                            Some(_) => items.push(act(A::Reload, "open the live thread")),
+                            None => items.push(act(A::Reload, "reload")),
+                        }
                     }
                 }
                 View::Catalog => {
@@ -340,6 +344,7 @@ impl App {
                     match self.selected_site_row() {
                         Some(SiteRow::Watched) => items.push(MenuItem::Enter("open Watched".into())),
                         Some(SiteRow::History) => items.push(MenuItem::Enter("open History".into())),
+                        Some(SiteRow::Saved) => items.push(MenuItem::Enter("open Saved".into())),
                         Some(SiteRow::Favorite(_)) => {
                             items.push(MenuItem::Enter("open the board".into()));
                             items.push(MenuItem::Act(A::Remove, "take it off the favorites".into()));
@@ -384,6 +389,18 @@ impl App {
                         items.push(act(A::CopyLink, "copy its link"));
                         items.push(act(A::Browser, "open it in the browser"));
                         items.push(act(A::Follow, "follow it as a general"));
+                    }
+                    items.push(act(A::Search, "filter"));
+                    items.push(act(A::Hints, "pick a thread by its label"));
+                }
+                View::Saved => {
+                    if let Some(i) = self.selected_index() {
+                        title = format!("No.{}", self.store.saved[i].key.no);
+                        items.push(MenuItem::Enter("read the saved copy".into()));
+                        items.push(act(A::Remove, "remove the saved copy"));
+                        items.push(act(A::Copy, "copy its subject and link"));
+                        items.push(act(A::CopyLink, "copy its link"));
+                        items.push(act(A::Browser, "open it in the browser"));
                     }
                     items.push(act(A::Search, "filter"));
                     items.push(act(A::Hints, "pick a thread by its label"));

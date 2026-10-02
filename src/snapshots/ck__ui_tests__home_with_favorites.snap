@@ -6,6 +6,7 @@ expression: snapshot(&mut a)
 
     ◉  Watched         3 threads   2 new
     ◷  History         2 threads recent
+    ▤  Saved           0 threads
     ★  4chan /g/       Technology                                                              1
     ★  lainchan /λ/    Programming                                                             2
     ↺  4chan /a/       Anime & Manga
@@ -23,7 +24,6 @@ expression: snapshot(&mut a)
        palanq           foolfuuka   https://archive.palanq.win
        b4k              foolfuuka   https://arch.b4k.dev
        10 hidden sites · enter shows them
-
 
 
 

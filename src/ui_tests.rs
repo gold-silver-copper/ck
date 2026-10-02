@@ -257,6 +257,46 @@ fn watched() {
     insta::assert_snapshot!(snapshot(&mut a));
 }
 
+/// Saved copies: a watched one, a dead one, an exported one.
+fn with_saved(a: &mut App) {
+    use crate::saved::SavedMeta;
+    let key = |board: &str, no| ThreadKey { site: "4chan".into(), board: board.into(), no };
+    let meta = |key, subject: &str, saved, dead, posts| SavedMeta { key, subject: subject.into(), saved, dead, bytes: 40_000, posts, newest: 0, hash: 0 };
+    a.store.saved = vec![
+        meta(key("g", 1000), "Snapshot thread", NOW - 60, false, 5),
+        meta(key("g", 900), "Old thread", NOW - 5 * HOUR, true, 300),
+        meta(key("b", 5), "Random thread", NOW - 50 * HOUR, false, 9),
+    ];
+}
+
+#[test]
+fn saved() {
+    let mut a = app(false);
+    with_saved(&mut a);
+    a.tab.view = View::Saved;
+    insta::assert_snapshot!(snapshot(&mut a));
+    // The home screen counts them.
+    a.tab.view = View::Sites;
+    assert!(snapshot(&mut a).contains("Saved           3 threads, 1 gone from the site"));
+}
+
+#[test]
+fn saved_dead_thread() {
+    let mut a = thread_app(false);
+    with_saved(&mut a);
+    a.tab.offline = Some(crate::app::Offline { saved: NOW - 5 * HOUR, dead: true });
+    insta::assert_snapshot!(snapshot(&mut a));
+}
+
+#[test]
+fn thread_gone_offers_the_saved_copy() {
+    let mut a = app(false);
+    with_saved(&mut a);
+    a.tab.view = View::Thread;
+    a.thread_gone(&ThreadKey { site: "4chan".into(), board: "g".into(), no: 900 });
+    insta::assert_snapshot!(snapshot(&mut a));
+}
+
 #[test]
 fn history() {
     let mut a = app(false);

@@ -80,6 +80,8 @@ pub enum Kind {
 
 pub enum State<'a> {
     Loading,
+    /// Offline (a saved copy), and not on disk: it won't be fetched.
+    Unavailable,
     /// Downloaded, being encoded for this size.
     Rendering,
     Failed,
@@ -152,6 +154,10 @@ pub struct Images {
     /// frame, and in the one being drawn).
     next_frame: Option<Instant>,
     drawing_next: Option<Instant>,
+    /// Reading offline: only images already on disk (cached thumbnails, `file://` paths)
+    /// load; nothing is fetched.
+    pub offline: bool,
+    disk: Option<Arc<DiskCache>>,
 }
 
 impl Images {
@@ -175,7 +181,8 @@ impl Images {
             }
             encode = Some(enc_tx);
         }
-        Self { picker, slots: HashMap::new(), queue, rx, encode, frame: Vec::new(), tick: 0, bytes: 0, next_frame: None, drawing_next: None }
+        let (offline, frame) = (false, Vec::new());
+        Self { picker, slots: HashMap::new(), queue, rx, encode, frame, tick: 0, bytes: 0, next_frame: None, drawing_next: None, offline, disk }
     }
 
     /// Images "on", but nothing is ever fetched or encoded: everything stays a placeholder.
@@ -184,7 +191,8 @@ impl Images {
         let (_tx, rx) = channel();
         let picker = Some(Picker::halfblocks());
         let queue = Arc::new(Queue::default());
-        Self { picker, slots: HashMap::new(), queue, rx, encode: None, frame: Vec::new(), tick: 0, bytes: 0, next_frame: None, drawing_next: None }
+        let (offline, disk) = (false, None);
+        Self { picker, slots: HashMap::new(), queue, rx, encode: None, frame: Vec::new(), tick: 0, bytes: 0, next_frame: None, drawing_next: None, offline, disk }
     }
 
     /// An encoder thread but no fetch workers (tests and benchmarks).
@@ -228,6 +236,9 @@ impl Images {
     pub fn get(&mut self, url: &str, size: Size, kind: Kind) -> State<'_> {
         if self.picker.is_none() {
             return State::Failed;
+        }
+        if !self.may_load(url) {
+            return State::Unavailable;
         }
         self.frame.push((url.to_string(), kind, Some(size)));
         self.tick += 1;
@@ -310,9 +321,15 @@ impl Images {
 
     /// Ask for an image without drawing it (prefetch for rows about to scroll into view).
     pub fn want(&mut self, url: &str, kind: Kind) {
-        if self.picker.is_some() {
+        if self.picker.is_some() && self.may_load(url) {
             self.frame.push((url.to_string(), kind, None));
         }
+    }
+
+    /// Whether an image may be loaded: always, unless offline, where only what's in memory
+    /// or on disk is.
+    fn may_load(&self, url: &str) -> bool {
+        !self.offline || self.slots.contains_key(url) || url.starts_with("file://") || self.disk.as_ref().is_some_and(|d| d.contains(url))
     }
 
     /// Call once per frame after drawing: hand this frame's wishes to the workers.
@@ -419,7 +436,7 @@ fn worker(q: &Queue, tx: &Sender<Done>, encode: &Sender<EncodeJob>, wake: &dyn F
                 if let Some(i) = st.jobs.iter().position(|(u, k, _)| runnable(&st.busy, u, *k, disk))
                     && let Some((url, kind, size)) = st.jobs.remove(i)
                 {
-                    let cached = kind == Kind::Thumb && disk.is_some_and(|d| d.contains(&url));
+                    let cached = url.starts_with("file://") || (kind == Kind::Thumb && disk.is_some_and(|d| d.contains(&url)));
                     let host = (!cached && !http::is_media_host(&url)).then(|| http::host(&url).to_string());
                     if let Some(h) = &host {
                         st.busy.insert(h.clone());
@@ -474,7 +491,8 @@ fn encode(picker: &Picker, img: &DynamicImage, size: Size) -> Result<Protocol, S
 /// Whether a job can start now: cached thumbnails and media hosts always; hosts that share
 /// the API's rate limit one at a time, so the queue's order (top to bottom) is kept.
 fn runnable(busy: &HashSet<String>, url: &str, kind: Kind, disk: Option<&DiskCache>) -> bool {
-    (kind == Kind::Thumb && disk.is_some_and(|d| d.contains(url)))
+    url.starts_with("file://")
+        || (kind == Kind::Thumb && disk.is_some_and(|d| d.contains(url)))
         || http::is_media_host(url)
         || !busy.contains(http::host(url))
 }
@@ -483,6 +501,12 @@ fn runnable(busy: &HashSet<String>, url: &str, kind: Kind, disk: Option<&DiskCac
 /// thumbnails that decode). A cached file that won't decode is deleted and fetched again.
 /// Full-size animated GIFs come with their frames.
 fn fetch(url: &str, kind: Kind, disk: Option<&DiskCache>) -> Result<(DynamicImage, Option<Frames>), String> {
+    // A downloaded file (a saved thread's, read offline).
+    if let Some(path) = url.strip_prefix("file://") {
+        let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
+        let frames = if kind == Kind::Full { gif_frames(&bytes) } else { None };
+        return Ok((decode(&bytes)?, frames));
+    }
     if let Some(d) = disk
         && let Some(bytes) = d.get(url)
     {
@@ -626,6 +650,31 @@ mod tests {
         disk.put(url, b"not an image").unwrap();
         assert!(fetch(url, Kind::Thumb, Some(&disk)).is_err());
         assert!(!disk.contains(url));
+    }
+
+    #[test]
+    fn offline_loads_only_what_is_on_disk() {
+        let dir = tempfile::tempdir().unwrap();
+        let disk = DiskCache::new(dir.path().join("cache"), 1 << 20);
+        let mut png = Vec::new();
+        DynamicImage::new_rgb8(4, 3).write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).unwrap();
+        let cached = "http://127.0.0.1:9/cached.png";
+        disk.put(cached, &png).unwrap();
+        std::fs::write(dir.path().join("1_cat.png"), &png).unwrap();
+        let local = format!("file://{}", dir.path().join("1_cat.png").display());
+        let mut im = Images::start(Some(Picker::halfblocks()), Arc::new(|| {}), Some(disk), 0);
+        im.offline = true;
+        let size = Size::new(4, 4);
+        assert!(matches!(im.get("http://127.0.0.1:9/other.png", size, Kind::Thumb), State::Unavailable));
+        im.want("http://127.0.0.1:9/next.png", Kind::Thumb);
+        assert!(matches!(im.get(cached, size, Kind::Thumb), State::Loading));
+        assert!(matches!(im.get(&local, size, Kind::Full), State::Loading));
+        im.end_frame();
+        let jobs: Vec<String> = lock(&im.queue.state).jobs.iter().map(|(u, ..)| u.clone()).collect();
+        assert_eq!(jobs, [cached.to_string(), local.clone()]);
+        // A downloaded file loads from its path, and never waits on a host.
+        assert_eq!(fetch(&local, Kind::Full, None).unwrap().0.width(), 4);
+        assert!(runnable(&["".to_string()].into(), &local, Kind::Full, None));
     }
 
     fn gif(frames: &[(u8, u16)]) -> Vec<u8> {

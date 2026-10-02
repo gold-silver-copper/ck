@@ -16,6 +16,7 @@ fn view_name(v: View) -> &'static str {
         View::Thread => "thread",
         View::Watched => "watched",
         View::History => "history",
+        View::Saved => "saved",
         // Settings and search results aren't places to come back to.
         View::Settings | View::Search => "",
     }
@@ -31,6 +32,10 @@ impl App {
             v => v,
         };
         let mut place = Place { view: view_name(view).into(), site: self.current_site().cfg.name.clone(), ..Default::default() };
+        // A saved copy open: reopened as one.
+        if view == View::Thread && self.tab.offline.is_some() {
+            place.view = "saved".into();
+        }
         match view {
             View::Catalog | View::Thread => {
                 place.board = self.tab.board.as_ref().map(|b| b.uri.clone());
@@ -102,6 +107,15 @@ impl App {
         match (p.view.as_str(), board, p.thread) {
             ("watched", ..) => self.tab.view = View::Watched,
             ("history", ..) => self.tab.view = View::History,
+            ("saved", Some(board), Some(no)) => {
+                self.open_saved(crate::store::ThreadKey { site: p.site.clone(), board: board.uri, no });
+                if let Some(t) = &mut self.tab.thread
+                    && let Some(&i) = p.selected.and_then(|s| t.index.get(&s))
+                {
+                    t.select(i);
+                }
+            }
+            ("saved", ..) => self.tab.view = View::Saved,
             ("boards", ..) => self.enter_site(site),
             ("catalog", Some(board), _) => {
                 self.tab.board = Some(board);

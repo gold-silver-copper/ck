@@ -6,6 +6,7 @@ expression: snapshot(&mut a)
 
     ◉  Watched         3 threads   2 new
     ◷  History         2 threads recent
+    ▤  Saved           0 threads
     ★  4chan /g/       Technology                                                              1
     ★  lainchan /λ/    Programming                                                             2
     ↺  4chan /a/       Anime & Manga
@@ -30,5 +31,4 @@ expression: snapshot(&mut a)
        erischan         jschan      https://erischan.org
        junkuchan        jschan      https://junkuchan.org
        nukechan         jschan      https://nukechan.net
-       palanq           foolfuuka   https://archive.palanq.win
  enter open   . more   / filter   o browser   r reload   , settings   ? help

@@ -27,7 +27,8 @@ What it does, besides browsing:
 - **Tabs**, and **`:`** to open any thread or board URL; `ck URL` starts there, and ck
   otherwise starts where you left off.
 - **Watched threads** refreshed in the background, with desktop notifications for new posts
-  and replies to posts you've marked as yours.
+  and replies to posts you've marked as yours. Each is **saved** as it refreshes, so a
+  thread that dies can still be read, offline.
 - **Catalogs** as cards, a compact list or a grid, marking threads that are new since your
   last visit; **filters** to hide or highlight threads and posts.
 - **Threads** with replies expandable inline, quote previews, search, a links panel, and
@@ -99,11 +100,11 @@ the action name is in brackets. The `?` help lists the same, with your keys.
 | `*`  | favorite board on / off (also in a catalog) [`favorite`] |
 | `x`  | on the home screen: take a favorite off, forget a recent board, hide / show a site [`remove`] |
 
-**Watched, History**
+**Watched, History, Saved**
 
 | key  | action |
 |------|--------|
-| `x`  | remove the entry [`remove`] |
+| `x`  | remove the entry; in Saved, press it twice to delete the copy [`remove`] |
 | `T`  | open the thread in a new tab [`new_tab`] |
 | `F`  | follow / stop following as a general [`follow`] |
 | `y` / `Y` | copy the subject and link / the link [`copy`, `copy_link`] |
@@ -167,7 +168,8 @@ needs `set -g set-clipboard on`. On a local machine ck also uses `pbcopy`, `wl-c
 
 ### The home screen
 
-`ck` starts on the home screen: Watched and History, your favorite boards, then the sites.
+`ck` starts on the home screen: Watched, History and Saved, your favorite boards, then the
+sites.
 `*` on a board (in the Boards list, or in its catalog) makes it a favorite; favorites are
 listed at the top, and `1`–`9` open the first nine directly. `x` on a favorite takes it
 off. They're kept in the config as `favorites = ["4chan/g", "lainchan/λ"]`.
@@ -202,6 +204,7 @@ nothing else is being typed starts this by itself), or type a short form:
 | `4chan/g`, `4chan/g/123` | a board, a thread                                |
 | `lainchan/λ/42#43`     | a thread, with post 43 selected                    |
 | `>>>/g/123`            | a cross-board quote: thread 123 on /g/             |
+| `saved`, `watched`, `history` | that list                                   |
 
 `tab` completes site and board names. `esc` (or `u` from a thread) goes back to where you
 were. `ck URL` (or `ck 4chan/g`) starts there.
@@ -268,6 +271,28 @@ The open thread refreshes in the background every 10 seconds and watched threads
 minimums). Posts that arrived since your last visit are marked "new"; `U` jumps to the
 first one.
 
+### Saved threads
+
+Watched threads are saved as they refresh: each time new posts arrive, the thread's last
+good copy is written to the data directory (`threads/<site>/<board>/<no>.json`, only when
+something changed). When a watched thread 404s, its copy is kept and marked dead, so the
+thread isn't lost. `E` saves a copy too, of any thread.
+
+"Saved" on the home screen (or `:saved`) lists the copies, newest first, with "dead" on
+threads that are gone and "watching" on ones you watch. `enter` opens one in the usual
+thread view, read offline: the top bar says "saved 2h ago" (and "dead"), nothing in it is
+refreshed or fetched, and everything else works (replies, search, the menu, the gallery).
+Images come from the thread's download folder when you saved them with `d`/`D`, and
+thumbnails from the thumbnail cache; the rest show as placeholders. On a copy of a thread
+that's still up, `r` opens the live thread. `x` (twice) deletes a copy; unwatching a thread
+keeps it.
+
+When the thread you open has 404'd and there's a copy, ck offers it ("a saved copy from
+2h ago: enter opens it"), and a thread that dies while you read it becomes its copy.
+Copies take at most `saved_max_mb` (500 MB by default; 0 for no limit): past that, the
+oldest copies of dead threads you no longer watch are removed. A watched thread's copy is
+never removed.
+
 ### Following a general
 
 Generals are threads that start over when they fill up (/lmg/, /hsg/, …). `F` on one (in
@@ -307,7 +332,8 @@ quotes of it read `>>123 (You)`, and they get their own notification.
 ck keeps its state as JSON in `$XDG_DATA_HOME/ck` (default `~/.local/share/ck`):
 `watched.json`, `history.json`, `recent_boards.json`, `board_prefs.json` (each board's
 sort and layout), `hidden.json` (what you hid with `H`), `seen.json` (catalog threads
-seen, for "new" and `+N`), and `session.json` (your tabs, for the next start). Board
+seen, for "new" and `+N`), `session.json` (your tabs, for the next start), and `saved.json`
+with `threads/` (saved threads). Board
 lists fetched from sites are saved there too (`boards/`), so a site's boards show up
 instantly next time; they're refreshed quietly in the background once a day, and `r` in
 the Boards view refreshes them now. Lists that come in several pages (LynxChan and
@@ -370,7 +396,8 @@ footer. Downloads go through the same rate limiter as images.
 `thread.html`, a page with the current theme's colors that reads offline, and
 `thread.json`, the posts as data (`"format": 1`). Files already saved there with `d`/`D`
 are shown from the folder; the others link to the site. So `D` then `E` makes a complete
-offline copy. Saving again replaces both.
+offline copy. Saving again replaces both. The thread is also saved for ck itself, to open
+from the Saved view.
 
 ## Themes and settings
 

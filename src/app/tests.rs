@@ -787,9 +787,9 @@ fn favorite_boards_on_the_home_screen() {
     assert_eq!(app.favorites.iter().map(BoardRef::key).collect::<Vec<_>>(), ["b/y", "a/xy"]);
     let c: Config = toml::from_str(&std::fs::read_to_string(dir.path().join("config.toml")).unwrap()).unwrap();
     assert_eq!(c.favorites, ["b/y", "a/xy"]);
-    // They're on the home screen after Watched and History; 2 opens the second.
+    // They're on the home screen after Watched, History and Saved; 2 opens the second.
     app.tab.view = View::Sites;
-    assert_eq!(app.visible_sites()[2..4], [SiteRow::Favorite(0), SiteRow::Favorite(1)]);
+    assert_eq!(app.visible_sites()[3..5], [SiteRow::Favorite(0), SiteRow::Favorite(1)]);
     app.on_key(KeyEvent::from(KeyCode::Char('1')));
     assert_eq!((app.tab.site, app.tab.view, app.tab.board.as_ref().unwrap().uri.as_str()), (1, View::Catalog, "y"));
     app.tab.view = View::Sites;
@@ -797,7 +797,7 @@ fn favorite_boards_on_the_home_screen() {
     assert_eq!((app.tab.site, app.tab.board.as_ref().unwrap().uri.as_str()), (0, "xy"));
     // x on a favorite row takes it off; * again on the board does too.
     app.tab.view = View::Sites;
-    app.site_list.state.select(Some(2));
+    app.site_list.state.select(Some(3));
     app.act(Action::Remove);
     assert_eq!(app.favorites.len(), 1);
     app.goto_str("a/xy");
@@ -820,13 +820,13 @@ fn recent_boards_on_the_home_screen() {
     app.favorites.push(BoardRef::parse("b/y").unwrap());
     app.tab.view = View::Sites;
     let rows = app.visible_sites();
-    assert_eq!(rows[2..5], [SiteRow::Favorite(0), SiteRow::Recent(0), SiteRow::Recent(2)]);
+    assert_eq!(rows[3..6], [SiteRow::Favorite(0), SiteRow::Recent(0), SiteRow::Recent(2)]);
     // Enter opens; x forgets it.
-    app.site_list.state.select(Some(4));
+    app.site_list.state.select(Some(5));
     app.enter();
     assert_eq!((app.tab.view, app.tab.board.as_ref().unwrap().uri.as_str()), (View::Catalog, "x"));
     app.tab.view = View::Sites;
-    app.site_list.state.select(Some(3));
+    app.site_list.state.select(Some(4));
     app.act(Action::Remove);
     assert_eq!(app.store.recent_boards, ["b/y", "a/x"]);
 }
@@ -838,16 +838,16 @@ fn hiding_sites_from_the_home_screen() {
     app.config_path = Some(dir.path().join("config.toml"));
     let sites = |app: &App| app.visible_sites().into_iter().filter(|r| matches!(r, SiteRow::Site(_) | SiteRow::HiddenSites)).collect::<Vec<_>>();
     assert_eq!(sites(&app), [SiteRow::Site(0), SiteRow::Site(1)]);
-    app.site_list.state.select(Some(2));
+    app.site_list.state.select(Some(3));
     app.act(Action::Remove);
     assert_eq!(sites(&app), [SiteRow::Site(1), SiteRow::HiddenSites]);
     let c: Config = toml::from_str(&std::fs::read_to_string(dir.path().join("config.toml")).unwrap()).unwrap();
     assert_eq!(c.hidden_sites, ["a"]);
     // The last row shows them; x on one brings it back.
-    app.site_list.state.select(Some(3));
+    app.site_list.state.select(Some(4));
     app.enter();
     assert_eq!(sites(&app), [SiteRow::Site(0), SiteRow::Site(1), SiteRow::HiddenSites]);
-    app.site_list.state.select(Some(2));
+    app.site_list.state.select(Some(3));
     app.act(Action::Remove);
     assert_eq!(sites(&app), [SiteRow::Site(0), SiteRow::Site(1)]);
     assert!(app.hidden_sites.is_empty());
@@ -1096,4 +1096,204 @@ fn the_menu_runs_what_it_lists() {
     app.on_key(KeyEvent::from(KeyCode::Char('.')));
     app.on_key(KeyEvent::from(KeyCode::Esc));
     assert!(app.menu.is_none());
+}
+
+// ----- saved threads -----
+
+/// The local app with a data directory, the clock fixed at `now`.
+fn saving_app(dir: &std::path::Path, now: i64) -> App {
+    let mut app = local_app();
+    app.store = Store::load(Some(dir.to_path_buf())).0;
+    app.clock = Clock { fixed: Some(now), ..Default::default() };
+    app
+}
+
+fn nos(nos: &[u64]) -> Vec<Post> {
+    nos.iter().map(|&no| Post { no, body: vec![Line::from(format!("post {no}"))], ..Default::default() }).collect()
+}
+
+fn gone() -> anyhow::Error {
+    anyhow::Error::new(http::HttpError::NotFound("x".into()))
+}
+
+#[test]
+fn watched_threads_are_saved_as_posts_arrive() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = saving_app(dir.path(), 1000);
+    let key = |no| ThreadKey { site: "a".into(), board: "x".into(), no };
+    let file = |no: u64| dir.path().join(format!("threads/a/x/{no}.json"));
+    // Not watched: not saved.
+    app.goto_str("a/x/1");
+    app.handle(Msg::Thread(app.tab.req, Ok(nos(&[1, 2]))));
+    assert!(!file(1).exists());
+    // Watching a loaded thread saves it at once; refreshes save the changes only.
+    app.act(Action::Watch);
+    assert!(file(1).exists());
+    std::fs::remove_file(file(1)).unwrap();
+    app.set_thread(nos(&[1, 2]));
+    assert!(!file(1).exists());
+    app.set_thread(nos(&[1, 2, 3]));
+    assert_eq!(app.store.saved(&key(1)).unwrap().posts, 3);
+    // A watched thread refreshed in the background, too.
+    app.store.toggle_watch(key(7), "seven".into(), 1, 7);
+    app.refreshed(key(7), Ok(nos(&[7, 8])));
+    assert!(file(7).exists());
+    // The index is written with the rest of the data.
+    app.save_now();
+    assert_eq!(Store::load(Some(dir.path().to_path_buf())).0.saved.len(), 2);
+}
+
+#[test]
+fn a_dead_thread_offers_its_saved_copy() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = saving_app(dir.path(), 10_000);
+    let key = ThreadKey { site: "a".into(), board: "x".into(), no: 1 };
+    app.store.toggle_watch(key.clone(), "one".into(), 2, 2);
+    app.store.keep_thread(&key, "one", "u", &nos(&[1, 2]), 10_000 - 7200).unwrap();
+    // Opened, and gone: the copy is offered (and the thread marked dead, copy and all).
+    app.goto_str("a/x/1");
+    app.handle(Msg::Thread(app.tab.req, Err(gone())));
+    assert!(app.store.watched(&key).unwrap().dead && app.store.saved(&key).unwrap().dead);
+    let text = &app.status.as_ref().unwrap().text;
+    assert!(text.contains("A saved copy from 2h ago: enter opens it"), "{text}");
+    app.on_key(KeyEvent::from(KeyCode::Enter));
+    assert_eq!(app.tab.offline, Some(tabs::Offline { saved: 10_000 - 7200, dead: true }));
+    assert_eq!(app.tab.thread.as_ref().unwrap().posts.len(), 2);
+    // Read offline: r says so, and nothing is fetched, however long it stays open.
+    app.act(Action::Reload);
+    assert!(app.status.as_ref().unwrap().text.contains("saved copy from 2h ago; the thread is gone"));
+    for _ in 0..3 {
+        app.clock = Clock { fixed: Some(app.clock.now() + 600), instant: Some(app.clock.instant() + Duration::from_secs(600)) };
+        app.poll();
+        assert!(app.tab.loading.is_none() && app.refreshing.is_empty() && app.tab.req == 0);
+    }
+    assert!(app.next_wake(app.clock.instant()) > Duration::from_millis(500));
+    // Opening it isn't a visit (which would bring the dead thread back to life).
+    assert!(app.store.watched(&key).unwrap().dead);
+}
+
+#[test]
+fn a_thread_dying_on_screen_becomes_its_saved_copy() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = saving_app(dir.path(), 1000);
+    let key = ThreadKey { site: "a".into(), board: "x".into(), no: 1 };
+    app.goto_str("a/x/1");
+    app.handle(Msg::Thread(app.tab.req, Ok(nos(&[1, 2]))));
+    app.act(Action::Watch);
+    app.refreshed(key.clone(), Err(gone()));
+    assert_eq!(app.tab.offline, Some(tabs::Offline { saved: 1000, dead: true }));
+    assert!(app.status.as_ref().unwrap().text.contains("this is its saved copy"));
+    assert_eq!(app.tab.thread.as_ref().unwrap().posts.len(), 2);
+    // Without a copy, as before.
+    let mut app = saving_app(dir.path(), 1000);
+    app.goto_str("a/x/5");
+    app.handle(Msg::Thread(app.tab.req, Err(gone())));
+    assert!(app.tab.saved_offer.is_none() && app.tab.offline.is_none());
+    assert_eq!(app.status.as_ref().unwrap().text, "Thread was deleted or archived");
+}
+
+#[test]
+fn a_saved_copy_of_a_live_thread_goes_live_with_r() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = saving_app(dir.path(), 1000);
+    let key = ThreadKey { site: "a".into(), board: "x".into(), no: 1 };
+    app.store.keep_thread(&key, "one", "u", &nos(&[1, 2]), 900).unwrap();
+    app.tab.view = View::Saved;
+    app.saved_list.state.select(Some(0));
+    app.enter();
+    assert_eq!(app.tab.offline, Some(tabs::Offline { saved: 900, dead: false }));
+    app.tab.thread.as_mut().unwrap().selected = 1;
+    app.act(Action::Reload);
+    assert!(app.tab.offline.is_none() && app.tab.loading.is_some());
+    // The copy stays up, and the live thread arrives in its place, keeping the selection.
+    app.handle(Msg::Thread(app.tab.req, Ok(nos(&[1, 2, 3]))));
+    let t = app.tab.thread.as_ref().unwrap();
+    assert_eq!((t.posts.len(), t.current().unwrap().no), (3, 2));
+    // Back goes to the Saved view.
+    app.back();
+    assert_eq!(app.tab.view, View::Saved);
+}
+
+#[test]
+fn the_saved_view_lists_and_removes_after_asking() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = saving_app(dir.path(), 1000);
+    let key = |no| ThreadKey { site: "a".into(), board: "x".into(), no };
+    for (no, at) in [(1, 100), (2, 300), (3, 200)] {
+        app.store.keep_thread(&key(no), &format!("thread {no}"), "u", &nos(&[no]), at).unwrap();
+    }
+    app.tab.view = View::Sites;
+    app.site_list.state.select(Some(2));
+    assert_eq!(app.selected_site_row(), Some(SiteRow::Saved));
+    app.enter();
+    assert_eq!(app.tab.view, View::Saved);
+    // Newest saved first.
+    let rows: Vec<u64> = app.visible_saved().iter().map(|&i| app.store.saved[i].key.no).collect();
+    assert_eq!(rows, [2, 3, 1]);
+    app.saved_list.filter = "thread 3".into();
+    assert_eq!(app.visible_saved().len(), 1);
+    app.saved_list.filter.clear();
+    // x asks first; a second x removes it, file and all.
+    app.saved_list.state.select(Some(1));
+    app.act(Action::Remove);
+    assert_eq!(app.store.saved.len(), 3);
+    assert!(app.status.as_ref().unwrap().text.contains("again to remove the saved copy of thread 3"));
+    app.act(Action::Remove);
+    assert!(app.store.saved(&key(3)).is_none() && !dir.path().join("threads/a/x/3.json").exists());
+    // Unwatching keeps a copy.
+    app.store.toggle_watch(key(1), String::new(), 1, 1);
+    app.store.toggle_watch(key(1), String::new(), 1, 1);
+    assert!(app.store.saved(&key(1)).is_some());
+    // From : too.
+    app.tab.view = View::Sites;
+    app.goto_str("saved");
+    assert_eq!(app.tab.view, View::Saved);
+}
+
+#[test]
+fn export_saves_a_copy() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = saving_app(&dir.path().join("data"), 1000);
+    app.download_dir = Some(dir.path().join("dl").display().to_string());
+    app.goto_str("a/x/1");
+    app.handle(Msg::Thread(app.tab.req, Ok(nos(&[1, 2]))));
+    app.act(Action::Export);
+    assert!(dir.path().join("dl/thread.json").exists());
+    let key = ThreadKey { site: "a".into(), board: "x".into(), no: 1 };
+    assert_eq!(app.store.saved(&key).unwrap().posts, 2);
+    assert!(app.status.as_ref().unwrap().text.contains("(and in Saved)"));
+}
+
+#[test]
+fn a_saved_copy_is_remembered_in_the_session() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = saving_app(dir.path(), 1000);
+    let key = ThreadKey { site: "b".into(), board: "y".into(), no: 5 };
+    app.store.keep_thread(&key, "five", "u", &nos(&[5, 6]), 900).unwrap();
+    app.open_saved(key);
+    app.tab.thread.as_mut().unwrap().selected = 1;
+    let place = app.place();
+    assert_eq!((place.view.as_str(), place.thread, place.selected), ("saved", Some(5), Some(6)));
+    let mut next = saving_app(dir.path(), 1000);
+    next.go_to_place(&place);
+    assert!(next.tab.offline.is_some() && next.tab.loading.is_none());
+    assert_eq!(next.tab.thread.as_ref().unwrap().current().unwrap().no, 6);
+    // The Saved view itself.
+    next.tab.view = View::Saved;
+    assert_eq!(next.place().view, "saved");
+}
+
+#[test]
+fn watching_a_saved_copy_keeps_it_under_its_own_number() {
+    // (Found by fuzzing.) The site answered thread 5 with thread 9's posts; its copy, kept as
+    // 5's, shows thread 9. Watching that keeps a copy as 9's too, so 9 dying loses nothing.
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = saving_app(dir.path(), 1000);
+    let key = |no| ThreadKey { site: "a".into(), board: "x".into(), no };
+    app.store.keep_thread(&key(5), "five", "u", &nos(&[9, 10]), 900).unwrap();
+    app.open_saved(key(5));
+    assert_eq!(app.tab.thread.as_ref().unwrap().no, 9);
+    app.act(Action::Watch);
+    assert!(app.store.watched(&key(9)).is_some_and(|w| w.last_seen > 0));
+    assert_eq!(app.store.saved(&key(9)).unwrap().posts, 2);
 }

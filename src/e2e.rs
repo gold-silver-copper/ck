@@ -265,7 +265,7 @@ fn e2e_soak() {
                 std::thread::sleep(Duration::from_millis(200));
                 let s = tmux.screen();
                 if s.lines().last().is_some_and(|l| l.contains("enter")) || s.contains("Search") {
-                    tmux.text(rng.pick(&["vichan/g", "js/b/1", "fool/a", "lynx", "the", "mak/b", "nosuch/x", "日本"]));
+                    tmux.text(rng.pick(&["vichan/g", "js/b/1", "fool/a", "lynx", "the", "mak/b", "nosuch/x", "日本", "saved", "saved", "watched"]));
                     tmux.keys(&["Enter"]);
                 }
             }

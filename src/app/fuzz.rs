@@ -47,6 +47,8 @@ struct GateState {
     running: usize,
     /// Everything answers at once (the episode is over).
     open: bool,
+    /// Every call so far, in order.
+    log: Vec<String>,
 }
 
 /// A call in progress; dropping it marks the answer as given.
@@ -68,6 +70,7 @@ impl Gate {
             let now = s.now.unwrap_or_else(Instant::now);
             s.background.push((what.clone(), now));
         }
+        s.log.push(what.clone());
         s.waiting.push((ticket, what));
         self.changed.notify_all();
         while !s.open && !s.released.contains(&ticket) {
@@ -104,6 +107,15 @@ impl Gate {
 
     fn calls(&self) -> u64 {
         lock(&self.state).next
+    }
+
+    /// Calls asked since the log had `from` entries.
+    fn log_since(&self, from: usize) -> Vec<String> {
+        lock(&self.state).log.get(from..).unwrap_or_default().to_vec()
+    }
+
+    fn log_len(&self) -> usize {
+        lock(&self.state).log.len()
     }
 
     fn set_now(&self, now: Instant) {
@@ -257,6 +269,11 @@ impl Backend for Fake {
             *g
         };
         let mut rng = Rng::new(hash(&[&self.seed, &self.site, &board, &no, &generation]));
+        // Some threads die after a few fetches, for good (archived or deleted).
+        let mut fate = Rng::new(hash(&[&self.seed, &self.site, &board, &no, &"dies"]));
+        if fate.chance(25) && generation >= 2 + fate.below(4) as u64 {
+            return Err(HttpError::NotFound(format!("{board}/{no}")).into());
+        }
         if let Some(e) = self.fail(&mut rng, board) {
             return Err(e);
         }
@@ -382,6 +399,8 @@ enum Act {
     Wait(Duration),
     Restart(u64),
     Pick(usize),
+    /// Open the Saved view and a copy in it.
+    Saved(usize),
 }
 
 impl std::fmt::Display for Act {
@@ -397,6 +416,7 @@ impl std::fmt::Display for Act {
             Act::Wait(d) => write!(f, "wait {d:?}"),
             Act::Restart(_) => write!(f, "restart"),
             Act::Pick(k) => write!(f, "pick row #{k} and enter"),
+            Act::Saved(k) => write!(f, "open saved copy #{k}"),
         }
     }
 }
@@ -457,6 +477,9 @@ fn place(rng: &mut Rng) -> String {
         "",
         "  ",
         "日本",
+        "saved",
+        "watched",
+        "history",
     ];
     let s = rng.pick(&forms).replace("{n}", &(1 + rng.below(3000)).to_string()).replace("{m}", &(1 + rng.below(3000)).to_string());
     if rng.chance(15) { fuzz::html(rng, 3) } else { s }
@@ -491,6 +514,7 @@ fn random_act(rng: &mut Rng, hot: &[KeyEvent]) -> Act {
         }
         87..92 => Act::Wait(Duration::from_secs(*rng.pick(&[1, 3, 9, 11, 30, 61, 300, 3600]))),
         92..93 => Act::Restart(rng.next()),
+        93..95 => Act::Saved(rng.below(1000)),
         _ => Act::Pick(rng.below(1000)),
     }
 }
@@ -636,6 +660,18 @@ impl World {
                 }
                 app.on_key(KeyEvent::from(KeyCode::Enter));
             }
+            Act::Saved(k) => {
+                app.on_key(KeyEvent::from(KeyCode::Char(':')));
+                if app.goto.is_some() {
+                    app.paste("saved");
+                    app.on_key(KeyEvent::from(KeyCode::Enter));
+                }
+                let in_saved = app.tab.view == View::Saved;
+                if let Some((p, len)) = app.picker().filter(|(_, len)| *len > 0 && in_saved) {
+                    p.state.select(Some(k % len));
+                    app.on_key(KeyEvent::from(KeyCode::Enter));
+                }
+            }
         }
     }
 }
@@ -720,8 +756,10 @@ fn replay(seed: u64, acts: &[Act]) -> Result<(), (String, String)> {
     let mut log: Vec<String> = Vec::new();
     let result = catch_unwind(AssertUnwindSafe(|| {
         world.tick(Duration::ZERO);
+        let mut removed: HashSet<ThreadKey> = HashSet::new();
         for (step, act) in acts.iter().enumerate() {
             let (gate, calls_before) = (world.gate.clone(), world.gate.calls());
+            let before = Before::of(&world.app, &world.gate);
             log.push(format!("{step}: {act}"));
             world.apply(act);
             world.tick(Duration::from_millis(100));
@@ -730,6 +768,8 @@ fn replay(seed: u64, acts: &[Act]) -> Result<(), (String, String)> {
             let (w, h) = world.size;
             draw(&mut world.app, w, h);
             check(&world.app);
+            let calls = if Arc::ptr_eq(&gate, &world.gate) { world.gate.log_since(before.log) } else { Vec::new() };
+            check_saved(&world.app, &before, &calls, &mut removed);
             // A step asks a handful of things at most (a few refreshes may fall due at once).
             let asked = world.gate.calls() - if Arc::ptr_eq(&gate, &world.gate) { calls_before } else { 0 };
             assert!(asked <= 12, "{asked} requests from one step");
@@ -915,6 +955,52 @@ fn check_thread(t: &ThreadView) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// What saved copies there were before a step.
+struct Before {
+    /// Each copy: whether it was of a dead thread nobody watches (which may be pruned).
+    saved: HashMap<ThreadKey, bool>,
+    /// In the Saved view, where `x` removes copies.
+    in_saved_view: bool,
+    /// The open tab's saved copy of a thread that's gone (and not watched alive).
+    offline_dead: Option<(usize, ThreadKey)>,
+    log: usize,
+}
+
+impl Before {
+    fn of(app: &App, gate: &Gate) -> Self {
+        let watched_alive = |k: &ThreadKey| app.store.watched(k).is_some_and(|w| !w.dead);
+        let saved = app.store.saved.iter().map(|m| (m.key.clone(), m.dead && app.store.watched(&m.key).is_none())).collect();
+        let offline_dead = match (&app.tab.offline, &app.tab.thread) {
+            (Some(o), Some(t)) if o.dead && app.tab.view == View::Thread => {
+                Some(app.key(&t.board, t.no)).filter(|k| !watched_alive(k)).map(|k| (app.active, k))
+            }
+            _ => None,
+        };
+        Before { saved, in_saved_view: app.tab.view == View::Saved, offline_dead, log: gate.log_len() }
+    }
+}
+
+/// Saved copies are never lost, and reading one of a dead thread fetches nothing.
+fn check_saved(app: &App, before: &Before, calls: &[String], removed: &mut HashSet<ThreadKey>) {
+    for (key, prunable) in &before.saved {
+        if app.store.saved(key).is_none() {
+            assert!(before.in_saved_view || *prunable, "the saved copy of {key:?} vanished outside the Saved view");
+            removed.insert(key.clone());
+        }
+    }
+    for w in &app.store.watched {
+        if w.dead && w.last_seen > 0 && !removed.contains(&w.key) {
+            assert!(app.store.saved(&w.key).is_some(), "watched thread {:?} died with no saved copy", w.key);
+        }
+    }
+    if let Some((tab, key)) = &before.offline_dead
+        && Before::of(app, &Gate::default()).offline_dead.as_ref().is_some_and(|(t, k)| t == tab && k == key)
+    {
+        let what = format!("{} thread /{}/{}", key.site, key.board, key.no);
+        assert!(!calls.contains(&what), "fetched {what} while reading its saved copy");
+    }
 }
 
 /// With nothing in flight, nothing may still be loading or refreshing.

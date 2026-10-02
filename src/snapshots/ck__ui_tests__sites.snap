@@ -6,6 +6,7 @@ expression: snapshot(&mut a)
 
     ◉  Watched         3 threads   2 new
     ◷  History         2 threads recent
+    ▤  Saved           0 threads
        4chan            fourchan    https://4chan.org
        lainchan         vichan      https://lainchan.org
        wizchan          vichan      https://wizchan.org
@@ -29,6 +30,5 @@ expression: snapshot(&mut a)
        nukechan         jschan      https://nukechan.net
        palanq           foolfuuka   https://archive.palanq.win
        b4k              foolfuuka   https://arch.b4k.dev
-
 
  enter open   . more   / filter   o browser   r reload   , settings   ? help

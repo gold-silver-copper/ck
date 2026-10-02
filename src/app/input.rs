@@ -286,7 +286,7 @@ impl App {
             View::Sites | View::Boards | View::Settings | View::Search => Scope::Lists,
             View::Catalog => Scope::Catalog,
             View::Thread => Scope::Thread,
-            View::Watched | View::History => Scope::Saved,
+            View::Watched | View::History | View::Saved => Scope::Saved,
         }
     }
 
@@ -422,6 +422,9 @@ impl App {
     }
 
     fn on_thread_key(&mut self, code: KeyCode, ctrl: bool) {
+        if code == KeyCode::Enter && self.take_saved_offer() {
+            return;
+        }
         let Some(t) = &mut self.tab.thread else { return };
         let half = (t.viewport / 2).max(1) as isize;
         match code {
