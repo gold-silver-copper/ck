@@ -125,6 +125,9 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             draw_help(f, app);
         }
     }
+    if app.image_search_panel.is_some() {
+        draw_image_search(f, app);
+    }
     app.images.end_frame();
     if !app.truecolor {
         downgrade(f.buffer_mut());
@@ -1279,6 +1282,33 @@ fn draw_links(f: &mut Frame, app: &mut App) {
     }
 }
 
+/// `R`: the reverse image search engines, per file.
+fn draw_image_search(f: &mut Frame, app: &mut App) {
+    let t = theme();
+    let names: Vec<String> = app.image_search.iter().map(|e| e.name.clone()).collect();
+    let Some(p) = &mut app.image_search_panel else { return };
+    let inner = panel(f, 64, p.rows.len() as u16 + 3, "Search for this image", "enter open · y copy · esc close");
+    let rows = inner.height as usize;
+    let sel = p.list.selected().unwrap_or(0);
+    let off = p.list.offset().min(sel).max((sel + 1).saturating_sub(rows));
+    *p.list.offset_mut() = off;
+    p.area = inner;
+    for (k, row) in p.rows.iter().enumerate().skip(off).take(rows) {
+        let y = inner.y + (k - off) as u16;
+        let line = match row {
+            Err(file) => Line::styled(truncate(file, inner.width as usize), bold(t.primary)),
+            Ok((_, e)) => {
+                if k == sel {
+                    fill(f, Rect::new(inner.x - 2, y, inner.width + 4, 1), t.selection);
+                    fill(f, Rect::new(inner.x - 2, y, 1, 1), t.primary);
+                }
+                Line::styled(format!("  {}", names[*e]), Style::new().fg(t.text))
+            }
+        };
+        put(f, inner.x, y, inner.width, line);
+    }
+}
+
 /// Key help, by section, with the configured keys. Keep in sync with the README.
 fn help_sections(keys: &KeyMap) -> Vec<(&'static str, Vec<(String, &'static str)>)> {
     let k = |a| keys.label(a);
@@ -1329,6 +1359,7 @@ fn help_sections(keys: &KeyMap) -> Vec<(&'static str, Vec<(String, &'static str)
                 (k(Action::OpenFile), "open file (videos in mpv)"),
                 (k(Action::View), "view the post's images"),
                 (k(Action::Gallery), "all the thread's files, as a grid"),
+                (k(Action::ImageSearch), "reverse image search"),
                 (k(Action::Links), "the post's links and files"),
                 (pair(Action::Hide, Action::ShowHidden), "hide the post / show hidden"),
                 (k(Action::Expand), "show / hide replies under the post"),
@@ -1351,6 +1382,7 @@ fn help_sections(keys: &KeyMap) -> Vec<(&'static str, Vec<(String, &'static str)
                 ("h / l, ← / →".into(), "previous / next file"),
                 ("i".into(), "open externally"),
                 (pair(Action::Copy, Action::CopyLink), "copy the file's URL / post link"),
+                (k(Action::ImageSearch), "reverse image search"),
                 ("esc, q".into(), "close"),
             ],
         ),
@@ -1642,7 +1674,8 @@ fn draw_viewer(f: &mut Frame, app: &mut App) {
     let msg = |f: &mut Frame, s: String, style: Style| {
         put(f, inner.x, inner.y + inner.height / 2, inner.width, Line::styled(s, style).centered());
     };
-    let Some(url) = url else { return };
+    // Terminal graphics would cover a panel on top.
+    let Some(url) = url.filter(|_| app.image_search_panel.is_none()) else { return };
     let spinner = SPINNER[app.tick % SPINNER.len()];
     let kind = if file.is_image() { Kind::Full } else { Kind::Thumb };
     match app.images.get(url, Size::new(inner.width, inner.height), kind) {

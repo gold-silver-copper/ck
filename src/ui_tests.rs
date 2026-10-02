@@ -455,3 +455,14 @@ fn archive_search_results() {
     a.search_list.state.select(Some(0));
     insta::assert_snapshot!(snapshot(&mut a));
 }
+
+#[test]
+fn image_search_panel() {
+    let mut a = app(false);
+    a.view = View::Thread;
+    let mut t = thread();
+    t.posts[0].files.push(file("second.jpg"));
+    a.thread = Some(t);
+    a.open_image_search();
+    insta::assert_snapshot!(snapshot(&mut a));
+}

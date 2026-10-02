@@ -29,7 +29,7 @@ mod links;
 mod search;
 mod settings;
 pub use gallery::Gallery;
-pub use links::{LinkItem, LinksPanel};
+pub use links::{ImageSearchPanel, LinkItem, LinksPanel};
 pub use search::Search;
 pub use settings::{Popup as SettingsPopup, SECTIONS as SETTING_SECTIONS, key_rows, rows as setting_rows, tilde};
 
@@ -554,6 +554,9 @@ pub struct App {
     pub viewer: Option<Viewer>,
     pub preview: Option<Preview>,
     pub links: Option<LinksPanel>,
+    /// Reverse image search engines (`R`), and the panel choosing one.
+    pub image_search: Vec<crate::config::ImageSearch>,
+    pub image_search_panel: Option<ImageSearchPanel>,
     /// The thread's files as a grid (`V`), over the thread.
     pub gallery: Option<Gallery>,
     /// Archive search: its results, the list over them, and the query being typed.
@@ -687,6 +690,8 @@ impl App {
             viewer: None,
             preview: None,
             links: None,
+            image_search: if cfg.image_search.is_empty() { crate::config::ImageSearch::defaults() } else { cfg.image_search.clone() },
+            image_search_panel: None,
             gallery: None,
             search: None,
             search_list: Picker::default(),
@@ -1485,7 +1490,7 @@ impl App {
         let down = matches!(ev.kind, MouseEventKind::ScrollDown);
         if matches!(ev.kind, MouseEventKind::ScrollDown | MouseEventKind::ScrollUp) {
             let key = |c| KeyEvent::from(if c { KeyCode::Down } else { KeyCode::Up });
-            if self.show_help || self.viewer.is_some() || self.preview.is_some() || self.links.is_some() {
+            if self.show_help || self.viewer.is_some() || self.preview.is_some() || self.links.is_some() || self.image_search_panel.is_some() {
                 self.on_key(key(down));
             } else if self.view == View::Thread {
                 if let Some(t) = &mut self.thread {
@@ -1501,6 +1506,10 @@ impl App {
         }
         if self.links.is_some() {
             self.on_links_click(ev.column, ev.row, now);
+            return;
+        }
+        if self.image_search_panel.is_some() {
+            self.on_image_search_click(ev.column, ev.row);
             return;
         }
         if self.gallery.is_some() && self.view == View::Thread && self.viewer.is_none() {
@@ -1693,6 +1702,10 @@ impl App {
             }
             return;
         }
+        if self.image_search_panel.is_some() {
+            self.on_image_search_key(key.code);
+            return;
+        }
         if self.viewer.is_some() {
             match self.keys.action(Scope::Viewer, &key) {
                 Some(action) => self.act(action),
@@ -1813,6 +1826,7 @@ impl App {
             Action::Gallery => self.open_gallery(),
             Action::Export => self.export_thread(),
             Action::ArchiveSearch => self.start_archive_search(),
+            Action::ImageSearch => self.open_image_search(),
             Action::Expand => {
                 if let Some(t) = &mut self.thread {
                     match t.toggle_expanded() {
@@ -3059,6 +3073,37 @@ mod tests {
         app.sites[0].cfg.archive = None;
         app.act(Action::ArchiveSearch);
         assert!(app.search_input.is_none() && app.status.as_ref().unwrap().0.contains("no archive"));
+    }
+
+    #[test]
+    fn reverse_image_search() {
+        let mut app = local_app();
+        app.images = crate::images::Images::offline();
+        let file = |name: &str, thumb| Attachment { filename: name.into(), url: format!("https://i.example/{name}"), thumb, ..Default::default() };
+        let files = vec![file("a.png", None), file("b.webm", Some("https://i.example/bs.jpg".into())), file("c.pdf", None)];
+        app.thread = Some(ThreadView::new("x".into(), 1, vec![Post { no: 1, files, ..Default::default() }]));
+        app.view = View::Thread;
+        app.act(Action::ImageSearch);
+        // The image itself, and the video's thumbnail; a file with neither is left out.
+        let rows = &app.image_search_panel.as_ref().unwrap().rows;
+        assert_eq!(rows.len(), 2 + 2 * 4);
+        assert_eq!(rows[0], Err("a.png".into()));
+        assert_eq!(rows[6], Ok(("https://i.example/bs.jpg".into(), 0)));
+        app.on_key(KeyEvent::from(KeyCode::Down));
+        app.on_key(KeyEvent::from(KeyCode::Enter));
+        assert_eq!(app.opened.as_deref(), Some("https://lens.google.com/uploadbyurl?url=https%3A%2F%2Fi.example%2Fa.png"));
+        assert!(app.image_search_panel.is_none());
+        // In the viewer: the file shown.
+        app.act(Action::View);
+        app.on_key(KeyEvent::from(KeyCode::Char('R')));
+        assert_eq!(app.image_search_panel.as_ref().unwrap().rows.len(), 4);
+        app.on_key(KeyEvent::from(KeyCode::Char('y')));
+        assert_eq!(app.copied.as_deref(), Some("https://saucenao.com/search.php?url=https%3A%2F%2Fi.example%2Fa.png"));
+        // Engines can be configured.
+        let cfg: Config = toml::from_str("[[image_search]]\nname = \"Mine\"\nurl = \"https://s.example/?u={url}\"\n[[site]]\nname = \"a\"\nkind = \"4chan\"").unwrap();
+        let app = App::new(cfg, KeyMap::default(), None, Store::default());
+        assert_eq!(app.image_search.len(), 1);
+        assert_eq!(app.image_search[0].link("http://x/y z"), "https://s.example/?u=http%3A%2F%2Fx%2Fy%20z");
     }
 
     #[test]

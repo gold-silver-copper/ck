@@ -75,6 +75,7 @@ is in brackets):
 | `H`  | catalog, thread       | hide / unhide the thread or post [`hide`]                  |
 | `Z`  | catalog, thread       | show hidden threads and posts, dimmed [`show_hidden`]      |
 | `E`  | thread                | save the thread as `thread.html` and `thread.json` in its download folder [`export`] |
+| `R`  | thread, viewer        | reverse image search: SauceNAO, Google Lens, Yandex, IQDB (opens the browser) [`image_search`] |
 | `V`  | thread                | gallery: every file of the thread as a grid; `enter` views (h/l go through all of them), `d` saves one, `esc` returns to its post [`gallery`] |
 | `e`  | thread                | show / hide the post's replies under it, indented; again on a reply goes a level deeper (up to 4) [`expand`] |
 | `m`  | thread                | mark the post as yours, to be told about replies [`mine`]  |
@@ -270,6 +271,19 @@ it's one (desuarchive, palanq, b4k), or the archive configured for it with `arch
 thread; `enter` opens the thread on the archive with the post selected, `esc` goes back.
 Each page of 25 results is one request; going down past the last one (or `n`) loads the
 next. Archives limit how often you can search; when they say no, ck shows their message.
+
+### Reverse image search
+
+`R` lists search engines for the selected post's images (for videos, their thumbnail) or
+the image in the viewer; `enter` opens the search in the browser, `y` copies its link.
+ck itself sends nothing anywhere. The engines can be replaced in the config; `{url}`
+becomes the image's address:
+
+```toml
+[[image_search]]
+name = "SauceNAO"
+url = "https://saucenao.com/search.php?url={url}"
+```
 
 ### Saving a thread
 

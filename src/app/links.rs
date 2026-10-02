@@ -122,3 +122,84 @@ impl App {
         })
     }
 }
+
+/// `R`: reverse image search engines for the post's files (or the viewer's file).
+pub struct ImageSearchPanel {
+    /// `Err(file name)` heads each file's engines when there are several files;
+    /// `Ok((file URL, engine))` rows open a search.
+    pub rows: Vec<Result<(String, usize), String>>,
+    pub list: ListState,
+    pub area: Rect,
+}
+
+impl App {
+    pub fn open_image_search(&mut self) {
+        let files: Vec<Attachment> = match &self.viewer {
+            Some(v) => vec![v.files[v.index].clone()],
+            None => self.selected_post().map(|p| p.files.clone()).unwrap_or_default(),
+        };
+        // Videos and others: their thumbnail is what can be searched.
+        let files: Vec<(String, String)> =
+            files.iter().filter_map(|f| Some((f.filename.clone(), if f.is_image() { f.url.clone() } else { f.thumb.clone()? }))).collect();
+        if files.is_empty() {
+            self.status = Some(("Post has no image to search for".into(), false));
+            return;
+        }
+        let mut rows = Vec::new();
+        for (name, url) in &files {
+            if files.len() > 1 {
+                rows.push(Err(name.clone()));
+            }
+            rows.extend((0..self.image_search.len()).map(|e| Ok((url.clone(), e))));
+        }
+        let mut list = ListState::default();
+        list.select(rows.iter().position(Result::is_ok));
+        self.image_search_panel = Some(ImageSearchPanel { rows, list, area: Rect::default() });
+    }
+
+    pub fn on_image_search_key(&mut self, code: KeyCode) {
+        let Some(p) = &mut self.image_search_panel else { return };
+        let ok: Vec<usize> = (0..p.rows.len()).filter(|&r| p.rows[r].is_ok()).collect();
+        let cur = ok.iter().position(|&r| Some(r) == p.list.selected()).unwrap_or(0);
+        let to = match code {
+            KeyCode::Char('j') | KeyCode::Down => Some((cur + 1).min(ok.len() - 1)),
+            KeyCode::Char('k') | KeyCode::Up => Some(cur.saturating_sub(1)),
+            KeyCode::Char('g') | KeyCode::Home => Some(0),
+            KeyCode::Char('G') | KeyCode::End => Some(ok.len() - 1),
+            _ => None,
+        };
+        if let Some(to) = to {
+            p.list.select(Some(ok[to]));
+            return;
+        }
+        let row = p.list.selected().and_then(|r| p.rows.get(r)).and_then(|r| r.as_ref().ok()).cloned();
+        let link = row.map(|(url, e)| self.image_search[e].link(&url));
+        match code {
+            KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right => {
+                self.image_search_panel = None;
+                if let Some(link) = link {
+                    self.open_url(&link);
+                }
+            }
+            KeyCode::Char('y') => {
+                if let Some(link) = link {
+                    self.copy_text("link", link);
+                }
+            }
+            _ => self.image_search_panel = None,
+        }
+    }
+
+    pub fn on_image_search_click(&mut self, col: u16, row: u16) {
+        let Some(p) = &mut self.image_search_panel else { return };
+        let r = p.list.offset() + row.saturating_sub(p.area.y) as usize;
+        match p.rows.get(r) {
+            Some(Ok(_)) if p.area.contains(ratatui::layout::Position::new(col, row)) => {
+                p.list.select(Some(r));
+                self.on_image_search_key(KeyCode::Enter);
+            }
+            Some(Err(_)) if p.area.contains(ratatui::layout::Position::new(col, row)) => {}
+            _ => self.image_search_panel = None,
+        }
+    }
+}

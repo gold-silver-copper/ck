@@ -283,7 +283,7 @@ url = "https://arch.b4k.dev"
 #   catalog:    view = "v", watch = "w", sort = "s", compact = "c", links = "O", hide = "H",
 #               show_hidden = "Z", archive_search = "f"
 #   thread:     view, watch, links, hide, show_hidden, mine = "m", expand = "e", gallery = "V",
-#               open_file = "i",
+#               image_search = "R", open_file = "i",
 #               replies = "b", jump_back = "u", unread = "U",
 #               preview = "p", next_match = "n", prev_match = "N", spoiler = "s",
 #               all_spoilers = "S", download = "d", download_thread = "D", export = "E",
@@ -307,6 +307,13 @@ url = "https://arch.b4k.dev"
 # pattern = "(?i)rust"
 # action = "highlight"
 # boards = ["g"]
+
+# Reverse image search engines for R ({url} becomes the image's address). Without any,
+# ck offers SauceNAO, Google Lens, Yandex and IQDB.
+#
+# [[image_search]]
+# name = "SauceNAO"
+# url = "https://saucenao.com/search.php?url={url}"
 
 # Custom themes. Start from a built-in (`base`) or generate one from a single color
 # (`seed`, with mode = "dark" or "light"), then override any role. Colors are "#rrggbb",

@@ -47,6 +47,9 @@ pub struct Config {
     /// A command to notify with instead, `{title}` and `{body}` filled in.
     #[serde(default)]
     pub notify_command: Option<Vec<String>>,
+    /// `[[image_search]]`: reverse image search engines for `R` (default: a few well-known ones).
+    #[serde(default, rename = "image_search")]
+    pub image_search: Vec<ImageSearch>,
     /// `[[filter]]`: hide or highlight threads and posts.
     #[serde(default, rename = "filter")]
     pub filters: Vec<crate::filter::FilterConfig>,
@@ -60,6 +63,32 @@ fn default_refresh_thread() -> u64 {
 
 fn default_refresh_watched() -> u64 {
     60
+}
+
+/// A reverse image search engine: `{url}` in `url` becomes the file's (encoded) URL.
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub struct ImageSearch {
+    pub name: String,
+    pub url: String,
+}
+
+impl ImageSearch {
+    pub fn defaults() -> Vec<Self> {
+        [
+            ("SauceNAO", "https://saucenao.com/search.php?url={url}"),
+            ("Google Lens", "https://lens.google.com/uploadbyurl?url={url}"),
+            ("Yandex", "https://yandex.com/images/search?rpt=imageview&url={url}"),
+            ("IQDB", "https://iqdb.org/?url={url}"),
+        ]
+        .into_iter()
+        .map(|(name, url)| Self { name: name.into(), url: url.into() })
+        .collect()
+    }
+
+    /// The search page for an image.
+    pub fn link(&self, image: &str) -> String {
+        self.url.replace("{url}", &crate::http::encode_segment(image))
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]

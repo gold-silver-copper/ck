@@ -45,6 +45,7 @@ pub enum Action {
     Gallery,
     Export,
     ArchiveSearch,
+    ImageSearch,
 }
 
 /// Where a key applies. Global keys work in every view but the image viewer.
@@ -105,6 +106,7 @@ pub const ACTIONS: &[(Action, &str, &str, &[Scope], &str)] = &[
     (Action::Links, "links", "O", &[Scope::Catalog, Scope::Thread], "the post's links and files"),
     (Action::Hide, "hide", "H", &[Scope::Catalog, Scope::Thread], "hide / unhide the thread or post"),
     (Action::ShowHidden, "show_hidden", "Z", &[Scope::Catalog, Scope::Thread], "show hidden threads and posts"),
+    (Action::ImageSearch, "image_search", "R", &[Scope::Thread, Scope::Viewer], "reverse image search"),
     (Action::Gallery, "gallery", "V", &[Scope::Thread], "the thread's files as a grid"),
     (Action::Export, "export", "E", &[Scope::Thread], "save the thread as HTML and JSON"),
     (Action::Expand, "expand", "e", &[Scope::Thread], "show / hide the post's replies under it"),
