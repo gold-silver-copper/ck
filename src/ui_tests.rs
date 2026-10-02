@@ -383,3 +383,14 @@ fn your_posts_and_replies() {
     a.view = View::Watched;
     insta::assert_snapshot!("watched_with_replies", snapshot(&mut a));
 }
+
+#[test]
+fn catalog_new_threads_and_replies() {
+    let mut a = app(false);
+    a.view = View::Catalog;
+    a.catalog = catalog();
+    a.catalog_new.insert(1100);
+    a.store.opened("4chan", "g", 1000, 300, NOW);
+    a.catalog_list.state.select(Some(1));
+    insta::assert_snapshot!(snapshot(&mut a));
+}

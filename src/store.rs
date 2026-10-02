@@ -53,6 +53,18 @@ pub struct Visit {
     pub opened: i64,
 }
 
+/// A catalog thread as last seen: when it was last in the catalog, and how many replies it
+/// had when it was last opened.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SeenThread {
+    pub last: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replies: Option<u32>,
+}
+
+/// Threads gone from the catalog this long are forgotten.
+const SEEN_FOR: i64 = 7 * 24 * 3600;
+
 /// UI settings that couldn't be saved in config.toml.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Settings {
@@ -69,6 +81,10 @@ pub struct Store {
     pub settings: Settings,
     /// Thread and post numbers hidden by hand, by `site/board`, oldest first.
     pub hidden: std::collections::BTreeMap<String, Vec<u64>>,
+    /// Catalog threads seen, by `site/board`.
+    pub seen: std::collections::BTreeMap<String, std::collections::BTreeMap<u64, SeenThread>>,
+    /// `seen` changed since it was last written.
+    seen_dirty: std::cell::Cell<bool>,
 }
 
 /// A site's fetched board list, saved so the next start can show it at once.
@@ -97,6 +113,7 @@ impl Store {
             store.history = load_file(&dir.join("history.json"), &mut warnings);
             store.settings = load_file(&dir.join("settings.json"), &mut warnings);
             store.hidden = load_file(&dir.join("hidden.json"), &mut warnings);
+            store.seen = load_file(&dir.join("seen.json"), &mut warnings);
         }
         (store, warnings)
     }
@@ -108,6 +125,9 @@ impl Store {
         write_atomic(&dir.join("history.json"), &serde_json::to_vec_pretty(&self.history)?)?;
         if !self.hidden.is_empty() || dir.join("hidden.json").exists() {
             write_atomic(&dir.join("hidden.json"), &serde_json::to_vec(&self.hidden)?)?;
+        }
+        if self.seen_dirty.replace(false) {
+            write_atomic(&dir.join("seen.json"), &serde_json::to_vec(&self.seen)?)?;
         }
         if self.settings.compact_catalog.is_some() {
             write_atomic(&dir.join("settings.json"), &serde_json::to_vec_pretty(&self.settings)?)?;
@@ -133,6 +153,34 @@ impl Store {
         }
         let saved = SavedBoards { fetched: now, boards: boards.to_vec() };
         write_atomic(&path, &serde_json::to_vec(&saved)?)
+    }
+
+    /// A board's catalog was loaded: remember its threads, and return the ones that weren't
+    /// there on the previous load (none on the first).
+    pub fn catalog_seen(&mut self, site: &str, board: &str, threads: &[u64], now: i64) -> std::collections::HashSet<u64> {
+        let key = format!("{site}/{board}");
+        let first = !self.seen.contains_key(&key);
+        let map = self.seen.entry(key).or_default();
+        let new = if first { Default::default() } else { threads.iter().copied().filter(|no| !map.contains_key(no)).collect() };
+        for &no in threads {
+            map.entry(no).or_default().last = now;
+        }
+        map.retain(|_, t| now - t.last <= SEEN_FOR);
+        self.seen_dirty.set(true);
+        new
+    }
+
+    /// A thread was opened with `replies` replies.
+    pub fn opened(&mut self, site: &str, board: &str, no: u64, replies: u32, now: i64) {
+        let t = self.seen.entry(format!("{site}/{board}")).or_default().entry(no).or_default();
+        t.replies = Some(replies);
+        t.last = t.last.max(now);
+        self.seen_dirty.set(true);
+    }
+
+    /// Replies the thread had when it was last opened.
+    pub fn replies_seen(&self, site: &str, board: &str, no: u64) -> Option<u32> {
+        self.seen.get(&format!("{site}/{board}"))?.get(&no)?.replies
     }
 
     pub fn is_hidden(&self, site: &str, board: &str, no: u64) -> bool {
@@ -273,6 +321,25 @@ mod tests {
             s.toggle_hidden("4chan", "g", no);
         }
         assert!(!s.is_hidden("4chan", "g", 0) && !s.is_hidden("4chan", "g", 1) && s.is_hidden("4chan", "g", 2));
+    }
+
+    #[test]
+    fn catalog_threads_seen() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut s, _) = Store::load(Some(dir.path().to_path_buf()));
+        let day = 24 * 3600;
+        // The first visit marks nothing new; later ones mark what wasn't there.
+        assert!(s.catalog_seen("4chan", "g", &[1, 2, 3], 0).is_empty());
+        assert_eq!(s.catalog_seen("4chan", "g", &[2, 3, 4], day), [4].into());
+        s.opened("4chan", "g", 3, 10, day);
+        s.save().unwrap();
+        let (mut s, w) = Store::load(Some(dir.path().to_path_buf()));
+        assert!(w.is_empty());
+        assert_eq!((s.replies_seen("4chan", "g", 3), s.replies_seen("4chan", "g", 2)), (Some(10), None));
+        // Threads gone for over a week are forgotten (and would count as new again).
+        s.catalog_seen("4chan", "g", &[4], 9 * day);
+        assert!(!s.seen["4chan/g"].contains_key(&1) && !s.seen["4chan/g"].contains_key(&3));
+        assert_eq!(s.catalog_seen("4chan", "g", &[1, 4], 9 * day), [1].into());
     }
 
     #[test]

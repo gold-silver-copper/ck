@@ -165,6 +165,10 @@ fn location(app: &App) -> (Vec<String>, Vec<Span<'static>>) {
         }
         View::Catalog => {
             meta.push(plural(app.catalog.len(), "thread"));
+            let new = app.catalog.iter().filter(|p| app.catalog_new.contains(&p.no)).count();
+            if new > 0 {
+                meta.push(format!("{new} new"));
+            }
             let hidden = app.catalog_marks.iter().filter(|m| m.hidden.is_some()).count();
             if hidden > 0 {
                 meta.push(if app.show_hidden { format!("{hidden} hidden, shown") } else { format!("{hidden} hidden") });
@@ -560,6 +564,7 @@ fn draw_catalog(f: &mut Frame, app: &mut App, area: Rect) {
     let thumbs = app.images.enabled() && area.width >= MIN_THUMB_WIDTH && !app.compact;
     let width = area.width.saturating_sub(PAD + 2) as usize;
     let visible = app.visible_catalog();
+    let mut state = std::mem::take(&mut app.catalog_list.state);
     let mut build = |k: usize| -> Vec<Line<'static>> {
         let i = visible[k];
         {
@@ -572,6 +577,10 @@ fn draw_catalog(f: &mut Frame, app: &mut App, area: Rect) {
             }
             if let Some(label) = &mark.highlight {
                 head.push(chip(label.clone(), t.on_primary_container, t.primary_container));
+                head.push(Span::raw(" "));
+            }
+            if app.catalog_new.contains(&p.no) {
+                head.push(chip("new", t.background, t.new));
                 head.push(Span::raw(" "));
             }
             if p.sticky {
@@ -594,12 +603,16 @@ fn draw_catalog(f: &mut Frame, app: &mut App, area: Rect) {
             }
             // Some overboards don't give counts; show nothing rather than zeros.
             let mut meta = Vec::new();
-            if let Some(r) = p.replies {
-                meta.push(format!("{r} replies"));
-                meta.push(format!("{} images", p.images.unwrap_or(0)));
+            if let Some(n) = app.new_replies(p) {
+                meta.push(Span::styled(format!("+{n} "), bold(t.new)));
             }
-            meta.push(ago(p.time, app.clock));
-            let meta = vec![Span::styled(meta.join(" · "), dim())];
+            let mut facts = Vec::new();
+            if let Some(r) = p.replies {
+                facts.push(format!("{r} replies"));
+                facts.push(format!("{} images", p.images.unwrap_or(0)));
+            }
+            facts.push(ago(p.time, app.clock));
+            meta.push(Span::styled(facts.join(" · "), dim()));
             let text_w = if thumbs { width.saturating_sub(CAT_THUMB.width as usize + 2) } else { width };
             if app.compact {
                 let used: usize = head.iter().chain(&meta).map(|s| s.width()).sum();
@@ -633,9 +646,9 @@ fn draw_catalog(f: &mut Frame, app: &mut App, area: Rect) {
         (2, 1, Some(t.surface))
     };
     let stripes: Vec<bool> = visible.iter().map(|&i| app.catalog_marks.get(i).is_some_and(|m| m.highlight.is_some())).collect();
-    let mut state = std::mem::take(&mut app.catalog_list.state);
-    app.hit = draw_rows_with(f, area, visible.len(), &mut build, &mut state, height, gap, card, &stripes);
+    let hit = draw_rows_with(f, area, visible.len(), &mut build, &mut state, height, gap, card, &stripes);
     app.catalog_list.state = state;
+    app.hit = hit;
     if app.hit.is_none() {
         if app.loading.is_none() {
             empty(f, area, "No threads");

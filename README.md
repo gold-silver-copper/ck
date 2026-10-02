@@ -164,6 +164,13 @@ The open thread refreshes in the background every 10 seconds and watched threads
 minimums). Posts that arrived since your last visit are marked "new"; `U` jumps to the
 first one.
 
+### What's new in a catalog
+
+Catalogs mark threads that weren't there on your previous visit with "new" (the header
+counts them), and threads you've opened before show how many replies they've gained since,
+like `+12`. This is kept per board in the data directory (threads are forgotten a week
+after they leave the catalog) and needs no extra requests.
+
 ### Notifications
 
 When a background refresh finds new posts in a watched thread (other than the one on

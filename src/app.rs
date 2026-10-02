@@ -425,6 +425,8 @@ pub struct App {
     pub catalog: Vec<Post>,
     /// What filters and hiding say about each catalog thread.
     pub catalog_marks: Vec<Mark>,
+    /// Catalog threads that weren't there on the previous visit.
+    pub catalog_new: HashSet<u64>,
     pub filters: Filters,
     /// Show hidden threads and posts (dimmed) instead of leaving them out.
     pub show_hidden: bool,
@@ -544,6 +546,7 @@ impl App {
             board: None,
             catalog: Vec::new(),
             catalog_marks: Vec::new(),
+            catalog_new: HashSet::new(),
             filters: Filters::new(&cfg.filters).unwrap_or_default(),
             show_hidden: false,
             thread: None,
@@ -838,6 +841,7 @@ impl App {
                         Ok(posts) => {
                             self.catalog = posts;
                             self.remark_catalog();
+                            self.catalog_seen();
                             let len = self.visible_catalog().len();
                             self.catalog_list.clamp(len);
                         }
@@ -1015,6 +1019,7 @@ impl App {
         let max_no = tv.posts.iter().map(|p| p.no).max().unwrap_or(0);
         let subject = thread_subject(&tv.posts);
         self.store.visit(&key, &subject, tv.posts.len(), max_no, self.clock.now());
+        self.store.opened(&key.site, &key.board, key.no, tv.posts.len().saturating_sub(1) as u32, self.clock.now());
         self.save();
         self.thread = Some(tv);
         self.remark_thread();
@@ -1031,13 +1036,28 @@ impl App {
         m
     }
 
+    /// Note which catalog threads are new since the last visit (and remember them all).
+    fn catalog_seen(&mut self) {
+        let nos: Vec<u64> = self.catalog.iter().map(|p| p.no).collect();
+        let site = self.current_site().cfg.name.clone();
+        let board = self.catalog_board.clone();
+        self.catalog_new = self.store.catalog_seen(&site, &board, &nos, self.clock.now());
+        self.save();
+    }
+
+    /// Replies a catalog thread has gained since it was last opened.
+    pub fn new_replies(&self, p: &Post) -> Option<u32> {
+        let seen = self.store.replies_seen(&self.current_site().cfg.name, &self.board_of(p), p.no)?;
+        p.replies.filter(|&r| r > seen).map(|r| r - seen)
+    }
+
     pub fn remark_catalog(&mut self) {
         let marks = self.catalog.iter().map(|p| self.mark(&self.board_of(p), p)).collect();
         self.catalog_marks = marks;
     }
 
     /// The board a catalog thread is on (overboards mix boards).
-    fn board_of(&self, p: &Post) -> String {
+    pub fn board_of(&self, p: &Post) -> String {
         let loaded = Some(self.catalog_board.clone()).filter(|b| !b.is_empty());
         p.board.clone().or(loaded).or_else(|| self.board.as_ref().map(|b| b.uri.clone())).unwrap_or_default()
     }
@@ -2605,6 +2625,25 @@ mod tests {
         assert!(app.thread.as_ref().unwrap().mine.contains(&2));
         app.act(Action::Mine);
         assert!(app.store.watched(&key).unwrap().mine.is_empty());
+    }
+
+    #[test]
+    fn catalogs_mark_new_threads_and_replies() {
+        let mut app = local_app();
+        app.clock = Clock { fixed: Some(1000) };
+        app.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
+        let op = |no, replies| Post { no, replies: Some(replies), ..Default::default() };
+        app.load_catalog();
+        app.handle(Msg::Catalog(app.req, Ok(vec![op(1, 3), op(2, 0)])));
+        assert!(app.catalog_new.is_empty());
+        // Thread 1 is opened with 3 replies.
+        app.set_thread(vec![Post { no: 1, ..Default::default() }, Post { no: 5, ..Default::default() }, Post { no: 6, ..Default::default() }, Post { no: 7, ..Default::default() }]);
+        app.load_catalog();
+        app.handle(Msg::Catalog(app.req, Ok(vec![op(9, 0), op(1, 8), op(2, 1)])));
+        assert_eq!(app.catalog_new, [9].into());
+        assert_eq!(app.new_replies(&app.catalog[1]), Some(5));
+        // Threads never opened don't count replies.
+        assert_eq!(app.new_replies(&app.catalog[2]), None);
     }
 
     #[test]
