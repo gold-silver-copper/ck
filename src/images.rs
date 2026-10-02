@@ -500,7 +500,7 @@ fn gif_frames(bytes: &[u8]) -> Option<Frames> {
     gif_frames_within(bytes, ANIMATION_BYTES)
 }
 
-fn gif_frames_within(bytes: &[u8], budget: usize) -> Option<Frames> {
+pub(crate) fn gif_frames_within(bytes: &[u8], budget: usize) -> Option<Frames> {
     use image::AnimationDecoder;
     if !bytes.starts_with(b"GIF8") || bytes.len() < 10 {
         return None;
@@ -537,7 +537,7 @@ fn gif_frames_within(bytes: &[u8], budget: usize) -> Option<Frames> {
     (frames.len() > 1).then(|| Arc::new(frames))
 }
 
-fn decode(bytes: &[u8]) -> Result<DynamicImage, String> {
+pub(crate) fn decode(bytes: &[u8]) -> Result<DynamicImage, String> {
     let img = image::load_from_memory(bytes).map_err(|e| e.to_string())?;
     Ok(if img.width() > MAX_DIM || img.height() > MAX_DIM { img.thumbnail(MAX_DIM, MAX_DIM) } else { img })
 }

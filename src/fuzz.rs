@@ -12,6 +12,7 @@ use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
+use ratatui::crossterm::event::{KeyCode, KeyEvent};
 use ratatui::text::Line;
 use serde_json::{Value, json};
 
@@ -19,6 +20,9 @@ use crate::http::{self, Cache, Limiter, MIN_REFETCH, Priority, Raw};
 use crate::markup::{self, Flavor};
 use crate::config::{SiteConfig, SiteKind};
 use crate::route;
+
+/// The wall clock fuzzed data is dated from.
+const START: i64 = 1_790_000_000;
 
 /// splitmix64: small, fast, and good enough to drive a fuzzer.
 pub struct Rng(u64);
@@ -564,4 +568,252 @@ fn fuzz_backends() {
 #[ignore]
 fn fuzz_backends_long() {
     run("fuzz_backends", true, 0, 5_000, backends_once);
+}
+
+// ----- files on disk: data, config and cached images, broken -----
+
+/// Break some bytes: as JSON when they are, else as bytes.
+fn break_bytes(rng: &mut Rng, bytes: &[u8]) -> Vec<u8> {
+    match rng.below(10) {
+        0 => Vec::new(),
+        1 => bytes.get(..rng.below(bytes.len() + 1)).unwrap_or_default().to_vec(),
+        2 => (0..rng.below(300)).map(|_| rng.next() as u8).collect(),
+        3 => rng.pick(&[&b"null"[..], b"[]", b"{}", b"0", b"\"\"", b"\xff\xfe", b"[[[[[[[[[["]).to_vec(),
+        4 => {
+            let mut b = bytes.to_vec();
+            for _ in 0..1 + rng.below(8) {
+                if !b.is_empty() {
+                    let i = rng.below(b.len());
+                    b[i] = rng.next() as u8;
+                }
+            }
+            b
+        }
+        _ => match serde_json::from_slice::<Value>(bytes) {
+            Ok(mut v) => {
+                for _ in 0..1 + rng.below(4) {
+                    mutate(rng, &mut v);
+                }
+                v.to_string().into_bytes()
+            }
+            Err(_) => bytes.to_vec(),
+        },
+    }
+}
+
+fn data_dir_once(seed: u64) {
+    use crate::store::{Place, Session, Store, ThreadKey};
+    let mut rng = Rng::new(seed);
+    let dir = tempfile::tempdir().unwrap();
+    let data = dir.path().join("data");
+    // A plausible data directory first.
+    let (mut store, _) = Store::load(Some(data.clone()));
+    for i in 0..rng.below(6) as u64 {
+        let key = ThreadKey { site: rng.pick(&["4chan", "lainchan", "nosuch"]).to_string(), board: "g".into(), no: 100 + i };
+        store.toggle_watch(key.clone(), format!("thread {i}"), 10, 105 + i);
+        store.visit(&key, "subject", 10, 109, START + i as i64);
+        store.toggle_hidden(&key.site, "g", 200 + i);
+        store.opened(&key.site, "g", key.no, 9, START);
+    }
+    store.recent_boards = vec!["4chan/g".into(), "lainchan/λ".into(), "x".into()];
+    store.save().unwrap();
+    let place = |view: &str| Place { view: view.into(), site: "4chan".into(), board: Some("g".into()), thread: Some(100), ..Default::default() };
+    store.save_session(&Session { tabs: vec![place("thread"), place("catalog"), place("watched")], active: rng.below(4) }).unwrap();
+    store.save_boards("4chan", &[crate::model::Board { uri: "g".into(), title: "Technology".into(), nsfw: Some(false) }], START).unwrap();
+    // Then break some of it.
+    let mut files: Vec<std::path::PathBuf> = std::fs::read_dir(&data).unwrap().filter_map(|e| Some(e.ok()?.path())).filter(|p| p.is_file()).collect();
+    files.push(data.join("boards").join("4chan.json"));
+    files.sort();
+    let mut broken: HashMap<std::path::PathBuf, Vec<u8>> = HashMap::new();
+    for path in &files {
+        if rng.chance(40) {
+            let bytes = break_bytes(&mut rng, &std::fs::read(path).unwrap_or_default());
+            std::fs::write(path, &bytes).unwrap();
+            broken.insert(path.clone(), bytes);
+        }
+    }
+    let (store, warnings) = Store::load(Some(data.clone()));
+    // Nothing the user had is destroyed: a file that wouldn't load is kept beside.
+    for (path, bytes) in &broken {
+        if !path.exists() {
+            let aside = path.with_extension("json.corrupt");
+            assert_eq!(std::fs::read(&aside).ok().as_ref(), Some(bytes), "{} vanished (seed {seed}; {warnings:?})", path.display());
+        }
+    }
+    // The app starts on it, restores the session, draws and saves.
+    let mut app = crate::app::tests::test_app();
+    let cfg: crate::config::Config = toml::from_str(crate::config::DEFAULT_CONFIG).unwrap();
+    app = crate::app::App::new(cfg, app.keys.clone(), None, store);
+    app.config_path = None;
+    app.restore_session();
+    for (w, h) in [(110, 32), (20, 5)] {
+        let mut term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(w, h)).unwrap();
+        term.draw(|f| crate::ui::draw(f, &mut app)).unwrap();
+    }
+    app.save_now();
+    let (_, warnings) = Store::load(Some(data));
+    assert!(warnings.is_empty(), "what was saved doesn't load cleanly (seed {seed}): {warnings:?}");
+}
+
+#[test]
+fn fuzz_data_dir() {
+    run("fuzz_data_dir", false, 1, 60, data_dir_once);
+}
+
+#[test]
+#[ignore]
+fn fuzz_data_dir_long() {
+    run("fuzz_data_dir", true, 0, 5_000, data_dir_once);
+}
+
+/// Odd values for a config setting.
+fn odd_toml(rng: &mut Rng) -> toml_edit::Item {
+    use toml_edit::value;
+    match rng.below(12) {
+        0 => value(-1),
+        1 => value(i64::MAX),
+        2 => value(0),
+        3 => value(""),
+        4 => value("nonsense"),
+        5 => value(true),
+        6 => value(1.5),
+        7 => value(toml_edit::Array::from_iter(["a", "", "x/y/z"])),
+        8 => value(toml_edit::Array::new()),
+        9 => value(html(rng, 3)),
+        10 => value("#zzzzzz"),
+        _ => value("ctrl-alt-shift-f99"),
+    }
+}
+
+fn config_once(seed: u64) {
+    let mut rng = Rng::new(seed);
+    let mut doc: toml_edit::DocumentMut = crate::config::DEFAULT_CONFIG.parse().unwrap();
+    const KEYS: &[&str] = &[
+        "theme", "color", "images", "notify", "notify_command", "catalog_layout", "compact_catalog", "refresh_thread_secs",
+        "refresh_watched_secs", "restore_session", "download_dir", "favorites", "hidden_sites",
+    ];
+    for _ in 0..1 + rng.below(5) {
+        match rng.below(6) {
+            0 => doc[*rng.pick(KEYS)] = odd_toml(&mut rng),
+            1 => {
+                doc.remove(rng.pick(KEYS));
+            }
+            2 => {
+                let action = rng.pick(crate::keys::ACTIONS).1;
+                doc["keys"][action] = odd_toml(&mut rng);
+            }
+            3 => {
+                let mut f = toml_edit::Table::new();
+                f["pattern"] = toml_edit::value(*rng.pick(&["(", "a{99999}", "", "(?i)x", "[", "\\p{Han}"]));
+                f[*rng.pick(&["action", "field", "label"])] = odd_toml(&mut rng);
+                doc["filter"].or_insert(toml_edit::Item::ArrayOfTables(Default::default()));
+                if let Some(a) = doc["filter"].as_array_of_tables_mut() {
+                    a.push(f);
+                }
+            }
+            4 => {
+                doc["themes"]["odd"][*rng.pick(&["base", "seed", "mode", "primary", "background"])] = odd_toml(&mut rng);
+                if rng.chance(50) {
+                    doc["theme"] = toml_edit::value("odd");
+                }
+            }
+            _ => {
+                if let Some(sites) = doc["site"].as_array_of_tables_mut()
+                    && !sites.is_empty()
+                {
+                    let i = rng.below(sites.len());
+                    if let Some(t) = sites.get_mut(i) {
+                        t[*rng.pick(&["name", "kind", "url", "boards", "thumb_ext", "archive", "media_url"])] = odd_toml(&mut rng);
+                    }
+                }
+            }
+        }
+    }
+    let mut text = doc.to_string();
+    if rng.chance(10) {
+        text = String::from_utf8_lossy(&break_bytes(&mut rng, text.as_bytes())).into_owned();
+    }
+    // As main does: each check may refuse the config, none may panic.
+    let Ok(cfg) = toml::from_str::<crate::config::Config>(&text) else { return };
+    let Ok(keys) = crate::keys::KeyMap::new(&cfg.keys) else { return };
+    if crate::filter::Filters::new(&cfg.filters).is_err() || crate::theme::from_config(cfg.theme.as_ref(), &cfg.themes).is_err() {
+        return;
+    }
+    let mut app = crate::app::App::new(cfg, keys, None, crate::store::Store::default());
+    app.config_path = None;
+    let mut term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 24)).unwrap();
+    for key in [KeyCode::Enter, KeyCode::Char(','), KeyCode::Char('j'), KeyCode::Enter, KeyCode::Esc] {
+        app.on_key(KeyEvent::from(key));
+        term.draw(|f| crate::ui::draw(f, &mut app)).unwrap();
+    }
+}
+
+#[test]
+fn fuzz_config() {
+    run("fuzz_config", false, 1, 300, config_once);
+}
+
+#[test]
+#[ignore]
+fn fuzz_config_long() {
+    run("fuzz_config", true, 0, 50_000, config_once);
+}
+
+/// Small real images of each format, encoded here.
+static IMAGES: std::sync::LazyLock<Vec<Vec<u8>>> = std::sync::LazyLock::new(|| {
+    use image::{DynamicImage, ImageFormat, RgbaImage};
+    let img = DynamicImage::ImageRgba8(RgbaImage::from_fn(17, 11, |x, y| image::Rgba([x as u8 * 15, y as u8 * 20, 99, 255])));
+    [ImageFormat::Png, ImageFormat::Jpeg, ImageFormat::Gif, ImageFormat::WebP]
+        .into_iter()
+        .filter_map(|f| {
+            let mut out = std::io::Cursor::new(Vec::new());
+            let img = if f == ImageFormat::Jpeg { DynamicImage::ImageRgb8(img.to_rgb8()) } else { img.clone() };
+            img.write_to(&mut out, f).ok()?;
+            Some(out.into_inner())
+        })
+        .collect()
+});
+
+fn image_once(seed: u64) {
+    let mut rng = Rng::new(seed);
+    let mut bytes = rng.pick(&IMAGES).clone();
+    match rng.below(4) {
+        0 => bytes = break_bytes(&mut rng, &bytes),
+        // A header that claims a huge picture.
+        1 if bytes.len() > 24 => {
+            for i in 6..10.min(bytes.len()) {
+                bytes[i] = 0xff;
+            }
+            if bytes.starts_with(b"\x89PNG") {
+                bytes[16..24].copy_from_slice(&[0, 0, 0xff, 0xff, 0, 0, 0xff, 0xff]);
+            }
+        }
+        2 => {
+            let cut = rng.below(bytes.len());
+            bytes.truncate(cut);
+        }
+        _ => {
+            for _ in 0..1 + rng.below(20) {
+                let i = rng.below(bytes.len());
+                if let Some(b) = bytes.get_mut(i) {
+                    *b ^= 1 << rng.below(8);
+                }
+            }
+        }
+    }
+    if let Ok(img) = crate::images::decode(&bytes) {
+        assert!(img.width() <= 4096 && img.height() <= 4096, "a {}x{} image kept (seed {seed})", img.width(), img.height());
+    }
+    let _ = crate::images::gif_frames_within(&bytes, 1 << 20);
+}
+
+#[test]
+fn fuzz_images() {
+    run("fuzz_images", false, 1, 300, image_once);
+}
+
+#[test]
+#[ignore]
+fn fuzz_images_long() {
+    run("fuzz_images", true, 0, 50_000, image_once);
 }

@@ -332,15 +332,16 @@ impl Store {
 }
 
 fn load_file<T: DeserializeOwned + Default>(path: &Path, warnings: &mut Vec<String>) -> T {
-    let text = match std::fs::read_to_string(path) {
-        Ok(t) => t,
+    let bytes = match std::fs::read(path) {
+        Ok(b) => b,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return T::default(),
         Err(e) => {
             warnings.push(format!("Couldn't read {}: {e}", path.display()));
             return T::default();
         }
     };
-    match serde_json::from_str(&text) {
+    // Not UTF-8 counts as corrupt too, rather than being overwritten later.
+    match serde_json::from_slice(&bytes) {
         Ok(v) => v,
         Err(e) => {
             // Keep the broken file for the user instead of overwriting it on the next save.
