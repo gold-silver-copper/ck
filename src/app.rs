@@ -842,7 +842,7 @@ impl App {
             .chain((0..self.sites.len()).filter(|&i| self.show_hidden_sites || !self.is_site_hidden(i)).map(SiteRow::Site))
             .chain((!self.hidden_sites.is_empty()).then_some(SiteRow::HiddenSites))
             .collect();
-        let names = rows.iter().map(|r| match r {
+        let name = |k: usize| match &rows[k] {
             SiteRow::Watched => "Watched".to_string(),
             SiteRow::History => "History".to_string(),
             SiteRow::Favorite(i) => {
@@ -855,18 +855,18 @@ impl App {
             }
             SiteRow::Site(i) => self.sites[*i].cfg.name.clone(),
             SiteRow::HiddenSites => "hidden sites".to_string(),
-        });
-        filtered(&self.site_list.filter, names).into_iter().map(|i| rows[i]).collect()
+        };
+        filtered(&self.site_list.filter, rows.len(), name).into_iter().map(|i| rows[i]).collect()
     }
 
     pub fn visible_watched(&self) -> Vec<usize> {
-        let items = self.store.watched.iter().map(|w| format!("{} {} {} {}", w.key.site, w.key.board, w.key.no, w.subject));
-        filtered(&self.watched_list.filter, items)
+        let w = &self.store.watched;
+        filtered(&self.watched_list.filter, w.len(), |i| format!("{} {} {} {}", w[i].key.site, w[i].key.board, w[i].key.no, w[i].subject))
     }
 
     pub fn visible_history(&self) -> Vec<usize> {
-        let items = self.store.history.iter().map(|v| format!("{} {} {} {}", v.key.site, v.key.board, v.key.no, v.subject));
-        filtered(&self.history_list.filter, items)
+        let h = &self.store.history;
+        filtered(&self.history_list.filter, h.len(), |i| format!("{} {} {} {}", h[i].key.site, h[i].key.board, h[i].key.no, h[i].subject))
     }
 
     pub fn boards(&self) -> &[Board] {
@@ -874,7 +874,8 @@ impl App {
     }
 
     pub fn visible_boards(&self) -> Vec<usize> {
-        filtered(&self.board_list.filter, self.boards().iter().map(|b| format!("{} {}", b.uri, b.title)))
+        let b = self.boards();
+        filtered(&self.board_list.filter, b.len(), |i| format!("{} {}", b[i].uri, b[i].title))
     }
 
     pub fn visible_catalog(&self) -> Vec<usize> {
@@ -2706,13 +2707,11 @@ pub fn on_path(program: &str) -> bool {
     std::env::var_os("PATH").is_some_and(|paths| std::env::split_paths(&paths).any(|dir| dir.join(program).is_file()))
 }
 
-fn filtered(filter: &str, items: impl Iterator<Item = String>) -> Vec<usize> {
+/// The indices of `n` items whose `text` contains the filter (any case). The text is only
+/// made while there's a filter.
+fn filtered(filter: &str, n: usize, text: impl Fn(usize) -> String) -> Vec<usize> {
     let needle = filter.to_lowercase();
-    items
-        .enumerate()
-        .filter(|(_, s)| needle.is_empty() || s.to_lowercase().contains(&needle))
-        .map(|(i, _)| i)
-        .collect()
+    (0..n).filter(|&i| needle.is_empty() || text(i).to_lowercase().contains(&needle)).collect()
 }
 
 #[cfg(test)]

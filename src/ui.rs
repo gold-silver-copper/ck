@@ -412,38 +412,20 @@ fn current_filter(app: &App) -> &str {
 
 // ----- lists and cards -----
 
-/// Draw items `height` rows tall with `gap` rows of background between them. With `card`
-/// each item sits on that color; the selected one gets the selection color and an accent
-/// stripe, as do items marked in `stripes` (highlighted by a filter). Returns where it
-/// went, for mouse clicks.
+/// Draw `count` items `height` rows tall with `gap` rows of background between them;
+/// `build` makes only the ones on screen. With `card` each item sits on that color; the
+/// selected one gets the selection color and an accent stripe, as do those `stripe` marks
+/// (highlighted by a filter). Returns where they went, for mouse clicks.
 #[allow(clippy::too_many_arguments)]
 fn draw_rows(
     f: &mut Frame,
     area: Rect,
-    items: Vec<Vec<Line<'static>>>,
-    state: &mut ListState,
-    height: u16,
-    gap: u16,
-    card: Option<Color>,
-    stripes: &[bool],
-) -> Option<Hit> {
-    let mut items: Vec<Option<Vec<Line<'static>>>> = items.into_iter().map(Some).collect();
-    let n = items.len();
-    draw_rows_with(f, area, n, &mut |k| items[k].take().unwrap_or_default(), state, height, gap, card, stripes)
-}
-
-/// `draw_rows` for long lists: `build` makes only the items that are on screen.
-#[allow(clippy::too_many_arguments)]
-fn draw_rows_with(
-    f: &mut Frame,
-    area: Rect,
     count: usize,
-    build: &mut dyn FnMut(usize) -> Vec<Line<'static>>,
     state: &mut ListState,
-    height: u16,
-    gap: u16,
+    (height, gap): (u16, u16),
     card: Option<Color>,
-    stripes: &[bool],
+    stripe: &dyn Fn(usize) -> bool,
+    build: &mut dyn FnMut(usize) -> Vec<Line<'static>>,
 ) -> Option<Hit> {
     if count == 0 || area.is_empty() {
         return None;
@@ -464,20 +446,17 @@ fn draw_rows_with(
         if y >= area.bottom() {
             break;
         }
-        let lines = build(k);
         let h = height.min(area.bottom() - y);
         let row = Rect::new(area.x, y, area.width, h);
-        let selected = k == sel;
-        if selected {
+        if k == sel {
             fill(f, row, t.selection);
-            fill(f, Rect::new(row.x, y, 1, h), t.primary);
         } else if let Some(c) = card {
             fill(f, row, c);
         }
-        if stripes.get(k).copied().unwrap_or(false) {
+        if k == sel || stripe(k) {
             fill(f, Rect::new(row.x, y, 1, h), t.primary);
         }
-        for (r, line) in lines.into_iter().take(h as usize).enumerate() {
+        for (r, line) in build(k).into_iter().take(h as usize).enumerate() {
             put(f, row.x + PAD, y + r as u16, row.width.saturating_sub(PAD + 1), line);
         }
     }
@@ -498,10 +477,11 @@ fn spread(mut left: Vec<Span<'static>>, right: Vec<Span<'static>>, width: usize)
 fn draw_sites(f: &mut Frame, app: &mut App, area: Rect) {
     let t = theme();
     let width = area.width.saturating_sub(PAD + 1) as usize;
-    let items: Vec<Vec<Line>> = app
-        .visible_sites()
-        .into_iter()
-        .map(|row| match row {
+    let rows = app.visible_sites();
+    let mut state = app.site_list.state;
+    app.hit = draw_rows(f, area, rows.len(), &mut state, (1, 0), None, &|_| false, &mut |k| {
+        let row = rows[k];
+        match row {
             SiteRow::Watched => {
                 let n = app.store.watched.len();
                 let unread: usize = app.store.watched.iter().map(|w| w.unread).sum();
@@ -560,9 +540,9 @@ fn draw_sites(f: &mut Frame, app: &mut App, area: Rect) {
                 let what = if app.show_hidden_sites { "enter hides them again" } else { "enter shows them" };
                 vec![Line::from(vec![Span::raw("   "), Span::styled(format!("{} · {what}", plural(n, "hidden site")), dim())])]
             }
-        })
-        .collect();
-    app.hit = draw_rows(f, area, items, &mut app.site_list.state, 1, 0, None, &[]);
+        }
+    });
+    app.site_list.state = state;
     if app.hit.is_none() {
         empty(f, area, "No sites match");
     }
@@ -581,10 +561,11 @@ fn thread_row(key: &crate::store::ThreadKey, subject: &str) -> Vec<Span<'static>
 fn draw_watched(f: &mut Frame, app: &mut App, area: Rect) {
     let t = theme();
     let width = area.width.saturating_sub(PAD + 1) as usize;
-    let items: Vec<Vec<Line>> = app
-        .visible_watched()
-        .into_iter()
-        .map(|i| {
+    let rows = app.visible_watched();
+    let mut state = app.watched_list.state;
+    app.hit = draw_rows(f, area, rows.len(), &mut state, (1, 0), None, &|_| false, &mut |k| {
+        let i = rows[k];
+        {
             let w = &app.store.watched[i];
             let mut right = Vec::new();
             if app.refreshing.contains(&w.key) {
@@ -612,9 +593,9 @@ fn draw_watched(f: &mut Frame, app: &mut App, area: Rect) {
             }
             right.push(Span::styled(plural(w.posts, "post"), dim()));
             vec![spread(thread_row(&w.key, &w.subject), right, width)]
-        })
-        .collect();
-    app.hit = draw_rows(f, area, items, &mut app.watched_list.state, 1, 0, None, &[]);
+        }
+    });
+    app.watched_list.state = state;
     if app.hit.is_none() {
         let msg = format!("No watched threads. Press {} in a catalog or thread to watch one.", app.keys.key(Action::Watch));
         empty(f, area, &msg);
@@ -623,15 +604,16 @@ fn draw_watched(f: &mut Frame, app: &mut App, area: Rect) {
 
 fn draw_history(f: &mut Frame, app: &mut App, area: Rect) {
     let width = area.width.saturating_sub(PAD + 1) as usize;
-    let items: Vec<Vec<Line>> = app
-        .visible_history()
-        .into_iter()
-        .map(|i| {
+    let rows = app.visible_history();
+    let mut state = app.history_list.state;
+    app.hit = draw_rows(f, area, rows.len(), &mut state, (1, 0), None, &|_| false, &mut |k| {
+        let i = rows[k];
+        {
             let v = &app.store.history[i];
             vec![spread(thread_row(&v.key, &v.subject), vec![Span::styled(ago(v.opened, app.clock), dim())], width)]
-        })
-        .collect();
-    app.hit = draw_rows(f, area, items, &mut app.history_list.state, 1, 0, None, &[]);
+        }
+    });
+    app.history_list.state = state;
     if app.hit.is_none() {
         empty(f, area, "No history yet");
     }
@@ -640,10 +622,11 @@ fn draw_history(f: &mut Frame, app: &mut App, area: Rect) {
 fn draw_boards(f: &mut Frame, app: &mut App, area: Rect) {
     let t = theme();
     let width = app.boards().iter().map(|b| b.uri.width()).max().unwrap_or(1) + 4;
-    let items: Vec<Vec<Line>> = app
-        .visible_boards()
-        .into_iter()
-        .map(|i| {
+    let rows = app.visible_boards();
+    let mut state = app.board_list.state;
+    app.hit = draw_rows(f, area, rows.len(), &mut state, (1, 0), None, &|_| false, &mut |k| {
+        let i = rows[k];
+        {
             let b = &app.boards()[i];
             let mut spans = vec![
                 Span::styled(format!("{:<width$}", format!("/{}/", b.uri)), bold(t.primary)),
@@ -653,9 +636,9 @@ fn draw_boards(f: &mut Frame, app: &mut App, area: Rect) {
                 spans.push(Span::styled("  nsfw", Style::new().fg(t.error)));
             }
             vec![Line::from(spans)]
-        })
-        .collect();
-    app.hit = draw_rows(f, area, items, &mut app.board_list.state, 1, 0, None, &[]);
+        }
+    });
+    app.board_list.state = state;
     if app.hit.is_none() && app.loading.is_none() {
         empty(f, area, "No boards");
     }
@@ -675,79 +658,76 @@ fn draw_catalog(f: &mut Frame, app: &mut App, area: Rect) {
     let thumbs = images && !compact;
     let width = area.width.saturating_sub(PAD + 2) as usize;
     let visible = app.visible_catalog();
-    let mut state = std::mem::take(&mut app.catalog_list.state);
     let mut build = |k: usize| -> Vec<Line<'static>> {
         let i = visible[k];
-        {
-            let p = &app.catalog[i];
-            let mark = app.catalog_marks.get(i).cloned().unwrap_or_default();
-            let mut head = Vec::new();
-            if let Some(label) = &mark.hidden {
-                head.push(chip(hidden_label(label), t.text_dim, t.surface_high));
-                head.push(Span::raw(" "));
-            }
-            if let Some(label) = &mark.highlight {
-                head.push(chip(label.clone(), t.on_primary_container, t.primary_container));
-                head.push(Span::raw(" "));
-            }
-            if app.catalog_new.contains(&p.no) {
-                head.push(chip("new", t.background, t.new));
-                head.push(Span::raw(" "));
-            }
-            if p.sticky {
-                head.push(chip("pinned", t.text_dim, t.surface_high));
-                head.push(Span::raw(" "));
-            }
-            if p.locked {
-                head.push(chip("locked", t.text_dim, t.surface_high));
-                head.push(Span::raw(" "));
-            }
-            // Overboards show where each thread lives.
-            if let Some(b) = p.board.as_ref().filter(|b| app.board.as_ref().is_some_and(|cur| cur.uri != **b)) {
-                head.push(chip(format!("/{b}/"), t.on_primary_container, t.primary_container));
-                head.push(Span::raw(" "));
-            }
-            let subject_style = if mark.hidden.is_some() { dim() } else { bold(t.text) };
-            match &p.subject {
-                Some(s) => head.push(Span::styled(s.clone(), subject_style)),
-                None => head.push(Span::styled(format!("No.{}", p.no), dim())),
-            }
-            // Some overboards don't give counts; show nothing rather than zeros.
-            let mut meta = Vec::new();
-            if let Some(n) = app.new_replies(p) {
-                meta.push(Span::styled(format!("+{n} "), bold(t.new)));
-            }
-            let mut facts = Vec::new();
-            if let Some(r) = p.replies {
-                facts.push(format!("{r} replies"));
-                facts.push(format!("{} images", p.images.unwrap_or(0)));
-            }
-            facts.push(ago(p.time, app.clock));
-            meta.push(Span::styled(facts.join(" · "), dim()));
-            let text_w = if thumbs { width.saturating_sub(CAT_THUMB.width as usize + 2) } else { width };
-            if compact {
-                let used: usize = head.iter().chain(&meta).map(|s| s.width()).sum();
-                let room = text_w.saturating_sub(used + 4);
-                if room > 8 {
-                    head.push(Span::styled(format!("  {}", truncate(p.plain_text(), room)), dim()));
-                }
-                return vec![spread(head, meta, text_w)];
-            }
-            let mut lines = vec![spread(head, meta, text_w)];
-            let rows = if thumbs { CAT_THUMB.height as usize - 1 } else { 1 };
-            let mut preview = markup::wrap(&Line::styled(p.plain_text().to_string(), dim()), text_w);
-            if preview.len() > rows {
-                preview.truncate(rows);
-                let last = preview.pop().map(|l| format!("{}…", line_text(&l))).unwrap_or_default();
-                preview.push(Line::styled(truncate(&last, text_w), dim()));
-            }
-            lines.extend(preview);
-            if thumbs {
-                lines.resize(CAT_THUMB.height as usize, Line::raw(""));
-                lines = beside(Vec::new(), lines, CAT_THUMB.width + 1);
-            }
-            lines
+        let p = &app.catalog[i];
+        let mark = app.catalog_marks.get(i).cloned().unwrap_or_default();
+        let mut head = Vec::new();
+        if let Some(label) = &mark.hidden {
+            head.push(chip(hidden_label(label), t.text_dim, t.surface_high));
+            head.push(Span::raw(" "));
         }
+        if let Some(label) = &mark.highlight {
+            head.push(chip(label.clone(), t.on_primary_container, t.primary_container));
+            head.push(Span::raw(" "));
+        }
+        if app.catalog_new.contains(&p.no) {
+            head.push(chip("new", t.background, t.new));
+            head.push(Span::raw(" "));
+        }
+        if p.sticky {
+            head.push(chip("pinned", t.text_dim, t.surface_high));
+            head.push(Span::raw(" "));
+        }
+        if p.locked {
+            head.push(chip("locked", t.text_dim, t.surface_high));
+            head.push(Span::raw(" "));
+        }
+        // Overboards show where each thread lives.
+        if let Some(b) = p.board.as_ref().filter(|b| app.board.as_ref().is_some_and(|cur| cur.uri != **b)) {
+            head.push(chip(format!("/{b}/"), t.on_primary_container, t.primary_container));
+            head.push(Span::raw(" "));
+        }
+        let subject_style = if mark.hidden.is_some() { dim() } else { bold(t.text) };
+        match &p.subject {
+            Some(s) => head.push(Span::styled(s.clone(), subject_style)),
+            None => head.push(Span::styled(format!("No.{}", p.no), dim())),
+        }
+        // Some overboards don't give counts; show nothing rather than zeros.
+        let mut meta = Vec::new();
+        if let Some(n) = app.new_replies(p) {
+            meta.push(Span::styled(format!("+{n} "), bold(t.new)));
+        }
+        let mut facts = Vec::new();
+        if let Some(r) = p.replies {
+            facts.push(format!("{r} replies"));
+            facts.push(format!("{} images", p.images.unwrap_or(0)));
+        }
+        facts.push(ago(p.time, app.clock));
+        meta.push(Span::styled(facts.join(" · "), dim()));
+        let text_w = if thumbs { width.saturating_sub(CAT_THUMB.width as usize + 2) } else { width };
+        if compact {
+            let used: usize = head.iter().chain(&meta).map(|s| s.width()).sum();
+            let room = text_w.saturating_sub(used + 4);
+            if room > 8 {
+                head.push(Span::styled(format!("  {}", truncate(p.plain_text(), room)), dim()));
+            }
+            return vec![spread(head, meta, text_w)];
+        }
+        let mut lines = vec![spread(head, meta, text_w)];
+        let rows = if thumbs { CAT_THUMB.height as usize - 1 } else { 1 };
+        let mut preview = markup::wrap(&Line::styled(p.plain_text().to_string(), dim()), text_w);
+        if preview.len() > rows {
+            preview.truncate(rows);
+            let last = preview.pop().map(|l| format!("{}…", line_text(&l))).unwrap_or_default();
+            preview.push(Line::styled(truncate(&last, text_w), dim()));
+        }
+        lines.extend(preview);
+        if thumbs {
+            lines.resize(CAT_THUMB.height as usize, Line::raw(""));
+            lines = beside(Vec::new(), lines, CAT_THUMB.width + 1);
+        }
+        lines
     };
     let (height, gap, card) = if compact {
         (1, 0, None)
@@ -756,8 +736,9 @@ fn draw_catalog(f: &mut Frame, app: &mut App, area: Rect) {
     } else {
         (2, 1, Some(t.surface))
     };
-    let stripes: Vec<bool> = visible.iter().map(|&i| app.catalog_marks.get(i).is_some_and(|m| m.highlight.is_some())).collect();
-    let hit = draw_rows_with(f, area, visible.len(), &mut build, &mut state, height, gap, card, &stripes);
+    let highlighted = |k: usize| app.catalog_marks.get(visible[k]).is_some_and(|m| m.highlight.is_some());
+    let mut state = app.catalog_list.state;
+    let hit = draw_rows(f, area, visible.len(), &mut state, (height, gap), card, &highlighted, &mut build);
     app.catalog_list.state = state;
     app.hit = hit;
     if app.hit.is_none() {
@@ -820,8 +801,8 @@ fn draw_search(f: &mut Frame, app: &mut App, area: Rect) {
         lines.extend(text);
         lines
     };
-    let mut state = std::mem::take(&mut app.search_list.state);
-    let hit = draw_rows_with(f, area, s.hits.len(), &mut build, &mut state, 3, 1, Some(t.surface), &[]);
+    let mut state = app.search_list.state;
+    let hit = draw_rows(f, area, s.hits.len(), &mut state, (3, 1), Some(t.surface), &|_| false, &mut build);
     app.search_list.state = state;
     if hit.is_none() && app.loading.is_none() {
         empty(f, area, "No results");
