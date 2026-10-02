@@ -356,6 +356,8 @@ pub struct App {
     /// Label of the in-flight request, if any.
     pub loading: Option<String>,
     pub status: Option<(String, bool)>,
+    /// The status message as last seen by `expire_status`, and when it appeared.
+    status_since: Option<(String, Instant)>,
     pub show_help: bool,
     pub help_scroll: u16,
     pub images: Images,
@@ -422,6 +424,7 @@ impl App {
             filtering: false,
             loading: None,
             status: None,
+            status_since: None,
             show_help: false,
             help_scroll: 0,
             images: Images::new(picker),
@@ -522,6 +525,7 @@ impl App {
     // ----- background loading -----
 
     pub fn poll(&mut self) {
+        self.expire_status(Instant::now());
         self.images.poll();
         self.background();
         while let Ok(msg) = self.rx.try_recv() {
@@ -593,6 +597,25 @@ impl App {
                 }
                 _ => {} // stale response
             }
+        }
+    }
+
+    /// Status messages replace the footer's key hints only briefly: info for 2 seconds,
+    /// errors for 5. A new or changed message restarts the timer.
+    fn expire_status(&mut self, now: Instant) {
+        let Some((msg, is_err)) = &self.status else {
+            self.status_since = None;
+            return;
+        };
+        match &self.status_since {
+            Some((seen, since)) if seen == msg => {
+                let ttl = Duration::from_secs(if *is_err { 5 } else { 2 });
+                if now.duration_since(*since) >= ttl {
+                    self.status = None;
+                    self.status_since = None;
+                }
+            }
+            _ => self.status_since = Some((msg.clone(), now)),
         }
     }
 
@@ -1626,6 +1649,30 @@ mod tests {
         assert_eq!(app.thread.as_ref().unwrap().selected, 2);
         app.on_mouse(mouse(MouseEventKind::ScrollDown, 3, 3), Instant::now());
         assert_eq!(app.thread.as_ref().unwrap().scroll, 2);
+    }
+
+    #[test]
+    fn status_messages_expire() {
+        let mut app = test_app();
+        let t0 = Instant::now();
+        app.status = Some(("No unread posts".into(), false));
+        app.expire_status(t0);
+        app.expire_status(t0 + Duration::from_millis(1500));
+        assert!(app.status.is_some());
+        app.expire_status(t0 + Duration::from_secs(2));
+        assert!(app.status.is_none());
+
+        // Errors stay longer, and a new message restarts the timer.
+        app.status = Some(("Rate limited".into(), true));
+        app.expire_status(t0);
+        app.expire_status(t0 + Duration::from_secs(4));
+        assert!(app.status.is_some());
+        app.status = Some(("Thread was deleted or archived".into(), true));
+        app.expire_status(t0 + Duration::from_secs(4));
+        app.expire_status(t0 + Duration::from_secs(8));
+        assert!(app.status.is_some());
+        app.expire_status(t0 + Duration::from_secs(9));
+        assert!(app.status.is_none());
     }
 
     #[test]
