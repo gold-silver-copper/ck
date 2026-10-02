@@ -116,15 +116,11 @@ fn post(v: &Value) -> Option<Post> {
         name,
         subject: as_str(&v["title_processed"]).or_else(|| as_str(&v["title"])).map(|s| markup::decode(&s)),
         time: as_i64(&v["timestamp"]).unwrap_or(0),
-        body: parsed.lines,
-        quotes: parsed.quotes,
-        links: parsed.links,
-        urls: parsed.urls,
         files: attachment(&v["media"]).into_iter().collect(),
         sticky: as_bool(&v["sticky"]),
         board: as_str(&v["board"]["shortname"]),
         locked: as_bool(&v["locked"]),
-        ..Default::default()
+        ..parsed.into()
     })
 }
 

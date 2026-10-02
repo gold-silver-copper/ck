@@ -75,17 +75,13 @@ pub fn post(base: &str, v: &Value) -> Post {
         name,
         subject: as_str(&v["subject"]),
         time,
-        body: parsed.lines,
-        quotes: parsed.quotes,
-        links: parsed.links,
-        urls: parsed.urls,
         files,
         replies: as_u64(&v["replyposts"]).map(|n| n as u32),
         images: as_u64(&v["replyfiles"]).map(|n| n as u32),
         sticky: as_bool(&v["sticky"]),
         board: as_str(&v["board"]),
         locked: as_bool(&v["locked"]),
-        ..Default::default()
+        ..parsed.into()
     }
 }
 

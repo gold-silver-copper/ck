@@ -29,13 +29,8 @@ impl App {
     /// Remember a site's board titles for the home screen, from its loaded, configured or
     /// saved board list.
     pub fn note_titles(&mut self, site: usize) {
-        let Some(s) = self.sites.get(site) else { return };
-        let boards = match (&s.boards, &s.cfg.boards) {
-            (Some(b), _) => b.clone(),
-            (None, Some(cfg)) => cfg.iter().map(crate::backend::to_board).collect(),
-            (None, None) => self.store.load_boards(&s.cfg.name).map(|(b, _)| b).unwrap_or_default(),
-        };
-        let name = s.cfg.name.clone();
+        let Some(name) = self.sites.get(site).map(|s| s.cfg.name.clone()) else { return };
+        let boards = self.known_boards(site).unwrap_or_default();
         self.home_titles.extend(boards.into_iter().map(|b| (format!("{name}/{}", b.uri), b.title)));
     }
 

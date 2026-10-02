@@ -54,10 +54,7 @@ fn post(no: u64, age: i64, subject: Option<&str>, html: &str) -> Post {
         name: "Anonymous".into(),
         subject: subject.map(String::from),
         time: NOW - age,
-        body: p.lines,
-        quotes: p.quotes,
-        links: p.links,
-        ..Default::default()
+        ..p.into()
     }
 }
 

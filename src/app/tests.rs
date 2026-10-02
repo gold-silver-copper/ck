@@ -304,7 +304,7 @@ fn links_panel_lists_and_opens() {
     app.tab.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
     let html = r#"<a href="/x/res/1.html#1" class="quotelink">&gt;&gt;1</a> <a href="/xy/res/9.html#10">&gt;&gt;&gt;/xy/10</a> see https://example.com/a"#;
     let parsed = crate::markup::parse_html(html, crate::markup::Flavor::Vichan);
-    let reply = Post { no: 2, body: parsed.lines, quotes: parsed.quotes, links: parsed.links, urls: parsed.urls, files: vec![Attachment { filename: "a.png".into(), url: "http://127.0.0.1:3/x/src/a.png".into(), ..Default::default() }], ..Default::default() };
+    let reply = Post { no: 2, files: vec![Attachment { filename: "a.png".into(), url: "http://127.0.0.1:3/x/src/a.png".into(), ..Default::default() }], ..parsed.into() };
     app.tab.thread = Some(ThreadView::new("x".into(), 1, vec![Post { no: 1, ..Default::default() }, reply]));
     app.tab.thread.as_mut().unwrap().selected = 1;
     app.tab.view = View::Thread;

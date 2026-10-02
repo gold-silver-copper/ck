@@ -32,6 +32,13 @@ pub struct Parsed {
     pub urls: Vec<String>,
 }
 
+impl From<Parsed> for crate::model::Post {
+    /// A post with this body (and its quotes and links), the rest left to fill in.
+    fn from(p: Parsed) -> Self {
+        Self { body: p.lines, quotes: p.quotes, links: p.links, urls: p.urls, ..Default::default() }
+    }
+}
+
 /// The HTML dialects differ in a few ways.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Flavor {

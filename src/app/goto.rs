@@ -3,7 +3,6 @@
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 
 use super::{App, Msg, View};
-use crate::model::Board;
 use crate::route::{self, SiteInfo, Target};
 
 impl App {
@@ -101,17 +100,7 @@ impl App {
             }
             None => (String::new(), text.clone(), None),
         };
-        let boards = |site: usize| -> Vec<String> {
-            let s = &self.sites[site];
-            if let Some(b) = &s.boards {
-                return b.iter().map(|b| b.uri.clone()).collect();
-            }
-            if let Some(b) = &s.cfg.boards {
-                return b.iter().map(|b| crate::backend::to_board(b).uri).collect();
-            }
-            let saved: Vec<Board> = self.store.load_boards(&s.cfg.name).map(|(b, _)| b).unwrap_or_default();
-            saved.into_iter().map(|b| b.uri).collect()
-        };
+        let boards = |site: usize| -> Vec<String> { self.known_boards(site).unwrap_or_default().into_iter().map(|b| b.uri).collect() };
         let candidates: Vec<String> = match site {
             Some(site) => boards(site),
             None => self.sites.iter().map(|s| s.cfg.name.clone()).chain(boards(self.tab.site)).collect(),

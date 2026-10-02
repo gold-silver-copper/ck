@@ -259,7 +259,7 @@ mod tests {
     fn posts() -> Vec<Post> {
         let post = |no, html: &str| {
             let p = parse_html(html, Flavor::Fourchan);
-            Post { no, name: "Anonymous".into(), time: 1_790_000_000, body: p.lines, quotes: p.quotes, links: p.links, urls: p.urls, ..Default::default() }
+            Post { no, name: "Anonymous".into(), time: 1_790_000_000, ..p.into() }
         };
         let mut op = post(1, "Hello <b>world</b> &amp; <s>secret</s><br><span class=\"quote\">&gt;green</span>");
         op.subject = Some("A <thread>".into());

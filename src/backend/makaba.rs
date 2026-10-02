@@ -58,15 +58,11 @@ impl Makaba {
             name,
             subject: as_str(&v["subject"]).map(|s| strip_tags(&s)).filter(|s| !s.is_empty()),
             time: as_i64(&v["timestamp"]).unwrap_or(0),
-            body: parsed.lines,
-            quotes: parsed.quotes,
-            links: parsed.links,
-            urls: parsed.urls,
             files: items(&v["files"]).filter_map(|f| self.attachment(f)).collect(),
             sticky: as_bool(&v["sticky"]),
             board: as_str(&v["board"]),
             locked: as_bool(&v["closed"]),
-            ..Default::default()
+            ..parsed.into()
         }
     }
 

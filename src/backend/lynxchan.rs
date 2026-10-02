@@ -96,10 +96,6 @@ impl Lynxchan {
             name,
             subject: as_str(&v["subject"]),
             time: parse_time(&v["creation"]).or_else(|| parse_time(&v["lastBump"])).unwrap_or(0),
-            body: parsed.lines,
-            quotes: parsed.quotes,
-            links: parsed.links,
-            urls: parsed.urls,
             files,
             // postCount excludes the OP, like 4chan's `replies`.
             replies: as_u64(&v["postCount"]).map(|n| n as u32),
@@ -107,7 +103,7 @@ impl Lynxchan {
             sticky: as_bool(&v["pinned"]),
             board: as_str(&v["boardUri"]),
             locked: as_bool(&v["locked"]),
-            ..Default::default()
+            ..parsed.into()
         }
     }
 }

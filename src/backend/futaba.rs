@@ -135,10 +135,6 @@ impl Futaba {
             name,
             subject: as_str(&v["sub"]).map(|s| markup::decode(&s)),
             time: as_i64(&v["time"]).unwrap_or(0),
-            body: parsed.lines,
-            quotes: parsed.quotes,
-            links: parsed.links,
-            urls: parsed.urls,
             files,
             replies: as_u64(&v["replies"]).map(|n| n as u32),
             images: as_u64(&v["images"]).map(|n| n as u32),
@@ -146,7 +142,7 @@ impl Futaba {
             board: own_board,
             locked: as_bool(&v["closed"]) || as_bool(&v["locked"]),
             bumplimit: as_bool(&v["bumplimit"]),
-            ..Default::default()
+            ..parsed.into()
         }
     }
 

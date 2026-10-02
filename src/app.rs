@@ -790,27 +790,17 @@ impl App {
     }
 
     fn picker(&mut self) -> Option<(&mut Picker, usize)> {
-        let len = match self.tab.view {
-            View::Sites => self.visible_sites().len(),
-            View::Boards => self.visible_boards().len(),
-            View::Catalog => self.visible_catalog().len(),
-            View::Watched => self.visible_watched().len(),
-            View::History => self.visible_history().len(),
-            View::Settings => settings::items().len(),
-            View::Search => self.tab.search.as_ref().map_or(0, |s| s.hits.len()),
+        Some(match self.tab.view {
+            View::Sites => (self.visible_sites().len(), &mut self.site_list),
+            View::Boards => (self.visible_boards().len(), &mut self.tab.board_list),
+            View::Catalog => (self.visible_catalog().len(), &mut self.tab.catalog_list),
+            View::Watched => (self.visible_watched().len(), &mut self.watched_list),
+            View::History => (self.visible_history().len(), &mut self.history_list),
+            View::Settings => (settings::items().len(), &mut self.settings_list),
+            View::Search => (self.tab.search.as_ref().map_or(0, |s| s.hits.len()), &mut self.tab.search_list),
             View::Thread => return None,
-        };
-        let p = match self.tab.view {
-            View::Sites => &mut self.site_list,
-            View::Boards => &mut self.tab.board_list,
-            View::Catalog => &mut self.tab.catalog_list,
-            View::Watched => &mut self.watched_list,
-            View::History => &mut self.history_list,
-            View::Settings => &mut self.settings_list,
-            View::Search => &mut self.tab.search_list,
-            View::Thread => return None,
-        };
-        Some((p, len))
+        })
+        .map(|(len, p)| (p, len))
     }
 
     pub fn current_site(&self) -> &Site {
@@ -1662,15 +1652,21 @@ impl App {
         self.tab.board_list = Picker::top();
         self.tab.site = site;
         if self.sites[site].boards.is_none() {
-            let cfg = &self.sites[site].cfg;
-            if let Some(b) = &cfg.boards {
-                self.sites[site].boards = Some(b.iter().map(backend::to_board).collect());
-            } else if let Some((boards, _)) = self.store.load_boards(&cfg.name) {
-                self.sites[site].boards = Some(boards);
-            } else {
-                self.refresh_boards_in_background(site);
+            match self.known_boards(site) {
+                Some(boards) => self.sites[site].boards = Some(boards),
+                None => self.refresh_boards_in_background(site),
             }
         }
+    }
+
+    /// A site's boards as far as they're known without a request: loaded, from the config,
+    /// or saved last time.
+    fn known_boards(&self, site: usize) -> Option<Vec<Board>> {
+        let s = self.sites.get(site)?;
+        s.boards
+            .clone()
+            .or_else(|| s.cfg.boards.as_ref().map(|b| b.iter().map(backend::to_board).collect()))
+            .or_else(|| self.store.load_boards(&s.cfg.name).map(|(b, _)| b))
     }
 
     /// Follow the selected post's first link that leads out of this thread, preferring links
