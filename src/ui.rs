@@ -4,7 +4,6 @@
 
 use chrono::{Local, TimeZone, Utc};
 use ratatui::Frame;
-use ratatui::buffer::Buffer;
 use ratatui::layout::{Constraint, Layout, Margin, Rect, Size};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -80,14 +79,6 @@ fn empty(f: &mut Frame, area: Rect, msg: &str) {
     }
 }
 
-/// Map every 24-bit color to the nearest of 256, for terminals without 24-bit color.
-fn downgrade(buf: &mut Buffer) {
-    for cell in buf.content.iter_mut() {
-        cell.fg = theme::to_256(cell.fg);
-        cell.bg = theme::to_256(cell.bg);
-    }
-}
-
 // ----- the frame -----
 
 pub fn draw(f: &mut Frame, app: &mut App) {
@@ -132,8 +123,12 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         draw_image_search(f, app);
     }
     app.images.end_frame();
+    // Every 24-bit color to the nearest of 256, for terminals without 24-bit color.
     if !app.truecolor {
-        downgrade(f.buffer_mut());
+        for cell in f.buffer_mut().content.iter_mut() {
+            cell.fg = theme::to_256(cell.fg);
+            cell.bg = theme::to_256(cell.bg);
+        }
     }
 }
 
@@ -275,11 +270,9 @@ fn location(app: &App) -> (Vec<String>, Vec<Span<'static>>) {
         _ => Some(current_filter(app)).filter(|q| !q.is_empty() && !app.filtering).map(|q| format!("/{q}")),
     };
     if let Some(q) = query {
-        spans.push(chip(q, t.on_primary_container, t.primary_container));
-        spans.push(Span::raw("  "));
+        spans.extend([chip(q, t.on_primary_container, t.primary_container), Span::raw("  ")]);
     }
-    spans.push(Span::styled(meta.join("  ·  "), dim()));
-    spans.push(Span::raw(" "));
+    spans.extend([Span::styled(meta.join("  ·  "), dim()), Span::raw(" ")]);
     (crumbs, spans)
 }
 
@@ -333,20 +326,17 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
     } else {
         let mut spans = vec![Span::raw(" ")];
         for (key, label) in footer_hints(app) {
-            spans.push(Span::styled(key, bold(t.primary)));
-            spans.push(Span::styled(format!(" {label}   "), dim()));
+            spans.extend([Span::styled(key, bold(t.primary)), Span::styled(format!(" {label}   "), dim())]);
         }
         Line::from(spans)
     };
     let d = &app.downloads;
     let mut right = Vec::new();
     if d.running > 0 {
-        right.push(chip(format!("⇣ {}/{}", d.done + d.skipped + d.failed, d.total), t.text, t.surface_high));
-        right.push(Span::raw(" "));
+        right.extend([chip(format!("⇣ {}/{}", d.done + d.skipped + d.failed, d.total), t.text, t.surface_high), Span::raw(" ")]);
     }
     if !app.refreshing.is_empty() {
-        right.push(chip(format!("↻ {}", app.refreshing.len()), t.text, t.surface_high));
-        right.push(Span::raw(" "));
+        right.extend([chip(format!("↻ {}", app.refreshing.len()), t.text, t.surface_high), Span::raw(" ")]);
     }
     let right_w = right.iter().map(|s| s.width()).sum::<usize>() as u16;
     put(f, area.x, area.y, area.width.saturating_sub(right_w), line);
@@ -489,8 +479,7 @@ fn draw_sites(f: &mut Frame, app: &mut App, area: Rect) {
     let rows = app.visible_sites();
     let mut state = app.site_list.state;
     app.hit = draw_rows(f, area, rows.len(), &mut state, (1, 0), None, &|_| false, &mut |k| {
-        let row = rows[k];
-        match row {
+        match rows[k] {
             SiteRow::Watched => {
                 let n = app.store.watched.len();
                 let unread: usize = app.store.watched.iter().map(|w| w.unread).sum();
@@ -500,8 +489,7 @@ fn draw_sites(f: &mut Frame, app: &mut App, area: Rect) {
                     Span::styled(plural(n, "thread"), dim()),
                 ];
                 if unread > 0 {
-                    spans.push(Span::raw("  "));
-                    spans.push(chip(format!("{unread} new"), t.background, t.new));
+                    spans.extend([Span::raw("  "), chip(format!("{unread} new"), t.background, t.new)]);
                 }
                 vec![Line::from(spans)]
             }
@@ -573,36 +561,28 @@ fn draw_watched(f: &mut Frame, app: &mut App, area: Rect) {
     let rows = app.visible_watched();
     let mut state = app.watched_list.state;
     app.hit = draw_rows(f, area, rows.len(), &mut state, (1, 0), None, &|_| false, &mut |k| {
-        let i = rows[k];
-        {
-            let w = &app.store.watched[i];
-            let mut right = Vec::new();
-            if app.refreshing.contains(&w.key) {
-                right.push(Span::styled("↻  ", Style::new().fg(t.primary)));
-            }
-            if let Some(g) = &w.general {
-                right.push(chip(format!("follows {g}"), t.on_primary_container, t.primary_container));
-                right.push(Span::raw(" "));
-            }
-            if w.at_limit && !w.dead {
-                right.push(chip("bump limit", t.text_dim, t.surface_high));
-                right.push(Span::raw(" "));
-            }
-            if w.replies > 0 {
-                let n = w.replies;
-                right.push(chip(format!("{n} repl{} to you", if n == 1 { "y" } else { "ies" }), t.on_primary, t.primary));
-                right.push(Span::raw(" "));
-            }
-            if w.dead {
-                right.push(chip("archived/deleted", t.background, t.error));
-                right.push(Span::raw("  "));
-            } else if w.unread > 0 {
-                right.push(chip(format!("{} new", w.unread), t.background, t.new));
-                right.push(Span::raw("  "));
-            }
-            right.push(Span::styled(plural(w.posts, "post"), dim()));
-            vec![spread(thread_row(&w.key, &w.subject), right, width)]
+        let w = &app.store.watched[rows[k]];
+        let mut right = Vec::new();
+        if app.refreshing.contains(&w.key) {
+            right.push(Span::styled("↻  ", Style::new().fg(t.primary)));
         }
+        if let Some(g) = &w.general {
+            right.extend([chip(format!("follows {g}"), t.on_primary_container, t.primary_container), Span::raw(" ")]);
+        }
+        if w.at_limit && !w.dead {
+            right.extend([chip("bump limit", t.text_dim, t.surface_high), Span::raw(" ")]);
+        }
+        if w.replies > 0 {
+            let n = w.replies;
+            right.extend([chip(format!("{n} repl{} to you", if n == 1 { "y" } else { "ies" }), t.on_primary, t.primary), Span::raw(" ")]);
+        }
+        if w.dead {
+            right.extend([chip("archived/deleted", t.background, t.error), Span::raw("  ")]);
+        } else if w.unread > 0 {
+            right.extend([chip(format!("{} new", w.unread), t.background, t.new), Span::raw("  ")]);
+        }
+        right.push(Span::styled(plural(w.posts, "post"), dim()));
+        vec![spread(thread_row(&w.key, &w.subject), right, width)]
     });
     app.watched_list.state = state;
     if app.hit.is_none() {
@@ -616,11 +596,8 @@ fn draw_history(f: &mut Frame, app: &mut App, area: Rect) {
     let rows = app.visible_history();
     let mut state = app.history_list.state;
     app.hit = draw_rows(f, area, rows.len(), &mut state, (1, 0), None, &|_| false, &mut |k| {
-        let i = rows[k];
-        {
-            let v = &app.store.history[i];
-            vec![spread(thread_row(&v.key, &v.subject), vec![Span::styled(ago(v.opened, app.clock), dim())], width)]
-        }
+        let v = &app.store.history[rows[k]];
+        vec![spread(thread_row(&v.key, &v.subject), vec![Span::styled(ago(v.opened, app.clock), dim())], width)]
     });
     app.history_list.state = state;
     if app.hit.is_none() {
@@ -634,18 +611,15 @@ fn draw_boards(f: &mut Frame, app: &mut App, area: Rect) {
     let rows = app.visible_boards();
     let mut state = app.tab.board_list.state;
     app.hit = draw_rows(f, area, rows.len(), &mut state, (1, 0), None, &|_| false, &mut |k| {
-        let i = rows[k];
-        {
-            let b = &app.boards()[i];
-            let mut spans = vec![
-                Span::styled(format!("{:<width$}", format!("/{}/", b.uri)), bold(t.primary)),
-                Span::styled(b.title.clone(), Style::new().fg(t.text)),
-            ];
-            if b.nsfw == Some(true) {
-                spans.push(Span::styled("  nsfw", Style::new().fg(t.error)));
-            }
-            vec![Line::from(spans)]
+        let b = &app.boards()[rows[k]];
+        let mut spans = vec![
+            Span::styled(format!("{:<width$}", format!("/{}/", b.uri)), bold(t.primary)),
+            Span::styled(b.title.clone(), Style::new().fg(t.text)),
+        ];
+        if b.nsfw == Some(true) {
+            spans.push(Span::styled("  nsfw", Style::new().fg(t.error)));
         }
+        vec![Line::from(spans)]
     });
     app.tab.board_list.state = state;
     if app.hit.is_none() && app.tab.loading.is_none() {
@@ -673,29 +647,23 @@ fn draw_catalog(f: &mut Frame, app: &mut App, area: Rect) {
         let mark = app.tab.catalog_marks.get(i).cloned().unwrap_or_default();
         let mut head = Vec::new();
         if let Some(label) = &mark.hidden {
-            head.push(chip(hidden_label(label), t.text_dim, t.surface_high));
-            head.push(Span::raw(" "));
+            head.extend([chip(hidden_label(label), t.text_dim, t.surface_high), Span::raw(" ")]);
         }
         if let Some(label) = &mark.highlight {
-            head.push(chip(label.clone(), t.on_primary_container, t.primary_container));
-            head.push(Span::raw(" "));
+            head.extend([chip(label.clone(), t.on_primary_container, t.primary_container), Span::raw(" ")]);
         }
         if app.tab.catalog_new.contains(&p.no) {
-            head.push(chip("new", t.background, t.new));
-            head.push(Span::raw(" "));
+            head.extend([chip("new", t.background, t.new), Span::raw(" ")]);
         }
         if p.sticky {
-            head.push(chip("pinned", t.text_dim, t.surface_high));
-            head.push(Span::raw(" "));
+            head.extend([chip("pinned", t.text_dim, t.surface_high), Span::raw(" ")]);
         }
         if p.locked {
-            head.push(chip("locked", t.text_dim, t.surface_high));
-            head.push(Span::raw(" "));
+            head.extend([chip("locked", t.text_dim, t.surface_high), Span::raw(" ")]);
         }
         // Overboards show where each thread lives.
         if let Some(b) = p.board.as_ref().filter(|b| app.tab.board.as_ref().is_some_and(|cur| cur.uri != **b)) {
-            head.push(chip(format!("/{b}/"), t.on_primary_container, t.primary_container));
-            head.push(Span::raw(" "));
+            head.extend([chip(format!("/{b}/"), t.on_primary_container, t.primary_container), Span::raw(" ")]);
         }
         let subject_style = if mark.hidden.is_some() { dim() } else { bold(t.text) };
         match &p.subject {
@@ -725,16 +693,10 @@ fn draw_catalog(f: &mut Frame, app: &mut App, area: Rect) {
         }
         let mut lines = vec![spread(head, meta, text_w)];
         let rows = if thumbs { CAT_THUMB.height as usize - 1 } else { 1 };
-        let mut preview = markup::wrap(&Line::styled(p.plain_text().to_string(), dim()), text_w);
-        if preview.len() > rows {
-            preview.truncate(rows);
-            let last = preview.pop().map(|l| format!("{}…", line_text(&l))).unwrap_or_default();
-            preview.push(Line::styled(truncate(&last, text_w), dim()));
-        }
-        lines.extend(preview);
+        lines.extend(excerpt(p.plain_text(), dim(), text_w, rows));
         if thumbs {
             lines.resize(CAT_THUMB.height as usize, Line::raw(""));
-            lines = beside(Vec::new(), lines, CAT_THUMB.width + 1);
+            lines = beside_tile(lines, CAT_THUMB.width + 1);
         }
         lines
     };
@@ -747,9 +709,8 @@ fn draw_catalog(f: &mut Frame, app: &mut App, area: Rect) {
     };
     let highlighted = |k: usize| app.tab.catalog_marks.get(visible[k]).is_some_and(|m| m.highlight.is_some());
     let mut state = app.tab.catalog_list.state;
-    let hit = draw_rows(f, area, visible.len(), &mut state, (height, gap), card, &highlighted, &mut build);
+    app.hit = draw_rows(f, area, visible.len(), &mut state, (height, gap), card, &highlighted, &mut build);
     app.tab.catalog_list.state = state;
-    app.hit = hit;
     if app.hit.is_none() {
         if app.tab.loading.is_none() {
             empty(f, area, "No threads");
@@ -791,8 +752,7 @@ fn draw_search(f: &mut Frame, app: &mut App, area: Rect) {
         let (thread, p) = &s.hits[k];
         let mut head = vec![Span::styled(p.name.clone(), bold(t.name)), Span::raw("  ")];
         if p.no == *thread {
-            head.push(chip("OP", t.on_primary_container, t.primary_container));
-            head.push(Span::raw(" "));
+            head.extend([chip("OP", t.on_primary_container, t.primary_container), Span::raw(" ")]);
         } else {
             head.push(Span::styled(format!("in thread {thread}  "), dim()));
         }
@@ -801,13 +761,7 @@ fn draw_search(f: &mut Frame, app: &mut App, area: Rect) {
         }
         let right = vec![Span::styled(format!("No.{}  ·  {}", p.no, ago(p.time, app.clock)), dim())];
         let mut lines = vec![spread(head, right, width)];
-        let mut text = markup::wrap(&Line::styled(p.plain_text().to_string(), Style::new().fg(t.text)), width);
-        if text.len() > 2 {
-            text.truncate(2);
-            let last = text.pop().map(|l| format!("{}…", line_text(&l))).unwrap_or_default();
-            text.push(Line::styled(truncate(&last, width), Style::new().fg(t.text)));
-        }
-        lines.extend(text);
+        lines.extend(excerpt(p.plain_text(), Style::new().fg(t.text), width, 2));
         lines
     };
     let mut state = app.tab.search_list.state;
@@ -910,12 +864,10 @@ fn draw_grid(f: &mut Frame, app: &mut App, area: Rect) {
         let w = GRID_CARD.width - PAD - 1;
         let mut head = Vec::new();
         if app.tab.catalog_new.contains(&p.no) {
-            head.push(chip("new", t.background, t.new));
-            head.push(Span::raw(" "));
+            head.extend([chip("new", t.background, t.new), Span::raw(" ")]);
         }
         if let Some(label) = &mark.hidden {
-            head.push(chip(hidden_label(label), t.text_dim, t.surface_high));
-            head.push(Span::raw(" "));
+            head.extend([chip(hidden_label(label), t.text_dim, t.surface_high), Span::raw(" ")]);
         }
         let (title, rest) = match &p.subject {
             Some(s) => (s.clone(), p.plain_text().to_string()),
@@ -943,31 +895,22 @@ fn draw_grid(f: &mut Frame, app: &mut App, area: Rect) {
     app.hit = Some(Hit::Grid { area, offset: top * cols, cols, cell: (cell_w, cell_h) });
 }
 
-fn line_text(l: &Line) -> String {
-    l.spans.iter().map(|s| s.content.as_ref()).collect()
+/// `text` wrapped to `width`, cut to `rows` lines with "…" if there's more.
+fn excerpt(text: &str, style: Style, width: usize, rows: usize) -> Vec<Line<'static>> {
+    let mut lines = markup::wrap(&Line::styled(text.to_string(), style), width);
+    if lines.len() > rows {
+        lines.truncate(rows);
+        let last = lines.pop().map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect::<String>() + "…").unwrap_or_default();
+        lines.push(Line::styled(truncate(&last, width), style));
+    }
+    lines
 }
 
-/// Put `right` after a blank column `width` wide (where a tile is painted), keeping the
-/// right line's style (code lines are marked by it).
-fn beside(left: Vec<Line<'static>>, right: Vec<Line<'static>>, width: u16) -> Vec<Line<'static>> {
-    let n = left.len().max(right.len());
-    let blank = " ".repeat(width as usize);
-    let (mut left, mut right) = (left.into_iter(), right.into_iter());
-    (0..n)
-        .map(|_| {
-            let mut spans = match left.next() {
-                Some(l) => l.spans,
-                None => vec![Span::raw(blank.clone())],
-            };
-            match right.next() {
-                Some(r) => {
-                    spans.extend(r.spans);
-                    Line::from(spans).style(r.style)
-                }
-                None => Line::from(spans),
-            }
-        })
-        .collect()
+/// `lines` after a blank column `width` wide (where a tile is painted), each keeping its
+/// style (code lines are marked by it).
+fn beside_tile(lines: Vec<Line<'static>>, width: u16) -> Vec<Line<'static>> {
+    let blank = Span::raw(" ".repeat(width as usize));
+    lines.into_iter().map(|l| Line::from([vec![blank.clone()], l.spans].concat()).style(l.style)).collect()
 }
 
 /// A thumbnail tile: a flat square with the file's type, and the image over it once it's
@@ -1106,7 +1049,7 @@ fn layout_thread(t: &mut ThreadView, width: u16, thumbs: bool, clock: Clock) -> 
         starts.push(len);
         let block: Rc<[Line<'static>]> = if t.is_collapsed(i) {
             // A hidden post is one line, so replies to it still make sense.
-            let why = t.marks[i].hidden.as_deref().filter(|l| !l.is_empty());
+            let why = t.marks.get(i).and_then(|m| m.hidden.as_deref()).filter(|l| !l.is_empty());
             let why = why.map_or("hidden".to_string(), |l| format!("hidden by the filter \"{l}\""));
             vec![Line::styled(format!("No.{}  {why}", p.no), Style::new().fg(theme().text_dim)), Line::raw("")].into()
         } else {
@@ -1119,7 +1062,7 @@ fn layout_thread(t: &mut ThreadView, width: u16, thumbs: bool, clock: Clock) -> 
                     let mut lines = vec![Line::raw("")];
                     if thumb {
                         let text = post_lines(p, &ctx, text_width - THUMB.width as usize - 2);
-                        let mut text = beside(Vec::new(), text, THUMB.width + 2);
+                        let mut text = beside_tile(text, THUMB.width + 2);
                         text.resize(text.len().max(THUMB.height as usize), Line::raw(""));
                         lines.extend(text);
                     } else {
@@ -1200,25 +1143,20 @@ fn post_lines(p: &Post, ctx: &PostCtx, width: usize) -> Vec<Line<'static>> {
     let t = theme();
     let mut head = vec![Span::styled(p.name.clone(), bold(t.name)), Span::raw("  ")];
     if ctx.is_op {
-        head.push(chip("OP", t.on_primary_container, t.primary_container));
-        head.push(Span::raw(" "));
+        head.extend([chip("OP", t.on_primary_container, t.primary_container), Span::raw(" ")]);
     }
     if ctx.is_new {
-        head.push(chip("new", t.background, t.new));
-        head.push(Span::raw(" "));
+        head.extend([chip("new", t.background, t.new), Span::raw(" ")]);
     }
     if ctx.mine.contains(&p.no) {
-        head.push(chip("you", t.on_primary, t.primary));
-        head.push(Span::raw(" "));
+        head.extend([chip("you", t.on_primary, t.primary), Span::raw(" ")]);
     }
     if let Some(m) = ctx.mark {
         if let Some(label) = &m.hidden {
-            head.push(chip(hidden_label(label), t.text_dim, t.surface_high));
-            head.push(Span::raw(" "));
+            head.extend([chip(hidden_label(label), t.text_dim, t.surface_high), Span::raw(" ")]);
         }
         if let Some(label) = &m.highlight {
-            head.push(chip(label.clone(), t.on_primary_container, t.primary_container));
-            head.push(Span::raw(" "));
+            head.extend([chip(label.clone(), t.on_primary_container, t.primary_container), Span::raw(" ")]);
         }
     }
     head.push(Span::styled(format!("{}  No.{}", fmt_time(p.time, ctx.clock), p.no), dim()));
@@ -1228,13 +1166,7 @@ fn post_lines(p: &Post, ctx: &PostCtx, width: usize) -> Vec<Line<'static>> {
         out.extend(markup::wrap(&subject, width));
     }
     for file in &p.files {
-        let mut meta = Vec::new();
-        if let (Some(w), Some(h)) = (file.width, file.height) {
-            meta.push(format!("{w}x{h}"));
-        }
-        if let Some(s) = file.size {
-            meta.push(human_size(s));
-        }
+        let meta = file_facts(file);
         let meta = if meta.is_empty() { String::new() } else { format!("  {}", meta.join(" · ")) };
         out.extend(markup::wrap(
             &Line::from(vec![Span::styled(file.filename.clone(), Style::new().fg(t.text)), Span::styled(meta, dim())]),
@@ -1271,8 +1203,7 @@ fn post_lines(p: &Post, ctx: &PostCtx, width: usize) -> Vec<Line<'static>> {
         out.push(Line::raw(""));
         let mut spans = vec![Span::styled("Replies  ", dim())];
         for no in ctx.backlinks {
-            spans.push(Span::styled(format!(">>{no}"), Style::new().fg(t.quotelink)));
-            spans.push(Span::raw("  "));
+            spans.extend([Span::styled(format!(">>{no}"), Style::new().fg(t.quotelink)), Span::raw("  ")]);
         }
         out.extend(markup::wrap(&Line::from(spans), width));
     }
@@ -1346,18 +1277,13 @@ fn draw_links(f: &mut Frame, app: &mut App) {
         let room = (inner.width as usize).saturating_sub(9);
         let text = truncate(&text, room);
         let extra = truncate(&extra, room.saturating_sub(text.width()));
-        put(
-            f,
-            inner.x,
-            y,
-            inner.width,
-            Line::from(vec![
-                chip(format!("{kind:<5}"), t.text_dim, t.surface_high),
-                Span::raw("  "),
-                Span::styled(text, Style::new().fg(if kind == "file" { t.text } else { t.quotelink })),
-                Span::styled(extra, dim()),
-            ]),
-        );
+        let line = Line::from(vec![
+            chip(format!("{kind:<5}"), t.text_dim, t.surface_high),
+            Span::raw("  "),
+            Span::styled(text, Style::new().fg(if kind == "file" { t.text } else { t.quotelink })),
+            Span::styled(extra, dim()),
+        ]);
+        put(f, inner.x, y, inner.width, line);
     }
 }
 
@@ -1533,17 +1459,12 @@ fn draw_settings(f: &mut Frame, app: &mut App, area: Rect) {
                 paint_row(f, Rect::new(area.x, y, area.width, 1), None, i == selected, false);
                 let value = app.setting_value(item);
                 let hint_w = (area.width as usize).saturating_sub(PAD as usize + 1 + 18 + 34);
-                put(
-                    f,
-                    area.x + PAD,
-                    y,
-                    area.width.saturating_sub(PAD + 1),
-                    Line::from(vec![
-                        Span::styled(format!("{:<18}", item.label()), Style::new().fg(t.text)),
-                        Span::styled(format!("{:<34}", truncate(&value, 32)), bold(t.text)),
-                        Span::styled(if hint_w >= 16 { truncate(item.hint(), hint_w) } else { String::new() }, dim()),
-                    ]),
-                );
+                let line = Line::from(vec![
+                    Span::styled(format!("{:<18}", item.label()), Style::new().fg(t.text)),
+                    Span::styled(format!("{:<34}", truncate(&value, 32)), bold(t.text)),
+                    Span::styled(if hint_w >= 16 { truncate(item.hint(), hint_w) } else { String::new() }, dim()),
+                ]);
+                put(f, area.x + PAD, y, area.width.saturating_sub(PAD + 1), line);
             }
         }
     }
@@ -1560,14 +1481,6 @@ fn draw_settings(f: &mut Frame, app: &mut App, area: Rect) {
     }
 }
 
-/// A row of colored cells: a theme at a glance.
-fn swatch(t: &Theme) -> Vec<Span<'static>> {
-    [t.background, t.surface, t.selection, t.primary, t.primary_container, t.greentext, t.quotelink, t.heading, t.new]
-        .into_iter()
-        .map(|c| Span::styled("  ", Style::new().bg(c)))
-        .collect()
-}
-
 fn draw_settings_popup(f: &mut Frame, app: &App) {
     let t = theme();
     match &app.settings.popup {
@@ -1578,8 +1491,10 @@ fn draw_settings_popup(f: &mut Frame, app: &App) {
                 let y = inner.y + k as u16;
                 paint_row(f, Rect::new(inner.x - 2, y, inner.width + 4, 1), None, k == sel, false);
                 let mut spans = vec![Span::styled(format!("{name:<22}"), Style::new().fg(t.text))];
+                // A row of colored cells: the theme at a glance.
                 if let Ok(th) = theme::resolve(name, &app.themes) {
-                    spans.extend(swatch(&th));
+                    let colors = [th.background, th.surface, th.selection, th.primary, th.primary_container, th.greentext, th.quotelink, th.heading, th.new];
+                    spans.extend(colors.map(|c| Span::styled("  ", Style::new().bg(c))));
                 }
                 put(f, inner.x, y, inner.width, Line::from(spans));
             }
@@ -1596,23 +1511,18 @@ fn draw_settings_popup(f: &mut Frame, app: &App) {
                 let y = inner.y + (k - first) as u16;
                 paint_row(f, Rect::new(inner.x - 2, y, inner.width + 4, 1), None, k == sel, false);
                 let c = t.get(role).unwrap_or(Color::Reset);
-                put(
-                    f,
-                    inner.x,
-                    y,
-                    inner.width,
-                    Line::from(vec![
-                        Span::styled("    ", Style::new().bg(c)),
-                        Span::styled(format!("  {role:<22}"), Style::new().fg(t.text)),
-                        Span::styled(format!("{:<10}", theme::color_string(c)), bold(t.text)),
-                        Span::styled(*desc, dim()),
-                    ]),
-                );
+                let line = Line::from(vec![
+                    Span::styled("    ", Style::new().bg(c)),
+                    Span::styled(format!("  {role:<22}"), Style::new().fg(t.text)),
+                    Span::styled(format!("{:<10}", theme::color_string(c)), bold(t.text)),
+                    Span::styled(*desc, dim()),
+                ]);
+                put(f, inner.x, y, inner.width, line);
             }
             let y = inner.bottom().saturating_sub(1);
             let line = match editing {
                 Some(text) => Line::from(vec![
-                    Span::styled(format!("New {} color: ", ROLES[sel].0), Style::new().fg(t.text)),
+                    Span::styled(format!("New {} color: ", ROLES.get(sel).map_or("", |r| r.0)), Style::new().fg(t.text)),
                     Span::styled(text.clone(), bold(t.text)),
                     Span::styled("▏", Style::new().fg(t.primary)),
                     Span::styled("   #rrggbb, a name, 0-255, or default", dim()),
@@ -1672,13 +1582,8 @@ fn draw_settings_popup(f: &mut Frame, app: &App) {
             let inner = panel(f, 90, 7, "Download folder", "enter save · esc cancel");
             let field = Rect::new(inner.x, inner.y, inner.width, 1);
             fill(f, field, t.surface);
-            put(
-                f,
-                inner.x + 1,
-                inner.y,
-                inner.width.saturating_sub(2),
-                Line::from(vec![Span::styled(value.clone(), Style::new().fg(t.text)), Span::styled("▏", Style::new().fg(t.primary))]),
-            );
+            let line = Line::from(vec![Span::styled(value.clone(), Style::new().fg(t.text)), Span::styled("▏", Style::new().fg(t.primary))]);
+            put(f, inner.x + 1, inner.y, inner.width.saturating_sub(2), line);
             let help = "{site}, {board}, {thread} and {downloads} are filled in. Empty for the default.";
             put(f, inner.x, inner.y + 2, inner.width, Line::styled(help, dim()));
         }
@@ -1691,7 +1596,7 @@ fn draw_settings_popup(f: &mut Frame, app: &App) {
 fn draw_viewer(f: &mut Frame, app: &mut App) {
     let t = theme();
     let Some(v) = &app.tab.viewer else { return };
-    let file = &v.files[v.index];
+    let Some(file) = v.files.get(v.index) else { return };
     let [top, _, middle, _, bottom] = Layout::vertical([
         Constraint::Length(1),
         Constraint::Length(1),
@@ -1700,34 +1605,22 @@ fn draw_viewer(f: &mut Frame, app: &mut App) {
         Constraint::Length(1),
     ])
     .areas(f.area());
-    let mut meta = Vec::new();
-    if let (Some(w), Some(h)) = (file.width, file.height) {
-        meta.push(format!("{w}x{h}"));
-    }
-    if let Some(s) = file.size {
-        meta.push(human_size(s));
-    }
+    let mut meta = file_facts(file);
     meta.push(format!("{} of {}", v.index + 1, v.files.len()));
     fill(f, top, t.bar);
-    put(
-        f,
-        top.x,
-        top.y,
-        top.width,
-        Line::from(vec![
-            Span::styled(" ck ", bold(t.on_primary).bg(t.primary)),
-            Span::styled(format!("  {}", file.filename), bold(t.on_bar)),
-            Span::styled(format!("    {}", meta.join("  ·  ")), dim()),
-        ]),
-    );
+    let line = Line::from(vec![
+        Span::styled(" ck ", bold(t.on_primary).bg(t.primary)),
+        Span::styled(format!("  {}", file.filename), bold(t.on_bar)),
+        Span::styled(format!("    {}", meta.join("  ·  ")), dim()),
+    ]);
+    put(f, top.x, top.y, top.width, line);
     fill(f, bottom, t.bar);
     let mut hints = vec![Span::raw(" ")];
     if let Some(s) = &app.status {
         hints.extend(status_spans(s, t));
     } else {
         for (k, label) in [("h/l", "previous / next"), ("i", "open externally"), ("esc", "close")] {
-            hints.push(Span::styled(k, bold(t.primary)));
-            hints.push(Span::styled(format!(" {label}   "), dim()));
+            hints.extend([Span::styled(k, bold(t.primary)), Span::styled(format!(" {label}   "), dim())]);
         }
     }
     put(f, bottom.x, bottom.y, bottom.width, Line::from(hints));
@@ -1793,24 +1686,25 @@ fn fmt_time(ts: i64, clock: Clock) -> String {
         Some(_) => Utc.timestamp_opt(ts, 0).single().map(|t| t.format("%Y-%m-%d %H:%M").to_string()),
         None => Local.timestamp_opt(ts, 0).single().map(|t| t.format("%Y-%m-%d %H:%M").to_string()),
     };
-    match date {
-        Some(d) => format!("{d} · {}", ago(ts, clock)),
-        None => String::new(),
-    }
+    date.map(|d| format!("{d} · {}", ago(ts, clock))).unwrap_or_default()
 }
 
 fn ago(ts: i64, clock: Clock) -> String {
     if ts == 0 {
         return String::new();
     }
-    let secs = (clock.now() - ts).max(0);
-    match secs {
+    match (clock.now() - ts).max(0) {
         s if s < 60 => format!("{s}s ago"),
         s if s < 3600 => format!("{}m ago", s / 60),
         s if s < 86400 => format!("{}h ago", s / 3600),
         s if s < 86400 * 365 => format!("{}d ago", s / 86400),
         s => format!("{}y ago", s / (86400 * 365)),
     }
+}
+
+/// A file's dimensions and size, as far as they're known.
+fn file_facts(file: &Attachment) -> Vec<String> {
+    file.width.zip(file.height).map(|(w, h)| format!("{w}x{h}")).into_iter().chain(file.size.map(human_size)).collect()
 }
 
 fn human_size(bytes: u64) -> String {

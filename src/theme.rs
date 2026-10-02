@@ -183,14 +183,12 @@ pub const BUILTIN: &[(&str, Theme)] = &[
 /// A custom theme from `[themes.NAME]`: start from `base` (a built-in or another custom
 /// theme) or generate from `seed`, then override any role.
 #[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
 pub struct ThemeDef {
-    #[serde(default)]
     pub base: Option<String>,
     /// A color to derive the whole scheme from, Material-style.
-    #[serde(default)]
     pub seed: Option<String>,
     /// For `seed`: "dark" (default) or "light".
-    #[serde(default)]
     pub mode: Option<String>,
     /// Role overrides: `primary = "#88c0d0"`.
     #[serde(flatten)]

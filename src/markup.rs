@@ -8,29 +8,15 @@ use crate::model::Link;
 use crate::theme::mark;
 
 // Parsed posts carry marker colors, mapped to the current theme when drawn (`theme::paint`).
-pub const PINKTEXT: Style = Style::new().fg(mark::PINKTEXT);
-pub const SPOILER: Style = Style::new().fg(mark::SPOILER).bg(mark::SPOILER);
+const PINKTEXT: Style = Style::new().fg(mark::PINKTEXT);
+const SPOILER: Style = Style::new().fg(mark::SPOILER).bg(mark::SPOILER);
 
-pub fn greentext() -> Style {
-    Style::new().fg(mark::GREENTEXT)
-}
-
-pub fn quotelink() -> Style {
-    Style::new().fg(mark::QUOTELINK).add_modifier(Modifier::UNDERLINED)
-}
-
+pub const GREENTEXT: Style = Style::new().fg(mark::GREENTEXT);
+const QUOTELINK: Style = Style::new().fg(mark::QUOTELINK).add_modifier(Modifier::UNDERLINED);
 /// A web link (not a quote link).
-pub fn link() -> Style {
-    Style::new().fg(mark::LINK).add_modifier(Modifier::UNDERLINED)
-}
-
-pub fn heading() -> Style {
-    Style::new().fg(mark::HEADING).add_modifier(Modifier::BOLD)
-}
-
-pub fn code() -> Style {
-    Style::new().fg(mark::CODE)
-}
+const LINK: Style = Style::new().fg(mark::LINK).add_modifier(Modifier::UNDERLINED);
+const HEADING: Style = Style::new().fg(mark::HEADING).add_modifier(Modifier::BOLD);
+const CODE: Style = Style::new().fg(mark::CODE);
 /// Line style marking a line of a code block: `wrap` keeps its whitespace and never word-wraps it.
 pub const CODE_LINE: Style = Style::new().fg(mark::CODE);
 const CONTINUATION: &str = "↪";
@@ -143,26 +129,26 @@ pub fn parse_html(html: &str, flavor: Flavor) -> Parsed {
                     b.urls.push(h.to_string());
                 }
                 let style = match name.as_str() {
-                    _ if block => base.patch(code()),
-                    "a" if web.is_some() => base.patch(link()),
-                    "a" => base.patch(quotelink()),
+                    _ if block => base.patch(CODE),
+                    "a" if web.is_some() => base.patch(LINK),
+                    "a" => base.patch(QUOTELINK),
                     "b" | "strong" => base.add_modifier(Modifier::BOLD),
                     "i" | "em" => base.add_modifier(Modifier::ITALIC),
                     "u" => base.add_modifier(Modifier::UNDERLINED),
                     "s" if flavor == Flavor::Fourchan => base.patch(SPOILER),
                     "s" | "del" | "strike" => base.add_modifier(Modifier::CROSSED_OUT),
-                    "code" => base.patch(code()),
+                    "code" => base.patch(CODE),
                     "span" | "div" | "p" => match class.as_str() {
                         c if c.contains("spoiler") => base.patch(SPOILER),
-                        c if c.contains("quote") || c.contains("greentext") || c == "unkfunc" => base.patch(greentext()),
-                        c if c.contains("heading") || c.contains("redtext") || c == "title" => base.patch(heading()),
+                        c if c.contains("quote") || c.contains("greentext") || c == "unkfunc" => base.patch(GREENTEXT),
+                        c if c.contains("heading") || c.contains("redtext") || c == "title" => base.patch(HEADING),
                         c if c.contains("pinktext") || c.contains("orangetext") => base.patch(PINKTEXT),
                         // jschan's inline formatting.
                         "bold" => base.add_modifier(Modifier::BOLD),
                         "em" => base.add_modifier(Modifier::ITALIC),
                         "underline" | "u" => base.add_modifier(Modifier::UNDERLINED),
                         "strike" | "s" => base.add_modifier(Modifier::CROSSED_OUT),
-                        "mono" => base.patch(code()),
+                        "mono" => base.patch(CODE),
                         _ => base,
                     },
                     _ => base,
@@ -186,11 +172,11 @@ pub fn parse_plain(text: &str) -> Parsed {
             b.newline();
         }
         let style = if line.starts_with('>') && !line.starts_with(">>") {
-            greentext()
+            GREENTEXT
         } else if line.starts_with('<') {
             PINKTEXT
         } else if line.starts_with("==") && line.ends_with("==") && line.len() > 4 {
-            heading()
+            HEADING
         } else {
             Style::new()
         };
@@ -243,7 +229,7 @@ impl Builder {
             if !self.links.contains(&link) {
                 self.links.push(link);
             }
-            self.cur.push(Span::styled(quote.to_string(), style.patch(quotelink())));
+            self.cur.push(Span::styled(quote.to_string(), style.patch(QUOTELINK)));
             self.sealed = true;
             rest = after;
         }
@@ -359,7 +345,7 @@ fn style_ranges(spans: Vec<Span<'static>>, ranges: &[(usize, usize)]) -> Vec<Spa
         for end in cuts.into_iter().chain([len]) {
             let piece = s.content.get(at..end).unwrap_or_default();
             let inside = ranges.iter().any(|&(a, b)| off + at >= a && off + at < b);
-            let style = if inside && !keep { s.style.patch(link()) } else { s.style };
+            let style = if inside && !keep { s.style.patch(LINK) } else { s.style };
             out.push(Span::styled(piece.to_string(), style));
             at = end;
         }
@@ -582,7 +568,7 @@ mod tests {
         assert_eq!(lines, [">>123", ">be me", "it's fineok"]);
         assert_eq!(p.quotes, [123]);
         assert_eq!(p.links, [link(None, None, Some(123))]);
-        assert_eq!(p.lines[1].spans[0].style, greentext());
+        assert_eq!(p.lines[1].spans[0].style, GREENTEXT);
     }
 
     #[test]
@@ -630,9 +616,9 @@ mod tests {
     fn plain() {
         let p = parse_plain(">>42 hello\n>green\n<pink\n>>>/b/7 and >>>/tech/");
         assert_eq!(p.quotes, [42]);
-        assert_eq!(p.lines[1].spans[0].style, greentext());
+        assert_eq!(p.lines[1].spans[0].style, GREENTEXT);
         assert_eq!(p.lines[2].spans[0].style, PINKTEXT);
-        assert_eq!(p.lines[0].spans[0].style, quotelink());
+        assert_eq!(p.lines[0].spans[0].style, QUOTELINK);
         assert_eq!(p.links[1..], [link(Some("b"), None, Some(7)), link(Some("tech"), None, None)]);
     }
 
@@ -704,7 +690,7 @@ mod tests {
         let p = parse_html(&sample("lynx_kohl_spoiler"), Flavor::Lynxchan);
         let spoiler = p.lines.iter().flat_map(|l| &l.spans).find(|s| is_spoiler(s.style)).unwrap();
         assert!(spoiler.content.starts_with("Achtung"));
-        assert!(p.lines.iter().flat_map(|l| &l.spans).any(|s| s.style == heading()));
+        assert!(p.lines.iter().flat_map(|l| &l.spans).any(|s| s.style == HEADING));
 
         // endchan: <br> line breaks, <pre> used inline inside greentext.
         let p = parse_html(&sample("lynx_end_pre"), Flavor::Lynxchan);

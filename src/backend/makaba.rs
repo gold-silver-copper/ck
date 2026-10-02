@@ -212,7 +212,7 @@ mod tests {
         assert_eq!(quote.content, format!(">>{op}"));
         assert!(reply.links.iter().any(|l| l.thread == Some(op) && l.board.as_deref() == Some("b")));
         let all: Vec<_> = posts.iter().flat_map(|p| &p.body).flat_map(|l| &l.spans).collect();
-        assert!(all.iter().any(|s| s.content.starts_with('>') && s.style == crate::markup::greentext()));
+        assert!(all.iter().any(|s| s.content.starts_with('>') && s.style == crate::markup::GREENTEXT));
         assert!(all.iter().any(|s| is_spoiler(s.style)));
         assert!(!all.iter().any(|s| s.content.contains("(OP)")));
     }

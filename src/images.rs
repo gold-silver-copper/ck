@@ -232,10 +232,7 @@ impl Images {
         self.frame.push((url.to_string(), kind, Some(size)));
         self.tick += 1;
         let Some(Slot::Ready { img, protos, pending, asked, used, frames, animation, animating, .. }) = self.slots.get_mut(url) else {
-            return match self.slots.get(url) {
-                Some(Slot::Failed) => State::Failed,
-                _ => State::Loading,
-            };
+            return if matches!(self.slots.get(url), Some(Slot::Failed)) { State::Failed } else { State::Loading };
         };
         *used = self.tick;
         // Animated: the frame due now, once the frames are encoded for this size.
@@ -389,16 +386,9 @@ impl Images {
     /// dropping an image just loaded would only have it fetched again, and again.
     fn evict(&mut self) {
         while self.bytes > BUDGET_BYTES {
-            let mut ready: Vec<(u64, &String)> = self
-                .slots
-                .iter()
-                .filter_map(|(k, s)| match s {
-                    Slot::Ready { used, .. } => Some((*used, k)),
-                    _ => None,
-                })
-                .collect();
-            ready.sort_unstable();
-            let oldest = ready.first().filter(|_| ready.len() > 1).map(|(_, k)| (*k).clone());
+            let ready: Vec<(u64, &String)> =
+                self.slots.iter().filter_map(|(k, s)| if let Slot::Ready { used, .. } = s { Some((*used, k)) } else { None }).collect();
+            let oldest = ready.iter().min().filter(|_| ready.len() > 1).map(|(_, k)| (*k).clone());
             let Some(k) = oldest else { break };
             if let Some(Slot::Ready { bytes, .. }) = self.slots.remove(&k) {
                 self.bytes -= bytes;
