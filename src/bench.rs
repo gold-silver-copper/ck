@@ -41,7 +41,7 @@ fn app() -> App {
     let cfg: Config = toml::from_str(crate::config::DEFAULT_CONFIG).unwrap();
     let mut app = App::new(cfg, KeyMap::default(), None, Store::default());
     app.config_path = None;
-    app.board = Some(Board { uri: "g".into(), title: "Technology".into(), nsfw: Some(false) });
+    app.tab.board = Some(Board { uri: "g".into(), title: "Technology".into(), nsfw: Some(false) });
     app
 }
 
@@ -64,28 +64,28 @@ fn bench_thread() {
     let posts = Futaba::fourchan(None).parse_thread("g", &fixture("4chan_thread.json"));
     let posts = scale(&posts, 1000);
     let mut a = app();
-    a.view = View::Thread;
-    a.thread = Some(ThreadView::new("g".into(), posts[0].no, posts.clone()));
+    a.tab.view = View::Thread;
+    a.tab.thread = Some(ThreadView::new("g".into(), posts[0].no, posts.clone()));
     let mut t = term();
     eprintln!("\n== thread, {} posts ==", posts.len());
     time("frame, layout cached", 200, || draw(&mut t, &mut a));
     time("frame with full layout rebuild", 30, || {
-        a.thread.as_mut().unwrap().layout = None;
+        a.tab.thread.as_mut().unwrap().layout = None;
         draw(&mut t, &mut a)
     });
-    time("search keystroke", 30, || a.thread.as_mut().unwrap().set_search("the".into()));
+    time("search keystroke", 30, || a.tab.thread.as_mut().unwrap().set_search("the".into()));
     // Matching posts are laid out again (their highlight changes); the rest aren't.
     for (label, words) in [("search keystroke, then a frame (most posts match)", ["the", "they"]), ("search keystroke, then a frame (few match)", ["linux", "linu"])] {
         let mut q = 0;
         time(label, 30, || {
             q += 1;
-            a.thread.as_mut().unwrap().set_search(words[q % 2].into());
+            a.tab.thread.as_mut().unwrap().set_search(words[q % 2].into());
             draw(&mut t, &mut a)
         });
     }
-    a.thread.as_mut().unwrap().set_search(String::new());
+    a.tab.thread.as_mut().unwrap().set_search(String::new());
     // `e` on the most-replied post, then the frame that lays the thread out again.
-    let th = a.thread.as_mut().unwrap();
+    let th = a.tab.thread.as_mut().unwrap();
     let most = (0..th.posts.len()).max_by_key(|&i| th.backlinks[i].len()).unwrap();
     eprintln!("(expanding {} replies)", th.backlinks[most].len());
     th.selected = most;
@@ -102,9 +102,9 @@ fn bench_catalog() {
     let cat = scale(&Futaba::fourchan(None).parse_catalog("g", &v), 150);
     let mut a = app();
     a.images = Images::offline();
-    a.view = View::Catalog;
-    a.catalog = cat;
-    a.catalog_list.state.select(Some(0));
+    a.tab.view = View::Catalog;
+    a.tab.catalog = cat;
+    a.tab.catalog_list.state.select(Some(0));
     let mut t = term();
     eprintln!("\n== catalog, 150 threads ==");
     time("frame with thumbnail placeholders", 200, || draw(&mut t, &mut a));
@@ -116,7 +116,7 @@ fn bench_catalog() {
         filter: Vec<crate::filter::FilterConfig>,
     }
     a.filters = crate::filter::Filters::new(&toml::from_str::<C>(&toml_text).unwrap().filter).unwrap();
-    a.catalog = scale(&a.catalog, 300);
+    a.tab.catalog = scale(&a.tab.catalog, 300);
     eprintln!("\n== catalog, 300 threads, 20 filters ==");
     time("filtering (once per load)", 50, || a.remark_catalog());
     time("frame", 200, || draw(&mut t, &mut a));
@@ -156,7 +156,7 @@ fn bench_images() {
             let mut a = app();
             a.images = Images::with_picker(picker(proto));
             a.images.insert_decoded("https://x/big.png", DynamicImage::new_rgb8(2048, 1536));
-            a.viewer = Some(Viewer { files: vec![file("https://x/big.png")], index: 0, link: None });
+            a.tab.viewer = Some(Viewer { files: vec![file("https://x/big.png")], index: 0, link: None });
             let mut t = term();
             let start = Instant::now();
             draw(&mut t, &mut a);
@@ -192,8 +192,8 @@ fn bench_images() {
             for i in 0..3 {
                 a.images.insert_decoded(&format!("https://x/{i}.png.thumb"), DynamicImage::new_rgb8(250, 250));
             }
-            a.view = View::Thread;
-            a.thread = Some(ThreadView::new("g".into(), 100, posts.clone()));
+            a.tab.view = View::Thread;
+            a.tab.thread = Some(ThreadView::new("g".into(), 100, posts.clone()));
             let mut t = term();
             let start = Instant::now();
             draw(&mut t, &mut a);

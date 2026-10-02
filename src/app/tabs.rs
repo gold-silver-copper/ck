@@ -1,6 +1,5 @@
 //! Tabs: each is a place (view, site, board, catalog, thread, ...) of its own. The active
-//! tab's state lives in `App`'s fields; the others wait in `App::tabs`, and switching
-//! swaps them in and out.
+//! tab is `App::tab`; the others wait in `App::tabs`, and switching swaps them in and out.
 
 use std::collections::HashSet;
 use std::time::Instant;
@@ -13,38 +12,56 @@ use crate::store::ThreadKey;
 /// Tabs open at once, at most.
 pub const MAX_TABS: usize = 9;
 
-/// One tab's place. Mirrors the per-place fields of `App`.
+/// One tab's place: the active one is `App::tab`.
 pub struct Tab {
-    view: View,
-    settings_back: Option<View>,
-    board_list: Picker,
-    catalog_list: Picker,
-    catalog_sort: Sort,
-    return_to: Option<View>,
-    thread_checked: Instant,
-    site: usize,
-    board: Option<Board>,
-    catalog: Vec<Post>,
-    catalog_marks: Vec<Mark>,
-    catalog_new: HashSet<u64>,
-    thread: Option<ThreadView>,
-    loading: Option<String>,
-    viewer: Option<Viewer>,
-    preview: Option<Preview>,
-    links: Option<LinksPanel>,
-    gallery: Option<Gallery>,
-    trail: Vec<(usize, Board, u64, u64)>,
-    pending_post: Option<u64>,
-    catalog_board: String,
-    catalog_of: Option<Board>,
-    from_catalog: bool,
-    archive_offer: Option<ThreadKey>,
-    req: u64,
-    pending_thread: u64,
-    pending_catalog: Option<u64>,
-    restoring: bool,
-    search: Option<Search>,
-    search_list: Picker,
+    pub view: View,
+    /// Where esc goes back to from Settings.
+    pub settings_back: Option<View>,
+    pub board_list: Picker,
+    pub catalog_list: Picker,
+    pub catalog_sort: Sort,
+    /// Where `back` goes from a thread opened from Watched or History.
+    pub return_to: Option<View>,
+    pub thread_checked: Instant,
+    pub site: usize,
+    pub board: Option<Board>,
+    pub catalog: Vec<Post>,
+    /// What filters and hiding say about each catalog thread.
+    pub catalog_marks: Vec<Mark>,
+    /// Catalog threads that weren't there on the previous visit.
+    pub catalog_new: HashSet<u64>,
+    pub thread: Option<ThreadView>,
+    /// Label of the in-flight request, if any.
+    pub loading: Option<String>,
+    pub viewer: Option<Viewer>,
+    pub preview: Option<Preview>,
+    pub links: Option<LinksPanel>,
+    /// The thread's files as a grid (`V`), over the thread.
+    pub gallery: Option<Gallery>,
+    /// Threads left by following cross-thread links: (site, board, thread, selected post), for `u`.
+    pub trail: Vec<(usize, Board, u64, u64)>,
+    /// Post to select once the loading thread arrives.
+    pub pending_post: Option<u64>,
+    /// Board the loaded catalog belongs to.
+    pub catalog_board: String,
+    /// The board whose catalog is loaded, to return to from a thread opened on another board
+    /// (an overboard's threads live on their own boards).
+    pub catalog_of: Option<Board>,
+    /// The open thread was opened from the catalog (not by following a link).
+    pub from_catalog: bool,
+    /// After a thread 404'd: the same thread on the site's configured archive.
+    pub archive_offer: Option<ThreadKey>,
+    /// The tab's request in flight (0: none).
+    pub req: u64,
+    /// The thread number of the last thread load, for 404 handling.
+    pub pending_thread: u64,
+    /// Thread to select in the catalog once it loads (restoring a session).
+    pub pending_catalog: Option<u64>,
+    /// The open thread is being restored from the last session.
+    pub restoring: bool,
+    /// Archive search: its results and the list over them.
+    pub search: Option<Search>,
+    pub search_list: Picker,
 }
 
 impl Tab {
@@ -86,64 +103,20 @@ impl Tab {
     }
 }
 
-impl Tab {
-    #[cfg(test)]
-    pub fn req_for_tests(&self) -> u64 {
-        self.req
-    }
-}
-
 impl App {
-    /// Exchange the active tab's state (in `App`'s fields) with `tab`.
-    fn swap_tab(&mut self, tab: &mut Tab) {
-        use std::mem::swap;
-        swap(&mut self.view, &mut tab.view);
-        swap(&mut self.settings.back, &mut tab.settings_back);
-        swap(&mut self.board_list, &mut tab.board_list);
-        swap(&mut self.catalog_list, &mut tab.catalog_list);
-        swap(&mut self.catalog_sort, &mut tab.catalog_sort);
-        swap(&mut self.return_to, &mut tab.return_to);
-        swap(&mut self.thread_checked, &mut tab.thread_checked);
-        swap(&mut self.site, &mut tab.site);
-        swap(&mut self.board, &mut tab.board);
-        swap(&mut self.catalog, &mut tab.catalog);
-        swap(&mut self.catalog_marks, &mut tab.catalog_marks);
-        swap(&mut self.catalog_new, &mut tab.catalog_new);
-        swap(&mut self.thread, &mut tab.thread);
-        swap(&mut self.loading, &mut tab.loading);
-        swap(&mut self.viewer, &mut tab.viewer);
-        swap(&mut self.preview, &mut tab.preview);
-        swap(&mut self.links, &mut tab.links);
-        swap(&mut self.gallery, &mut tab.gallery);
-        swap(&mut self.trail, &mut tab.trail);
-        swap(&mut self.pending_post, &mut tab.pending_post);
-        swap(&mut self.catalog_board, &mut tab.catalog_board);
-        swap(&mut self.catalog_of, &mut tab.catalog_of);
-        swap(&mut self.from_catalog, &mut tab.from_catalog);
-        swap(&mut self.archive_offer, &mut tab.archive_offer);
-        swap(&mut self.req, &mut tab.req);
-        swap(&mut self.pending_thread, &mut tab.pending_thread);
-        swap(&mut self.pending_catalog, &mut tab.pending_catalog);
-        swap(&mut self.restoring, &mut tab.restoring);
-        swap(&mut self.search, &mut tab.search);
-        swap(&mut self.search_list, &mut tab.search_list);
-    }
-
     /// Make tab `i` the active one.
     pub fn switch_tab(&mut self, i: usize) {
         if i == self.active || i >= self.tabs.len() {
             return;
         }
-        let mut tabs = std::mem::take(&mut self.tabs);
-        self.swap_tab(&mut tabs[self.active]);
-        self.swap_tab(&mut tabs[i]);
-        self.tabs = tabs;
+        std::mem::swap(&mut self.tab, &mut self.tabs[self.active]);
+        std::mem::swap(&mut self.tab, &mut self.tabs[i]);
         self.active = i;
     }
 
     /// Lay every tab's thread out again (their colors changed).
     pub fn invalidate_layouts(&mut self) {
-        for t in self.thread.iter_mut().chain(self.tabs.iter_mut().filter_map(|tab| tab.thread.as_mut())) {
+        for t in self.tab.thread.iter_mut().chain(self.tabs.iter_mut().filter_map(|tab| tab.thread.as_mut())) {
             t.layout = None;
             t.cache.clear();
         }
@@ -180,9 +153,9 @@ impl App {
             self.info(format!("{MAX_TABS} tabs is the most; close one with {}", self.keys.key(crate::keys::Action::CloseTab)));
             return;
         }
-        let open = match self.view {
+        let open = match self.tab.view {
             View::Catalog => self.selected_index().map(|i| {
-                let p = &self.catalog[i];
+                let p = &self.tab.catalog[i];
                 Open::Thread(self.find_board(&self.board_of(p)), p.no)
             }),
             View::Watched => self.selected_index().map(|i| Open::Key(self.store.watched[i].key.clone())),
@@ -197,11 +170,11 @@ impl App {
             _ => None,
         };
         let Some(open) = open else { return };
-        let (site, board) = (self.site, self.board.clone());
+        let (site, board) = (self.tab.site, self.tab.board.clone());
         let at = self.active + 1;
         self.tabs.insert(at, Tab::new(site));
         self.switch_tab(at);
-        self.board = board;
+        self.tab.board = board;
         match open {
             Open::Thread(board, no) => self.open_thread_at(board, no, None, false),
             Open::Key(key) => self.open_key(key),
@@ -239,13 +212,11 @@ impl App {
         if i == self.active {
             return f(self);
         }
-        let mut tabs = std::mem::take(&mut self.tabs);
-        self.swap_tab(&mut tabs[self.active]);
-        self.swap_tab(&mut tabs[i]);
+        std::mem::swap(&mut self.tab, &mut self.tabs[self.active]);
+        std::mem::swap(&mut self.tab, &mut self.tabs[i]);
         let out = f(self);
-        self.swap_tab(&mut tabs[i]);
-        self.swap_tab(&mut tabs[self.active]);
-        self.tabs = tabs;
+        std::mem::swap(&mut self.tab, &mut self.tabs[i]);
+        std::mem::swap(&mut self.tab, &mut self.tabs[self.active]);
         out
     }
 
@@ -254,19 +225,18 @@ impl App {
         (0..self.tabs.len()).map(|i| self.in_tab(i, |app| app.place())).collect()
     }
 
-    /// What a tab shows, in a few words (read from the stored tab: no swapping per frame).
+    /// What a tab shows, in a few words.
     pub fn tab_label(&self, i: usize) -> String {
-        let t = self.tabs.get(i).filter(|_| i != self.active);
-        let view = t.map_or(self.view, |t| t.view);
-        let board = t.map_or(self.board.as_ref(), |t| t.board.as_ref()).map_or("", |b| b.uri.as_str());
-        match view {
-            View::Thread => match t.map_or(self.thread.as_ref(), |t| t.thread.as_ref()) {
+        let t = if i == self.active { &self.tab } else { self.tabs.get(i).unwrap_or(&self.tab) };
+        let board = t.board.as_ref().map_or("", |b| b.uri.as_str());
+        match t.view {
+            View::Thread => match &t.thread {
                 Some(th) => thread_subject(&th.posts),
-                None => format!("/{board}/{}", t.map_or(self.pending_thread, |t| t.pending_thread)),
+                None => format!("/{board}/{}", t.pending_thread),
             },
             View::Catalog => format!("/{board}/"),
-            View::Boards => self.sites.get(t.map_or(self.site, |t| t.site)).map_or(String::new(), |s| s.cfg.name.clone()),
-            View::Search => t.map_or(self.search.as_ref(), |t| t.search.as_ref()).map_or("Search".into(), |s| format!("Search: {}", s.query)),
+            View::Boards => self.sites.get(t.site).map_or(String::new(), |s| s.cfg.name.clone()),
+            View::Search => t.search.as_ref().map_or("Search".into(), |s| format!("Search: {}", s.query)),
             View::Sites => "Sites".into(),
             View::Watched => "Watched".into(),
             View::History => "History".into(),

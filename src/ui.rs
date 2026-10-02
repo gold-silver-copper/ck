@@ -94,7 +94,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     let t = theme();
     let all = f.area();
     f.buffer_mut().set_style(all, Style::new().fg(t.text).bg(t.background));
-    if app.viewer.is_some() {
+    if app.tab.viewer.is_some() {
         draw_viewer(f, app);
     } else {
         let [bar, gap, body, footer] =
@@ -103,11 +103,11 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         draw_app_bar(f, app, bar);
         draw_tab_row(f, app, gap.inner(Margin::new(MARGIN, 0)));
         let content = body.inner(Margin::new(MARGIN, 0));
-        match app.view {
+        match app.tab.view {
             View::Sites => draw_sites(f, app, content),
             View::Boards => draw_boards(f, app, content),
             View::Catalog => draw_catalog(f, app, content),
-            View::Thread if app.gallery.is_some() => draw_gallery(f, app, content),
+            View::Thread if app.tab.gallery.is_some() => draw_gallery(f, app, content),
             View::Thread => draw_thread(f, app, content),
             View::Watched => draw_watched(f, app, content),
             View::History => draw_history(f, app, content),
@@ -115,10 +115,10 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             View::Search => draw_search(f, app, content),
         }
         draw_footer(f, app, footer);
-        if app.preview.is_some() {
+        if app.tab.preview.is_some() {
             draw_preview(f, app);
         }
-        if app.links.is_some() {
+        if app.tab.links.is_some() {
             draw_links(f, app);
         }
         if app.settings.popup.is_some() {
@@ -193,10 +193,10 @@ fn location(app: &App) -> (Vec<String>, Vec<Span<'static>>) {
     let t = theme();
     let site = || app.current_site().cfg.name.clone();
     let board = || {
-        app.board.as_ref().map(|b| if b.title.is_empty() { format!("/{}/", b.uri) } else { format!("/{}/  {}", b.uri, b.title) })
+        app.tab.board.as_ref().map(|b| if b.title.is_empty() { format!("/{}/", b.uri) } else { format!("/{}/  {}", b.uri, b.title) })
     };
     let mut meta: Vec<String> = Vec::new();
-    let crumbs = match app.view {
+    let crumbs = match app.tab.view {
         View::Sites => {
             meta.push(plural(app.sites.len(), "site"));
             vec!["Sites".to_string()]
@@ -206,22 +206,22 @@ fn location(app: &App) -> (Vec<String>, Vec<Span<'static>>) {
             vec![site(), "Boards".into()]
         }
         View::Catalog => {
-            meta.push(plural(app.catalog.len(), "thread"));
-            let new = app.catalog.iter().filter(|p| app.catalog_new.contains(&p.no)).count();
+            meta.push(plural(app.tab.catalog.len(), "thread"));
+            let new = app.tab.catalog.iter().filter(|p| app.tab.catalog_new.contains(&p.no)).count();
             if new > 0 {
                 meta.push(format!("{new} new"));
             }
-            let hidden = app.catalog_marks.iter().filter(|m| m.hidden.is_some()).count();
+            let hidden = app.tab.catalog_marks.iter().filter(|m| m.hidden.is_some()).count();
             if hidden > 0 {
                 meta.push(if app.show_hidden { format!("{hidden} hidden, shown") } else { format!("{hidden} hidden") });
             }
-            if app.catalog_sort != Sort::Bump {
-                meta.push(app.catalog_sort.label().into());
+            if app.tab.catalog_sort != Sort::Bump {
+                meta.push(app.tab.catalog_sort.label().into());
             }
             vec![site(), board().unwrap_or_default()]
         }
         View::Thread => {
-            let th = app.thread.as_ref();
+            let th = app.tab.thread.as_ref();
             let subject = th.and_then(|th| th.posts.first()?.subject.clone()).unwrap_or_else(|| {
                 th.map_or("Thread".into(), |th| format!("Thread {}", th.no))
             });
@@ -235,8 +235,8 @@ fn location(app: &App) -> (Vec<String>, Vec<Span<'static>>) {
                     meta.push("spoilers shown".into());
                 }
             }
-            let uri = app.board.as_ref().map(|b| format!("/{}/", b.uri)).unwrap_or_default();
-            if let Some(g) = &app.gallery {
+            let uri = app.tab.board.as_ref().map(|b| format!("/{}/", b.uri)).unwrap_or_default();
+            if let Some(g) = &app.tab.gallery {
                 meta.insert(0, plural(g.files.len(), "file"));
                 vec![site(), uri, truncate(&subject, 40), "Files".into()]
             } else {
@@ -257,7 +257,7 @@ fn location(app: &App) -> (Vec<String>, Vec<Span<'static>>) {
         }
         View::Settings => vec!["Settings".into()],
         View::Search => {
-            let Some(s) = &app.search else { return (vec!["Search".into()], Vec::new()) };
+            let Some(s) = &app.tab.search else { return (vec!["Search".into()], Vec::new()) };
             match s.total {
                 Some(t) => meta.push(format!("{} of {}", s.hits.len(), plural(t as usize, "result"))),
                 None => meta.push(plural(s.hits.len(), "result")),
@@ -267,8 +267,8 @@ fn location(app: &App) -> (Vec<String>, Vec<Span<'static>>) {
     };
     let mut spans: Vec<Span> = Vec::new();
     // An active filter or search, unless it's being typed (the footer shows that).
-    let query = match app.view {
-        View::Thread => app.thread.as_ref().filter(|th| !th.search.is_empty() && !app.searching).map(|th| {
+    let query = match app.tab.view {
+        View::Thread => app.tab.thread.as_ref().filter(|th| !th.search.is_empty() && !app.searching).map(|th| {
             let k = th.matches.len();
             format!("/{}  {}", th.search, plural(k, "match").replace("matchs", "matches"))
         }),
@@ -301,7 +301,7 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
     } else if let Some(q) = &app.search_input {
         Some(("search the archive", q.as_str()))
     } else if app.searching {
-        Some(("search", app.thread.as_ref().map_or("", |th| th.search.as_str())))
+        Some(("search", app.tab.thread.as_ref().map_or("", |th| th.search.as_str())))
     } else if app.filtering {
         Some(("filter", current_filter(app)))
     } else {
@@ -323,7 +323,7 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
                 dim(),
             ),
         ])
-    } else if let Some(label) = &app.loading {
+    } else if let Some(label) = &app.tab.loading {
         Line::from(vec![
             Span::styled(format!(" {} ", SPINNER[app.tick % SPINNER.len()]), bold(t.primary)),
             Span::styled(format!("{label}…"), Style::new().fg(t.on_bar)),
@@ -356,8 +356,8 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
 /// Key hints for the footer, with the configured keys.
 fn footer_hints(app: &App) -> Vec<(String, &'static str)> {
     let k = |a| app.keys.key(a).to_string();
-    let mut hints: Vec<(String, &'static str)> = match app.view {
-        View::Thread if app.gallery.is_some() => vec![
+    let mut hints: Vec<(String, &'static str)> = match app.tab.view {
+        View::Thread if app.tab.gallery.is_some() => vec![
             ("h/j/k/l".into(), "move"),
             ("enter".into(), "view"),
             (k(Action::Download), "save"),
@@ -404,10 +404,10 @@ fn footer_hints(app: &App) -> Vec<(String, &'static str)> {
 }
 
 fn current_filter(app: &App) -> &str {
-    match app.view {
+    match app.tab.view {
         View::Sites => &app.site_list.filter,
-        View::Boards => &app.board_list.filter,
-        View::Catalog => &app.catalog_list.filter,
+        View::Boards => &app.tab.board_list.filter,
+        View::Catalog => &app.tab.catalog_list.filter,
         View::Watched => &app.watched_list.filter,
         View::History => &app.history_list.filter,
         View::Thread | View::Settings | View::Search => "",
@@ -627,7 +627,7 @@ fn draw_boards(f: &mut Frame, app: &mut App, area: Rect) {
     let t = theme();
     let width = app.boards().iter().map(|b| b.uri.width()).max().unwrap_or(1) + 4;
     let rows = app.visible_boards();
-    let mut state = app.board_list.state;
+    let mut state = app.tab.board_list.state;
     app.hit = draw_rows(f, area, rows.len(), &mut state, (1, 0), None, &|_| false, &mut |k| {
         let i = rows[k];
         {
@@ -642,8 +642,8 @@ fn draw_boards(f: &mut Frame, app: &mut App, area: Rect) {
             vec![Line::from(spans)]
         }
     });
-    app.board_list.state = state;
-    if app.hit.is_none() && app.loading.is_none() {
+    app.tab.board_list.state = state;
+    if app.hit.is_none() && app.tab.loading.is_none() {
         empty(f, area, "No boards");
     }
 }
@@ -664,8 +664,8 @@ fn draw_catalog(f: &mut Frame, app: &mut App, area: Rect) {
     let visible = app.visible_catalog();
     let mut build = |k: usize| -> Vec<Line<'static>> {
         let i = visible[k];
-        let p = &app.catalog[i];
-        let mark = app.catalog_marks.get(i).cloned().unwrap_or_default();
+        let p = &app.tab.catalog[i];
+        let mark = app.tab.catalog_marks.get(i).cloned().unwrap_or_default();
         let mut head = Vec::new();
         if let Some(label) = &mark.hidden {
             head.push(chip(hidden_label(label), t.text_dim, t.surface_high));
@@ -675,7 +675,7 @@ fn draw_catalog(f: &mut Frame, app: &mut App, area: Rect) {
             head.push(chip(label.clone(), t.on_primary_container, t.primary_container));
             head.push(Span::raw(" "));
         }
-        if app.catalog_new.contains(&p.no) {
+        if app.tab.catalog_new.contains(&p.no) {
             head.push(chip("new", t.background, t.new));
             head.push(Span::raw(" "));
         }
@@ -688,7 +688,7 @@ fn draw_catalog(f: &mut Frame, app: &mut App, area: Rect) {
             head.push(Span::raw(" "));
         }
         // Overboards show where each thread lives.
-        if let Some(b) = p.board.as_ref().filter(|b| app.board.as_ref().is_some_and(|cur| cur.uri != **b)) {
+        if let Some(b) = p.board.as_ref().filter(|b| app.tab.board.as_ref().is_some_and(|cur| cur.uri != **b)) {
             head.push(chip(format!("/{b}/"), t.on_primary_container, t.primary_container));
             head.push(Span::raw(" "));
         }
@@ -740,13 +740,13 @@ fn draw_catalog(f: &mut Frame, app: &mut App, area: Rect) {
     } else {
         (2, 1, Some(t.surface))
     };
-    let highlighted = |k: usize| app.catalog_marks.get(visible[k]).is_some_and(|m| m.highlight.is_some());
-    let mut state = app.catalog_list.state;
+    let highlighted = |k: usize| app.tab.catalog_marks.get(visible[k]).is_some_and(|m| m.highlight.is_some());
+    let mut state = app.tab.catalog_list.state;
     let hit = draw_rows(f, area, visible.len(), &mut state, (height, gap), card, &highlighted, &mut build);
-    app.catalog_list.state = state;
+    app.tab.catalog_list.state = state;
     app.hit = hit;
     if app.hit.is_none() {
-        if app.loading.is_none() {
+        if app.tab.loading.is_none() {
             empty(f, area, "No threads");
         }
         return;
@@ -758,13 +758,13 @@ fn draw_catalog(f: &mut Frame, app: &mut App, area: Rect) {
     // (on rate-limited hosts that would delay visible ones).
     let per = height + gap;
     let on_screen = (area.height / per) as usize + 1;
-    let offset = app.catalog_list.state.offset();
+    let offset = app.tab.catalog_list.state.offset();
     for (k, &i) in visible.iter().enumerate().skip(offset).take(on_screen * 2) {
-        let Some(file) = app.catalog[i].files.first() else { continue };
+        let Some(file) = app.tab.catalog[i].files.first() else { continue };
         let row = (k - offset) as u16 * per;
         if row < area.height {
             let tile = Rect::new(area.x + PAD, area.y + row, CAT_THUMB.width, CAT_THUMB.height);
-            draw_tile(f, &mut app.images, file, app.catalog[i].files.len(), tile, area);
+            draw_tile(f, &mut app.images, file, app.tab.catalog[i].files.len(), tile, area);
         } else if let Some(url) = file.thumb.as_ref().filter(|u| http::is_media_host(u)) {
             app.images.want(url, Kind::Thumb);
         }
@@ -779,7 +779,7 @@ fn hidden_label(filter: &str) -> String {
 /// Archive search results: each post with its thread, as cards.
 fn draw_search(f: &mut Frame, app: &mut App, area: Rect) {
     let t = theme();
-    let Some(s) = &app.search else { return };
+    let Some(s) = &app.tab.search else { return };
     let width = area.width.saturating_sub(PAD + 2) as usize;
     let more = app.more_results();
     let mut build = |k: usize| -> Vec<Line<'static>> {
@@ -805,10 +805,10 @@ fn draw_search(f: &mut Frame, app: &mut App, area: Rect) {
         lines.extend(text);
         lines
     };
-    let mut state = app.search_list.state;
+    let mut state = app.tab.search_list.state;
     let hit = draw_rows(f, area, s.hits.len(), &mut state, (3, 1), Some(t.surface), &|_| false, &mut build);
-    app.search_list.state = state;
-    if hit.is_none() && app.loading.is_none() {
+    app.tab.search_list.state = state;
+    if hit.is_none() && app.tab.loading.is_none() {
         empty(f, area, "No results");
     }
     // Below the last card: more to load.
@@ -825,7 +825,7 @@ fn draw_search(f: &mut Frame, app: &mut App, area: Rect) {
 /// The thread's files (`V`): thumbnails with their post number and type.
 fn draw_gallery(f: &mut Frame, app: &mut App, area: Rect) {
     let t = theme();
-    let Some(g) = &mut app.gallery else { return };
+    let Some(g) = &mut app.tab.gallery else { return };
     let (card_w, card_h) = (THUMB.width + 4, THUMB.height + 1);
     let (cell_w, cell_h) = (card_w + 2, card_h + 1);
     let cols = ((area.width + 2) / cell_w).max(1) as usize;
@@ -840,7 +840,7 @@ fn draw_gallery(f: &mut Frame, app: &mut App, area: Rect) {
         top = sel / cols + 1 - rows;
     }
     *g.state.offset_mut() = top * cols;
-    let posts = app.thread.as_ref().map(|t| &t.posts);
+    let posts = app.tab.thread.as_ref().map(|t| &t.posts);
     for (k, (post, file)) in g.files.iter().enumerate().skip(top * cols).take((rows + 1) * cols) {
         let (r, c) = (k / cols - top, k % cols);
         let (x, y) = (area.x + c as u16 * cell_w, area.y + r as u16 * cell_h);
@@ -875,7 +875,7 @@ fn draw_grid(f: &mut Frame, app: &mut App, area: Rect) {
     let visible = app.visible_catalog();
     if visible.is_empty() {
         app.hit = None;
-        if app.loading.is_none() {
+        if app.tab.loading.is_none() {
             empty(f, area, "No threads");
         }
         return;
@@ -884,7 +884,7 @@ fn draw_grid(f: &mut Frame, app: &mut App, area: Rect) {
     let cols = ((area.width + 2) / cell_w).max(1) as usize;
     let rows = ((area.height + 1) / cell_h).max(1) as usize;
     app.grid_cols = cols;
-    let state = &mut app.catalog_list.state;
+    let state = &mut app.tab.catalog_list.state;
     let sel = state.selected().unwrap_or(0).min(visible.len() - 1);
     let mut top = state.offset() / cols;
     if sel / cols < top {
@@ -899,13 +899,13 @@ fn draw_grid(f: &mut Frame, app: &mut App, area: Rect) {
         let card = Rect::new(x, y, GRID_CARD.width, GRID_CARD.height).intersection(area);
         if card.is_empty() {
             // Below the screen: prefetch from media hosts.
-            if let Some(url) = app.catalog[i].files.first().and_then(|f| f.thumb.as_ref()).filter(|u| http::is_media_host(u)) {
+            if let Some(url) = app.tab.catalog[i].files.first().and_then(|f| f.thumb.as_ref()).filter(|u| http::is_media_host(u)) {
                 app.images.want(url, Kind::Thumb);
             }
             continue;
         }
-        let p = &app.catalog[i];
-        let mark = app.catalog_marks.get(i).cloned().unwrap_or_default();
+        let p = &app.tab.catalog[i];
+        let mark = app.tab.catalog_marks.get(i).cloned().unwrap_or_default();
         fill(f, card, if k == sel { t.selection } else { t.surface });
         if k == sel || mark.highlight.is_some() {
             fill(f, Rect::new(x, card.y, 1, card.height), t.primary);
@@ -920,7 +920,7 @@ fn draw_grid(f: &mut Frame, app: &mut App, area: Rect) {
         }
         let w = GRID_CARD.width - PAD - 1;
         let mut head = Vec::new();
-        if app.catalog_new.contains(&p.no) {
+        if app.tab.catalog_new.contains(&p.no) {
             head.push(chip("new", t.background, t.new));
             head.push(Span::raw(" "));
         }
@@ -1023,8 +1023,8 @@ fn draw_tile(f: &mut Frame, images: &mut Images, file: &Attachment, count: usize
 // ----- the thread -----
 
 fn draw_thread(f: &mut Frame, app: &mut App, area: Rect) {
-    let Some(t) = &mut app.thread else {
-        if app.loading.is_none() {
+    let Some(t) = &mut app.tab.thread else {
+        if app.tab.loading.is_none() {
             empty(f, area, "Thread not loaded");
         }
         return;
@@ -1316,7 +1316,7 @@ fn panel(f: &mut Frame, width: u16, height: u16, title: &str, hint: &str) -> Rec
 }
 
 fn draw_preview(f: &mut Frame, app: &App) {
-    let (Some(p), Some(t)) = (&app.preview, &app.thread) else { return };
+    let (Some(p), Some(t)) = (&app.tab.preview, &app.tab.thread) else { return };
     let w = f.area().width.saturating_sub(8).clamp(20, 110);
     let width = w.saturating_sub(4) as usize;
     let mut lines = Vec::new();
@@ -1340,7 +1340,7 @@ fn draw_preview(f: &mut Frame, app: &App) {
 /// The selected post's links: quotes leading elsewhere, web links, files.
 fn draw_links(f: &mut Frame, app: &mut App) {
     let t = theme();
-    let Some(p) = &mut app.links else { return };
+    let Some(p) = &mut app.tab.links else { return };
     let w = f.area().width.saturating_sub(8).clamp(20, 110);
     let inner = panel(f, w, p.items.len() as u16 + 3, "Links", "enter open · y copy · esc close");
     let rows = inner.height as usize;
@@ -1722,7 +1722,7 @@ fn draw_settings_popup(f: &mut Frame, app: &App) {
 
 fn draw_viewer(f: &mut Frame, app: &mut App) {
     let t = theme();
-    let Some(v) = &app.viewer else { return };
+    let Some(v) = &app.tab.viewer else { return };
     let file = &v.files[v.index];
     let [top, _, middle, _, bottom] = Layout::vertical([
         Constraint::Length(1),

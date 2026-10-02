@@ -37,14 +37,14 @@ impl App {
     /// `F`: follow (or stop following) the open or selected thread as a general. Following
     /// also watches it.
     pub fn toggle_follow(&mut self) {
-        let (key, subject, posts, max_no) = match (self.view, &self.board) {
+        let (key, subject, posts, max_no) = match (self.tab.view, &self.tab.board) {
             (View::Thread, _) => {
-                let Some(t) = &self.thread else { return };
+                let Some(t) = &self.tab.thread else { return };
                 (self.key(&t.board, t.no), thread_subject(&t.posts), t.posts.len(), t.posts.iter().map(|p| p.no).max().unwrap_or(0))
             }
             (View::Catalog, Some(_)) => {
                 let Some(i) = self.selected_index() else { return };
-                let op = &self.catalog[i];
+                let op = &self.tab.catalog[i];
                 (self.key(&self.board_of(op), op.no), thread_subject(std::slice::from_ref(op)), 1, 0)
             }
             (View::Watched, _) => {

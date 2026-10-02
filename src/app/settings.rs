@@ -139,15 +139,13 @@ pub fn key_rows() -> Vec<Result<usize, &'static str>> {
 #[derive(Default)]
 pub struct Settings {
     pub popup: Option<Popup>,
-    /// Where esc goes back to.
-    pub back: Option<View>,
 }
 
 impl App {
     pub fn open_settings(&mut self) {
-        if self.view != View::Settings {
-            self.settings.back = Some(self.view);
-            self.view = View::Settings;
+        if self.tab.view != View::Settings {
+            self.tab.settings_back = Some(self.tab.view);
+            self.tab.view = View::Settings;
         }
     }
 

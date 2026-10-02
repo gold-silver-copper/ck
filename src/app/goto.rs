@@ -13,26 +13,26 @@ impl App {
 
     /// Go where `input` leads, or say why it can't.
     pub fn goto_str(&mut self, input: &str) {
-        let board = self.board.as_ref().map(|b| b.uri.clone());
-        match route::resolve(input, &self.site_infos(), (self.site, board.as_deref())) {
+        let board = self.tab.board.as_ref().map(|b| b.uri.clone());
+        match route::resolve(input, &self.site_infos(), (self.tab.site, board.as_deref())) {
             Ok(target) => self.go(target),
             Err(e) => self.error(e),
         }
     }
 
     pub(super) fn go(&mut self, target: Target) {
-        let from_thread = self.view == View::Thread;
+        let from_thread = self.tab.view == View::Thread;
         // `u` comes back to the thread this was opened from.
-        if let (Some(t), Some(b)) = (&self.thread, &self.board)
+        if let (Some(t), Some(b)) = (&self.tab.thread, &self.tab.board)
             && from_thread
             && target.thread.is_some()
         {
-            self.trail.push((self.site, b.clone(), t.no, t.current().map_or(t.no, |p| p.no)));
+            self.tab.trail.push((self.tab.site, b.clone(), t.no, t.current().map_or(t.no, |p| p.no)));
         }
-        let back_to = self.view;
+        let back_to = self.tab.view;
         self.switch_site(target.site);
         let Some(uri) = target.board else {
-            self.view = View::Boards;
+            self.tab.view = View::Boards;
             return;
         };
         let board = self.find_board(&uri);
@@ -40,7 +40,7 @@ impl App {
             (Some(no), post) => {
                 self.open_thread_at(board, no, post, false);
                 if !from_thread && back_to != View::Settings {
-                    self.return_to = Some(back_to);
+                    self.tab.return_to = Some(back_to);
                 }
             }
             (None, Some(post)) => {
@@ -50,12 +50,12 @@ impl App {
                 self.spawn(label, move |b, _, _| b.find_thread(&job_board, post), move |id, r| Msg::Found(id, board, post, r));
             }
             (None, None) => {
-                self.board = Some(board);
-                self.catalog.clear();
-                self.catalog_list = Picker::default();
-                self.catalog_list.state.select(Some(0));
-                self.return_to = None;
-                self.view = View::Catalog;
+                self.tab.board = Some(board);
+                self.tab.catalog.clear();
+                self.tab.catalog_list = Picker::default();
+                self.tab.catalog_list.state.select(Some(0));
+                self.tab.return_to = None;
+                self.tab.view = View::Catalog;
                 self.load_catalog();
             }
         }
@@ -85,7 +85,7 @@ impl App {
         if let Some(g) = &mut self.goto {
             g.push_str(&text);
         } else if self.searching {
-            if let Some(t) = &mut self.thread {
+            if let Some(t) = &mut self.tab.thread {
                 let q = format!("{}{text}", t.search);
                 t.set_search(q);
             }
@@ -94,7 +94,7 @@ impl App {
                 p.filter.push_str(&text);
                 p.clamp(len);
             }
-        } else if self.settings.popup.is_none() && !self.show_help && self.viewer.is_none() {
+        } else if self.settings.popup.is_none() && !self.show_help && self.tab.viewer.is_none() {
             self.goto = Some(text);
         }
     }
@@ -105,7 +105,7 @@ impl App {
         let (prefix, partial, site) = match text.rsplit_once('/') {
             Some((head, tail)) => {
                 let name = head.trim_start_matches('/');
-                let site = self.sites.iter().position(|s| s.cfg.name.eq_ignore_ascii_case(name)).or(head.is_empty().then_some(self.site));
+                let site = self.sites.iter().position(|s| s.cfg.name.eq_ignore_ascii_case(name)).or(head.is_empty().then_some(self.tab.site));
                 (format!("{head}/"), tail.to_string(), site)
             }
             None => (String::new(), text.clone(), None),
@@ -123,7 +123,7 @@ impl App {
         };
         let candidates: Vec<String> = match site {
             Some(site) => boards(site),
-            None => self.sites.iter().map(|s| s.cfg.name.clone()).chain(boards(self.site)).collect(),
+            None => self.sites.iter().map(|s| s.cfg.name.clone()).chain(boards(self.tab.site)).collect(),
         };
         let lower = partial.to_lowercase();
         let matches: Vec<&String> = candidates.iter().filter(|c| c.to_lowercase().starts_with(&lower)).collect();

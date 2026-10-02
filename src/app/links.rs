@@ -27,8 +27,8 @@ pub struct LinksPanel {
 impl App {
     pub fn open_links(&mut self) {
         let Some(post) = self.selected_post() else { return };
-        let here = self.board.as_ref().map(|b| b.uri.clone()).unwrap_or_default();
-        let thread = self.thread.as_ref().filter(|_| self.view == View::Thread);
+        let here = self.tab.board.as_ref().map(|b| b.uri.clone()).unwrap_or_default();
+        let thread = self.tab.thread.as_ref().filter(|_| self.tab.view == View::Thread);
         let mut items: Vec<LinkItem> = Vec::new();
         for l in &post.links {
             let board = l.board.clone().unwrap_or_else(|| here.clone());
@@ -54,11 +54,11 @@ impl App {
         }
         let mut list = ListState::default();
         list.select(Some(0));
-        self.links = Some(LinksPanel { items, list, area: Rect::default(), last_click: None });
+        self.tab.links = Some(LinksPanel { items, list, area: Rect::default(), last_click: None });
     }
 
     pub fn on_links_key(&mut self, code: KeyCode) {
-        let Some(p) = &mut self.links else { return };
+        let Some(p) = &mut self.tab.links else { return };
         let n = p.items.len();
         let cur = p.list.selected().unwrap_or(0);
         match code {
@@ -72,18 +72,18 @@ impl App {
                     self.copy_text("link", text);
                 }
             }
-            _ => self.links = None,
+            _ => self.tab.links = None,
         }
     }
 
     /// A click in the panel selects a row; a second quick click opens it. Clicks outside close it.
     pub fn on_links_click(&mut self, col: u16, row: u16, now: Instant) {
-        let Some(p) = &mut self.links else { return };
+        let Some(p) = &mut self.tab.links else { return };
         let pos = ratatui::layout::Position::new(col, row);
         let first = p.list.offset();
         let i = first + row.saturating_sub(p.area.y) as usize;
         if !p.area.contains(pos) || i >= p.items.len() {
-            self.links = None;
+            self.tab.links = None;
             return;
         }
         let double = p.last_click.is_some_and(|(t, k)| k == i && now.duration_since(t).as_millis() < 400);
@@ -95,7 +95,7 @@ impl App {
     }
 
     fn open_link_item(&mut self, i: usize) {
-        let Some(p) = self.links.take() else { return };
+        let Some(p) = self.tab.links.take() else { return };
         match p.items.into_iter().nth(i) {
             Some(LinkItem::Quote(link, _)) => self.follow(link),
             Some(LinkItem::Url(url)) => self.open_url(&url),
@@ -105,13 +105,13 @@ impl App {
     }
 
     fn link_item_url(&self, i: usize) -> Option<String> {
-        let p = self.links.as_ref()?;
+        let p = self.tab.links.as_ref()?;
         Some(match p.items.get(i)? {
             LinkItem::Url(u) => u.clone(),
             LinkItem::File(f) => f.url.clone(),
             LinkItem::Quote(l, _) => {
                 let backend = &self.current_site().backend;
-                let board = l.board.clone().or_else(|| self.board.as_ref().map(|b| b.uri.clone()))?;
+                let board = l.board.clone().or_else(|| self.tab.board.as_ref().map(|b| b.uri.clone()))?;
                 match (l.thread, l.post) {
                     (Some(t), Some(p)) => backend.post_url(&board, t, p),
                     (Some(t), None) => backend.thread_url(&board, t),
@@ -134,7 +134,7 @@ pub struct ImageSearchPanel {
 
 impl App {
     pub fn open_image_search(&mut self) {
-        let files: Vec<Attachment> = match &self.viewer {
+        let files: Vec<Attachment> = match &self.tab.viewer {
             Some(v) => vec![v.files[v.index].clone()],
             None => self.selected_post().map(|p| p.files.clone()).unwrap_or_default(),
         };

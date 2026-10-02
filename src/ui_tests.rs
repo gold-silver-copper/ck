@@ -54,7 +54,7 @@ fn app(images: bool) -> App {
         Board { uri: "b".into(), title: "Random".into(), nsfw: Some(true) },
         Board { uri: "g".into(), title: "Technology".into(), nsfw: Some(false) },
     ]);
-    app.board = Some(Board { uri: "g".into(), title: "Technology".into(), nsfw: Some(false) });
+    app.tab.board = Some(Board { uri: "g".into(), title: "Technology".into(), nsfw: Some(false) });
     app
 }
 
@@ -189,17 +189,17 @@ fn sites() {
 #[test]
 fn boards() {
     let mut a = app(false);
-    a.view = View::Boards;
-    a.board_list.state.select(Some(2));
+    a.tab.view = View::Boards;
+    a.tab.board_list.state.select(Some(2));
     insta::assert_snapshot!(snapshot(&mut a));
 }
 
 #[test]
 fn catalog_with_thumbnail_placeholders() {
     let mut a = app(true);
-    a.view = View::Catalog;
-    a.catalog = catalog();
-    a.catalog_list.state.select(Some(1));
+    a.tab.view = View::Catalog;
+    a.tab.catalog = catalog();
+    a.tab.catalog_list.state.select(Some(1));
     insta::assert_snapshot!(snapshot(&mut a));
     insta::assert_snapshot!("catalog_backgrounds", bg_map(&mut a));
     // Only what's on screen is asked for.
@@ -209,18 +209,18 @@ fn catalog_with_thumbnail_placeholders() {
 #[test]
 fn catalog_compact() {
     let mut a = app(true);
-    a.view = View::Catalog;
+    a.tab.view = View::Catalog;
     a.default_layout = crate::config::CatalogLayout::Compact;
-    a.catalog = catalog();
-    a.catalog_list.state.select(Some(0));
+    a.tab.catalog = catalog();
+    a.tab.catalog_list.state.select(Some(0));
     insta::assert_snapshot!(snapshot(&mut a));
 }
 
 #[test]
 fn thread_view() {
     let mut a = app(true);
-    a.view = View::Thread;
-    a.thread = Some(thread());
+    a.tab.view = View::Thread;
+    a.tab.thread = Some(thread());
     insta::assert_snapshot!(snapshot(&mut a));
     insta::assert_snapshot!("thread_backgrounds", bg_map(&mut a));
 }
@@ -235,21 +235,21 @@ fn help() {
 #[test]
 fn quote_preview() {
     let mut a = app(false);
-    a.view = View::Thread;
+    a.tab.view = View::Thread;
     let mut t = thread();
     t.selected = 3;
-    a.thread = Some(t);
-    a.preview = Some(Preview { posts: vec![1], elsewhere: vec![], scroll: 0 });
+    a.tab.thread = Some(t);
+    a.tab.preview = Some(Preview { posts: vec![1], elsewhere: vec![], scroll: 0 });
     insta::assert_snapshot!(snapshot(&mut a));
 }
 
 #[test]
 fn search_highlight() {
     let mut a = app(false);
-    a.view = View::Thread;
+    a.tab.view = View::Thread;
     let mut t = thread();
     t.set_search("Snapshot".into());
-    a.thread = Some(t);
+    a.tab.thread = Some(t);
     let (text, buf) = render(&mut a);
     insta::assert_snapshot!(text);
     // Every visible "snapshot" (any case) in the thread is highlighted, and nothing else.
@@ -262,23 +262,23 @@ fn search_highlight() {
 #[test]
 fn watched() {
     let mut a = app(false);
-    a.view = View::Watched;
+    a.tab.view = View::Watched;
     insta::assert_snapshot!(snapshot(&mut a));
 }
 
 #[test]
 fn history() {
     let mut a = app(false);
-    a.view = View::History;
+    a.tab.view = View::History;
     insta::assert_snapshot!(snapshot(&mut a));
 }
 
 #[test]
 fn image_viewer_placeholder() {
     let mut a = app(true);
-    a.view = View::Thread;
-    a.thread = Some(thread());
-    a.viewer = Some(Viewer { files: vec![file("op.png"), file("clip.webm")], index: 0, link: None });
+    a.tab.view = View::Thread;
+    a.tab.thread = Some(thread());
+    a.tab.viewer = Some(Viewer { files: vec![file("op.png"), file("clip.webm")], index: 0, link: None });
     insta::assert_snapshot!(snapshot(&mut a));
 }
 
@@ -314,8 +314,8 @@ fn other_themes_and_256_colors() {
     // Every built-in theme draws a thread; in 256-color mode no 24-bit color is left.
     for (name, t) in crate::theme::BUILTIN {
         let mut a = app(false);
-        a.view = View::Thread;
-        a.thread = Some(thread());
+        a.tab.view = View::Thread;
+        a.tab.thread = Some(thread());
         a.set_theme(*t);
         a.truecolor = false;
         let (_, buf) = render(&mut a);
@@ -339,12 +339,12 @@ fn key_editor() {
 #[test]
 fn links_panel() {
     let mut a = app(false);
-    a.view = View::Thread;
+    a.tab.view = View::Thread;
     let mut t = thread();
     t.selected = 4;
     t.posts[4].urls = vec!["https://example.com/a-long-path?with=query".into()];
     t.posts[4].files = vec![file("notes.pdf")];
-    a.thread = Some(t);
+    a.tab.thread = Some(t);
     a.open_links();
     insta::assert_snapshot!(snapshot(&mut a));
 }
@@ -362,19 +362,19 @@ fn with_filters(a: &mut App) {
 fn filtered_catalog_and_thread() {
     let mut a = app(true);
     with_filters(&mut a);
-    a.view = View::Catalog;
-    a.catalog = catalog();
+    a.tab.view = View::Catalog;
+    a.tab.catalog = catalog();
     a.store.toggle_hidden("4chan", "g", 1100);
     a.remark_catalog();
-    a.catalog_list.state.select(Some(0));
+    a.tab.catalog_list.state.select(Some(0));
     insta::assert_snapshot!(snapshot(&mut a));
     // Z: hidden ones shown, marked.
     a.show_hidden = true;
     insta::assert_snapshot!("filtered_catalog_shown", snapshot(&mut a));
     insta::assert_snapshot!("filtered_catalog_backgrounds", bg_map(&mut a));
     a.show_hidden = false;
-    a.view = View::Thread;
-    a.thread = Some(thread());
+    a.tab.view = View::Thread;
+    a.tab.thread = Some(thread());
     a.remark_thread();
     insta::assert_snapshot!("filtered_thread", snapshot(&mut a));
 }
@@ -382,31 +382,31 @@ fn filtered_catalog_and_thread() {
 #[test]
 fn your_posts_and_replies() {
     let mut a = app(false);
-    a.view = View::Thread;
-    a.thread = Some(thread());
-    a.thread.as_mut().unwrap().mine.insert(1001);
+    a.tab.view = View::Thread;
+    a.tab.thread = Some(thread());
+    a.tab.thread.as_mut().unwrap().mine.insert(1001);
     a.store.watched[0].replies = 1;
     insta::assert_snapshot!(snapshot(&mut a));
-    a.view = View::Watched;
+    a.tab.view = View::Watched;
     insta::assert_snapshot!("watched_with_replies", snapshot(&mut a));
 }
 
 #[test]
 fn catalog_new_threads_and_replies() {
     let mut a = app(false);
-    a.view = View::Catalog;
-    a.catalog = catalog();
-    a.catalog_new.insert(1100);
+    a.tab.view = View::Catalog;
+    a.tab.catalog = catalog();
+    a.tab.catalog_new.insert(1100);
     a.store.opened("4chan", "g", 1000, 300, NOW);
-    a.catalog_list.state.select(Some(1));
+    a.tab.catalog_list.state.select(Some(1));
     insta::assert_snapshot!(snapshot(&mut a));
 }
 
 #[test]
 fn replies_inline() {
     let mut a = app(true);
-    a.view = View::Thread;
-    a.thread = Some(thread());
+    a.tab.view = View::Thread;
+    a.tab.thread = Some(thread());
     a.on_key(ratatui::crossterm::event::KeyEvent::from(ratatui::crossterm::event::KeyCode::Char('e')));
     a.on_key(ratatui::crossterm::event::KeyEvent::from(ratatui::crossterm::event::KeyCode::Char('j')));
     a.on_key(ratatui::crossterm::event::KeyEvent::from(ratatui::crossterm::event::KeyCode::Char('e')));
@@ -417,18 +417,18 @@ fn replies_inline() {
 #[test]
 fn catalog_grid() {
     let mut a = app(true);
-    a.view = View::Catalog;
+    a.tab.view = View::Catalog;
     a.default_layout = crate::config::CatalogLayout::Grid;
-    a.catalog = catalog();
-    a.catalog_list.state.select(Some(1));
+    a.tab.catalog = catalog();
+    a.tab.catalog_list.state.select(Some(1));
     insta::assert_snapshot!(snapshot(&mut a));
     insta::assert_snapshot!("catalog_grid_backgrounds", bg_map(&mut a));
     assert_eq!(a.grid_cols, 4);
     // Without images, the grid is drawn as cards.
     let mut b = app(false);
-    b.view = View::Catalog;
+    b.tab.view = View::Catalog;
     b.default_layout = crate::config::CatalogLayout::Grid;
-    b.catalog = catalog();
+    b.tab.catalog = catalog();
     let text = snapshot(&mut b);
     assert!(text.contains("312 replies") && b.grid_cols == 0, "{text}");
 }
@@ -436,10 +436,10 @@ fn catalog_grid() {
 #[test]
 fn gallery() {
     let mut a = app(true);
-    a.view = View::Thread;
+    a.tab.view = View::Thread;
     let mut t = thread();
     t.posts[2].files = vec![file("code.png"), file("clip.webm")];
-    a.thread = Some(t);
+    a.tab.thread = Some(t);
     a.open_gallery();
     a.on_key(ratatui::crossterm::event::KeyEvent::from(ratatui::crossterm::event::KeyCode::Char('l')));
     insta::assert_snapshot!(snapshot(&mut a));
@@ -450,25 +450,25 @@ fn archive_search_results() {
     let mut a = app(false);
     let path = format!("{}/tests/fixtures/foolfuuka_search.json", env!("CARGO_MANIFEST_DIR"));
     let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
-    a.site = a.sites.iter().position(|s| s.cfg.name == "desuarchive").unwrap();
+    a.tab.site = a.sites.iter().position(|s| s.cfg.name == "desuarchive").unwrap();
     a.search_input = Some("borrow".into());
-    a.view = View::Catalog;
+    a.tab.view = View::Catalog;
     insta::assert_snapshot!("archive_search_typing", snapshot(&mut a));
     a.search_input = None;
-    a.view = View::Search;
+    a.tab.view = View::Search;
     let page = crate::backend::foolfuuka::parse_search(&v).unwrap();
-    a.search = Some(crate::app::Search::for_tests("g", "rust borrow checker", page));
-    a.search_list.state.select(Some(0));
+    a.tab.search = Some(crate::app::Search::for_tests("g", "rust borrow checker", page));
+    a.tab.search_list.state.select(Some(0));
     insta::assert_snapshot!(snapshot(&mut a));
 }
 
 #[test]
 fn image_search_panel() {
     let mut a = app(false);
-    a.view = View::Thread;
+    a.tab.view = View::Thread;
     let mut t = thread();
     t.posts[0].files.push(file("second.jpg"));
-    a.thread = Some(t);
+    a.tab.thread = Some(t);
     a.open_image_search();
     insta::assert_snapshot!(snapshot(&mut a));
 }
@@ -476,11 +476,11 @@ fn image_search_panel() {
 #[test]
 fn tabs_row() {
     let mut a = app(false);
-    a.view = View::Catalog;
-    a.catalog = catalog();
-    a.catalog_list.state.select(Some(1));
+    a.tab.view = View::Catalog;
+    a.tab.catalog = catalog();
+    a.tab.catalog_list.state.select(Some(1));
     a.new_tab();
-    a.thread = Some(thread());
+    a.tab.thread = Some(thread());
     insta::assert_snapshot!(snapshot(&mut a));
     insta::assert_snapshot!("tabs_row_backgrounds", bg_map(&mut a));
 }
@@ -512,10 +512,10 @@ fn narrow_screens() {
     let (text, _) = render_at(&mut a, 60, 20);
     assert!(text.contains("Key bindings"), "{text}");
     // Long crumbs give way with an ellipsis, before the counts.
-    a.view = View::Thread;
+    a.tab.view = View::Thread;
     let mut t = thread();
     t.posts[0].subject = Some("A very long subject that can't possibly fit in a narrow terminal".into());
-    a.thread = Some(t);
+    a.tab.thread = Some(t);
     let (text, _) = render_at(&mut a, 60, 20);
     let bar = text.lines().next().unwrap();
     assert!(bar.contains("…  ") && bar.ends_with("5 posts  ·  2 new"), "{bar}");
@@ -547,7 +547,7 @@ fn home_with_favorites() {
 #[test]
 fn watched_generals() {
     let mut a = app(false);
-    a.view = View::Watched;
+    a.tab.view = View::Watched;
     a.store.watched[0].general = Some("/lmg/".into());
     a.store.watched[0].at_limit = true;
     insta::assert_snapshot!(snapshot(&mut a));
@@ -557,31 +557,31 @@ fn watched_generals() {
 fn thread_lines_are_cached_but_never_stale() {
     use ratatui::crossterm::event::{KeyCode, KeyEvent};
     let mut a = app(false);
-    a.view = View::Thread;
-    a.thread = Some(thread());
-    let blocks = |a: &App| a.thread.as_ref().unwrap().layout.as_ref().unwrap().blocks.clone();
+    a.tab.view = View::Thread;
+    a.tab.thread = Some(thread());
+    let blocks = |a: &App| a.tab.thread.as_ref().unwrap().layout.as_ref().unwrap().blocks.clone();
     render(&mut a);
     let first = blocks(&a);
     // Nothing changed: the same lines, not laid out again.
-    a.thread.as_mut().unwrap().layout = None;
+    a.tab.thread.as_mut().unwrap().layout = None;
     render(&mut a);
     assert!(first.iter().zip(blocks(&a)).all(|(x, y)| std::rc::Rc::ptr_eq(x, &y)));
     // A search re-lays out only what it highlights, including text added to quotes ("(OP)").
-    a.thread.as_mut().unwrap().set_search("(op)".into());
+    a.tab.thread.as_mut().unwrap().set_search("(op)".into());
     let (text, buf) = render(&mut a);
     let hl: String = buf.content().iter().filter(|c| c.bg == theme().search).map(|c| c.symbol()).collect();
     assert_eq!(hl, "(OP)", "{text}");
     let now = blocks(&a);
     assert!(std::rc::Rc::ptr_eq(&first[0], &now[0]) && !std::rc::Rc::ptr_eq(&first[1], &now[1]));
-    a.thread.as_mut().unwrap().set_search(String::new());
+    a.tab.thread.as_mut().unwrap().set_search(String::new());
     // Spoilers shown on one post.
-    a.thread.as_mut().unwrap().selected = 3;
+    a.tab.thread.as_mut().unwrap().selected = 3;
     a.on_key(KeyEvent::from(KeyCode::Char('s')));
     let (text, _) = render(&mut a);
     assert!(text.contains("secret and"), "{text}");
     // Times move on.
     a.clock = Clock { fixed: Some(NOW + 3 * HOUR) };
-    a.thread.as_mut().unwrap().layout = None;
+    a.tab.thread.as_mut().unwrap().layout = None;
     let (text, _) = render(&mut a);
     assert!(text.contains("7h ago") && !text.contains("4h ago"), "{text}");
     // A refresh keeps unchanged posts and redoes those with new replies.
@@ -589,8 +589,8 @@ fn thread_lines_are_cached_but_never_stale() {
     let mut posts = thread().posts;
     posts.push(crate::model::Post { no: 1005, quotes: vec![1003], time: NOW, ..Default::default() });
     let mut t = crate::app::ThreadView::new("g".into(), 1000, posts);
-    t.cache = std::mem::take(&mut a.thread.as_mut().unwrap().cache);
-    a.thread = Some(t);
+    t.cache = std::mem::take(&mut a.tab.thread.as_mut().unwrap().cache);
+    a.tab.thread = Some(t);
     render(&mut a);
     let after = blocks(&a);
     assert!(std::rc::Rc::ptr_eq(&before[1], &after[1]) && !std::rc::Rc::ptr_eq(&before[3], &after[3]));

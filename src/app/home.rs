@@ -64,9 +64,9 @@ impl App {
     /// The board a `*` applies to: the selected one in Boards, the open one in a catalog.
     fn current_board_ref(&self) -> Option<BoardRef> {
         let site = self.current_site().cfg.name.clone();
-        let board = match self.view {
+        let board = match self.tab.view {
             View::Boards => self.selected_index().map(|i| self.boards()[i].uri.clone())?,
-            View::Catalog | View::Thread => self.board.as_ref()?.uri.clone(),
+            View::Catalog | View::Thread => self.tab.board.as_ref()?.uri.clone(),
             View::Sites => match self.selected_site_row()? {
                 SiteRow::Favorite(i) => return self.favorites.get(i).cloned(),
                 SiteRow::Recent(i) => return self.recent_board(i),
@@ -96,7 +96,7 @@ impl App {
     /// `*`: add the board to the favorites, or take it off. They're kept in the config.
     pub fn toggle_favorite(&mut self) {
         let Some(b) = self.current_board_ref() else { return };
-        self.note_titles(self.site);
+        self.note_titles(self.tab.site);
         let added = match self.favorites.iter().position(|f| *f == b) {
             Some(i) => {
                 self.favorites.remove(i);

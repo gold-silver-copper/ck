@@ -25,28 +25,28 @@ impl App {
     /// Where this tab is.
     pub fn place(&self) -> Place {
         // From settings or search results: the view they were opened from.
-        let view = match self.view {
-            View::Settings => self.settings.back.unwrap_or(View::Sites),
+        let view = match self.tab.view {
+            View::Settings => self.tab.settings_back.unwrap_or(View::Sites),
             View::Search => View::Catalog,
             v => v,
         };
         let mut place = Place { view: view_name(view).into(), site: self.current_site().cfg.name.clone(), ..Default::default() };
         match view {
             View::Catalog | View::Thread => {
-                place.board = self.board.as_ref().map(|b| b.uri.clone());
-                place.sort = (self.catalog_sort != Sort::Bump).then_some(self.catalog_sort);
-                place.filter = self.catalog_list.filter.clone();
+                place.board = self.tab.board.as_ref().map(|b| b.uri.clone());
+                place.sort = (self.tab.catalog_sort != Sort::Bump).then_some(self.tab.catalog_sort);
+                place.filter = self.tab.catalog_list.filter.clone();
             }
             _ => {}
         }
         match view {
             View::Thread => {
-                let t = self.thread.as_ref();
-                place.thread = t.map(|t| t.no).or((self.pending_thread > 0).then_some(self.pending_thread));
-                place.selected = t.and_then(|t| t.current()).map(|p| p.no).or(self.pending_post);
+                let t = self.tab.thread.as_ref();
+                place.thread = t.map(|t| t.no).or((self.tab.pending_thread > 0).then_some(self.tab.pending_thread));
+                place.selected = t.and_then(|t| t.current()).map(|p| p.no).or(self.tab.pending_post);
             }
             View::Catalog => {
-                place.selected = self.catalog_list.state.selected().and_then(|i| self.visible_catalog().get(i).map(|&k| self.catalog[k].no));
+                place.selected = self.tab.catalog_list.state.selected().and_then(|i| self.visible_catalog().get(i).map(|&k| self.tab.catalog[k].no));
             }
             _ => {}
         }
@@ -96,26 +96,26 @@ impl App {
     pub fn go_to_place(&mut self, p: &Place) {
         let Some(site) = self.sites.iter().position(|s| s.cfg.name == p.site) else { return };
         self.switch_site(site);
-        self.catalog_sort = p.sort.unwrap_or_default();
-        self.catalog_list = Picker { filter: p.filter.clone(), ..Default::default() };
-        self.catalog_list.state.select(Some(0));
+        self.tab.catalog_sort = p.sort.unwrap_or_default();
+        self.tab.catalog_list = Picker { filter: p.filter.clone(), ..Default::default() };
+        self.tab.catalog_list.state.select(Some(0));
         let board = p.board.as_ref().map(|b| self.find_board(b));
         match (p.view.as_str(), board, p.thread) {
-            ("watched", ..) => self.view = View::Watched,
-            ("history", ..) => self.view = View::History,
+            ("watched", ..) => self.tab.view = View::Watched,
+            ("history", ..) => self.tab.view = View::History,
             ("boards", ..) => self.enter_site(site),
             ("catalog", Some(board), _) => {
-                self.board = Some(board);
-                self.catalog.clear();
-                self.view = View::Catalog;
-                self.pending_catalog = p.selected;
+                self.tab.board = Some(board);
+                self.tab.catalog.clear();
+                self.tab.view = View::Catalog;
+                self.tab.pending_catalog = p.selected;
                 self.load_catalog();
             }
             ("thread", Some(board), Some(no)) => {
                 self.open_thread_at(board, no, p.selected, false);
-                self.restoring = true;
+                self.tab.restoring = true;
             }
-            _ => self.view = View::Sites,
+            _ => self.tab.view = View::Sites,
         }
     }
 }

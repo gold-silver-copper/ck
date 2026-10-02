@@ -550,7 +550,6 @@ impl Msg {
 
 pub struct App {
     pub sites: Vec<Site>,
-    pub view: View,
     pub site_list: Picker,
     /// Favorite boards (from the config), and board titles for the home screen.
     pub favorites: Vec<BoardRef>,
@@ -558,9 +557,6 @@ pub struct App {
     /// Sites left off the home screen (from the config), and whether they're shown anyway.
     pub hidden_sites: std::collections::BTreeSet<String>,
     pub show_hidden_sites: bool,
-    pub board_list: Picker,
-    pub catalog_list: Picker,
-    pub catalog_sort: Sort,
     /// The catalog layout for boards without their own (`catalog_layout` in the config).
     pub default_layout: CatalogLayout,
     /// Columns of the catalog grid as last drawn (0: not a grid).
@@ -577,11 +573,8 @@ pub struct App {
     pub watched_list: Picker,
     pub history_list: Picker,
     pub store: Store,
-    /// Where `back` goes from a thread opened from Watched or History.
-    return_to: Option<View>,
     refresh_thread: Duration,
     refresh_watched: Duration,
-    thread_checked: Instant,
     watched_checked: HashMap<ThreadKey, Instant>,
     /// Background refreshes in flight.
     pub refreshing: HashSet<ThreadKey>,
@@ -600,35 +593,20 @@ pub struct App {
     pub notified: Vec<String>,
     /// Sites whose saved board list is being refreshed in the background.
     boards_refreshing: HashSet<usize>,
-    pub site: usize,
-    pub board: Option<Board>,
-    pub catalog: Vec<Post>,
-    /// What filters and hiding say about each catalog thread.
-    pub catalog_marks: Vec<Mark>,
-    /// Catalog threads that weren't there on the previous visit.
-    pub catalog_new: HashSet<u64>,
     pub filters: Filters,
     /// Show hidden threads and posts (dimmed) instead of leaving them out.
     pub show_hidden: bool,
-    pub thread: Option<ThreadView>,
     /// True while typing into the filter.
     pub filtering: bool,
-    /// Label of the in-flight request, if any.
-    pub loading: Option<String>,
     pub status: Option<Status>,
     /// The status message as last seen by `expire_status`, and when it appeared.
     status_since: Option<(String, Instant)>,
     pub show_help: bool,
     pub help_scroll: u16,
     pub images: Images,
-    pub viewer: Option<Viewer>,
-    pub preview: Option<Preview>,
-    pub links: Option<LinksPanel>,
     /// Reverse image search engines (`R`), and the panel choosing one.
     pub image_search: Vec<crate::config::ImageSearch>,
     pub image_search_panel: Option<ImageSearchPanel>,
-    /// The thread's files as a grid (`V`), over the thread.
-    pub gallery: Option<Gallery>,
     /// Save where you are and start there next time.
     pub restore_session: bool,
     /// The data directory has changes to write, and when it was last written.
@@ -636,31 +614,12 @@ pub struct App {
     saved_at: Instant,
     /// The session as last saved, and when that was checked.
     session_saved: (Option<crate::store::Session>, Instant),
-    /// Thread to select in the catalog once it loads (restoring a session).
-    pending_catalog: Option<u64>,
-    /// The open thread is being restored from the last session.
-    restoring: bool,
-    /// Archive search: its results, the list over them, and the query being typed.
-    pub search: Option<Search>,
-    pub search_list: Picker,
+    /// The archive search query being typed.
     pub search_input: Option<String>,
     /// True while typing a thread search.
     pub searching: bool,
     /// What's typed after `:`, while it's being typed.
     pub goto: Option<String>,
-    /// Threads left by following cross-thread links: (site, board, thread, selected post), for `u`.
-    trail: Vec<(usize, Board, u64, u64)>,
-    /// Post to select once the loading thread arrives.
-    pending_post: Option<u64>,
-    /// Board the loaded catalog belongs to.
-    catalog_board: String,
-    /// The board whose catalog is loaded, to return to from a thread opened on another board
-    /// (an overboard's threads live on their own boards).
-    catalog_of: Option<Board>,
-    /// The open thread was opened from the catalog (not by following a link).
-    from_catalog: bool,
-    /// After a thread 404'd: the same thread on the site's configured archive.
-    archive_offer: Option<ThreadKey>,
     pub keys: KeyMap,
     /// The last text copied to the clipboard, and the last URL opened.
     pub copied: Option<String>,
@@ -678,15 +637,13 @@ pub struct App {
     last_click: Option<(Instant, usize)>,
     pub tick: usize,
     pub quit: bool,
-    /// The other tabs (the active one's slot holds nothing useful), and which is active.
+    /// The active tab's place; the other tabs (the active one's slot holds nothing useful),
+    /// and which is active.
+    pub tab: Tab,
     pub tabs: Vec<Tab>,
     pub active: usize,
     /// The last request id given out (ids are unique across tabs).
     next_id: u64,
-    /// The active tab's request in flight (0: none).
-    req: u64,
-    /// The thread number of the last thread load, for 404 handling.
-    pending_thread: u64,
     tx: Sender<Msg>,
     rx: Receiver<Msg>,
 }
@@ -722,15 +679,11 @@ impl App {
         let (tx, rx) = channel();
         let mut app = Self {
             sites,
-            view: View::Sites,
             site_list: Picker::default(),
             favorites: cfg.favorites.iter().filter_map(|f| BoardRef::parse(f)).collect(),
             home_titles: HashMap::new(),
             hidden_sites: cfg.hidden_sites.iter().cloned().collect(),
             show_hidden_sites: false,
-            board_list: Picker::default(),
-            catalog_list: Picker::default(),
-            catalog_sort: Sort::default(),
             grid_cols: 0,
             default_layout: store.settings.catalog_layout.unwrap_or(match store.settings.compact_catalog {
                 Some(true) => CatalogLayout::Compact,
@@ -747,10 +700,8 @@ impl App {
             watched_list: Picker::default(),
             history_list: Picker::default(),
             store,
-            return_to: None,
             refresh_thread,
             refresh_watched,
-            thread_checked: Instant::now(),
             watched_checked: HashMap::new(),
             refreshing: HashSet::new(),
             notified_max: HashMap::new(),
@@ -762,16 +713,9 @@ impl App {
             notify_command: cfg.notify_command.clone(),
             notified: Vec::new(),
             boards_refreshing: HashSet::new(),
-            site: 0,
-            board: None,
-            catalog: Vec::new(),
-            catalog_marks: Vec::new(),
-            catalog_new: HashSet::new(),
             filters: Filters::new(&cfg.filters).unwrap_or_default(),
             show_hidden: false,
-            thread: None,
             filtering: false,
-            loading: None,
             status: None,
             status_since: None,
             show_help: false,
@@ -782,29 +726,15 @@ impl App {
                     let _ = tx.send(Msg::Wake);
                 })
             }, DiskCache::default_dir().map(|d| DiskCache::new(d, crate::disk_cache::BUDGET))),
-            viewer: None,
-            preview: None,
-            links: None,
             image_search: if cfg.image_search.is_empty() { crate::config::ImageSearch::defaults() } else { cfg.image_search.clone() },
             image_search_panel: None,
-            gallery: None,
             restore_session: cfg.restore_session,
             save_pending: false,
             saved_at: Instant::now(),
             session_saved: (None, Instant::now()),
-            pending_catalog: None,
-            restoring: false,
-            search: None,
-            search_list: Picker::default(),
             search_input: None,
             searching: false,
             goto: None,
-            trail: Vec::new(),
-            pending_post: None,
-            catalog_board: String::new(),
-            catalog_of: None,
-            from_catalog: false,
-            archive_offer: None,
             keys,
             copied: None,
             opened: None,
@@ -817,11 +747,10 @@ impl App {
             last_click: None,
             tick: 0,
             quit: false,
+            tab: Tab::new(0),
             tabs: vec![Tab::new(0)],
             active: 0,
             next_id: 0,
-            req: 0,
-            pending_thread: 0,
             tx,
             rx,
         };
@@ -871,21 +800,21 @@ impl App {
     }
 
     pub fn boards(&self) -> &[Board] {
-        self.sites[self.site].boards.as_deref().unwrap_or(&[])
+        self.sites[self.tab.site].boards.as_deref().unwrap_or(&[])
     }
 
     pub fn visible_boards(&self) -> Vec<usize> {
         let b = self.boards();
-        filtered(&self.board_list.filter, b.len(), |i| format!("{} {}", b[i].uri, b[i].title))
+        filtered(&self.tab.board_list.filter, b.len(), |i| format!("{} {}", b[i].uri, b[i].title))
     }
 
     pub fn visible_catalog(&self) -> Vec<usize> {
-        let needle = self.catalog_list.filter.to_lowercase();
-        let shown = |i: usize| self.show_hidden || self.catalog_marks.get(i).is_none_or(|m| m.hidden.is_none());
+        let needle = self.tab.catalog_list.filter.to_lowercase();
+        let shown = |i: usize| self.show_hidden || self.tab.catalog_marks.get(i).is_none_or(|m| m.hidden.is_none());
         let mut v: Vec<usize> =
-            (0..self.catalog.len()).filter(|&i| shown(i) && self.catalog[i].search_text().contains(&needle)).collect();
-        let c = &self.catalog;
-        match self.catalog_sort {
+            (0..self.tab.catalog.len()).filter(|&i| shown(i) && self.tab.catalog[i].search_text().contains(&needle)).collect();
+        let c = &self.tab.catalog;
+        match self.tab.catalog_sort {
             Sort::Bump => {}
             Sort::Replies => v.sort_by_key(|&i| std::cmp::Reverse(c[i].replies.unwrap_or(0))),
             Sort::Newest => v.sort_by_key(|&i| std::cmp::Reverse((c[i].time, c[i].no))),
@@ -895,31 +824,31 @@ impl App {
     }
 
     fn picker(&mut self) -> Option<(&mut Picker, usize)> {
-        let len = match self.view {
+        let len = match self.tab.view {
             View::Sites => self.visible_sites().len(),
             View::Boards => self.visible_boards().len(),
             View::Catalog => self.visible_catalog().len(),
             View::Watched => self.visible_watched().len(),
             View::History => self.visible_history().len(),
             View::Settings => settings::items().len(),
-            View::Search => self.search.as_ref().map_or(0, |s| s.hits.len()),
+            View::Search => self.tab.search.as_ref().map_or(0, |s| s.hits.len()),
             View::Thread => return None,
         };
-        let p = match self.view {
+        let p = match self.tab.view {
             View::Sites => &mut self.site_list,
-            View::Boards => &mut self.board_list,
-            View::Catalog => &mut self.catalog_list,
+            View::Boards => &mut self.tab.board_list,
+            View::Catalog => &mut self.tab.catalog_list,
             View::Watched => &mut self.watched_list,
             View::History => &mut self.history_list,
             View::Settings => &mut self.settings_list,
-            View::Search => &mut self.search_list,
+            View::Search => &mut self.tab.search_list,
             View::Thread => return None,
         };
         Some((p, len))
     }
 
     pub fn current_site(&self) -> &Site {
-        &self.sites[self.site]
+        &self.sites[self.tab.site]
     }
 
     // ----- background loading -----
@@ -1002,7 +931,7 @@ impl App {
     /// due refresh, and at most a second (relative times like "5s ago" stay current).
     pub fn next_wake(&self, now: Instant) -> Duration {
         let mut wake = Duration::from_secs(1);
-        let animating = self.loading.is_some() || !self.refreshing.is_empty() || self.downloads.running > 0 || self.viewer.is_some();
+        let animating = self.tab.loading.is_some() || !self.refreshing.is_empty() || self.downloads.running > 0 || self.tab.viewer.is_some();
         if animating {
             wake = wake.min(Duration::from_millis(100));
         }
@@ -1020,8 +949,8 @@ impl App {
         if let (Some(s), Some((_, since))) = (&self.status, &self.status_since) {
             at(*since + s.ttl());
         }
-        if self.view == View::Thread && self.thread.is_some() && self.loading.is_none() {
-            at(self.thread_checked + self.refresh_thread);
+        if self.tab.view == View::Thread && self.tab.thread.is_some() && self.tab.loading.is_none() {
+            at(self.tab.thread_checked + self.refresh_thread);
         }
         // At capacity, a finished refresh wakes the loop anyway (and due ones mustn't spin it).
         if self.refreshing.len() < MAX_REFRESHING {
@@ -1051,7 +980,7 @@ impl App {
     fn handle(&mut self, msg: Msg) {
         // A response to another request: another tab's is handled there, the rest are stale
         // (but a finished board list is worth keeping anyway).
-        let other = msg.id().filter(|&id| id != self.req);
+        let other = msg.id().filter(|&id| id != self.tab.req);
         if let Some(i) = other.and_then(|id| self.tab_of(id)) {
             self.handle_in_tab(i, msg);
             return;
@@ -1069,11 +998,11 @@ impl App {
             Msg::GeneralCatalog(key, res) => self.general_catalog(key, res),
             Msg::Download(ev) => self.download_event(ev),
             Msg::Found(_, board, post, res) => {
-                self.loading = None;
+                self.tab.loading = None;
                 match res {
                     Ok(Some(no)) => {
-                        if let Some(t) = &self.thread {
-                            self.trail.push((self.site, self.board.clone().unwrap_or(board.clone()), t.no, t.current().map_or(t.no, |p| p.no)));
+                        if let Some(t) = &self.tab.thread {
+                            self.tab.trail.push((self.tab.site, self.tab.board.clone().unwrap_or(board.clone()), t.no, t.current().map_or(t.no, |p| p.no)));
                         }
                         self.open_thread_at(board, no, Some(post), true);
                     }
@@ -1085,7 +1014,7 @@ impl App {
                 }
             }
             Msg::Search(_, page, res) => {
-                self.loading = None;
+                self.tab.loading = None;
                 self.search_results(page, res);
             }
             Msg::Cached(_, age) => {
@@ -1095,7 +1024,7 @@ impl App {
             }
             Msg::Boards(_, site, res) => {
                 if other.is_none() {
-                    self.loading = None;
+                    self.tab.loading = None;
                 }
                 match res {
                     Ok(b) => self.set_boards(site, b, true),
@@ -1111,43 +1040,43 @@ impl App {
                 }
             }
             Msg::CatalogPartial(_, posts) => {
-                self.catalog = posts;
+                self.tab.catalog = posts;
                 self.remark_catalog();
                 let len = self.visible_catalog().len();
-                self.catalog_list.clamp(len);
+                self.tab.catalog_list.clamp(len);
             }
             Msg::Catalog(_, res) => {
-                self.loading = None;
+                self.tab.loading = None;
                 match res {
                     Ok(posts) => {
-                        self.catalog = posts;
+                        self.tab.catalog = posts;
                         self.remark_catalog();
                         self.catalog_seen();
-                        if let Some(no) = self.pending_catalog.take()
-                            && let Some(i) = self.visible_catalog().iter().position(|&k| self.catalog[k].no == no)
+                        if let Some(no) = self.tab.pending_catalog.take()
+                            && let Some(i) = self.visible_catalog().iter().position(|&k| self.tab.catalog[k].no == no)
                         {
-                            self.catalog_list.state.select(Some(i));
+                            self.tab.catalog_list.state.select(Some(i));
                         }
                         let len = self.visible_catalog().len();
-                        self.catalog_list.clamp(len);
+                        self.tab.catalog_list.clamp(len);
                     }
                     Err(e) => self.error(e),
                 }
             }
             Msg::Thread(_, res) => {
-                self.loading = None;
-                self.thread_checked = Instant::now();
-                let restoring = std::mem::take(&mut self.restoring);
+                self.tab.loading = None;
+                self.tab.thread_checked = Instant::now();
+                let restoring = std::mem::take(&mut self.tab.restoring);
                 match res {
                     Ok(posts) => self.set_thread(posts),
                     // Last session's thread is gone: its catalog instead.
                     Err(e) if restoring && http::is_not_found(&e) => {
-                        self.view = View::Catalog;
+                        self.tab.view = View::Catalog;
                         self.load_catalog();
                         self.info("The thread you had open last time is gone (archived or deleted)");
                     }
                     Err(e) if http::is_not_found(&e) => {
-                        let Some(key) = self.board.as_ref().map(|b| self.key(&b.uri, self.pending_thread)) else {
+                        let Some(key) = self.tab.board.as_ref().map(|b| self.key(&b.uri, self.tab.pending_thread)) else {
                             return;
                         };
                         self.thread_gone(&key);
@@ -1199,11 +1128,11 @@ impl App {
         wrap: impl FnOnce(u64, Result<T>) -> Msg + Send + 'static,
     ) {
         self.next_id += 1;
-        self.req = self.next_id;
-        let id = self.req;
+        self.tab.req = self.next_id;
+        let id = self.tab.req;
         let backend = self.current_site().backend.clone();
         let tx = self.tx.clone();
-        self.loading = Some(label);
+        self.tab.loading = Some(label);
         self.status = None;
         std::thread::spawn(move || {
             let res = job(&*backend, id, &tx);
@@ -1224,9 +1153,9 @@ impl App {
             }
         }
         self.sites[site].boards = Some(boards);
-        if site == self.site {
+        if site == self.tab.site {
             let len = self.visible_boards().len();
-            self.board_list.clamp(len);
+            self.tab.board_list.clamp(len);
         }
         if complete {
             self.note_titles(site);
@@ -1247,7 +1176,7 @@ impl App {
     }
 
     fn load_boards(&mut self) {
-        let site = self.site;
+        let site = self.tab.site;
         let label = format!("Loading boards for {}", self.current_site().cfg.name);
         self.spawn(
             label,
@@ -1261,23 +1190,23 @@ impl App {
     }
 
     fn load_catalog(&mut self) {
-        let Some(board) = self.board.clone() else { return };
-        self.catalog_board = board.uri.clone();
-        self.catalog_of = Some(board.clone());
+        let Some(board) = self.tab.board.clone() else { return };
+        self.tab.catalog_board = board.uri.clone();
+        self.tab.catalog_of = Some(board.clone());
         self.apply_board_sort();
         let job = move |b: &dyn Backend, id, tx: &Sender<Msg>| {
             b.catalog(&board.uri, &|so_far| {
                 let _ = tx.send(Msg::CatalogPartial(id, so_far.to_vec()));
             })
         };
-        self.spawn(format!("Loading /{}/", self.catalog_board), job, Msg::Catalog);
+        self.spawn(format!("Loading /{}/", self.tab.catalog_board), job, Msg::Catalog);
     }
 
     fn load_thread(&mut self, no: u64) {
-        let Some(board) = self.board.clone() else { return };
-        self.pending_thread = no;
-        self.archive_offer = None;
-        self.thread_checked = Instant::now();
+        let Some(board) = self.tab.board.clone() else { return };
+        self.tab.pending_thread = no;
+        self.tab.archive_offer = None;
+        self.tab.thread_checked = Instant::now();
         self.spawn(format!("Loading thread {no}"), move |b, _, _| b.thread(&board.uri, no), Msg::Thread);
     }
 
@@ -1301,13 +1230,13 @@ impl App {
     }
 
     fn set_thread(&mut self, posts: Vec<Post>) {
-        let Some(board) = self.board.as_ref().map(|b| b.uri.clone()) else { return };
+        let Some(board) = self.tab.board.as_ref().map(|b| b.uri.clone()) else { return };
         let no = posts.first().map(|p| p.no).unwrap_or(0);
         let key = self.key(&board, no);
         let mut tv = ThreadView::new(board, no, posts);
         // On a refresh, the newest post already shown.
         let mut shown_max = None;
-        match self.thread.take().filter(|t| t.no == no && t.board == tv.board) {
+        match self.tab.thread.take().filter(|t| t.no == no && t.board == tv.board) {
             // On refresh, keep the selected post and what's at the top of the view.
             Some(old) => {
                 shown_max = old.posts.iter().map(|p| p.no).max();
@@ -1333,7 +1262,7 @@ impl App {
             }
             None => {
                 tv.new_after = self.store.last_seen(&key);
-                if let Some(i) = self.pending_post.take().and_then(|no| tv.index.get(&no).copied()) {
+                if let Some(i) = self.tab.pending_post.take().and_then(|no| tv.index.get(&no).copied()) {
                     tv.selected = i;
                 }
             }
@@ -1349,7 +1278,7 @@ impl App {
             generals::note_limit(w, &tv.posts);
         }
         self.save();
-        self.thread = Some(tv);
+        self.tab.thread = Some(tv);
         self.remark_thread();
     }
 
@@ -1373,12 +1302,12 @@ impl App {
 
     /// Note which catalog threads are new since the last visit (and remember them all).
     fn catalog_seen(&mut self) {
-        let nos: Vec<u64> = self.catalog.iter().map(|p| p.no).collect();
+        let nos: Vec<u64> = self.tab.catalog.iter().map(|p| p.no).collect();
         let site = self.current_site().cfg.name.clone();
-        let board = self.catalog_board.clone();
-        self.catalog_new = self.store.catalog_seen(&site, &board, &nos, self.clock.now());
+        let board = self.tab.catalog_board.clone();
+        self.tab.catalog_new = self.store.catalog_seen(&site, &board, &nos, self.clock.now());
         self.store.board_opened(&site, &board);
-        self.note_titles(self.site);
+        self.note_titles(self.tab.site);
         self.save();
     }
 
@@ -1389,22 +1318,22 @@ impl App {
     }
 
     pub fn remark_catalog(&mut self) {
-        let marks = self.marks(&self.catalog, |p| self.board_of(p));
-        self.catalog_marks = marks;
+        let marks = self.marks(&self.tab.catalog, |p| self.board_of(p));
+        self.tab.catalog_marks = marks;
     }
 
     /// The board a catalog thread is on (overboards mix boards).
     pub fn board_of(&self, p: &Post) -> String {
-        let loaded = Some(self.catalog_board.clone()).filter(|b| !b.is_empty());
-        p.board.clone().or(loaded).or_else(|| self.board.as_ref().map(|b| b.uri.clone())).unwrap_or_default()
+        let loaded = Some(self.tab.catalog_board.clone()).filter(|b| !b.is_empty());
+        p.board.clone().or(loaded).or_else(|| self.tab.board.as_ref().map(|b| b.uri.clone())).unwrap_or_default()
     }
 
     pub fn remark_thread(&mut self) {
-        let Some(t) = &self.thread else { return };
+        let Some(t) = &self.tab.thread else { return };
         let marks = self.marks(&t.posts, |_| t.board.clone());
         let mine = self.store.watched(&self.key(&t.board, t.no)).map(|w| w.mine.iter().copied().collect()).unwrap_or_default();
         let show = self.show_hidden;
-        if let Some(t) = &mut self.thread {
+        if let Some(t) = &mut self.tab.thread {
             t.marks = marks;
             t.mine = mine;
             t.show_hidden = show;
@@ -1414,14 +1343,14 @@ impl App {
 
     /// `H`: hide or unhide the selected thread (catalog) or post (thread) by hand.
     fn toggle_hidden(&mut self) {
-        let (board, no, what, mark) = match self.view {
+        let (board, no, what, mark) = match self.tab.view {
             View::Catalog => {
                 let Some(i) = self.selected_index() else { return };
-                let p = &self.catalog[i];
-                (self.board_of(p), p.no, "thread", self.catalog_marks.get(i).cloned())
+                let p = &self.tab.catalog[i];
+                (self.board_of(p), p.no, "thread", self.tab.catalog_marks.get(i).cloned())
             }
             View::Thread => {
-                let Some(t) = &self.thread else { return };
+                let Some(t) = &self.tab.thread else { return };
                 let what = if t.selected == 0 { "thread" } else { "post" };
                 (t.board.clone(), t.current().map_or(t.no, |p| p.no), what, t.marks.get(t.selected).cloned())
             }
@@ -1447,13 +1376,13 @@ impl App {
     /// `Z`: show hidden threads and posts (dimmed), or leave them out again.
     fn toggle_show_hidden(&mut self) {
         // Keep the same thread selected in the catalog.
-        let keep = self.selected_index().filter(|_| self.view == View::Catalog);
+        let keep = self.selected_index().filter(|_| self.tab.view == View::Catalog);
         self.show_hidden = !self.show_hidden;
         self.remark_thread();
         if let Some(i) = keep
             && let Some(pos) = self.visible_catalog().iter().position(|&v| v == i)
         {
-            self.catalog_list.state.select(Some(pos));
+            self.tab.catalog_list.state.select(Some(pos));
         }
         if let Some((p, len)) = self.picker() {
             p.clamp(len);
@@ -1467,13 +1396,13 @@ impl App {
     /// Start background refreshes that are due: the open thread every `refresh_thread`, and
     /// each watched thread every `refresh_watched`, a couple at a time.
     fn background(&mut self) {
-        let open = self.thread.as_ref().filter(|_| self.view == View::Thread).map(|t| self.key(&t.board, t.no));
+        let open = self.tab.thread.as_ref().filter(|_| self.tab.view == View::Thread).map(|t| self.key(&t.board, t.no));
         if let Some(key) = &open
-            && self.loading.is_none()
-            && self.thread_checked.elapsed() >= self.refresh_thread
+            && self.tab.loading.is_none()
+            && self.tab.thread_checked.elapsed() >= self.refresh_thread
             && !self.refreshing.contains(key)
         {
-            self.thread_checked = Instant::now();
+            self.tab.thread_checked = Instant::now();
             self.refresh_in_background(key.clone());
         }
         if self.refreshing.len() >= MAX_REFRESHING {
@@ -1505,12 +1434,12 @@ impl App {
 
     fn refreshed(&mut self, key: ThreadKey, res: Result<Vec<Post>>) {
         self.refreshing.remove(&key);
-        let is_open = self.view == View::Thread
-            && self.thread.as_ref().is_some_and(|t| self.key(&t.board, t.no) == key)
+        let is_open = self.tab.view == View::Thread
+            && self.tab.thread.as_ref().is_some_and(|t| self.key(&t.board, t.no) == key)
             && self.current_site().cfg.name == key.site;
         if is_open {
             // Count the interval from the response, so the next refresh is past the HTTP cache window.
-            self.thread_checked = Instant::now();
+            self.tab.thread_checked = Instant::now();
         }
         match res {
             Ok(posts) if is_open => self.set_thread(posts),
@@ -1568,7 +1497,7 @@ impl App {
 
     /// Save the selected post's files, or the whole thread's.
     fn download(&mut self, whole_thread: bool) {
-        let Some(t) = &self.thread else { return };
+        let Some(t) = &self.tab.thread else { return };
         let posts: Vec<&Post> = if whole_thread { t.posts.iter().collect() } else { t.current().into_iter().collect() };
         let dir = download::dir(self.download_dir.as_deref(), &self.current_site().cfg.name, &t.board, t.no);
         let jobs = download::jobs(&posts, &dir);
@@ -1577,7 +1506,7 @@ impl App {
 
     /// `E`: save the thread as thread.html and thread.json in its download folder.
     fn export_thread(&mut self) {
-        let (Some(t), Some(b)) = (&self.thread, &self.board) else { return };
+        let (Some(t), Some(b)) = (&self.tab.thread, &self.tab.board) else { return };
         let site = self.current_site();
         let dir = download::dir(self.download_dir.as_deref(), &site.cfg.name, &t.board, t.no);
         let url = site.backend.thread_url(&b.uri, t.no);
@@ -1652,7 +1581,7 @@ impl App {
 
     /// The open catalog's board, as `site/board` (for its own sort and layout).
     fn board_key(&self) -> String {
-        let board = Some(self.catalog_board.clone()).filter(|b| !b.is_empty()).or_else(|| self.board.as_ref().map(|b| b.uri.clone()));
+        let board = Some(self.tab.catalog_board.clone()).filter(|b| !b.is_empty()).or_else(|| self.tab.board.as_ref().map(|b| b.uri.clone()));
         format!("{}/{}", self.current_site().cfg.name, board.unwrap_or_default())
     }
 
@@ -1667,13 +1596,13 @@ impl App {
         let key = self.board_key();
         self.store.board_prefs.entry(key).or_default().layout = Some(layout);
         self.save_now();
-        let board = self.board.as_ref().map_or(String::new(), |b| format!(" for /{}/", b.uri));
+        let board = self.tab.board.as_ref().map_or(String::new(), |b| format!(" for /{}/", b.uri));
         self.info(format!("Layout{board}: {} (the default is in Settings)", layout.as_str()));
     }
 
     /// The board's own sort, when its catalog opens.
     fn apply_board_sort(&mut self) {
-        self.catalog_sort = self.store.board_prefs.get(&self.board_key()).and_then(|p| p.sort).unwrap_or_default();
+        self.tab.catalog_sort = self.store.board_prefs.get(&self.board_key()).and_then(|p| p.sort).unwrap_or_default();
     }
 
     /// The default catalog layout (Settings): saved in config.toml (keeping its comments), or
@@ -1709,8 +1638,8 @@ impl App {
             let key = |c| KeyEvent::from(if c { KeyCode::Down } else { KeyCode::Up });
             match self.modal() {
                 Some(Modal::Help | Modal::Viewer | Modal::Preview | Modal::Links | Modal::ImageSearch) => self.on_key(key(down)),
-                _ if self.view == View::Thread => {
-                    if let Some(t) = &mut self.thread {
+                _ if self.tab.view == View::Thread => {
+                    if let Some(t) = &mut self.tab.thread {
                         t.scroll_lines(if down { 3 } else { -3 });
                     }
                 }
@@ -1733,7 +1662,7 @@ impl App {
             Some(Modal::Help | Modal::Preview) => {
                 // Clicking anywhere closes a popup.
                 self.show_help = false;
-                self.preview = None;
+                self.tab.preview = None;
                 return;
             }
             Some(Modal::Viewer | Modal::Searching | Modal::Filtering) => return,
@@ -1743,7 +1672,7 @@ impl App {
         let double = self.last_click.is_some_and(|(t, i)| i == target && now.duration_since(t) < Duration::from_millis(400));
         self.last_click = if double { None } else { Some((now, target)) };
         if self.modal() == Some(Modal::Gallery) {
-            if let Some(g) = &mut self.gallery
+            if let Some(g) = &mut self.tab.gallery
                 && target < g.files.len()
             {
                 g.state.select(Some(target));
@@ -1751,8 +1680,8 @@ impl App {
                     self.view_from_gallery(target);
                 }
             }
-        } else if self.view == View::Thread {
-            if let Some(t) = &mut self.thread {
+        } else if self.tab.view == View::Thread {
+            if let Some(t) = &mut self.tab.thread {
                 t.set_cursor(target);
             }
             if double {
@@ -1775,10 +1704,10 @@ impl App {
             (self.settings.popup.is_some(), Modal::Settings),
             (self.show_help, Modal::Help),
             (self.image_search_panel.is_some(), Modal::ImageSearch),
-            (self.viewer.is_some(), Modal::Viewer),
-            (self.preview.is_some(), Modal::Preview),
-            (self.gallery.is_some() && self.view == View::Thread, Modal::Gallery),
-            (self.links.is_some(), Modal::Links),
+            (self.tab.viewer.is_some(), Modal::Viewer),
+            (self.tab.preview.is_some(), Modal::Preview),
+            (self.tab.gallery.is_some() && self.tab.view == View::Thread, Modal::Gallery),
+            (self.tab.links.is_some(), Modal::Links),
             (self.goto.is_some(), Modal::Goto),
             (self.search_input.is_some(), Modal::SearchInput),
             (self.searching, Modal::Searching),
@@ -1800,7 +1729,7 @@ impl App {
                 (c < cols).then(|| offset + ((row - area.y) / cell.1) as usize * cols + c)
             }
             Hit::Thread { area } if area.contains(pos) => {
-                let t = self.thread.as_ref()?;
+                let t = self.tab.thread.as_ref()?;
                 let l = t.layout.as_ref()?;
                 let line = t.scroll + (row - area.y) as usize;
                 l.line(line).map(|(e, _)| e)
@@ -1815,22 +1744,22 @@ impl App {
         match archive.filter(|a| self.sites.iter().any(|s| s.cfg.name == *a)) {
             Some(a) => {
                 self.error(format!("Thread was deleted or archived. Press a to open it in {a}"));
-                self.archive_offer = Some(ThreadKey { site: a, board: key.board.clone(), no: key.no });
+                self.tab.archive_offer = Some(ThreadKey { site: a, board: key.board.clone(), no: key.no });
             }
             None => self.error("Thread was deleted or archived"),
         }
     }
 
     fn toggle_watch(&mut self) {
-        let (board, no, subject, posts, last_seen) = match (self.view, &self.board) {
+        let (board, no, subject, posts, last_seen) = match (self.tab.view, &self.tab.board) {
             (View::Thread, _) => {
-                let Some(t) = &self.thread else { return };
+                let Some(t) = &self.tab.thread else { return };
                 let max_no = t.posts.iter().map(|p| p.no).max().unwrap_or(0);
                 (t.board.clone(), t.no, thread_subject(&t.posts), t.posts.len(), max_no)
             }
             (View::Catalog, Some(b)) => {
                 let Some(i) = self.selected_index() else { return };
-                let op = &self.catalog[i];
+                let op = &self.tab.catalog[i];
                 let posts = op.replies.map_or(1, |r| r as usize + 1);
                 let board = op.board.clone().unwrap_or_else(|| b.uri.clone());
                 // Unknown until the first refresh, which then counts nothing as unread.
@@ -1848,7 +1777,7 @@ impl App {
     /// `m`: mark the selected post as yours (or not), to hear about replies to it. The
     /// thread is watched if it isn't.
     fn toggle_mine(&mut self) {
-        let Some(t) = &self.thread else { return };
+        let Some(t) = &self.tab.thread else { return };
         let key = self.key(&t.board, t.no);
         let Some(no) = t.current().map(|p| p.no) else { return };
         if self.store.watched(&key).is_none() {
@@ -1879,24 +1808,24 @@ impl App {
         };
         self.switch_site(site);
         let board = self.boards().iter().find(|b| b.uri == key.board).cloned();
-        self.board = Some(board.unwrap_or(Board { uri: key.board, title: String::new(), nsfw: None }));
-        self.return_to = Some(self.view);
-        self.from_catalog = false;
-        self.gallery = None;
-        self.thread = None;
-        self.view = View::Thread;
+        self.tab.board = Some(board.unwrap_or(Board { uri: key.board, title: String::new(), nsfw: None }));
+        self.tab.return_to = Some(self.tab.view);
+        self.tab.from_catalog = false;
+        self.tab.gallery = None;
+        self.tab.thread = None;
+        self.tab.view = View::Thread;
         self.load_thread(key.no);
     }
 
     /// Make `site` the current one, with its board list if it's saved (else fetched in the
     /// background), so going back to Boards shows it.
     fn switch_site(&mut self, site: usize) {
-        if site == self.site {
+        if site == self.tab.site {
             return;
         }
-        self.board_list = Picker::default();
-        self.board_list.state.select(Some(0));
-        self.site = site;
+        self.tab.board_list = Picker::default();
+        self.tab.board_list.state.select(Some(0));
+        self.tab.site = site;
         if self.sites[site].boards.is_none() {
             let cfg = &self.sites[site].cfg;
             if let Some(b) = &cfg.boards {
@@ -1944,7 +1873,7 @@ impl App {
             return;
         }
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
-        if self.view == View::Search && self.keys.keys(Action::NextMatch).contains(&crate::keys::Key::from_event(&key)) {
+        if self.tab.view == View::Search && self.keys.keys(Action::NextMatch).contains(&crate::keys::Key::from_event(&key)) {
             if self.more_results() {
                 self.load_search_page();
             }
@@ -1956,8 +1885,8 @@ impl App {
         }
         match key.code {
             KeyCode::F(5) => self.refresh(),
-            KeyCode::Esc if self.view == View::Thread && self.thread.as_ref().is_some_and(|t| !t.search.is_empty()) => {
-                if let Some(t) = &mut self.thread {
+            KeyCode::Esc if self.tab.view == View::Thread && self.tab.thread.as_ref().is_some_and(|t| !t.search.is_empty()) => {
+                if let Some(t) = &mut self.tab.thread {
                     t.set_search(String::new());
                 }
             }
@@ -1969,10 +1898,10 @@ impl App {
                     self.back();
                 }
             }
-            _ if self.view == View::Catalog && self.grid_cols > 0 && self.on_grid_key(key.code) => {}
-            KeyCode::Char(c @ '1'..='9') if self.view == View::Sites => self.open_favorite(c as usize - '1' as usize),
+            _ if self.tab.view == View::Catalog && self.grid_cols > 0 && self.on_grid_key(key.code) => {}
+            KeyCode::Char(c @ '1'..='9') if self.tab.view == View::Sites => self.open_favorite(c as usize - '1' as usize),
             KeyCode::Char('h') | KeyCode::Left | KeyCode::Backspace => self.back(),
-            _ if self.view == View::Thread => self.on_thread_key(key.code, ctrl),
+            _ if self.tab.view == View::Thread => self.on_thread_key(key.code, ctrl),
             KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right => self.enter(),
             code => {
                 let Some((p, len)) = self.picker() else { return };
@@ -1987,7 +1916,7 @@ impl App {
                     KeyCode::Char('G') | KeyCode::End => p.move_by(isize::MAX / 2, len),
                     _ => {}
                 }
-                if self.view == View::Search {
+                if self.tab.view == View::Search {
                     self.search_moved();
                 }
             }
@@ -1995,7 +1924,7 @@ impl App {
     }
 
     pub fn scope(&self) -> Scope {
-        match self.view {
+        match self.tab.view {
             View::Sites | View::Boards | View::Settings | View::Search => Scope::Lists,
             View::Catalog => Scope::Catalog,
             View::Thread => Scope::Thread,
@@ -2009,9 +1938,9 @@ impl App {
             Action::Quit => self.quit = true,
             Action::Help => self.show_help = true,
             Action::Settings => self.open_settings(),
-            Action::Search if self.view == View::Settings => {}
-            Action::Search if self.view == View::Thread => {
-                if let Some(t) = &mut self.thread {
+            Action::Search if self.tab.view == View::Settings => {}
+            Action::Search if self.tab.view == View::Thread => {
+                if let Some(t) = &mut self.tab.thread {
                     t.set_search(String::new());
                     self.searching = true;
                 }
@@ -2037,7 +1966,7 @@ impl App {
             Action::PrevTab => self.cycle_tab(false),
             Action::CloseTab => self.close_tab(),
             Action::Expand => {
-                if let Some(t) = &mut self.thread {
+                if let Some(t) = &mut self.tab.thread {
                     match t.toggle_expanded() {
                         Ok(_) => {}
                         Err(msg) => self.info(msg),
@@ -2048,21 +1977,21 @@ impl App {
             Action::Copy => self.copy(false),
             Action::CopyLink => self.copy(true),
             Action::Sort => {
-                self.catalog_sort = self.catalog_sort.next();
-                self.catalog_list.state.select(Some(0));
+                self.tab.catalog_sort = self.tab.catalog_sort.next();
+                self.tab.catalog_list.state.select(Some(0));
                 // Remembered for this board.
                 let key = self.board_key();
-                self.store.board_prefs.entry(key).or_default().sort = (self.catalog_sort != Sort::Bump).then_some(self.catalog_sort);
+                self.store.board_prefs.entry(key).or_default().sort = (self.tab.catalog_sort != Sort::Bump).then_some(self.tab.catalog_sort);
                 self.save_now();
-                self.info(format!("Sorted by {}", self.catalog_sort.label()));
+                self.info(format!("Sorted by {}", self.tab.catalog_sort.label()));
             }
             Action::Compact => self.cycle_layout(),
             Action::Download => self.download(false),
             Action::DownloadThread => self.download(true),
-            Action::Archive => match self.archive_offer.take() {
+            Action::Archive => match self.tab.archive_offer.take() {
                 Some(key) => {
                     self.open_key(key);
-                    self.return_to = None;
+                    self.tab.return_to = None;
                 }
                 None => self.info("Nothing to open in an archive"),
             },
@@ -2105,7 +2034,7 @@ impl App {
     fn on_grid_key(&mut self, code: KeyCode) -> bool {
         let cols = self.grid_cols as isize;
         let len = self.visible_catalog().len();
-        let cur = self.catalog_list.state.selected().unwrap_or(0) as isize;
+        let cur = self.tab.catalog_list.state.selected().unwrap_or(0) as isize;
         let delta = match code {
             KeyCode::Char('j') | KeyCode::Down => cols,
             KeyCode::Char('k') | KeyCode::Up => -cols,
@@ -2116,15 +2045,15 @@ impl App {
         };
         // Down from the last full row goes to the last thread.
         if delta == cols && cur + cols >= len as isize && cur / cols < (len as isize - 1) / cols {
-            self.catalog_list.state.select(Some(len - 1));
+            self.tab.catalog_list.state.select(Some(len - 1));
         } else if (0..len as isize).contains(&(cur + delta)) {
-            self.catalog_list.state.select(Some((cur + delta) as usize));
+            self.tab.catalog_list.state.select(Some((cur + delta) as usize));
         }
         true
     }
 
     fn on_thread_key(&mut self, code: KeyCode, ctrl: bool) {
-        let Some(t) = &mut self.thread else { return };
+        let Some(t) = &mut self.tab.thread else { return };
         let half = (t.viewport / 2).max(1) as isize;
         match code {
             KeyCode::Char('j') | KeyCode::Down => t.select_entry(t.entry() + 1),
@@ -2149,7 +2078,7 @@ impl App {
 
     fn thread_action(&mut self, action: Action) {
         let search_key = self.keys.key(Action::Search);
-        let Some(t) = &mut self.thread else { return };
+        let Some(t) = &mut self.tab.thread else { return };
         match action {
             Action::Preview => self.open_preview(),
             Action::NextMatch | Action::PrevMatch if t.matches.is_empty() => {
@@ -2187,7 +2116,7 @@ impl App {
             Action::JumpBack => {
                 if let Some(i) = t.jumps.pop() {
                     t.select(i);
-                } else if let Some((site, board, no, post)) = self.trail.pop() {
+                } else if let Some((site, board, no, post)) = self.tab.trail.pop() {
                     // Back to the thread we came from by a cross-thread link.
                     self.switch_site(site);
                     self.open_thread_at(board, no, Some(post), false);
@@ -2209,7 +2138,7 @@ impl App {
     }
 
     fn on_search_key(&mut self, key: KeyEvent) {
-        let Some(t) = &mut self.thread else {
+        let Some(t) = &mut self.tab.thread else {
             self.searching = false;
             return;
         };
@@ -2244,7 +2173,7 @@ impl App {
     }
 
     fn open_preview(&mut self) {
-        let Some(t) = &self.thread else { return };
+        let Some(t) = &self.tab.thread else { return };
         let Some(p) = t.current() else { return };
         let posts: Vec<usize> = p.quotes.iter().filter_map(|q| t.index.get(q).copied()).collect();
         let elsewhere: Vec<u64> = p.links.iter().filter_map(|l| l.post).filter(|n| !t.index.contains_key(n)).collect();
@@ -2252,11 +2181,11 @@ impl App {
             self.info("Post quotes nothing");
             return;
         }
-        self.preview = Some(Preview { posts, elsewhere, scroll: 0 });
+        self.tab.preview = Some(Preview { posts, elsewhere, scroll: 0 });
     }
 
     fn on_preview_key(&mut self, code: KeyCode) {
-        let Some(p) = &mut self.preview else { return };
+        let Some(p) = &mut self.tab.preview else { return };
         match code {
             KeyCode::Char('j') | KeyCode::Down => p.scroll = p.scroll.saturating_add(1),
             KeyCode::Char('k') | KeyCode::Up => p.scroll = p.scroll.saturating_sub(1),
@@ -2266,13 +2195,13 @@ impl App {
             // Jump to the (first) quoted post.
             KeyCode::Enter => {
                 let first = p.posts.first().copied();
-                self.preview = None;
-                if let (Some(i), Some(t)) = (first, &mut self.thread) {
+                self.tab.preview = None;
+                if let (Some(i), Some(t)) = (first, &mut self.tab.thread) {
                     t.jumps.push(t.selected);
                     t.select(i);
                 }
             }
-            _ => self.preview = None,
+            _ => self.tab.preview = None,
         }
     }
 
@@ -2288,7 +2217,7 @@ impl App {
     /// The selected post's first link out of this thread (to a post rather than a board, if
     /// it has both).
     fn outgoing_link(&self) -> Option<Link> {
-        let (Some(t), Some(board)) = (&self.thread, &self.board) else { return None };
+        let (Some(t), Some(board)) = (&self.tab.thread, &self.tab.board) else { return None };
         let here = |l: &Link| l.board.as_ref().is_none_or(|b| *b == board.uri);
         let leaves = |l: &&Link| {
             let in_thread = here(l)
@@ -2302,26 +2231,26 @@ impl App {
     /// Go where a quote link leads: a thread (remembered for `u`), a board, or a post whose
     /// thread the engine is asked for.
     fn follow(&mut self, link: Link) {
-        let Some(board) = self.board.clone() else { return };
+        let Some(board) = self.tab.board.clone() else { return };
         let target = match &link.board {
             Some(uri) if *uri != board.uri => self.find_board(uri),
             _ => board.clone(),
         };
         match (link.thread, link.post) {
             (Some(no), post) => {
-                if let Some(t) = self.thread.as_ref().filter(|_| self.view == View::Thread) {
-                    self.trail.push((self.site, board, t.no, t.current().map_or(t.no, |p| p.no)));
+                if let Some(t) = self.tab.thread.as_ref().filter(|_| self.tab.view == View::Thread) {
+                    self.tab.trail.push((self.tab.site, board, t.no, t.current().map_or(t.no, |p| p.no)));
                 }
                 self.open_thread_at(target, no, post, true);
             }
             (None, None) => {
                 // A board link: open its catalog.
-                self.board = Some(target);
-                self.catalog.clear();
-                self.catalog_list = Picker::default();
-                self.catalog_list.state.select(Some(0));
-                self.return_to = None;
-                self.view = View::Catalog;
+                self.tab.board = Some(target);
+                self.tab.catalog.clear();
+                self.tab.catalog_list = Picker::default();
+                self.tab.catalog_list.state.select(Some(0));
+                self.tab.return_to = None;
+                self.tab.view = View::Catalog;
                 self.load_catalog();
             }
             (None, Some(post)) => {
@@ -2341,28 +2270,28 @@ impl App {
 
     /// Open a thread on the current site, selecting `post` when it arrives.
     fn open_thread_at(&mut self, board: Board, no: u64, post: Option<u64>, announce: bool) {
-        self.from_catalog = false;
-        self.gallery = None;
+        self.tab.from_catalog = false;
+        self.tab.gallery = None;
         if announce {
             self.info(format!("Opening /{}/{no} (u goes back)", board.uri));
         }
-        self.board = Some(board);
-        self.pending_post = post;
-        self.thread = None;
-        self.view = View::Thread;
+        self.tab.board = Some(board);
+        self.tab.pending_post = post;
+        self.tab.thread = None;
+        self.tab.view = View::Thread;
         self.load_thread(no);
     }
 
     fn on_viewer_key(&mut self, code: KeyCode) {
-        let Some(v) = &mut self.viewer else { return };
+        let Some(v) = &mut self.tab.viewer else { return };
         let n = v.files.len();
         match code {
             KeyCode::Esc | KeyCode::Char('q' | 'v') => {
                 // Back in the gallery, on the file last viewed.
-                if let Some(g) = &mut self.gallery {
+                if let Some(g) = &mut self.tab.gallery {
                     g.state.select(Some(v.index));
                 }
-                self.viewer = None;
+                self.tab.viewer = None;
             }
             KeyCode::Char('h' | 'k') | KeyCode::Left | KeyCode::Up => v.index = (v.index + n - 1) % n,
             // Space pauses an animated GIF; otherwise it's the next file.
@@ -2381,9 +2310,9 @@ impl App {
 
     /// The post whose files `v`, `i`, `d` act on: the selected catalog entry or thread post.
     fn selected_post(&self) -> Option<&Post> {
-        match self.view {
-            View::Catalog => self.selected_index().map(|i| &self.catalog[i]),
-            View::Thread => self.thread.as_ref().and_then(ThreadView::current),
+        match self.tab.view {
+            View::Catalog => self.selected_index().map(|i| &self.tab.catalog[i]),
+            View::Thread => self.tab.thread.as_ref().and_then(ThreadView::current),
             _ => None,
         }
     }
@@ -2395,7 +2324,7 @@ impl App {
         }
         let link = self.selected_link();
         match self.selected_post().map(|p| p.files.clone()) {
-            Some(files) if !files.is_empty() => self.viewer = Some(Viewer { files, index: 0, link }),
+            Some(files) if !files.is_empty() => self.tab.viewer = Some(Viewer { files, index: 0, link }),
             _ => self.info("Post has no file"),
         }
     }
@@ -2420,7 +2349,7 @@ impl App {
     }
 
     fn remove_entry(&mut self) {
-        if self.view == View::Sites {
+        if self.tab.view == View::Sites {
             match self.selected_site_row() {
                 Some(SiteRow::Favorite(i)) => {
                     let f = self.favorites.remove(i);
@@ -2438,7 +2367,7 @@ impl App {
             return;
         }
         let Some(i) = self.selected_index() else { return };
-        match self.view {
+        match self.tab.view {
             View::Watched => {
                 let w = self.store.watched.remove(i);
                 self.info(format!("Stopped watching thread {}", w.key.no));
@@ -2456,28 +2385,28 @@ impl App {
 
     /// Index of the selected item in the current list's underlying data (not for Sites).
     fn selected_index(&self) -> Option<usize> {
-        match self.view {
+        match self.tab.view {
             View::Sites | View::Thread | View::Settings | View::Search => None,
-            View::Boards => self.board_list.state.selected().and_then(|i| self.visible_boards().get(i).copied()),
-            View::Catalog => self.catalog_list.state.selected().and_then(|i| self.visible_catalog().get(i).copied()),
+            View::Boards => self.tab.board_list.state.selected().and_then(|i| self.visible_boards().get(i).copied()),
+            View::Catalog => self.tab.catalog_list.state.selected().and_then(|i| self.visible_catalog().get(i).copied()),
             View::Watched => self.watched_list.state.selected().and_then(|i| self.visible_watched().get(i).copied()),
             View::History => self.history_list.state.selected().and_then(|i| self.visible_history().get(i).copied()),
         }
     }
 
     fn enter(&mut self) {
-        if self.view == View::Settings {
+        if self.tab.view == View::Settings {
             self.activate_setting();
             return;
         }
-        if self.view == View::Search {
+        if self.tab.view == View::Search {
             self.open_search_hit();
             return;
         }
-        if self.view == View::Sites {
+        if self.tab.view == View::Sites {
             match self.site_list.state.selected().and_then(|i| self.visible_sites().get(i).copied()) {
-                Some(SiteRow::Watched) => self.view = View::Watched,
-                Some(SiteRow::History) => self.view = View::History,
+                Some(SiteRow::Watched) => self.tab.view = View::Watched,
+                Some(SiteRow::History) => self.tab.view = View::History,
                 Some(SiteRow::Favorite(i)) => self.open_favorite(i),
                 Some(SiteRow::Recent(i)) => {
                     if let Some(b) = self.recent_board(i) {
@@ -2495,42 +2424,42 @@ impl App {
             return;
         }
         let Some(i) = self.selected_index() else { return };
-        match self.view {
+        match self.tab.view {
             View::Sites | View::Thread | View::Settings | View::Search => {}
             View::Watched => self.open_key(self.store.watched[i].key.clone()),
             View::History => self.open_key(self.store.history[i].key.clone()),
             View::Boards => {
                 let board = self.boards()[i].clone();
-                self.catalog.clear();
-                self.catalog_list = Picker::default();
-                self.catalog_list.state.select(Some(0));
-                self.board = Some(board);
-                self.view = View::Catalog;
+                self.tab.catalog.clear();
+                self.tab.catalog_list = Picker::default();
+                self.tab.catalog_list.state.select(Some(0));
+                self.tab.board = Some(board);
+                self.tab.view = View::Catalog;
                 self.load_catalog();
             }
             View::Catalog => {
-                let no = self.catalog[i].no;
+                let no = self.tab.catalog[i].no;
                 // On an overboard the thread lives on its own board.
-                if let Some(uri) = self.catalog[i].board.clone().filter(|b| *b != self.catalog_board) {
-                    self.board = Some(self.find_board(&uri));
+                if let Some(uri) = self.tab.catalog[i].board.clone().filter(|b| *b != self.tab.catalog_board) {
+                    self.tab.board = Some(self.find_board(&uri));
                 }
-                self.thread = None;
-                self.return_to = None;
-                self.from_catalog = true;
-                self.view = View::Thread;
+                self.tab.thread = None;
+                self.tab.return_to = None;
+                self.tab.from_catalog = true;
+                self.tab.view = View::Thread;
                 self.load_thread(no);
             }
         }
     }
 
     fn enter_site(&mut self, i: usize) {
-        if i != self.site {
-            self.board_list = Picker::default();
+        if i != self.tab.site {
+            self.tab.board_list = Picker::default();
         }
-        self.site = i;
-        self.view = View::Boards;
-        if self.board_list.state.selected().is_none() {
-            self.board_list.state.select(Some(0));
+        self.tab.site = i;
+        self.tab.view = View::Boards;
+        if self.tab.board_list.state.selected().is_none() {
+            self.tab.board_list.state.select(Some(0));
         }
         if self.current_site().boards.is_some() {
             return;
@@ -2551,39 +2480,39 @@ impl App {
     }
 
     fn back(&mut self) {
-        self.gallery = None;
-        self.view = match self.view {
+        self.tab.gallery = None;
+        self.tab.view = match self.tab.view {
             View::Sites | View::Boards | View::Watched | View::History => View::Sites,
-            View::Settings => self.settings.back.take().unwrap_or(View::Sites),
+            View::Settings => self.tab.settings_back.take().unwrap_or(View::Sites),
             View::Search => self.close_search(),
             View::Catalog => View::Boards,
-            View::Thread => self.return_to.take().unwrap_or(View::Catalog),
+            View::Thread => self.tab.return_to.take().unwrap_or(View::Catalog),
         };
-        self.trail.clear();
+        self.tab.trail.clear();
         // Back to the catalog the thread was opened from (an overboard's, maybe).
-        if self.view == View::Catalog && std::mem::take(&mut self.from_catalog) {
-            self.board = self.catalog_of.clone();
+        if self.tab.view == View::Catalog && std::mem::take(&mut self.tab.from_catalog) {
+            self.tab.board = self.tab.catalog_of.clone();
         }
         // After following links to another board, the loaded catalog is for the old one.
-        if self.view == View::Catalog && self.board.as_ref().is_some_and(|b| b.uri != self.catalog_board) {
-            self.catalog.clear();
-            self.catalog_list = Picker::default();
-            self.catalog_list.state.select(Some(0));
+        if self.tab.view == View::Catalog && self.tab.board.as_ref().is_some_and(|b| b.uri != self.tab.catalog_board) {
+            self.tab.catalog.clear();
+            self.tab.catalog_list = Picker::default();
+            self.tab.catalog_list.state.select(Some(0));
             self.load_catalog();
             return;
         }
         // Navigating away cancels any in-flight request (its response will be ignored).
-        if self.loading.is_some() {
-            self.req = 0;
-            self.loading = None;
+        if self.tab.loading.is_some() {
+            self.tab.req = 0;
+            self.tab.loading = None;
         }
     }
 
     fn refresh(&mut self) {
-        match self.view {
+        match self.tab.view {
             View::Sites | View::Watched | View::History | View::Settings => {}
             View::Search => {
-                if let Some(s) = &mut self.search {
+                if let Some(s) = &mut self.tab.search {
                     s.hits.clear();
                     s.pages = 0;
                 }
@@ -2592,7 +2521,7 @@ impl App {
             View::Boards => self.load_boards(),
             View::Catalog => self.load_catalog(),
             View::Thread => {
-                if let Some(no) = self.thread.as_ref().map(|t| t.no) {
+                if let Some(no) = self.tab.thread.as_ref().map(|t| t.no) {
                     self.load_thread(no);
                 }
             }
@@ -2601,7 +2530,7 @@ impl App {
 
     /// Copy the selected thing's text (or file URL in the viewer), or with `link` its URL.
     fn copy(&mut self, link: bool) {
-        let what = if let Some(v) = &self.viewer {
+        let what = if let Some(v) = &self.tab.viewer {
             let post_link = v.link.clone().or_else(|| self.gallery_link(v.index));
             if link { post_link.map(|l| ("link", l)) } else { Some(("file URL", v.files[v.index].url.clone())) }
         } else if link {
@@ -2611,8 +2540,8 @@ impl App {
                 let url = self.thread_link(key, None).unwrap_or_default();
                 format!("{subject}\n{url}").trim().to_string()
             };
-            match self.view {
-                View::Thread => self.thread.as_ref().and_then(ThreadView::current).map(|p| ("text", copy_text(p, false))),
+            match self.tab.view {
+                View::Thread => self.tab.thread.as_ref().and_then(ThreadView::current).map(|p| ("text", copy_text(p, false))),
                 View::Catalog => self.selected_post().map(|p| ("text", copy_text(p, true))),
                 View::Watched => self.selected_index().map(|i| ("text", saved(&self.store.watched[i].key, &self.store.watched[i].subject))),
                 View::History => self.selected_index().map(|i| ("text", saved(&self.store.history[i].key, &self.store.history[i].subject))),
@@ -2648,15 +2577,15 @@ impl App {
     /// The link to what's selected: a post in a thread, a catalog thread, a saved thread, a board.
     fn selected_link(&self) -> Option<String> {
         let backend = &self.current_site().backend;
-        match (self.view, &self.board) {
+        match (self.tab.view, &self.tab.board) {
             (View::Watched, _) => self.selected_index().and_then(|i| self.thread_link(&self.store.watched[i].key, None)),
             (View::History, _) => self.selected_index().and_then(|i| self.thread_link(&self.store.history[i].key, None)),
             (View::Boards, _) => self.selected_index().map(|i| backend.board_url(&self.boards()[i].uri)),
             (View::Catalog, Some(b)) => self.selected_index().map(|i| {
-                let p = &self.catalog[i];
+                let p = &self.tab.catalog[i];
                 backend.thread_url(p.board.as_deref().unwrap_or(&b.uri), p.no)
             }),
-            (View::Thread, Some(b)) => self.thread.as_ref().and_then(|t| self.thread_link(&self.key(&b.uri, t.no), Some(t.current()?.no))),
+            (View::Thread, Some(b)) => self.tab.thread.as_ref().and_then(|t| self.thread_link(&self.key(&b.uri, t.no), Some(t.current()?.no))),
             _ => None,
         }
     }
@@ -2750,15 +2679,15 @@ mod tests {
         let left = MouseEventKind::Down(MouseButton::Left);
         app.on_mouse(mouse(left, 5, 3), t0);
         assert_eq!(app.site_list.state.selected(), Some(1));
-        assert_eq!(app.view, View::Sites);
+        assert_eq!(app.tab.view, View::Sites);
         // A slow second click is just another click; a quick one opens.
         app.on_mouse(mouse(left, 5, 3), t0 + Duration::from_secs(1));
-        assert_eq!(app.view, View::Sites);
+        assert_eq!(app.tab.view, View::Sites);
         app.on_mouse(mouse(left, 5, 3), t0 + Duration::from_millis(1200));
-        assert_eq!(app.view, View::History);
+        assert_eq!(app.tab.view, View::History);
 
         // Clicks outside the list do nothing.
-        app.view = View::Sites;
+        app.tab.view = View::Sites;
         app.on_mouse(mouse(left, 5, 30), t0);
         assert_eq!(app.site_list.state.selected(), Some(1));
     }
@@ -2772,13 +2701,13 @@ mod tests {
         let block: Rc<[Line]> = vec![Line::raw(""); 4].into();
         t.layout = Some(ThreadLayout { width: 40, blocks: vec![block.clone(), block.clone(), block], starts: vec![0, 4, 8, 12], thumbs: vec![] });
         t.viewport = 10;
-        app.thread = Some(t);
-        app.view = View::Thread;
+        app.tab.thread = Some(t);
+        app.tab.view = View::Thread;
         app.hit = Some(Hit::Thread { area: Rect::new(0, 1, 40, 10) });
         app.on_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 3, 1 + 9), Instant::now());
-        assert_eq!(app.thread.as_ref().unwrap().selected, 2);
+        assert_eq!(app.tab.thread.as_ref().unwrap().selected, 2);
         app.on_mouse(mouse(MouseEventKind::ScrollDown, 3, 3), Instant::now());
-        assert_eq!(app.thread.as_ref().unwrap().scroll, 2);
+        assert_eq!(app.tab.thread.as_ref().unwrap().scroll, 2);
     }
 
     #[test]
@@ -2788,9 +2717,9 @@ mod tests {
         // Idle: at most a second.
         assert_eq!(app.next_wake(now), Duration::from_secs(1));
         // A spinner animates.
-        app.loading = Some("Loading".into());
+        app.tab.loading = Some("Loading".into());
         assert_eq!(app.next_wake(now), Duration::from_millis(100));
-        app.loading = None;
+        app.tab.loading = None;
         // A status message wakes the loop when it's due to disappear.
         app.info("hi");
         app.status_since = Some(("hi".into(), now - Duration::from_millis(1700)));
@@ -2837,22 +2766,22 @@ mod tests {
     fn partial_pages_show_while_loading_continues() {
         let mut app = test_app();
         let board = |uri: &str| Board { uri: uri.into(), title: String::new(), nsfw: None };
-        app.req = 7;
-        app.loading = Some("Loading boards".into());
+        app.tab.req = 7;
+        app.tab.loading = Some("Loading boards".into());
         app.handle(Msg::BoardsPartial(7, 0, vec![board("a")]));
         assert_eq!(app.sites[0].boards.as_ref().unwrap().len(), 1);
-        assert!(app.loading.is_some());
+        assert!(app.tab.loading.is_some());
         // A stale request's pages are ignored.
         app.handle(Msg::BoardsPartial(6, 0, vec![board("x"), board("y"), board("z")]));
         assert_eq!(app.sites[0].boards.as_ref().unwrap().len(), 1);
         app.handle(Msg::Boards(7, 0, Ok(vec![board("a"), board("b")])));
         assert_eq!(app.sites[0].boards.as_ref().unwrap().len(), 2);
-        assert!(app.loading.is_none());
+        assert!(app.tab.loading.is_none());
 
-        app.req = 8;
-        app.loading = Some("Loading /a/".into());
+        app.tab.req = 8;
+        app.tab.loading = Some("Loading /a/".into());
         app.handle(Msg::CatalogPartial(8, vec![Post { no: 1, ..Default::default() }]));
-        assert_eq!((app.catalog.len(), app.loading.is_some()), (1, true));
+        assert_eq!((app.tab.catalog.len(), app.tab.loading.is_some()), (1, true));
     }
 
     #[test]
@@ -2861,18 +2790,18 @@ mod tests {
         let cfg: Config = toml::from_str("[[site]]\nname = \"t\"\nkind = \"vichan\"\nurl = \"http://127.0.0.1:9\"\nboards = [\"ob\"]").unwrap();
         let mut app = App::new(cfg, KeyMap::default(), None, Store::default());
         app.config_path = None;
-        app.board = Some(Board { uri: "ob".into(), title: "Overboard".into(), nsfw: None });
+        app.tab.board = Some(Board { uri: "ob".into(), title: "Overboard".into(), nsfw: None });
         app.load_catalog();
-        app.catalog = vec![Post { no: 5, board: Some("tech".into()), ..Default::default() }];
-        app.catalog_list.state.select(Some(0));
-        app.view = View::Catalog;
+        app.tab.catalog = vec![Post { no: 5, board: Some("tech".into()), ..Default::default() }];
+        app.tab.catalog_list.state.select(Some(0));
+        app.tab.view = View::Catalog;
         app.enter();
-        assert_eq!((app.view, app.board.as_ref().unwrap().uri.as_str()), (View::Thread, "tech"));
-        assert_eq!(app.pending_thread, 5);
+        assert_eq!((app.tab.view, app.tab.board.as_ref().unwrap().uri.as_str()), (View::Thread, "tech"));
+        assert_eq!(app.tab.pending_thread, 5);
         app.back();
-        assert_eq!((app.view, app.board.as_ref().unwrap().uri.as_str()), (View::Catalog, "ob"));
+        assert_eq!((app.tab.view, app.tab.board.as_ref().unwrap().uri.as_str()), (View::Catalog, "ob"));
         // The overboard's catalog is still there; nothing was reloaded.
-        assert_eq!(app.catalog.len(), 1);
+        assert_eq!(app.tab.catalog.len(), 1);
     }
 
     #[test]
@@ -2911,7 +2840,7 @@ mod tests {
         assert!(!c.keys.contains_key("watch"));
         // The new keys work at once.
         app.settings.popup = None;
-        app.view = View::Catalog;
+        app.tab.view = View::Catalog;
         assert_eq!(app.keys.action(app.scope(), &KeyEvent::from(KeyCode::Char('w'))), Some(Action::Watch));
     }
 
@@ -2921,28 +2850,28 @@ mod tests {
         let html = "<a href=\"#p1\" class=\"quotelink\">&gt;&gt;1</a><br><span class=\"quote\">&gt;green</span><br><s>secret</s> text";
         let parsed = crate::markup::parse_html(html, crate::markup::Flavor::Fourchan);
         let post = |no, body: Vec<Line<'static>>| Post { no, subject: Some("Subj".into()), body, ..Default::default() };
-        app.board = Some(Board { uri: "g".into(), title: String::new(), nsfw: None });
-        app.thread = Some(ThreadView::new("g".into(), 1, vec![post(1, vec![Line::raw("op")]), post(2, parsed.lines)]));
-        app.thread.as_mut().unwrap().selected = 1;
-        app.view = View::Thread;
+        app.tab.board = Some(Board { uri: "g".into(), title: String::new(), nsfw: None });
+        app.tab.thread = Some(ThreadView::new("g".into(), 1, vec![post(1, vec![Line::raw("op")]), post(2, parsed.lines)]));
+        app.tab.thread.as_mut().unwrap().selected = 1;
+        app.tab.view = View::Thread;
         app.act(Action::Copy);
         assert_eq!(app.copied.as_deref(), Some(">>1\n>green\nsecret text"));
         assert_eq!(app.status.as_ref().unwrap().text, "Copied 22 characters");
         app.act(Action::CopyLink);
         assert_eq!(app.copied.as_deref(), Some("https://boards.4chan.org/g/thread/1#p2"));
         // The viewer copies the file's URL, or the post's link.
-        app.thread.as_mut().unwrap().posts[1].files = vec![Attachment { url: "https://i.4cdn.org/g/1.png".into(), ..Default::default() }];
+        app.tab.thread.as_mut().unwrap().posts[1].files = vec![Attachment { url: "https://i.4cdn.org/g/1.png".into(), ..Default::default() }];
         app.images = crate::images::Images::offline();
         app.act(Action::View);
         app.on_key(KeyEvent::from(KeyCode::Char('y')));
         assert_eq!(app.copied.as_deref(), Some("https://i.4cdn.org/g/1.png"));
         app.on_key(KeyEvent::from(KeyCode::Char('Y')));
         assert_eq!(app.copied.as_deref(), Some("https://boards.4chan.org/g/thread/1#p2"));
-        app.viewer = None;
+        app.tab.viewer = None;
         // Catalog: subject and text; a thread link.
-        app.catalog = vec![post(7, vec![Line::raw("hello")])];
-        app.catalog_list.state.select(Some(0));
-        app.view = View::Catalog;
+        app.tab.catalog = vec![post(7, vec![Line::raw("hello")])];
+        app.tab.catalog_list.state.select(Some(0));
+        app.tab.view = View::Catalog;
         app.act(Action::Copy);
         assert_eq!(app.copied.as_deref(), Some("Subj\nhello"));
         app.act(Action::CopyLink);
@@ -2966,31 +2895,31 @@ mod tests {
     fn goto_opens_places_and_u_comes_back() {
         let mut app = local_app();
         app.goto_str("b/y/5#6");
-        assert_eq!((app.site, app.view, app.pending_thread, app.pending_post), (1, View::Thread, 5, Some(6)));
-        assert_eq!(app.board.as_ref().unwrap().uri, "y");
+        assert_eq!((app.tab.site, app.tab.view, app.tab.pending_thread, app.tab.pending_post), (1, View::Thread, 5, Some(6)));
+        assert_eq!(app.tab.board.as_ref().unwrap().uri, "y");
         // Esc from there returns to where : was typed.
-        assert_eq!(app.return_to, Some(View::Sites));
+        assert_eq!(app.tab.return_to, Some(View::Sites));
         // From a thread, `u` comes back across sites.
-        app.thread = Some(ThreadView::new("y".into(), 5, vec![Post { no: 5, ..Default::default() }, Post { no: 6, ..Default::default() }]));
-        app.thread.as_mut().unwrap().selected = 1;
+        app.tab.thread = Some(ThreadView::new("y".into(), 5, vec![Post { no: 5, ..Default::default() }, Post { no: 6, ..Default::default() }]));
+        app.tab.thread.as_mut().unwrap().selected = 1;
         app.goto_str("http://127.0.0.1:3/x/res/3.html#4");
-        assert_eq!((app.site, app.pending_thread, app.board.as_ref().unwrap().uri.as_str()), (0, 3, "x"));
-        app.thread = None;
+        assert_eq!((app.tab.site, app.tab.pending_thread, app.tab.board.as_ref().unwrap().uri.as_str()), (0, 3, "x"));
+        app.tab.thread = None;
         app.act(Action::JumpBack);
-        assert!(app.thread.is_none());
+        assert!(app.tab.thread.is_none());
         // (JumpBack needs a loaded thread; simulate the arrival of thread 3.)
-        app.thread = Some(ThreadView::new("x".into(), 3, vec![Post { no: 3, ..Default::default() }]));
+        app.tab.thread = Some(ThreadView::new("x".into(), 3, vec![Post { no: 3, ..Default::default() }]));
         app.act(Action::JumpBack);
-        assert_eq!((app.site, app.pending_thread, app.pending_post, app.board.as_ref().unwrap().uri.as_str()), (1, 5, Some(6), "y"));
+        assert_eq!((app.tab.site, app.tab.pending_thread, app.tab.pending_post, app.tab.board.as_ref().unwrap().uri.as_str()), (1, 5, Some(6), "y"));
         // A board opens its catalog; a site its boards.
         app.goto_str("a/xy");
-        assert_eq!((app.site, app.view, app.board.as_ref().unwrap().uri.as_str()), (0, View::Catalog, "xy"));
+        assert_eq!((app.tab.site, app.tab.view, app.tab.board.as_ref().unwrap().uri.as_str()), (0, View::Catalog, "xy"));
         app.goto_str("b");
-        assert_eq!((app.site, app.view), (1, View::Boards));
+        assert_eq!((app.tab.site, app.tab.view), (1, View::Boards));
         // Errors are said, not acted on.
         app.goto_str("https://example.com/g/");
         assert!(app.status.as_ref().unwrap().error);
-        assert_eq!(app.view, View::Boards);
+        assert_eq!(app.tab.view, View::Boards);
     }
 
     #[test]
@@ -3004,7 +2933,7 @@ mod tests {
         assert!(app.status.as_ref().unwrap().text.contains("xy"));
         app.on_key(KeyEvent::from(KeyCode::Char('y')));
         app.on_key(KeyEvent::from(KeyCode::Enter));
-        assert_eq!((app.goto.as_deref(), app.view, app.board.as_ref().unwrap().uri.as_str()), (None, View::Catalog, "xy"));
+        assert_eq!((app.goto.as_deref(), app.tab.view, app.tab.board.as_ref().unwrap().uri.as_str()), (None, View::Catalog, "xy"));
         // Site names complete with a slash.
         app.act(Action::Goto);
         app.on_key(KeyEvent::from(KeyCode::Char('b')));
@@ -3020,16 +2949,16 @@ mod tests {
     fn links_panel_lists_and_opens() {
         let mut app = local_app();
         app.switch_site(0);
-        app.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
+        app.tab.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
         let html = r#"<a href="/x/res/1.html#1" class="quotelink">&gt;&gt;1</a> <a href="/xy/res/9.html#10">&gt;&gt;&gt;/xy/10</a> see https://example.com/a"#;
         let parsed = crate::markup::parse_html(html, crate::markup::Flavor::Vichan);
         let reply = Post { no: 2, body: parsed.lines, quotes: parsed.quotes, links: parsed.links, urls: parsed.urls, files: vec![Attachment { filename: "a.png".into(), url: "http://127.0.0.1:3/x/src/a.png".into(), ..Default::default() }], ..Default::default() };
-        app.thread = Some(ThreadView::new("x".into(), 1, vec![Post { no: 1, ..Default::default() }, reply]));
-        app.thread.as_mut().unwrap().selected = 1;
-        app.view = View::Thread;
+        app.tab.thread = Some(ThreadView::new("x".into(), 1, vec![Post { no: 1, ..Default::default() }, reply]));
+        app.tab.thread.as_mut().unwrap().selected = 1;
+        app.tab.view = View::Thread;
         app.act(Action::Links);
         // The quote of a post in this thread isn't listed; the other board's is.
-        let kinds: Vec<String> = app.links.as_ref().unwrap().items.iter().map(|i| match i {
+        let kinds: Vec<String> = app.tab.links.as_ref().unwrap().items.iter().map(|i| match i {
             LinkItem::Quote(_, label) => label.clone(),
             LinkItem::Url(u) => u.clone(),
             LinkItem::File(f) => f.filename.clone(),
@@ -3040,17 +2969,17 @@ mod tests {
         app.on_key(KeyEvent::from(KeyCode::Char('y')));
         assert_eq!(app.copied.as_deref(), Some("https://example.com/a"));
         app.on_key(KeyEvent::from(KeyCode::Enter));
-        assert!(app.links.is_none());
+        assert!(app.tab.links.is_none());
         assert_eq!(app.opened.as_deref(), Some("https://example.com/a"));
         // Enter on the quote opens its thread, and `u` will come back.
         app.act(Action::Links);
         app.on_key(KeyEvent::from(KeyCode::Enter));
-        assert_eq!((app.board.as_ref().unwrap().uri.as_str(), app.pending_thread, app.pending_post), ("xy", 9, Some(10)));
-        assert_eq!(app.trail.len(), 1);
+        assert_eq!((app.tab.board.as_ref().unwrap().uri.as_str(), app.tab.pending_thread, app.tab.pending_post), ("xy", 9, Some(10)));
+        assert_eq!(app.tab.trail.len(), 1);
         // A post without links says so.
-        app.thread = Some(ThreadView::new("x".into(), 1, vec![Post { no: 1, ..Default::default() }]));
+        app.tab.thread = Some(ThreadView::new("x".into(), 1, vec![Post { no: 1, ..Default::default() }]));
         app.act(Action::Links);
-        assert!(app.links.is_none() && app.status.as_ref().unwrap().text == "Post has no links");
+        assert!(app.tab.links.is_none() && app.status.as_ref().unwrap().text == "Post has no links");
     }
 
     #[test]
@@ -3062,16 +2991,16 @@ mod tests {
             filter: Vec<crate::filter::FilterConfig>,
         }
         app.filters = Filters::new(&toml::from_str::<C>(cfg).unwrap().filter).unwrap();
-        app.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
-        app.catalog_board = "x".into();
+        app.tab.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
+        app.tab.catalog_board = "x".into();
         let op = |no, subject: &str| Post { no, subject: Some(subject.into()), ..Default::default() };
-        app.catalog = vec![op(1, "SPAM here"), op(2, "rust thread"), op(3, "other")];
+        app.tab.catalog = vec![op(1, "SPAM here"), op(2, "rust thread"), op(3, "other")];
         app.remark_catalog();
-        app.view = View::Catalog;
+        app.tab.view = View::Catalog;
         assert_eq!(app.visible_catalog(), [1, 2]);
-        assert_eq!(app.catalog_marks[1].highlight.as_deref(), Some("rust"));
+        assert_eq!(app.tab.catalog_marks[1].highlight.as_deref(), Some("rust"));
         // H hides by hand; the filter's own can't be unhidden by H.
-        app.catalog_list.state.select(Some(1));
+        app.tab.catalog_list.state.select(Some(1));
         app.act(Action::Hide);
         assert_eq!(app.visible_catalog(), [1]);
         assert!(app.store.hidden_on("a", "x").contains(&3));
@@ -3079,10 +3008,10 @@ mod tests {
         app.act(Action::ShowHidden);
         assert_eq!(app.visible_catalog(), [0, 1, 2]);
         assert_eq!(app.selected_index(), Some(1));
-        app.catalog_list.state.select(Some(0));
+        app.tab.catalog_list.state.select(Some(0));
         app.act(Action::Hide);
         assert!(app.status.as_ref().unwrap().text.contains("filter \"spam\""));
-        app.catalog_list.state.select(Some(2));
+        app.tab.catalog_list.state.select(Some(2));
         app.act(Action::Hide);
         assert!(!app.store.hidden_on("a", "x").contains(&3));
         app.act(Action::ShowHidden);
@@ -3090,14 +3019,14 @@ mod tests {
         let mut reply = op(11, "");
         reply.body = vec![Line::raw("buy spam")];
         app.set_thread(vec![op(10, "spam OP"), reply, op(12, "")]);
-        app.view = View::Thread;
-        let t = app.thread.as_ref().unwrap();
+        app.tab.view = View::Thread;
+        let t = app.tab.thread.as_ref().unwrap();
         assert!(!t.is_collapsed(0) && t.is_collapsed(1) && !t.is_collapsed(2));
-        app.thread.as_mut().unwrap().selected = 2;
+        app.tab.thread.as_mut().unwrap().selected = 2;
         app.act(Action::Hide);
-        assert!(app.thread.as_ref().unwrap().is_collapsed(2));
+        assert!(app.tab.thread.as_ref().unwrap().is_collapsed(2));
         app.act(Action::ShowHidden);
-        assert!(!app.thread.as_ref().unwrap().is_collapsed(1));
+        assert!(!app.tab.thread.as_ref().unwrap().is_collapsed(1));
     }
 
     #[test]
@@ -3135,14 +3064,14 @@ mod tests {
     #[test]
     fn marking_posts_as_yours_watches_the_thread() {
         let mut app = local_app();
-        app.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
-        app.thread = Some(ThreadView::new("x".into(), 1, vec![Post { no: 1, ..Default::default() }, Post { no: 2, ..Default::default() }]));
-        app.thread.as_mut().unwrap().selected = 1;
-        app.view = View::Thread;
+        app.tab.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
+        app.tab.thread = Some(ThreadView::new("x".into(), 1, vec![Post { no: 1, ..Default::default() }, Post { no: 2, ..Default::default() }]));
+        app.tab.thread.as_mut().unwrap().selected = 1;
+        app.tab.view = View::Thread;
         app.act(Action::Mine);
         let key = ThreadKey { site: "a".into(), board: "x".into(), no: 1 };
         assert_eq!(app.store.watched(&key).unwrap().mine, [2]);
-        assert!(app.thread.as_ref().unwrap().mine.contains(&2));
+        assert!(app.tab.thread.as_ref().unwrap().mine.contains(&2));
         app.act(Action::Mine);
         assert!(app.store.watched(&key).unwrap().mine.is_empty());
     }
@@ -3151,19 +3080,19 @@ mod tests {
     fn catalogs_mark_new_threads_and_replies() {
         let mut app = local_app();
         app.clock = Clock { fixed: Some(1000) };
-        app.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
+        app.tab.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
         let op = |no, replies| Post { no, replies: Some(replies), ..Default::default() };
         app.load_catalog();
-        app.handle(Msg::Catalog(app.req, Ok(vec![op(1, 3), op(2, 0)])));
-        assert!(app.catalog_new.is_empty());
+        app.handle(Msg::Catalog(app.tab.req, Ok(vec![op(1, 3), op(2, 0)])));
+        assert!(app.tab.catalog_new.is_empty());
         // Thread 1 is opened with 3 replies.
         app.set_thread(vec![Post { no: 1, ..Default::default() }, Post { no: 5, ..Default::default() }, Post { no: 6, ..Default::default() }, Post { no: 7, ..Default::default() }]);
         app.load_catalog();
-        app.handle(Msg::Catalog(app.req, Ok(vec![op(9, 0), op(1, 8), op(2, 1)])));
-        assert_eq!(app.catalog_new, [9].into());
-        assert_eq!(app.new_replies(&app.catalog[1]), Some(5));
+        app.handle(Msg::Catalog(app.tab.req, Ok(vec![op(9, 0), op(1, 8), op(2, 1)])));
+        assert_eq!(app.tab.catalog_new, [9].into());
+        assert_eq!(app.new_replies(&app.tab.catalog[1]), Some(5));
         // Threads never opened don't count replies.
-        assert_eq!(app.new_replies(&app.catalog[2]), None);
+        assert_eq!(app.new_replies(&app.tab.catalog[2]), None);
     }
 
     #[test]
@@ -3201,15 +3130,15 @@ mod tests {
     #[test]
     fn expanded_replies_survive_a_refresh() {
         let mut app = local_app();
-        app.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
+        app.tab.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
         let post = |no, quotes: Vec<u64>| Post { no, quotes, ..Default::default() };
         app.set_thread(vec![post(1, vec![]), post(2, vec![1])]);
-        app.view = View::Thread;
+        app.tab.view = View::Thread;
         app.act(Action::Expand);
         app.on_key(KeyEvent::from(KeyCode::Down));
-        assert_eq!((app.thread.as_ref().unwrap().entry(), app.thread.as_ref().unwrap().selected), (1, 1));
+        assert_eq!((app.tab.thread.as_ref().unwrap().entry(), app.tab.thread.as_ref().unwrap().selected), (1, 1));
         app.set_thread(vec![post(1, vec![]), post(2, vec![1]), post(3, vec![1])]);
-        let t = app.thread.as_ref().unwrap();
+        let t = app.tab.thread.as_ref().unwrap();
         assert_eq!(t.entries.len(), 5);
         assert_eq!((t.entry(), t.entries[t.entry()].depth), (1, 1));
     }
@@ -3217,13 +3146,13 @@ mod tests {
     #[test]
     fn grid_moves_in_two_dimensions() {
         let mut app = test_app();
-        app.catalog = (1..=7).map(|no| Post { no, ..Default::default() }).collect();
-        app.view = View::Catalog;
+        app.tab.catalog = (1..=7).map(|no| Post { no, ..Default::default() }).collect();
+        app.tab.view = View::Catalog;
         app.default_layout = CatalogLayout::Grid;
         app.grid_cols = 3;
-        app.catalog_list.state.select(Some(0));
+        app.tab.catalog_list.state.select(Some(0));
         let press = |app: &mut App, c| app.on_key(KeyEvent::from(KeyCode::Char(c)));
-        let at = |app: &App| app.catalog_list.state.selected().unwrap();
+        let at = |app: &App| app.tab.catalog_list.state.selected().unwrap();
         press(&mut app, 'j');
         assert_eq!(at(&app), 3);
         press(&mut app, 'l');
@@ -3238,9 +3167,9 @@ mod tests {
         assert_eq!(at(&app), 3);
         // h in the first column goes back, as in lists.
         press(&mut app, 'h');
-        assert_eq!(app.view, View::Boards);
+        assert_eq!(app.tab.view, View::Boards);
         // Clicks hit the right card.
-        app.view = View::Catalog;
+        app.tab.view = View::Catalog;
         app.hit = Some(Hit::Grid { area: Rect::new(2, 2, 66, 24), offset: 0, cols: 3, cell: (22, 12) });
         app.on_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 2 + 22 + 5, 2 + 12 + 3), Instant::now());
         assert_eq!(at(&app), 4);
@@ -3255,35 +3184,35 @@ mod tests {
         let mut app = local_app();
         app.download_dir = Some(dir.path().display().to_string());
         app.images = crate::images::Images::offline();
-        app.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
+        app.tab.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
         let file = |name: &str| Attachment { filename: name.into(), url: format!("http://127.0.0.1:3/x/src/{name}"), ..Default::default() };
         let post = |no, files: Vec<Attachment>| Post { no, files, ..Default::default() };
-        app.thread = Some(ThreadView::new("x".into(), 1, vec![post(1, vec![file("a.png")]), post(2, vec![]), post(3, vec![file("b.jpg"), file("c.gif")])]));
-        app.view = View::Thread;
-        app.thread.as_mut().unwrap().selected = 1;
+        app.tab.thread = Some(ThreadView::new("x".into(), 1, vec![post(1, vec![file("a.png")]), post(2, vec![]), post(3, vec![file("b.jpg"), file("c.gif")])]));
+        app.tab.view = View::Thread;
+        app.tab.thread.as_mut().unwrap().selected = 1;
         app.act(Action::Gallery);
         // It starts at the selected post's file, or the next.
-        assert_eq!(app.gallery.as_ref().unwrap().state.selected(), Some(1));
-        app.gallery.as_mut().unwrap().cols = 2;
+        assert_eq!(app.tab.gallery.as_ref().unwrap().state.selected(), Some(1));
+        app.tab.gallery.as_mut().unwrap().cols = 2;
         let press = |app: &mut App, code| app.on_key(KeyEvent::from(code));
         press(&mut app, KeyCode::Char('l'));
-        assert_eq!(app.gallery.as_ref().unwrap().state.selected(), Some(2));
+        assert_eq!(app.tab.gallery.as_ref().unwrap().state.selected(), Some(2));
         // Enter views every file of the thread, from this one; esc comes back to the grid.
         press(&mut app, KeyCode::Enter);
-        assert_eq!((app.viewer.as_ref().unwrap().files.len(), app.viewer.as_ref().unwrap().index), (3, 2));
+        assert_eq!((app.tab.viewer.as_ref().unwrap().files.len(), app.tab.viewer.as_ref().unwrap().index), (3, 2));
         press(&mut app, KeyCode::Char('h'));
         press(&mut app, KeyCode::Char('Y'));
         assert_eq!(app.copied.as_deref(), Some("http://127.0.0.1:3/x/res/1.html#3"));
         press(&mut app, KeyCode::Esc);
-        assert!(app.viewer.is_none());
-        assert_eq!(app.gallery.as_ref().unwrap().state.selected(), Some(1));
+        assert!(app.tab.viewer.is_none());
+        assert_eq!(app.tab.gallery.as_ref().unwrap().state.selected(), Some(1));
         // d saves the one file.
         press(&mut app, KeyCode::Char('d'));
         assert_eq!((app.downloads.total, app.downloads.running), (1, 1));
         // Esc: back to the thread, on the file's post.
         press(&mut app, KeyCode::Esc);
-        assert!(app.gallery.is_none());
-        assert_eq!(app.thread.as_ref().unwrap().selected, 2);
+        assert!(app.tab.gallery.is_none());
+        assert_eq!(app.tab.thread.as_ref().unwrap().selected, 2);
     }
 
     #[test]
@@ -3295,34 +3224,34 @@ mod tests {
         .unwrap();
         let mut app = App::new(cfg, KeyMap::default(), None, Store::default());
         app.config_path = None;
-        app.board = Some(Board { uri: "g".into(), title: String::new(), nsfw: None });
-        app.view = View::Catalog;
+        app.tab.board = Some(Board { uri: "g".into(), title: String::new(), nsfw: None });
+        app.tab.view = View::Catalog;
         app.act(Action::ArchiveSearch);
         for c in "borrow".chars() {
             app.on_key(KeyEvent::from(KeyCode::Char(c)));
         }
         app.on_key(KeyEvent::from(KeyCode::Enter));
-        assert_eq!((app.view, app.site), (View::Search, 1));
+        assert_eq!((app.tab.view, app.tab.site), (View::Search, 1));
         let path = format!("{}/tests/fixtures/foolfuuka_search.json", env!("CARGO_MANIFEST_DIR"));
         let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
-        app.handle(Msg::Search(app.req, 1, crate::backend::foolfuuka::parse_search(&v)));
-        assert_eq!(app.search.as_ref().unwrap().hits.len(), 4);
+        app.handle(Msg::Search(app.tab.req, 1, crate::backend::foolfuuka::parse_search(&v)));
+        assert_eq!(app.tab.search.as_ref().unwrap().hits.len(), 4);
         // Going down to the end asks for the next page.
-        let req = app.req;
+        let req = app.tab.req;
         for _ in 0..4 {
             app.on_key(KeyEvent::from(KeyCode::Down));
         }
-        assert_eq!(app.req, req + 1);
-        app.handle(Msg::Search(app.req, 2, Err(anyhow::anyhow!("You're searching too fast."))));
+        assert_eq!(app.tab.req, req + 1);
+        app.handle(Msg::Search(app.tab.req, 2, Err(anyhow::anyhow!("You're searching too fast."))));
         assert!(app.status.as_ref().is_some_and(|s| s.error && s.text.contains("too fast")));
         // Enter: the thread, on the archive, with the post selected.
-        app.search_list.state.select(Some(1));
+        app.tab.search_list.state.select(Some(1));
         app.enter();
-        assert_eq!((app.view, app.pending_thread, app.pending_post), (View::Thread, 109912686, Some(109914413)));
+        assert_eq!((app.tab.view, app.tab.pending_thread, app.tab.pending_post), (View::Thread, 109912686, Some(109914413)));
         app.back();
-        assert_eq!(app.view, View::Search);
+        assert_eq!(app.tab.view, View::Search);
         app.back();
-        assert_eq!((app.view, app.site, app.search.is_none()), (View::Catalog, 0, true));
+        assert_eq!((app.tab.view, app.tab.site, app.tab.search.is_none()), (View::Catalog, 0, true));
         // Sites without an archive say so.
         app.sites[0].cfg.archive = None;
         app.act(Action::ArchiveSearch);
@@ -3335,8 +3264,8 @@ mod tests {
         app.images = crate::images::Images::offline();
         let file = |name: &str, thumb| Attachment { filename: name.into(), url: format!("https://i.example/{name}"), thumb, ..Default::default() };
         let files = vec![file("a.png", None), file("b.webm", Some("https://i.example/bs.jpg".into())), file("c.pdf", None)];
-        app.thread = Some(ThreadView::new("x".into(), 1, vec![Post { no: 1, files, ..Default::default() }]));
-        app.view = View::Thread;
+        app.tab.thread = Some(ThreadView::new("x".into(), 1, vec![Post { no: 1, files, ..Default::default() }]));
+        app.tab.view = View::Thread;
         app.act(Action::ImageSearch);
         // The image itself, and the video's thumbnail; a file with neither is left out.
         let rows = &app.image_search_panel.as_ref().unwrap().rows;
@@ -3368,8 +3297,8 @@ mod tests {
         // A thread on the second site, with a post selected.
         app.goto_str("b/y/5");
         app.set_thread(vec![Post { no: 5, ..Default::default() }, Post { no: 6, ..Default::default() }]);
-        app.thread.as_mut().unwrap().selected = 1;
-        app.catalog_sort = Sort::Newest;
+        app.tab.thread.as_mut().unwrap().selected = 1;
+        app.tab.catalog_sort = Sort::Newest;
         app.save_session(None);
         let saved = app.store.load_session().unwrap();
         assert_eq!(saved.tabs[0], crate::store::Place {
@@ -3385,21 +3314,21 @@ mod tests {
         let mut next = local_app();
         next.store = Store::load(Some(dir.path().to_path_buf())).0;
         next.restore_session();
-        assert_eq!((next.site, next.view, next.pending_thread, next.pending_post, next.catalog_sort), (1, View::Thread, 5, Some(6), Sort::Newest));
+        assert_eq!((next.tab.site, next.tab.view, next.tab.pending_thread, next.tab.pending_post, next.tab.catalog_sort), (1, View::Thread, 5, Some(6), Sort::Newest));
         // If the thread is gone, its catalog instead.
-        next.handle(Msg::Thread(next.req, Err(anyhow::Error::new(http::HttpError::NotFound("x".into())))));
-        assert_eq!(next.view, View::Catalog);
+        next.handle(Msg::Thread(next.tab.req, Err(anyhow::Error::new(http::HttpError::NotFound("x".into())))));
+        assert_eq!(next.tab.view, View::Catalog);
         // A catalog with its selected thread.
-        next.handle(Msg::Catalog(next.req, Ok(vec![])));
-        next.catalog = (1..4).map(|no| Post { no, ..Default::default() }).collect();
-        next.catalog_list.state.select(Some(2));
+        next.handle(Msg::Catalog(next.tab.req, Ok(vec![])));
+        next.tab.catalog = (1..4).map(|no| Post { no, ..Default::default() }).collect();
+        next.tab.catalog_list.state.select(Some(2));
         // (The board has no sort of its own, so its catalog is in bump order: index 2 is thread 3.)
         let place = next.place();
         assert_eq!((place.view.as_str(), place.selected), ("catalog", Some(3)));
         let mut third = local_app();
         third.go_to_place(&place);
-        third.handle(Msg::Catalog(third.req, Ok((1..4).map(|no| Post { no, time: no as i64, ..Default::default() }).collect())));
-        assert_eq!(third.selected_index().map(|i| third.catalog[i].no), Some(3));
+        third.handle(Msg::Catalog(third.tab.req, Ok((1..4).map(|no| Post { no, time: no as i64, ..Default::default() }).collect())));
+        assert_eq!(third.selected_index().map(|i| third.tab.catalog[i].no), Some(3));
     }
 
     #[test]
@@ -3407,26 +3336,26 @@ mod tests {
         let mut app = local_app();
         // Tab 0 loads a catalog on site a.
         app.goto_str("a/x");
-        let first_req = app.req;
+        let first_req = app.tab.req;
         // Tab 1 opens a thread on site b while that's still loading.
         app.tabs.push(Tab::new(0));
         app.switch_tab(1);
-        assert_eq!((app.view, app.thread.is_none()), (View::Sites, true));
+        assert_eq!((app.tab.view, app.tab.thread.is_none()), (View::Sites, true));
         app.goto_str("b/y/5");
-        assert_eq!((app.site, app.view, app.pending_thread), (1, View::Thread, 5));
+        assert_eq!((app.tab.site, app.tab.view, app.tab.pending_thread), (1, View::Thread, 5));
         // Tab 0's catalog arrives: it goes to tab 0, not here.
         app.handle(Msg::Catalog(first_req, Ok(vec![Post { no: 1, ..Default::default() }])));
-        assert!(app.catalog.is_empty());
-        app.handle(Msg::Thread(app.req, Ok(vec![Post { no: 5, ..Default::default() }])));
-        assert_eq!(app.thread.as_ref().unwrap().no, 5);
+        assert!(app.tab.catalog.is_empty());
+        app.handle(Msg::Thread(app.tab.req, Ok(vec![Post { no: 5, ..Default::default() }])));
+        assert_eq!(app.tab.thread.as_ref().unwrap().no, 5);
         app.switch_tab(0);
-        assert_eq!((app.site, app.view, app.catalog.len(), app.loading.is_none()), (0, View::Catalog, 1, true));
-        assert!(app.thread.is_none());
+        assert_eq!((app.tab.site, app.tab.view, app.tab.catalog.len(), app.tab.loading.is_none()), (0, View::Catalog, 1, true));
+        assert!(app.tab.thread.is_none());
         // A response for a tab that's gone is dropped.
-        let stale = app.tabs[1].req_for_tests();
+        let stale = app.tabs[1].req;
         app.tabs.truncate(1);
         app.handle(Msg::Thread(stale, Ok(vec![Post { no: 9, ..Default::default() }])));
-        assert!(app.thread.is_none());
+        assert!(app.tab.thread.is_none());
     }
 
     #[test]
@@ -3435,25 +3364,25 @@ mod tests {
         let mut app = local_app();
         app.store = Store::load(Some(dir.path().to_path_buf())).0;
         app.goto_str("a/x");
-        app.handle(Msg::Catalog(app.req, Ok((1..=3).map(|no| Post { no, ..Default::default() }).collect())));
-        app.catalog_list.state.select(Some(1));
+        app.handle(Msg::Catalog(app.tab.req, Ok((1..=3).map(|no| Post { no, ..Default::default() }).collect())));
+        app.tab.catalog_list.state.select(Some(1));
         let key = |c| KeyEvent::from(KeyCode::Char(c));
         // T: thread 2 in a new tab after this one.
         app.on_key(key('T'));
-        assert_eq!((app.tabs.len(), app.active, app.view, app.pending_thread), (2, 1, View::Thread, 2));
+        assert_eq!((app.tabs.len(), app.active, app.tab.view, app.tab.pending_thread), (2, 1, View::Thread, 2));
         assert_eq!(app.tab_label(0), "/x/");
         // tab / shift-tab switch; each tab keeps its place.
         app.on_key(KeyEvent::from(KeyCode::Tab));
-        assert_eq!((app.active, app.view, app.catalog.len()), (0, View::Catalog, 3));
+        assert_eq!((app.active, app.tab.view, app.tab.catalog.len()), (0, View::Catalog, 3));
         app.on_key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT));
-        assert_eq!((app.active, app.view), (1, View::Thread));
+        assert_eq!((app.active, app.tab.view), (1, View::Thread));
         // The session has both.
         app.save_session(None);
         let s = app.store.load_session().unwrap();
         assert_eq!((s.tabs.len(), s.active, s.tabs[1].thread), (2, 1, Some(2)));
         // ctrl-w closes; the last tab stays.
         app.on_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL));
-        assert_eq!((app.tabs.len(), app.active, app.view), (1, 0, View::Catalog));
+        assert_eq!((app.tabs.len(), app.active, app.tab.view), (1, 0, View::Catalog));
         app.on_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL));
         assert_eq!(app.tabs.len(), 1);
         // At most MAX_TABS.
@@ -3466,9 +3395,9 @@ mod tests {
         let mut next = local_app();
         next.store = Store::load(Some(dir.path().to_path_buf())).0;
         next.restore_session();
-        assert_eq!((next.tabs.len(), next.active, next.view, next.pending_thread), (2, 1, View::Thread, 2));
+        assert_eq!((next.tabs.len(), next.active, next.tab.view, next.tab.pending_thread), (2, 1, View::Thread, 2));
         next.switch_tab(0);
-        assert_eq!((next.view, next.board.as_ref().unwrap().uri.as_str()), (View::Catalog, "x"));
+        assert_eq!((next.tab.view, next.tab.board.as_ref().unwrap().uri.as_str()), (View::Catalog, "x"));
     }
 
     #[test]
@@ -3478,8 +3407,8 @@ mod tests {
         app.config_path = Some(dir.path().join("config.toml"));
         // * in Boards on the selected board, and in a catalog on its board.
         app.switch_site(1);
-        app.view = View::Boards;
-        app.board_list.state.select(Some(0));
+        app.tab.view = View::Boards;
+        app.tab.board_list.state.select(Some(0));
         app.act(Action::Favorite);
         app.goto_str("a/xy");
         app.act(Action::Favorite);
@@ -3487,22 +3416,22 @@ mod tests {
         let c: Config = toml::from_str(&std::fs::read_to_string(dir.path().join("config.toml")).unwrap()).unwrap();
         assert_eq!(c.favorites, ["b/y", "a/xy"]);
         // They're on the home screen after Watched and History; 2 opens the second.
-        app.view = View::Sites;
+        app.tab.view = View::Sites;
         assert_eq!(app.visible_sites()[2..4], [SiteRow::Favorite(0), SiteRow::Favorite(1)]);
         app.on_key(KeyEvent::from(KeyCode::Char('1')));
-        assert_eq!((app.site, app.view, app.board.as_ref().unwrap().uri.as_str()), (1, View::Catalog, "y"));
-        app.view = View::Sites;
+        assert_eq!((app.tab.site, app.tab.view, app.tab.board.as_ref().unwrap().uri.as_str()), (1, View::Catalog, "y"));
+        app.tab.view = View::Sites;
         app.on_key(KeyEvent::from(KeyCode::Char('2')));
-        assert_eq!((app.site, app.board.as_ref().unwrap().uri.as_str()), (0, "xy"));
+        assert_eq!((app.tab.site, app.tab.board.as_ref().unwrap().uri.as_str()), (0, "xy"));
         // x on a favorite row takes it off; * again on the board does too.
-        app.view = View::Sites;
+        app.tab.view = View::Sites;
         app.site_list.state.select(Some(2));
         app.act(Action::Remove);
         assert_eq!(app.favorites.len(), 1);
         app.goto_str("a/xy");
         app.act(Action::Favorite);
         assert!(app.favorites.is_empty());
-        app.view = View::Sites;
+        app.tab.view = View::Sites;
         app.on_key(KeyEvent::from(KeyCode::Char('3')));
         assert!(app.status.as_ref().unwrap().text.contains("No favorites yet"));
     }
@@ -3512,19 +3441,19 @@ mod tests {
         let mut app = local_app();
         for board in ["a/x", "b/y", "a/xy"] {
             app.goto_str(board);
-            app.handle(Msg::Catalog(app.req, Ok(vec![])));
+            app.handle(Msg::Catalog(app.tab.req, Ok(vec![])));
         }
         assert_eq!(app.store.recent_boards, ["a/xy", "b/y", "a/x"]);
         // Favorites aren't repeated as recent.
         app.favorites.push(BoardRef::parse("b/y").unwrap());
-        app.view = View::Sites;
+        app.tab.view = View::Sites;
         let rows = app.visible_sites();
         assert_eq!(rows[2..5], [SiteRow::Favorite(0), SiteRow::Recent(0), SiteRow::Recent(2)]);
         // Enter opens; x forgets it.
         app.site_list.state.select(Some(4));
         app.enter();
-        assert_eq!((app.view, app.board.as_ref().unwrap().uri.as_str()), (View::Catalog, "x"));
-        app.view = View::Sites;
+        assert_eq!((app.tab.view, app.tab.board.as_ref().unwrap().uri.as_str()), (View::Catalog, "x"));
+        app.tab.view = View::Sites;
         app.site_list.state.select(Some(3));
         app.act(Action::Remove);
         assert_eq!(app.store.recent_boards, ["b/y", "a/x"]);
@@ -3558,13 +3487,13 @@ mod tests {
         app.goto_str("a/x");
         app.act(Action::Sort);
         app.act(Action::Compact);
-        assert_eq!((app.catalog_sort, app.layout()), (Sort::Replies, CatalogLayout::Compact));
+        assert_eq!((app.tab.catalog_sort, app.layout()), (Sort::Replies, CatalogLayout::Compact));
         // Another board: the defaults.
         app.goto_str("a/xy");
-        assert_eq!((app.catalog_sort, app.layout()), (Sort::Bump, CatalogLayout::Cards));
+        assert_eq!((app.tab.catalog_sort, app.layout()), (Sort::Bump, CatalogLayout::Cards));
         // Back on the first: its own again (also after a restart, from the data directory).
         app.goto_str("a/x");
-        assert_eq!((app.catalog_sort, app.layout()), (Sort::Replies, CatalogLayout::Compact));
+        assert_eq!((app.tab.catalog_sort, app.layout()), (Sort::Replies, CatalogLayout::Compact));
         assert_eq!(app.store.board_prefs["a/x"], crate::store::BoardPrefs { sort: Some(Sort::Replies), layout: Some(CatalogLayout::Compact) });
         // The default (Settings) applies to boards without their own.
         app.default_layout = CatalogLayout::Grid;
@@ -3575,10 +3504,10 @@ mod tests {
     #[test]
     fn following_a_general() {
         let mut app = local_app();
-        app.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
+        app.tab.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
         let op = |no, subject: &str| Post { no, subject: Some(subject.into()), replies: Some(10), ..Default::default() };
         app.set_thread(vec![op(10, "/lmg/ - Local Models General #5"), Post { no: 11, ..Default::default() }]);
-        app.view = View::Thread;
+        app.tab.view = View::Thread;
         // F follows it (watching it too).
         app.act(Action::Follow);
         let key = |no| ThreadKey { site: "a".into(), board: "x".into(), no };
@@ -3590,7 +3519,7 @@ mod tests {
         // At the bump limit (a refresh says so): its board is searched, once.
         let mut full = op(10, "/lmg/ - Local Models General #5");
         full.bumplimit = true;
-        app.view = View::Sites;
+        app.tab.view = View::Sites;
         app.refreshed(key(10), Ok(vec![full, Post { no: 11, ..Default::default() }]));
         assert!(app.store.watched(&key(10)).unwrap().at_limit);
         app.check_generals(now);
@@ -3613,7 +3542,7 @@ mod tests {
         assert!(app.store.watched(&key(13)).is_none());
         assert!(app.store.watched(&key(20)).is_some());
         // F again stops following.
-        app.view = View::Watched;
+        app.tab.view = View::Watched;
         let i = app.store.watched.iter().position(|w| w.key == key(20)).unwrap();
         app.watched_list.state.select(Some(i));
         app.act(Action::Follow);
@@ -3625,7 +3554,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut app = local_app();
         app.store = Store::load(Some(dir.path().to_path_buf())).0;
-        app.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
+        app.tab.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
         app.clock = Clock { fixed: Some(1000) };
         let posts = |n: u64| (1..=n).map(|no| Post { no, ..Default::default() }).collect::<Vec<_>>();
         app.set_thread(posts(2));
@@ -3641,7 +3570,7 @@ mod tests {
         app.set_thread(posts(3));
         assert_eq!((app.store.history[0].opened, app.store.history[0].last_seen), (2000, 3));
         // What the user does is saved at once.
-        app.view = View::Thread;
+        app.tab.view = View::Thread;
         app.act(Action::Watch);
         let watched = std::fs::read_to_string(dir.path().join("watched.json")).unwrap();
         assert!(watched.contains("\"no\": 1"), "{watched}");
@@ -3651,21 +3580,21 @@ mod tests {
     fn tab_switches_keep_layouts_and_theme_changes_redo_them_all() {
         let mut app = local_app();
         let layout = || Some(ThreadLayout { width: 40, blocks: Vec::new(), starts: vec![0, 0], thumbs: Vec::new() });
-        app.thread = Some(ThreadView::new("x".into(), 1, vec![Post { no: 1, ..Default::default() }]));
-        app.thread.as_mut().unwrap().layout = layout();
+        app.tab.thread = Some(ThreadView::new("x".into(), 1, vec![Post { no: 1, ..Default::default() }]));
+        app.tab.thread.as_mut().unwrap().layout = layout();
         app.tabs.push(Tab::new(0));
         app.switch_tab(1);
-        app.thread = Some(ThreadView::new("x".into(), 2, vec![Post { no: 2, ..Default::default() }]));
-        app.thread.as_mut().unwrap().layout = layout();
+        app.tab.thread = Some(ThreadView::new("x".into(), 2, vec![Post { no: 2, ..Default::default() }]));
+        app.tab.thread.as_mut().unwrap().layout = layout();
         // Switching (and handling another tab's response) doesn't throw layouts away.
         app.switch_tab(0);
         app.switch_tab(1);
-        assert!(app.thread.as_ref().unwrap().layout.is_some());
+        assert!(app.tab.thread.as_ref().unwrap().layout.is_some());
         // A theme change does, in every tab.
         app.set_theme(crate::theme::theme());
-        assert!(app.thread.as_ref().unwrap().layout.is_none());
+        assert!(app.tab.thread.as_ref().unwrap().layout.is_none());
         app.switch_tab(0);
-        assert!(app.thread.as_ref().unwrap().layout.is_none());
+        assert!(app.tab.thread.as_ref().unwrap().layout.is_none());
     }
 
     #[test]
@@ -3696,12 +3625,12 @@ mod tests {
     fn filtering_a_big_catalog_is_fast() {
         let mut app = test_app();
         let text = "lorem ipsum dolor sit amet consectetur adipiscing elit ".repeat(20);
-        app.catalog = (0..300)
+        app.tab.catalog = (0..300)
             .map(|i| Post { no: i, subject: Some(format!("thread {i}")), body: vec![Line::raw(text.clone())], ..Default::default() })
             .collect();
-        app.catalog_list.filter = "thread 29".into();
+        app.tab.catalog_list.filter = "thread 29".into();
         assert_eq!(app.visible_catalog().len(), 11); // 29, 290..299
-        app.catalog_sort = Sort::Replies;
+        app.tab.catalog_sort = Sort::Replies;
         let start = Instant::now();
         for _ in 0..100 {
             std::hint::black_box(app.visible_catalog());
