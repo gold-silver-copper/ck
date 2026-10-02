@@ -10,6 +10,8 @@ use crate::model::{Attachment, Board, Post};
 
 /// The board list is paginated, local boards first, then webring boards from other sites.
 const MAX_BOARD_PAGES: u64 = 5;
+/// The site-wide catalog (`/catalog.json`), shown as a board.
+pub const OVERBOARD: &str = "overboard";
 
 pub struct Jschan {
     base: String,
@@ -39,6 +41,11 @@ pub fn parse_boards(v: &Value) -> (Vec<Board>, bool) {
         })
         .collect();
     (boards, reached_webring)
+}
+
+/// The site-wide catalog: `{ "threads": [...] }`, each thread with its `board`.
+pub fn parse_overboard(base: &str, v: &Value) -> Vec<Post> {
+    v["threads"].as_array().into_iter().flatten().map(|t| post(base, t)).collect()
 }
 
 /// A thread from `/{board}/thread/{no}.json`: the OP with its `replies`.
@@ -75,6 +82,7 @@ pub fn post(base: &str, v: &Value) -> Post {
         replies: as_u64(&v["replyposts"]).map(|n| n as u32),
         images: as_u64(&v["replyfiles"]).map(|n| n as u32),
         sticky: as_bool(&v["sticky"]),
+        board: as_str(&v["board"]),
         locked: as_bool(&v["locked"]),
         ..Default::default()
     }
@@ -106,7 +114,7 @@ impl Backend for Jschan {
         if let Some(b) = &self.boards {
             return Ok(b.clone());
         }
-        let mut out = Vec::new();
+        let mut out = vec![Board { uri: OVERBOARD.into(), title: "Overboard (all boards)".into(), nsfw: None }];
         for page in 1..=MAX_BOARD_PAGES {
             let v = get_json(&format!("{}/boards.json?local_first=true&page={page}", self.base))?;
             let (boards, done) = parse_boards(&v);
@@ -120,6 +128,9 @@ impl Backend for Jschan {
     }
 
     fn catalog(&self, board: &str, _partial: Partial<Post>) -> Result<Vec<Post>> {
+        if board == OVERBOARD {
+            return Ok(parse_overboard(&self.base, &get_json(&format!("{}/catalog.json", self.base))?));
+        }
         let v = get_json(&format!("{}/{}/catalog.json", self.base, enc(board)))?;
         Ok(v.as_array().into_iter().flatten().map(|t| post(&self.base, t)).collect())
     }
@@ -171,6 +182,14 @@ mod tests {
         assert!(spoiler.thumb.is_none());
         let video = posts.iter().flat_map(|p| &p.files).find(|f| f.is_video()).unwrap();
         assert!(video.thumb.as_deref().unwrap().ends_with(".jpg"));
+    }
+
+    #[test]
+    fn overboard() {
+        let posts = super::parse_overboard(BASE, &fixture("jschan_overboard.json"));
+        let boards: Vec<_> = posts.iter().map(|p| p.board.as_deref().unwrap()).collect();
+        assert_eq!(boards, ["k", "fa", "v", "b", "japan"]);
+        assert!(posts.iter().all(|p| p.replies.is_some()));
     }
 
     #[test]

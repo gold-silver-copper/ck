@@ -108,6 +108,9 @@ impl Futaba {
         if let Some(cap) = as_str(&v["capcode"]) {
             name.push_str(&format!(" ## {cap}"));
         }
+        // On an overboard, files live under the thread's own board.
+        let own_board = as_str(&v["board"]);
+        let board = own_board.as_deref().unwrap_or(board);
         let mut files: Vec<_> = self.attachment(board, v).into_iter().collect();
         if let Some(extra) = v["extra_files"].as_array() {
             files.extend(extra.iter().filter_map(|f| self.attachment(board, f)));
@@ -128,6 +131,7 @@ impl Futaba {
             replies: as_u64(&v["replies"]).map(|n| n as u32),
             images: as_u64(&v["images"]).map(|n| n as u32),
             sticky: as_bool(&v["sticky"]),
+            board: own_board,
             locked: as_bool(&v["closed"]) || as_bool(&v["locked"]),
             ..Default::default()
         }
@@ -267,6 +271,16 @@ mod tests {
         assert_eq!((f.filename.as_str(), f.width, f.size), ("842251815915.jpg", Some(1080), Some(178528)));
         let cat = b.parse_catalog("leftypol", &fixture("leftypol_catalog.json"));
         assert!(cat.iter().any(|p| !p.files.is_empty()));
+    }
+
+    #[test]
+    fn overboard_threads_keep_their_board() {
+        let b = Futaba::vichan("https://leftypol.org".into(), None, None);
+        let cat = b.parse_catalog("overboard", &fixture("leftypol_overboard.json"));
+        let boards: Vec<_> = cat.iter().map(|p| p.board.as_deref().unwrap()).collect();
+        assert_eq!(boards, ["leftypol", "latam", "siberia", "tech", "games"]);
+        // Files are under the thread's own board, not the overboard.
+        assert!(cat.iter().flat_map(|p| &p.files).all(|f| !f.url.contains("/overboard/")));
     }
 
     #[test]

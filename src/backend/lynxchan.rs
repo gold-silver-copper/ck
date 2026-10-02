@@ -4,7 +4,7 @@ use anyhow::Result;
 use serde_json::Value;
 
 use super::{Backend, Partial};
-use crate::http::{as_bool, as_str, as_u64, encode_segment as enc, get_json};
+use crate::http::{as_bool, as_str, as_u64, encode_segment as enc, get_json, is_not_found};
 use crate::markup;
 use crate::model::{Attachment, Board, Post};
 
@@ -28,6 +28,24 @@ impl Lynxchan {
     /// Thread OPs from `/{board}/catalog.json`.
     pub fn parse_catalog(&self, v: &Value) -> Vec<Post> {
         v.as_array().into_iter().flatten().map(|t| self.post(t, "threadId")).collect()
+    }
+
+    /// Page 1 of a board's index (`/{board}/1.json`), which is how overboards are served:
+    /// threads from many boards, each with its `boardUri` and its last few replies.
+    pub fn parse_index(&self, v: &Value) -> Vec<Post> {
+        v["threads"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|t| {
+                let mut p = self.post(t, "threadId");
+                let shown = t["posts"].as_array().map_or(0, |a| a.len()) as u64;
+                let shown_files: u64 = t["posts"].as_array().into_iter().flatten().map(|r| r["files"].as_array().map_or(0, |f| f.len()) as u64).sum();
+                p.replies = Some((as_u64(&t["omittedPosts"]).unwrap_or(0) + shown) as u32);
+                p.images = Some((as_u64(&t["omittedFiles"]).unwrap_or(0) + shown_files) as u32);
+                p
+            })
+            .collect()
     }
 
     /// A thread from `/{board}/res/{no}.json`: the OP's fields plus `posts`.
@@ -96,6 +114,7 @@ impl Lynxchan {
             replies: as_u64(&v["postCount"]).map(|n| n as u32),
             images: as_u64(&v["fileCount"]).map(|n| n as u32),
             sticky: as_bool(&v["pinned"]),
+            board: as_str(&v["boardUri"]),
             locked: as_bool(&v["locked"]),
             ..Default::default()
         }
@@ -125,6 +144,14 @@ pub fn parse_boards(v: &Value) -> (Vec<Board>, u64) {
     (boards, as_u64(&v["pageCount"]).unwrap_or(1))
 }
 
+/// The overboards a board list names (`overboard`, `sfwOverboard`), to list as boards.
+pub fn parse_overboards(v: &Value) -> Vec<Board> {
+    [("overboard", "Overboard (all boards)"), ("sfwOverboard", "SFW overboard")]
+        .iter()
+        .filter_map(|(key, title)| Some(Board { uri: as_str(&v[*key])?, title: title.to_string(), nsfw: None }))
+        .collect()
+}
+
 /// A file's thumbnail path and whether it's a spoiler. Spoilers and non-images point at
 /// shared placeholder images, which aren't worth showing.
 fn thumb(v: &Value) -> (Option<String>, bool) {
@@ -146,7 +173,11 @@ impl Backend for Lynxchan {
         let mut out = Vec::new();
         let mut page = 1;
         loop {
-            let (boards, pages) = parse_boards(&self.get(&format!("/boards.js?json=1&page={page}"))?);
+            let v = self.get(&format!("/boards.js?json=1&page={page}"))?;
+            if page == 1 {
+                out.extend(parse_overboards(&v));
+            }
+            let (boards, pages) = parse_boards(&v);
             out.extend(boards);
             if page >= pages || page >= MAX_BOARD_PAGES {
                 break;
@@ -157,8 +188,12 @@ impl Backend for Lynxchan {
         Ok(out)
     }
 
+    /// Overboards have no catalog.json; their first index page stands in for one.
     fn catalog(&self, board: &str, _partial: Partial<Post>) -> Result<Vec<Post>> {
-        Ok(self.parse_catalog(&self.get(&format!("/{}/catalog.json", enc(board)))?))
+        match self.get(&format!("/{}/catalog.json", enc(board))) {
+            Err(e) if is_not_found(&e) => Ok(self.parse_index(&self.get(&format!("/{}/1.json", enc(board)))?)),
+            res => Ok(self.parse_catalog(&res?)),
+        }
     }
 
     fn thread(&self, board: &str, no: u64) -> Result<Vec<Post>> {
@@ -200,6 +235,23 @@ mod tests {
         let (boards, pages) = super::parse_boards(&super::unwrap(json("lynxchan_boards_wrapped.json")));
         assert_eq!((boards[0].uri.as_str(), boards[0].title.as_str()), ("int", "International"));
         assert_eq!(pages, 1);
+    }
+
+    #[test]
+    fn overboards() {
+        // Named in the board list...
+        let names = |f| super::parse_overboards(&super::unwrap(json(f))).into_iter().map(|b| b.uri).collect::<Vec<_>>();
+        assert_eq!(names("lynxchan_boards.json"), ["overboard", "overboard_sfw"]);
+        assert_eq!(names("lynxchan_boards_wrapped.json"), ["alle", "nvip"]);
+        // ...and served as index pages, threads from many boards.
+        let end = Lynxchan::new("https://endchan.net".into(), None);
+        let posts = end.parse_index(&json("lynxchan_overboard.json"));
+        let boards: Vec<_> = posts.iter().map(|p| p.board.as_deref().unwrap()).collect();
+        assert_eq!(boards, ["terrachan", "derman", "polru", "dota"]);
+        let kohl = Lynxchan::new("https://kohlchan.net".into(), None);
+        let posts = kohl.parse_index(&json("kohlchan_overboard.json"));
+        assert_eq!(posts[0].board.as_deref(), Some("int"));
+        assert_eq!(posts[0].replies, Some(47 + 2));
     }
 
     #[test]

@@ -13,6 +13,11 @@ A terminal imageboard browser built with [ratatui](https://ratatui.rs). One inte
 
 All of the examples are in the default config, so they show up without any setup.
 
+Overboards (one catalog mixing threads from many boards) work where the site says which
+board each thread is on: jschan and LynxChan sites list theirs first in the Boards view,
+and leftypol's are in the default config. Catalog entries from another board are tagged
+with it, threads open on their own board, and going back returns to the overboard.
+
 Read-only: browse boards, catalogs, and threads. Files open in your default viewer/browser.
 
 ck follows 4chan's API rules on every site: at most one API request per second per host,

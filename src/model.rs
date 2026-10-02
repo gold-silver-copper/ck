@@ -72,6 +72,9 @@ pub struct Post {
     pub images: Option<u32>,
     pub sticky: bool,
     pub locked: bool,
+    /// The board the thread is on, when the site says. Overboards mix threads from many
+    /// boards, so it can differ from the board being browsed.
+    pub board: Option<String>,
     /// `plain_text` and `search_text`, computed once.
     pub text: OnceLock<(String, String)>,
 }

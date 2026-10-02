@@ -390,6 +390,11 @@ pub struct App {
     pending_post: Option<u64>,
     /// Board the loaded catalog belongs to.
     catalog_board: String,
+    /// The board whose catalog is loaded, to return to from a thread opened on another board
+    /// (an overboard's threads live on their own boards).
+    catalog_of: Option<Board>,
+    /// The open thread was opened from the catalog (not by following a link).
+    from_catalog: bool,
     /// After a thread 404'd: the same thread on the site's configured archive.
     archive_offer: Option<ThreadKey>,
     pub keys: KeyMap,
@@ -459,6 +464,8 @@ impl App {
             trail: Vec::new(),
             pending_post: None,
             catalog_board: String::new(),
+            catalog_of: None,
+            from_catalog: false,
             archive_offer: None,
             keys,
             clock: Clock::default(),
@@ -790,6 +797,7 @@ impl App {
     fn load_catalog(&mut self) {
         let Some(board) = self.board.clone() else { return };
         self.catalog_board = board.uri.clone();
+        self.catalog_of = Some(board.clone());
         let job = move |b: &dyn Backend, id, tx: &Sender<Msg>| {
             b.catalog(&board.uri, &|so_far| {
                 let _ = tx.send(Msg::CatalogPartial(id, so_far.to_vec()));
@@ -1111,8 +1119,9 @@ impl App {
                 let Some(i) = self.selected_index() else { return };
                 let op = &self.catalog[i];
                 let posts = op.replies.map_or(1, |r| r as usize + 1);
+                let board = op.board.clone().unwrap_or_else(|| b.uri.clone());
                 // Unknown until the first refresh, which then counts nothing as unread.
-                (b.uri.clone(), op.no, thread_subject(std::slice::from_ref(op)), posts, 0)
+                (board, op.no, thread_subject(std::slice::from_ref(op)), posts, 0)
             }
             _ => return,
         };
@@ -1137,6 +1146,7 @@ impl App {
         let board = self.boards().iter().find(|b| b.uri == key.board).cloned();
         self.board = Some(board.unwrap_or(Board { uri: key.board, title: String::new(), nsfw: None }));
         self.return_to = Some(self.view);
+        self.from_catalog = false;
         self.thread = None;
         self.view = View::Thread;
         self.load_thread(key.no);
@@ -1498,6 +1508,7 @@ impl App {
 
     /// Open a thread on the current site, selecting `post` when it arrives.
     fn open_thread_at(&mut self, board: Board, no: u64, post: Option<u64>, announce: bool) {
+        self.from_catalog = false;
         if announce {
             self.status = Some((format!("Opening /{}/{no} (u goes back)", board.uri), false));
         }
@@ -1617,8 +1628,13 @@ impl App {
             }
             View::Catalog => {
                 let no = self.catalog[i].no;
+                // On an overboard the thread lives on its own board.
+                if let Some(uri) = self.catalog[i].board.clone().filter(|b| *b != self.catalog_board) {
+                    self.board = Some(self.find_board(&uri));
+                }
                 self.thread = None;
                 self.return_to = None;
+                self.from_catalog = true;
                 self.view = View::Thread;
                 self.load_thread(no);
             }
@@ -1659,6 +1675,10 @@ impl App {
             View::Thread => self.return_to.take().unwrap_or(View::Catalog),
         };
         self.trail.clear();
+        // Back to the catalog the thread was opened from (an overboard's, maybe).
+        if self.view == View::Catalog && std::mem::take(&mut self.from_catalog) {
+            self.board = self.catalog_of.clone();
+        }
         // After following links to another board, the loaded catalog is for the old one.
         if self.view == View::Catalog && self.board.as_ref().is_some_and(|b| b.uri != self.catalog_board) {
             self.catalog.clear();
@@ -1697,7 +1717,10 @@ impl App {
             (View::Watched, _) => self.selected_index().and_then(|i| key_url(&self.store.watched[i].key)),
             (View::History, _) => self.selected_index().and_then(|i| key_url(&self.store.history[i].key)),
             (View::Boards, _) => self.selected_index().map(|i| backend.board_url(&self.boards()[i].uri)),
-            (View::Catalog, Some(b)) => self.selected_index().map(|i| backend.thread_url(&b.uri, self.catalog[i].no)),
+            (View::Catalog, Some(b)) => self.selected_index().map(|i| {
+                let p = &self.catalog[i];
+                backend.thread_url(p.board.as_deref().unwrap_or(&b.uri), p.no)
+            }),
             (View::Thread, Some(b)) => self.thread.as_ref().map(|t| {
                 let mut url = backend.thread_url(&b.uri, t.no);
                 url.push_str(&format!("#{}", t.posts[t.selected].no));
@@ -1875,6 +1898,25 @@ mod tests {
         app.loading = Some("Loading /a/".into());
         app.handle(Msg::CatalogPartial(8, vec![Post { no: 1, ..Default::default() }]));
         assert_eq!((app.catalog.len(), app.loading.is_some()), (1, true));
+    }
+
+    #[test]
+    fn overboard_threads_open_on_their_board_and_back_returns() {
+        // A local site that refuses connections: nothing leaves the machine.
+        let cfg: Config = toml::from_str("[[site]]\nname = \"t\"\nkind = \"vichan\"\nurl = \"http://127.0.0.1:9\"\nboards = [\"ob\"]").unwrap();
+        let mut app = App::new(cfg, KeyMap::default(), None, Store::default());
+        app.board = Some(Board { uri: "ob".into(), title: "Overboard".into(), nsfw: None });
+        app.load_catalog();
+        app.catalog = vec![Post { no: 5, board: Some("tech".into()), ..Default::default() }];
+        app.catalog_list.state.select(Some(0));
+        app.view = View::Catalog;
+        app.enter();
+        assert_eq!((app.view, app.board.as_ref().unwrap().uri.as_str()), (View::Thread, "tech"));
+        assert_eq!(app.pending_thread, 5);
+        app.back();
+        assert_eq!((app.view, app.board.as_ref().unwrap().uri.as_str()), (View::Catalog, "ob"));
+        // The overboard's catalog is still there; nothing was reloaded.
+        assert_eq!(app.catalog.len(), 1);
     }
 
     #[test]

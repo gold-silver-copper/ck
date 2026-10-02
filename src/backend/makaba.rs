@@ -66,6 +66,7 @@ impl Makaba {
             links: parsed.links,
             files: v["files"].as_array().into_iter().flatten().filter_map(|f| self.attachment(f)).collect(),
             sticky: as_bool(&v["sticky"]),
+            board: as_str(&v["board"]),
             locked: as_bool(&v["closed"]),
             ..Default::default()
         }

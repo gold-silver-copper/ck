@@ -69,6 +69,14 @@ mod tests {
                 let board = &boards.first().ok_or_else(|| anyhow::anyhow!("no boards"))?.uri;
                 let cat = b.catalog(board, &|_| pages.set(pages.get() + 1))?;
                 let op = cat.iter().find(|p| !p.sticky).or(cat.first()).ok_or_else(|| anyhow::anyhow!("empty catalog"))?;
+                // On an overboard the thread is on its own board; then also try a real board.
+                let thread_board = op.board.as_deref().unwrap_or(board);
+                if thread_board != board
+                    && let Some(real) = boards.get(1)
+                {
+                    anyhow::ensure!(!b.catalog(&real.uri, &|_| {})?.is_empty(), "empty catalog on /{}/", real.uri);
+                }
+                let board = thread_board;
                 let posts = b.thread(board, op.no)?;
                 anyhow::ensure!(!posts.is_empty() && posts[0].no == op.no, "thread mismatch");
                 // Engines that can look up a post's thread must find this one.

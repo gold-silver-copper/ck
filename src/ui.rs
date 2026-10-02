@@ -365,17 +365,21 @@ fn draw_catalog(f: &mut Frame, app: &mut App, area: Rect) {
             if p.locked {
                 head.push(Span::styled("🔒 ", Style::new().fg(Color::Red)));
             }
+            // Overboards show where each thread lives.
+            if let Some(b) = p.board.as_ref().filter(|b| app.board.as_ref().is_some_and(|cur| cur.uri != **b)) {
+                head.push(Span::styled(format!("/{b}/ "), Style::new().fg(accent())));
+            }
             head.push(Span::styled(format!("{}", p.no), dim()));
             head.push(Span::raw("  "));
             if let Some(s) = &p.subject {
                 head.push(Span::styled(s.clone(), Style::new().fg(accent()).bold()));
                 head.push(Span::raw("  "));
             }
-            head.push(Span::styled(
-                format!("R:{} I:{}", p.replies.unwrap_or(0), p.images.unwrap_or(0)),
-                Style::new().fg(Color::Blue),
-            ));
-            head.push(Span::styled(format!("  {}", ago(p.time, app.clock)), dim()));
+            // Some overboards don't give counts; show nothing rather than zeros.
+            if let Some(r) = p.replies {
+                head.push(Span::styled(format!("R:{r} I:{}  ", p.images.unwrap_or(0)), Style::new().fg(Color::Blue)));
+            }
+            head.push(Span::styled(ago(p.time, app.clock), dim()));
             if app.compact {
                 // One line: the header, then as much of the text as fits.
                 let used: usize = head.iter().map(|s| s.content.width()).sum();

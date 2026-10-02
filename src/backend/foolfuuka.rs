@@ -108,6 +108,7 @@ fn post(v: &Value) -> Option<Post> {
         replies: None,
         images: None,
         sticky: as_bool(&v["sticky"]),
+        board: as_str(&v["board"]["shortname"]),
         locked: as_bool(&v["locked"]),
         ..Default::default()
     })
