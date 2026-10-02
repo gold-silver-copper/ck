@@ -83,6 +83,18 @@ impl Images {
         self.picker.as_ref().map_or("off".into(), |p| format!("{:?}", p.protocol_type()).to_lowercase())
     }
 
+    /// Put an already decoded image in the cache (benchmarks).
+    #[cfg(test)]
+    pub fn insert_decoded(&mut self, url: &str, img: DynamicImage) {
+        let bytes = img.as_bytes().len() * 2;
+        self.slots.insert(url.to_string(), Slot::Ready { img, protos: Vec::new(), bytes, used: 0 });
+    }
+
+    #[cfg(test)]
+    pub fn with_picker(picker: Picker) -> Self {
+        Self { picker: Some(picker), ..Self::offline() }
+    }
+
     #[cfg(test)]
     pub fn queued(&self) -> usize {
         self.queue.state.lock().unwrap().0.len()

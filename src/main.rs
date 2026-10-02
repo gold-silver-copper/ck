@@ -1,5 +1,7 @@
 mod app;
 mod backend;
+#[cfg(test)]
+mod bench;
 mod config;
 mod download;
 mod http;

@@ -1,7 +1,7 @@
 //! Imageboard backends. Each one speaks a different engine's JSON API.
 
 mod foolfuuka;
-mod futaba;
+pub(crate) mod futaba;
 mod jschan;
 mod lynxchan;
 
