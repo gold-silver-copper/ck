@@ -111,6 +111,7 @@ the action name is in brackets. The `?` help lists the same, with your keys.
 | `v`  | image viewer for the OP's files [`view`] |
 | `w` / `T` | watch / unwatch the thread; open it in a new tab [`watch`, `new_tab`] |
 | `F`  | follow the thread as a general [`follow`] |
+| `*`  | favorite this board on / off [`favorite`] |
 | `s`  | cycle the sort: bump order, most replies, newest, oldest (remembered per board) [`sort`] |
 | `c`  | cycle the layout: cards, compact (a line per thread), grid (thumbnails in columns), remembered per board [`compact`] |
 | `O`  | the OP's links and files [`links`] |

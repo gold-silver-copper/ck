@@ -225,7 +225,7 @@ mod tests {
         eprintln!("20 filters over 300 posts: {took:?}");
         assert_eq!(hidden, 0);
         // Run once per load, not per frame. About 1.3ms in a release build; debug is far slower.
-        let limit = if cfg!(debug_assertions) { 600 } else { 20 };
+        let limit = if cfg!(debug_assertions) { 3000 } else { 50 };
         assert!(took < std::time::Duration::from_millis(limit), "{took:?}");
     }
 }

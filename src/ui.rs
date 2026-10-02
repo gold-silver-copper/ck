@@ -1393,23 +1393,28 @@ fn help_sections(keys: &KeyMap) -> Vec<(&'static str, Vec<(String, &'static str)
         (
             "Everywhere",
             vec![
-                ("j k g G, ↑ ↓".into(), "move, top / bottom"),
-                ("ctrl-d / ctrl-u".into(), "half page down / up"),
+                ("j k g G ^d ^u".into(), "move, top/bottom, page"),
                 ("enter l / esc h".into(), "open / back"),
                 (k(Action::Search), "filter (thread: search)"),
                 (pair(Action::Reload, Action::Browser), "reload / open in browser"),
                 (k(Action::Goto), "go to a URL or site/board"),
                 (k(Action::Settings), "settings: theme, keys, …"),
-                (pair(Action::NextTab, Action::PrevTab), "next / previous tab"),
-                (k(Action::CloseTab), "close the tab"),
+                (pair(Action::NextTab, Action::CloseTab), "next tab / close tab"),
                 (format!("{}, ctrl-c", k(Action::Quit)), "quit (mouse works too)"),
+            ],
+        ),
+        (
+            "Home screen",
+            vec![
+                (format!("1-9 / {}", k(Action::Favorite)), "open / favorite a board"),
+                (k(Action::Remove), "unfavorite, hide a site"),
             ],
         ),
         (
             "Watched, History",
             vec![
                 (k(Action::Remove), "remove the entry"),
-                (k(Action::NewTab), "open in a new tab"),
+                (pair(Action::NewTab, Action::Follow), "new tab / follow general"),
                 (pair(Action::Copy, Action::CopyLink), "copy subject+link / link"),
             ],
         ),
@@ -1428,7 +1433,8 @@ fn help_sections(keys: &KeyMap) -> Vec<(&'static str, Vec<(String, &'static str)
             "Catalog",
             vec![
                 (k(Action::View), "view the OP's images"),
-                (pair(Action::Watch, Action::NewTab), "watch / open in a new tab"),
+                (format!("{} / {} / {}", k(Action::Watch), k(Action::NewTab), k(Action::Follow)), "watch / new tab / general"),
+                (k(Action::Favorite), "favorite this board"),
                 (pair(Action::Sort, Action::Compact), "sort / layout (grid, …)"),
                 (k(Action::Links), "the OP's links and files"),
                 (pair(Action::Hide, Action::ShowHidden), "hide / show hidden"),
@@ -1450,7 +1456,7 @@ fn help_sections(keys: &KeyMap) -> Vec<(&'static str, Vec<(String, &'static str)
                 (pair(Action::OpenFile, Action::ImageSearch), "open file / image search"),
                 (k(Action::Links), "the post's links and files"),
                 (format!("{} / {}", pair(Action::Download, Action::DownloadThread), k(Action::Export)), "save: files / all / page"),
-                (pair(Action::Watch, Action::NewTab), "watch / quote in a new tab"),
+                (format!("{} / {} / {}", k(Action::Watch), k(Action::NewTab), k(Action::Follow)), "watch / quote tab / general"),
                 (pair(Action::Hide, Action::ShowHidden), "hide post / show hidden"),
                 (k(Action::Mine), "mark as yours (replies)"),
                 (k(Action::Archive), "open a 404'd thread archived"),

@@ -492,7 +492,7 @@ fn help_fits_at_110x32_and_scrolls_when_small() {
     a.show_help = true;
     let (text, _) = render_at(&mut a, 110, 32);
     // Two columns, everything on screen.
-    for line in ["Everywhere", "Image viewer", "Catalog", "Thread", "mark as yours", "copy file URL / post link", "copy text / link"] {
+    for line in ["Everywhere", "Home screen", "Image viewer", "Catalog", "Thread", "mark as yours", "copy file URL / post link", "watch / quote tab / general", "favorite this board"] {
         assert!(text.contains(line), "{line} missing:\n{text}");
     }
     let (text, _) = render_at(&mut a, 60, 20);
