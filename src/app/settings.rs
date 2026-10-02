@@ -441,9 +441,7 @@ impl App {
     /// Switch the look now; cached thread layouts carry colors, so they're redone.
     pub fn set_theme(&mut self, t: Theme) {
         theme::set(t);
-        if let Some(th) = &mut self.thread {
-            th.layout = None;
-        }
+        self.invalidate_layouts();
     }
 
     fn choose_theme(&mut self, name: &str) {

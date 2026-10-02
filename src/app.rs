@@ -3634,6 +3634,27 @@ mod tests {
     }
 
     #[test]
+    fn tab_switches_keep_layouts_and_theme_changes_redo_them_all() {
+        let mut app = local_app();
+        let layout = || Some(ThreadLayout { width: 40, lines: Vec::new(), starts: vec![0, 0], thumbs: Vec::new() });
+        app.thread = Some(ThreadView::new("x".into(), 1, vec![Post { no: 1, ..Default::default() }]));
+        app.thread.as_mut().unwrap().layout = layout();
+        app.tabs.push(Tab::new(0));
+        app.switch_tab(1);
+        app.thread = Some(ThreadView::new("x".into(), 2, vec![Post { no: 2, ..Default::default() }]));
+        app.thread.as_mut().unwrap().layout = layout();
+        // Switching (and handling another tab's response) doesn't throw layouts away.
+        app.switch_tab(0);
+        app.switch_tab(1);
+        assert!(app.thread.as_ref().unwrap().layout.is_some());
+        // A theme change does, in every tab.
+        app.set_theme(crate::theme::theme());
+        assert!(app.thread.as_ref().unwrap().layout.is_none());
+        app.switch_tab(0);
+        assert!(app.thread.as_ref().unwrap().layout.is_none());
+    }
+
+    #[test]
     fn status_messages_expire() {
         let mut app = test_app();
         let t0 = Instant::now();
