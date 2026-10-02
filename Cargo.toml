@@ -13,6 +13,8 @@ exclude = ["tests/fixtures", "src/snapshots"]
 
 [dependencies]
 anyhow = "1.0.104"
+# The version crossterm uses.
+base64 = "0.22"
 chrono = "0.4.45"
 dirs = "7.0.0"
 html-escape = "0.2.15"

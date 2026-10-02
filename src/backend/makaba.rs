@@ -152,16 +152,9 @@ impl Backend for Makaba {
 
 /// makaba gives MD5s in hex; filters match them in base64, like every other engine's.
 fn hex_to_base64(hex: &str) -> Option<String> {
+    use base64::Engine;
     let bytes: Vec<u8> = (0..hex.len()).step_by(2).map(|i| u8::from_str_radix(hex.get(i..i + 2)?, 16).ok()).collect::<Option<_>>()?;
-    const ABC: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::new();
-    for chunk in bytes.chunks(3) {
-        let n = chunk.iter().enumerate().fold(0u32, |n, (i, &b)| n | (b as u32) << (16 - 8 * i));
-        for i in 0..4 {
-            out.push(if i <= chunk.len() { ABC[(n >> (18 - 6 * i) & 63) as usize] as char } else { '=' });
-        }
-    }
-    Some(out)
+    Some(base64::engine::general_purpose::STANDARD.encode(bytes))
 }
 
 #[cfg(test)]
