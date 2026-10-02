@@ -8,6 +8,7 @@ use ratatui::widgets::ListState;
 
 use super::{App, View};
 use crate::config::{self, ColorMode, ImagesMode};
+use crate::keys::{ACTIONS, Key, Scope};
 use crate::theme::{self, ROLES, Theme, ThemeDef};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -20,6 +21,7 @@ pub enum Item {
     RefreshThread,
     RefreshWatched,
     DownloadDir,
+    Keys,
 }
 
 /// The settings, by section, in display order.
@@ -28,6 +30,7 @@ pub const SECTIONS: &[(&str, &[Item])] = &[
     ("Catalog", &[Item::Compact, Item::Images]),
     ("Background refresh", &[Item::RefreshThread, Item::RefreshWatched]),
     ("Downloads", &[Item::DownloadDir]),
+    ("Keys", &[Item::Keys]),
 ];
 
 const REFRESH_THREAD: &[u64] = &[10, 15, 30, 60, 120];
@@ -66,6 +69,7 @@ impl Item {
             Item::RefreshThread => "Open thread",
             Item::RefreshWatched => "Watched threads",
             Item::DownloadDir => "Folder",
+            Item::Keys => "Key bindings",
         }
     }
 
@@ -79,6 +83,7 @@ impl Item {
             Item::RefreshThread => "How often the open thread updates",
             Item::RefreshWatched => "How often each watched thread updates",
             Item::DownloadDir => "Where d / D save files",
+            Item::Keys => "Rebind any command",
         }
     }
 }
@@ -90,6 +95,35 @@ pub enum Popup {
     Colors { list: ListState, editing: Option<String> },
     /// Typing the download folder.
     Folder { value: String },
+    /// The key editor, over `key_rows()`; `capture` is waiting for a key to bind
+    /// (`Some(true)`: add it to the action's keys).
+    Keys { list: ListState, capture: Option<bool> },
+}
+
+/// The key editor's rows: `Err(title)` for groups (by an action's first scope),
+/// `Ok(index into ACTIONS)` for actions.
+pub fn key_rows() -> Vec<Result<usize, &'static str>> {
+    let groups = [
+        (Scope::Global, "Everywhere"),
+        (Scope::Lists, "Lists"),
+        (Scope::Catalog, "Catalog"),
+        (Scope::Thread, "Thread"),
+        (Scope::Saved, "Watched and History"),
+        (Scope::Viewer, "Image viewer"),
+    ];
+    let mut out = Vec::new();
+    for (scope, title) in groups {
+        let actions: Vec<usize> = (0..ACTIONS.len()).filter(|&i| ACTIONS[i].3[0] == scope).collect();
+        if actions.is_empty() {
+            continue;
+        }
+        if !out.is_empty() {
+            out.push(Err(""));
+        }
+        out.push(Err(title));
+        out.extend(actions.into_iter().map(Ok));
+    }
+    out
 }
 
 #[derive(Default)]
@@ -132,6 +166,10 @@ impl App {
             Item::RefreshThread => format!("every {}s", self.refresh_thread.as_secs()),
             Item::RefreshWatched => format!("every {}s", self.refresh_watched.as_secs()),
             Item::DownloadDir => self.download_dir.clone().unwrap_or_else(|| "~/Downloads/ck/{site}/{board}/{thread}".into()),
+            Item::Keys => match ACTIONS.iter().filter(|e| !self.keys.is_default(e.0)).count() {
+                0 => "defaults".into(),
+                n => format!("{n} changed"),
+            },
         }
     }
 
@@ -182,6 +220,11 @@ impl App {
             }
             Item::DownloadDir => {
                 self.settings.popup = Some(Popup::Folder { value: self.download_dir.clone().unwrap_or_default() });
+            }
+            Item::Keys => {
+                let mut list = ListState::default();
+                list.select(key_rows().iter().position(Result::is_ok));
+                self.settings.popup = Some(Popup::Keys { list, capture: None });
             }
         }
     }
@@ -271,6 +314,37 @@ impl App {
                     }
                 }
             }
+            Popup::Keys { list, capture: Some(add) } => {
+                if key.code != KeyCode::Esc {
+                    self.bind_key(&list, Some((Key::from_event(&key), add)));
+                }
+                Some(Popup::Keys { list, capture: None })
+            }
+            Popup::Keys { mut list, capture: None } => match key.code {
+                KeyCode::Esc | KeyCode::Char('q' | 'h') | KeyCode::Left => None,
+                KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right => Some(Popup::Keys { list, capture: Some(false) }),
+                KeyCode::Char('a') => Some(Popup::Keys { list, capture: Some(true) }),
+                KeyCode::Char('x') | KeyCode::Delete => {
+                    self.bind_key(&list, None);
+                    Some(Popup::Keys { list, capture: None })
+                }
+                code => {
+                    let rows = key_rows();
+                    let actions: Vec<usize> = (0..rows.len()).filter(|&r| rows[r].is_ok()).collect();
+                    let cur = actions.iter().position(|&r| Some(r) == list.selected()).unwrap_or(0);
+                    let to = match code {
+                        KeyCode::Char('j') | KeyCode::Down => (cur + 1).min(actions.len() - 1),
+                        KeyCode::Char('k') | KeyCode::Up => cur.saturating_sub(1),
+                        KeyCode::Char('g') | KeyCode::Home => 0,
+                        KeyCode::Char('G') | KeyCode::End => actions.len() - 1,
+                        KeyCode::PageDown => (cur + 10).min(actions.len() - 1),
+                        KeyCode::PageUp => cur.saturating_sub(10),
+                        _ => cur,
+                    };
+                    list.select(Some(actions[to]));
+                    Some(Popup::Keys { list, capture: None })
+                }
+            },
             Popup::Folder { mut value } => match key.code {
                 KeyCode::Esc => None,
                 KeyCode::Enter => {
@@ -296,6 +370,29 @@ impl App {
             },
         };
         true
+    }
+
+    /// Bind a key to the action selected in the key editor (replacing its keys, or added to
+    /// them), or with `None` reset it to the default; refused if it would clash.
+    fn bind_key(&mut self, list: &ListState, key: Option<(Key, bool)>) {
+        let Some(Ok(i)) = list.selected().and_then(|r| key_rows().get(r).copied()) else { return };
+        let (action, name, ..) = ACTIONS[i];
+        let keys = key.map(|(k, add)| {
+            let mut keys = if add { self.keys.keys(action).to_vec() } else { Vec::new() };
+            if !keys.contains(&k) {
+                keys.push(k);
+            }
+            keys
+        });
+        match self.keys.with(action, keys) {
+            Ok(map) => {
+                self.keys = map;
+                let binding = self.keys.binding(action);
+                let what = format!("{name} = {}", self.keys.label(action));
+                self.save_config(&what, |d| config::set_key(d, name, binding.as_ref()));
+            }
+            Err(e) => self.status = Some((format!("{e:#}"), true)),
+        }
     }
 
     /// Switch the look now; cached thread layouts carry colors, so they're redone.
@@ -357,10 +454,17 @@ impl App {
 
     /// Write a change to the config file and say where it went.
     pub fn save_config(&mut self, what: &str, f: impl FnOnce(&mut toml_edit::DocumentMut)) {
-        self.status = Some(match config::edit(f) {
-            Ok(path) => (format!("Saved {what} in {}", tilde(&path.display().to_string())), false),
+        self.status = Some(match self.edit_config(f) {
+            Ok(path) => (format!("Saved {what} in {path}"), false),
             Err(e) => (format!("Changed {what} for now; couldn't save it: {e:#}"), true),
         });
+    }
+
+    /// Edit the config file; returns its path, for messages.
+    pub fn edit_config(&self, f: impl FnOnce(&mut toml_edit::DocumentMut)) -> anyhow::Result<String> {
+        let path = self.config_path.as_ref().ok_or_else(|| anyhow::anyhow!("no home directory to keep a config file in"))?;
+        config::edit_at(path, f)?;
+        Ok(tilde(&path.display().to_string()))
     }
 }
 

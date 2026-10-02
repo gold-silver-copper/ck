@@ -45,7 +45,8 @@ Navigation (fixed):
 | `esc`, `h`, backspace   | back                                          |
 | mouse                   | wheel scrolls, click selects, double-click opens |
 
-Commands (remappable, see [Configuration](#configuration); the action name is in brackets):
+Commands (remappable in Settings or the config, see [Keys](#remapping-keys); the action name
+is in brackets):
 
 | key  | where                 | action                                                     |
 |------|-----------------------|------------------------------------------------------------|
@@ -72,6 +73,26 @@ Commands (remappable, see [Configuration](#configuration); the action name is in
 
 In the image viewer: `h`/`l` or arrows for the previous/next file, `i` to open it externally,
 `esc` or `q` to close.
+
+### Remapping keys
+
+`,` → Key bindings lists every command with its keys. `enter` and then a key rebinds the
+command, `a` adds another key, `x` resets it to the default. A key that another command
+already uses in the same view is refused. Changes apply at once and are saved in the
+config's `[keys]` section (only the keys you changed):
+
+```toml
+[keys]
+watch = "W"
+help = ["?", "f1"]
+reload = "ctrl-r"
+```
+
+Keys are a character (`"w"`, `"W"`, `":"`), `ctrl-` or `alt-` with one, or a named key:
+`tab`, `shift-tab`, `enter`, `esc`, `backspace`, `delete`, `insert`, arrows (`up`, ...),
+`home`, `end`, `pageup`, `pagedown`, `space`, `f1`–`f12`. Navigation keys (the first
+table) are fixed, as are keys inside text inputs and popups. In the image viewer only
+the viewer's own commands apply.
 
 ## Watched threads and history
 
@@ -132,7 +153,8 @@ and the file is created from the default if you don't have one yet:
 - **Colors**: every color the theme uses, with a swatch and what it's for. `enter` edits
   one (`#rrggbb`, a name, or a 256-color index), `x` resets it. Changing a built-in theme
   saves your changes as a copy, `[themes.NAME-custom]`.
-- Color depth, the compact catalog, images, the refresh intervals, and the download folder.
+- Color depth, the compact catalog, images, the refresh intervals, the download folder,
+  and key bindings (see [Remapping keys](#remapping-keys)).
 
 Custom themes go in the config as `[themes.NAME]` tables. Start from a built-in theme and
 change some colors, or generate a whole theme from one color:
@@ -163,8 +185,9 @@ All settings are optional; see `config.example.toml` for every option with comme
 - `refresh_thread_secs`, `refresh_watched_secs`
 - `compact_catalog = true` (also toggled with `c`, which saves it here, comments intact)
 - `download_dir = "~/stuff/{site}/{board}/{thread}"`
-- `[keys]`: `action = "key"`, e.g. `watch = "W"`. Unknown actions, keys that aren't a single
-  character, and two commands on one key in the same view are reported at startup.
+- `[keys]`: `action = "key"` or `action = ["key", ...]`, e.g. `watch = "W"`; see
+  [Remapping keys](#remapping-keys). Unknown actions, things that aren't keys, and two
+  commands on one key in the same view are reported at startup.
 - `theme = "nord"`, `[themes.NAME]`, `color = "auto" | "truecolor" | "256"`: see
   [Themes and settings](#themes-and-settings). A ck 0.2 `[theme]` table of colors still
   works, on top of the default theme.

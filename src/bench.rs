@@ -40,6 +40,7 @@ fn time<T>(label: &str, n: u32, mut f: impl FnMut() -> T) -> Duration {
 fn app() -> App {
     let cfg: Config = toml::from_str(crate::config::DEFAULT_CONFIG).unwrap();
     let mut app = App::new(cfg, KeyMap::default(), None, Store::default());
+    app.config_path = None;
     app.board = Some(Board { uri: "g".into(), title: "Technology".into(), nsfw: Some(false) });
     app
 }

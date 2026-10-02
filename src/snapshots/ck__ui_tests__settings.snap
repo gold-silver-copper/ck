@@ -20,10 +20,10 @@ expression: snapshot(&mut a)
   Downloads
     Folder            ~/Downloads/ck/{site}/{board}/{…  Where d / D save files
 
-  Saved to ~/.config/ck/config.toml, comments kept. Themes and colors can be edited there too.
+  Keys
+    Key bindings      defaults                          Rebind any command
 
-
-
+  There's no config file to save to (no home directory); changes last until ck quits.
 
 
 

@@ -265,8 +265,12 @@ name = "b4k"
 kind = "foolfuuka"
 url = "https://arch.b4k.dev"
 
-# Remap single-key commands: action = "key". Navigation keys (j/k/g/G/h/l/J/K, arrows,
-# enter, esc, space) are fixed. Actions and their defaults:
+# Remap commands: action = "key", or several: action = ["key", "key"]. Keys are a
+# character ("w", "W", ":"), ctrl-/alt- with one ("ctrl-w", "alt-x"), or a named key (tab,
+# shift-tab, enter, esc, backspace, delete, insert, up, down, left, right, home, end,
+# pageup, pagedown, space, f1-f12). Settings (`,`) has a key editor that saves here.
+# Navigation keys (j/k/g/G/h/l/J/K, arrows, enter, esc, space, ctrl-d/u) are fixed.
+# Actions and their defaults:
 #   everywhere: quit = "q", help = "?", search = "/", reload = "r", browser = "o", settings = ","
 #   catalog:    view = "v", watch = "w", sort = "s", compact = "c"
 #   thread:     view, watch, open_file = "i", replies = "b", jump_back = "u", unread = "U",
@@ -275,6 +279,7 @@ url = "https://arch.b4k.dev"
 #   Watched/History: remove = "x"
 [keys]
 # watch = "W"
+# help = ["?", "f1"]
 
 # Custom themes. Start from a built-in (`base`) or generate one from a single color
 # (`seed`, with mode = "dark" or "light"), then override any role. Colors are "#rrggbb",

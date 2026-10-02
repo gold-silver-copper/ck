@@ -1,10 +1,12 @@
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
+
 use anyhow::{Context, Result};
 use serde::Deserialize;
 use toml_edit::{DocumentMut, Item, Table, value};
 
+use crate::keys::Binding;
 use crate::theme::{LEGACY_KEYS, ThemeDef, ThemeSetting};
 
 pub const DEFAULT_CONFIG: &str = include_str!("../config.example.toml");
@@ -25,9 +27,9 @@ pub struct Config {
     /// Where `d`/`D` save files; `{site}`, `{board}` and `{thread}` are filled in.
     #[serde(default)]
     pub download_dir: Option<String>,
-    /// Key overrides: `action = "key"`.
+    /// Key overrides: `action = "key"` or `action = ["key", "key"]`.
     #[serde(default)]
-    pub keys: HashMap<String, String>,
+    pub keys: HashMap<String, Binding>,
     /// A theme name (or, from ck 0.2, a table of color overrides).
     #[serde(default)]
     pub theme: Option<ThemeSetting>,
@@ -132,15 +134,9 @@ pub enum BoardConfig {
     },
 }
 
-/// Change the user's config file, keeping its comments and layout. A missing file is first
-/// created from the default config. Returns the file's path.
-pub fn edit(f: impl FnOnce(&mut DocumentMut)) -> Result<PathBuf> {
-    let path = Config::path().context("no home directory to keep a config file in")?;
-    edit_at(&path, f)?;
-    Ok(path)
-}
-
-fn edit_at(path: &Path, f: impl FnOnce(&mut DocumentMut)) -> Result<()> {
+/// Change a config file (the user's is `Config::path()`), keeping its comments and layout.
+/// A missing file is first created from the default config.
+pub fn edit_at(path: &Path, f: impl FnOnce(&mut DocumentMut)) -> Result<()> {
     let text = match std::fs::read_to_string(path) {
         Ok(t) => t,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => DEFAULT_CONFIG.to_string(),
@@ -194,6 +190,21 @@ pub fn set_theme_color(doc: &mut DocumentMut, name: &str, base: Option<&str>, ro
     }
 }
 
+/// Set an action's keys in `[keys]`, or with `None` (the default) remove its entry.
+pub fn set_key(doc: &mut DocumentMut, action: &str, binding: Option<&Binding>) {
+    if !doc.contains_key("keys") {
+        doc.insert("keys", Item::Table(Table::new()));
+    }
+    let Some(keys) = doc["keys"].as_table_mut() else { return };
+    match binding {
+        Some(Binding::One(k)) => keys[action] = value(k.as_str()),
+        Some(Binding::Many(v)) => keys[action] = value(v.iter().map(String::as_str).collect::<toml_edit::Array>()),
+        None => {
+            keys.remove(action);
+        }
+    }
+}
+
 fn themes_table(doc: &mut DocumentMut) -> &mut Table {
     if !doc.contains_key("themes") {
         let mut t = Table::new();
@@ -231,7 +242,27 @@ mod tests {
         assert!(!c.compact_catalog && c.keys.is_empty());
     }
 
-    use super::{Config, edit_at, set_theme, set_theme_color};
+    use super::{Config, edit_at, set_key, set_theme, set_theme_color};
+    use crate::keys::Binding;
+
+    #[test]
+    fn key_edits() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "[[site]]\nname = \"x\"\nkind = \"4chan\"\n\n# my keys\n[keys]\nsort = \"z\"\n").unwrap();
+        edit_at(&path, |d| {
+            set_key(d, "watch", Some(&Binding::Many(vec!["W".into(), "ctrl-w".into()])));
+            set_key(d, "sort", None);
+            set_key(d, "help", Some(&Binding::One("f1".into())));
+        })
+        .unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("# my keys"), "{text}");
+        let c: Config = toml::from_str(&text).unwrap();
+        assert_eq!(c.keys.len(), 2);
+        assert_eq!(c.keys["watch"], Binding::Many(vec!["W".into(), "ctrl-w".into()]));
+        assert!(crate::keys::KeyMap::new(&c.keys).is_ok());
+    }
     use crate::theme::ThemeSetting;
 
     #[test]

@@ -1,0 +1,34 @@
+---
+source: src/ui_tests.rs
+expression: snapshot(&mut a)
+---
+ ck  Settings
+
+    Keys                                                                press a key · esc cancel
+
+    Everywhere
+      q               quit             quit                                  everywhere
+      ?               help             help                                  everywhere
+      ,               settings         settings: theme, colors, keys, …      everywhere
+      /               search           filter the list; search a thread      everywhere
+      r               reload           reload                                everywhere
+      o               browser          open in the browser                   everywhere
+
+    Catalog
+      v               view             view the post's images                catalog, thread
+      w               watch            watch / unwatch the thread            catalog, thread
+      s               sort             cycle the sort order                  catalog
+      c               compact          compact layout on / off               catalog
+
+    Thread
+      i               open_file        open the file (videos in mpv)         thread
+      b               replies          jump to the first reply               thread
+      u               jump_back        jump back (also to the last thread)   thread
+      U               unread           jump to the first unread post         thread
+      p               preview          preview the quoted posts              thread
+      n               next_match       next search match                     thread
+
+    Press the new key for quit   esc cancels
+
+
+ enter change   esc back   , settings   ? help

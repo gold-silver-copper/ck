@@ -40,6 +40,8 @@ fn app(images: bool) -> App {
     let mut app = App::new(cfg, KeyMap::default(), None, store);
     app.clock = Clock { fixed: Some(NOW) };
     app.truecolor = true;
+    // Settings changes must never reach the real config file.
+    app.config_path = None;
     if images {
         app.images = Images::offline();
     }
@@ -310,4 +312,16 @@ fn other_themes_and_256_colors() {
         let rgb = buf.content().iter().any(|c| matches!(c.fg, ratatui::style::Color::Rgb(..)) || matches!(c.bg, ratatui::style::Color::Rgb(..)));
         assert!(!rgb, "{name}");
     }
+}
+
+#[test]
+fn key_editor() {
+    let mut a = app(false);
+    a.open_settings();
+    let keys = crate::app::SETTING_SECTIONS.iter().flat_map(|(_, i)| i.iter()).count() - 1;
+    a.settings_list.state.select(Some(keys));
+    a.activate_setting();
+    insta::assert_snapshot!(snapshot(&mut a));
+    a.on_key(ratatui::crossterm::event::KeyEvent::from(ratatui::crossterm::event::KeyCode::Enter));
+    insta::assert_snapshot!("key_editor_capturing", snapshot(&mut a));
 }

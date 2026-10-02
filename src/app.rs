@@ -12,7 +12,7 @@ use ratatui::text::Line;
 use ratatui::widgets::ListState;
 
 use crate::backend::{self, Backend};
-use crate::config::{self, ColorMode, Config, ImagesMode, SiteConfig};
+use crate::config::{ColorMode, Config, ImagesMode, SiteConfig};
 use crate::disk_cache::DiskCache;
 use crate::download;
 use crate::http;
@@ -23,7 +23,7 @@ use crate::store::{Store, ThreadKey};
 use crate::theme::{self, ThemeDef, ThemeSetting};
 
 mod settings;
-pub use settings::{Popup as SettingsPopup, SECTIONS as SETTING_SECTIONS, rows as setting_rows, tilde};
+pub use settings::{Popup as SettingsPopup, SECTIONS as SETTING_SECTIONS, key_rows, rows as setting_rows, tilde};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum View {
@@ -414,6 +414,8 @@ pub struct App {
     /// After a thread 404'd: the same thread on the site's configured archive.
     archive_offer: Option<ThreadKey>,
     pub keys: KeyMap,
+    /// The config file that settings are saved to (tests point it elsewhere).
+    pub config_path: Option<std::path::PathBuf>,
     pub clock: Clock,
     pub downloads: Downloads,
     download_dir: Option<String>,
@@ -509,6 +511,7 @@ impl App {
             from_catalog: false,
             archive_offer: None,
             keys,
+            config_path: Config::path(),
             clock: Clock::default(),
             downloads: Downloads::default(),
             download_dir: cfg.download_dir.clone(),
@@ -1058,10 +1061,9 @@ impl App {
         self.compact = !self.compact;
         let state = if self.compact { "on" } else { "off" };
         let value = self.compact;
-        match config::edit(|d| d["compact_catalog"] = toml_edit::value(value)) {
+        match self.edit_config(|d| d["compact_catalog"] = toml_edit::value(value)) {
             Ok(path) => {
                 self.store.settings.compact_catalog = None;
-                let path = settings::tilde(&path.display().to_string());
                 self.status = Some((format!("Compact catalog {state} (saved in {path})"), false));
             }
             // The config can't be edited: keep the choice in the data directory instead.
@@ -1221,7 +1223,10 @@ impl App {
             return;
         }
         if self.viewer.is_some() {
-            self.on_viewer_key(key.code);
+            match self.keys.action(Scope::Viewer, &key) {
+                Some(action) => self.act(action),
+                None => self.on_viewer_key(key.code),
+            }
             return;
         }
         if self.preview.is_some() {
@@ -1237,10 +1242,7 @@ impl App {
             return;
         }
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
-        if let KeyCode::Char(c) = key.code
-            && !ctrl
-            && let Some(action) = self.keys.action(self.scope(), c)
-        {
+        if let Some(action) = self.keys.action(self.scope(), &key) {
             self.act(action);
             return;
         }
@@ -1825,11 +1827,14 @@ mod tests {
     use ratatui::text::Line;
 
     use super::*;
+    use crate::keys::ACTIONS;
 
     /// An app over the default config; nothing here touches the network.
     pub fn test_app() -> App {
         let cfg: Config = toml::from_str(crate::config::DEFAULT_CONFIG).unwrap();
-        App::new(cfg, KeyMap::default(), None, Store::default())
+        let mut app = App::new(cfg, KeyMap::default(), None, Store::default());
+        app.config_path = None;
+        app
     }
 
     fn mouse(kind: MouseEventKind, column: u16, row: u16) -> MouseEvent {
@@ -1961,6 +1966,7 @@ mod tests {
         // A local site that refuses connections: nothing leaves the machine.
         let cfg: Config = toml::from_str("[[site]]\nname = \"t\"\nkind = \"vichan\"\nurl = \"http://127.0.0.1:9\"\nboards = [\"ob\"]").unwrap();
         let mut app = App::new(cfg, KeyMap::default(), None, Store::default());
+        app.config_path = None;
         app.board = Some(Board { uri: "ob".into(), title: "Overboard".into(), nsfw: None });
         app.load_catalog();
         app.catalog = vec![Post { no: 5, board: Some("tech".into()), ..Default::default() }];
@@ -1973,6 +1979,46 @@ mod tests {
         assert_eq!((app.view, app.board.as_ref().unwrap().uri.as_str()), (View::Catalog, "ob"));
         // The overboard's catalog is still there; nothing was reloaded.
         assert_eq!(app.catalog.len(), 1);
+    }
+
+    #[test]
+    fn key_editor_rebinds_saves_and_refuses_clashes() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = test_app();
+        app.config_path = Some(dir.path().join("config.toml"));
+        let press = |app: &mut App, code| app.on_key(KeyEvent::from(code));
+        app.open_settings();
+        app.settings_list.state.select(Some(settings::items().iter().position(|&i| i == settings::Item::Keys).unwrap()));
+        app.activate_setting();
+        // Move to `watch` and rebind it to W.
+        let rows = settings::key_rows();
+        let watch = rows.iter().position(|r| *r == Ok(ACTIONS.iter().position(|e| e.0 == Action::Watch).unwrap())).unwrap();
+        while app.settings.popup.as_ref().is_some_and(|p| !matches!(p, SettingsPopup::Keys { list, .. } if list.selected() == Some(watch))) {
+            press(&mut app, KeyCode::Down);
+        }
+        press(&mut app, KeyCode::Enter);
+        press(&mut app, KeyCode::Char('W'));
+        assert_eq!(app.keys.label(Action::Watch), "W");
+        // `a` adds a second key.
+        press(&mut app, KeyCode::Char('a'));
+        app.on_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL));
+        assert_eq!(app.keys.label(Action::Watch), "W, ctrl-w");
+        let text = std::fs::read_to_string(dir.path().join("config.toml")).unwrap();
+        assert!(text.contains(r#"watch = ["W", "ctrl-w"]"#), "{text}");
+        // A key another command uses in the same view is refused.
+        press(&mut app, KeyCode::Enter);
+        press(&mut app, KeyCode::Char('v'));
+        assert_eq!(app.keys.label(Action::Watch), "W, ctrl-w");
+        assert!(app.status.as_ref().is_some_and(|(m, err)| *err && m.contains("'v'")), "{:?}", app.status);
+        // x resets to the default, which removes the entry.
+        press(&mut app, KeyCode::Char('x'));
+        assert!(app.keys.is_default(Action::Watch));
+        let c: Config = toml::from_str(&std::fs::read_to_string(dir.path().join("config.toml")).unwrap()).unwrap();
+        assert!(!c.keys.contains_key("watch"));
+        // The new keys work at once.
+        app.settings.popup = None;
+        app.view = View::Catalog;
+        assert_eq!(app.keys.action(app.scope(), &KeyEvent::from(KeyCode::Char('w'))), Some(Action::Watch));
     }
 
     #[test]

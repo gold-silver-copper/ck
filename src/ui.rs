@@ -13,11 +13,12 @@ use ratatui_image::Image;
 use unicode_width::UnicodeWidthStr;
 
 use crate::app::{
-    App, Clock, Hit, SETTING_SECTIONS, SettingsPopup, SiteRow, Sort, ThreadLayout, ThreadView, View, setting_rows,
+    App, Clock, Hit, SETTING_SECTIONS, SettingsPopup, SiteRow, Sort, ThreadLayout, ThreadView, View, key_rows,
+    setting_rows,
 };
 use crate::http;
 use crate::images::{Images, Kind, State};
-use crate::keys::{Action, KeyMap};
+use crate::keys::{self, Action, KeyMap};
 use crate::markup;
 use crate::model::{Attachment, Post};
 use crate::theme::{self, ROLES, Theme, theme};
@@ -907,8 +908,8 @@ fn draw_preview(f: &mut Frame, app: &App) {
 
 /// Key help, by section, with the configured keys. Keep in sync with the README.
 fn help_sections(keys: &KeyMap) -> Vec<(&'static str, Vec<(String, &'static str)>)> {
-    let k = |a| keys.key(a).to_string();
-    let pair = |a, b| format!("{} / {}", keys.key(a), keys.key(b));
+    let k = |a| keys.label(a);
+    let pair = |a, b| format!("{} / {}", keys.label(a), keys.label(b));
     vec![
         (
             "Everywhere",
@@ -921,7 +922,7 @@ fn help_sections(keys: &KeyMap) -> Vec<(&'static str, Vec<(String, &'static str)
                 (k(Action::Search), "filter list"),
                 (k(Action::Reload), "reload"),
                 (k(Action::Browser), "open in browser"),
-                (k(Action::Settings), "settings: theme, colors, …"),
+                (k(Action::Settings), "settings: theme, keys, …"),
                 (format!("{}, ctrl-c", k(Action::Quit)), "quit"),
                 ("mouse".into(), "wheel scroll, click, dbl-click"),
             ],
@@ -1046,10 +1047,15 @@ fn draw_settings(f: &mut Frame, app: &mut App, area: Rect) {
             }
         }
     }
-    let path = crate::config::Config::path().map(|p| p.display().to_string()).unwrap_or_default();
     let y = area.y + setting_rows().len() as u16 + 1;
     if y < area.bottom() {
-        let note = format!("Saved to {}, comments kept. Themes and colors can be edited there too.", crate::app::tilde(&path));
+        let note = match &app.config_path {
+            Some(p) => format!(
+                "Saved to {}, comments kept. Themes, colors and keys can be edited there too.",
+                crate::app::tilde(&p.display().to_string())
+            ),
+            None => "There's no config file to save to (no home directory); changes last until ck quits.".into(),
+        };
         put(f, area.x, y, area.width, Line::styled(note, dim()));
     }
 }
@@ -1118,6 +1124,58 @@ fn draw_settings_popup(f: &mut Frame, app: &App) {
                     Span::styled("   #rrggbb, a name, 0-255, or default", dim()),
                 ]),
                 None => Line::styled("Changing a color of a built-in theme saves it as a copy: NAME-custom.", dim()),
+            };
+            put(f, inner.x, y, inner.width, line);
+        }
+        Some(SettingsPopup::Keys { list, capture }) => {
+            let rows = key_rows();
+            let hint = if capture.is_some() { "press a key · esc cancel" } else { "enter rebind · a add · x reset · esc close" };
+            let h = (rows.len() as u16 + 5).min(f.area().height.saturating_sub(4));
+            let inner = panel(f, 96, h, "Keys", hint);
+            let view = inner.height.saturating_sub(2) as usize;
+            let sel = list.selected().unwrap_or(0);
+            let first = (sel + 2).saturating_sub(view).min(rows.len().saturating_sub(view));
+            for (k, row) in rows.iter().enumerate().skip(first).take(view) {
+                let y = inner.y + (k - first) as u16;
+                let i = match row {
+                    Err(title) => {
+                        put(f, inner.x, y, inner.width, Line::styled(title.to_string(), bold(t.primary)));
+                        continue;
+                    }
+                    Ok(i) => *i,
+                };
+                if k == sel {
+                    fill(f, Rect::new(inner.x - 2, y, inner.width + 4, 1), t.selection);
+                    fill(f, Rect::new(inner.x - 2, y, 1, 1), t.primary);
+                }
+                let (action, name, _, scopes, desc) = keys::ACTIONS[i];
+                let changed = !app.keys.is_default(action);
+                let key_style = if changed { bold(t.primary) } else { bold(t.text) };
+                let scopes = scopes.iter().map(|s| s.label()).collect::<Vec<_>>().join(", ");
+                put(
+                    f,
+                    inner.x,
+                    y,
+                    inner.width,
+                    Line::from(vec![
+                        Span::styled(format!("  {:<16}", truncate(&app.keys.label(action), 15)), key_style),
+                        Span::styled(format!("{name:<17}"), dim()),
+                        Span::styled(format!("{desc:<38}"), Style::new().fg(t.text)),
+                        Span::styled(scopes, dim()),
+                    ]),
+                );
+            }
+            let y = inner.bottom().saturating_sub(1);
+            let line = match (capture, rows.get(sel)) {
+                (Some(add), Some(Ok(i))) => {
+                    let verb = if *add { "Press a key to add to" } else { "Press the new key for" };
+                    Line::from(vec![
+                        Span::styled(format!("{verb} "), Style::new().fg(t.text)),
+                        Span::styled(keys::ACTIONS[*i].1, bold(t.primary)),
+                        Span::styled("   esc cancels", dim()),
+                    ])
+                }
+                _ => Line::styled("Changed keys are saved in [keys]; navigation keys are fixed.", dim()),
             };
             put(f, inner.x, y, inner.width, line);
         }

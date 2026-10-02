@@ -20,10 +20,10 @@ expression: snapshot(&mut a)
   Downloads               catppuccin
     Folder            ~/  tokyo-night                                       es
                           solarized-light
-  Saved to ~/.config/ck/  terminal                                           edited there too.
+  Keys                    terminal
+    Key bindings      de
 
-
-
+  There's no config file to save to (no home directory); changes last until ck quits.
 
 
 
