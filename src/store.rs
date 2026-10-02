@@ -8,6 +8,8 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use crate::model::Board;
 
 const HISTORY_LEN: usize = 100;
+/// Boards remembered as recently opened.
+const RECENT_BOARDS: usize = 20;
 /// Threads and posts hidden by hand, kept per board; the oldest go first.
 const HIDDEN_PER_BOARD: usize = 3000;
 
@@ -110,6 +112,8 @@ pub struct Store {
     pub settings: Settings,
     /// Thread and post numbers hidden by hand, by `site/board`, oldest first.
     pub hidden: std::collections::BTreeMap<String, Vec<u64>>,
+    /// Boards whose catalogs were opened, `site/board`, most recent first.
+    pub recent_boards: Vec<String>,
     /// Catalog threads seen, by `site/board`.
     pub seen: std::collections::BTreeMap<String, std::collections::BTreeMap<u64, SeenThread>>,
     /// `seen` changed since it was last written.
@@ -143,6 +147,7 @@ impl Store {
             store.settings = load_file(&dir.join("settings.json"), &mut warnings);
             store.hidden = load_file(&dir.join("hidden.json"), &mut warnings);
             store.seen = load_file(&dir.join("seen.json"), &mut warnings);
+            store.recent_boards = load_file(&dir.join("recent_boards.json"), &mut warnings);
         }
         (store, warnings)
     }
@@ -154,6 +159,9 @@ impl Store {
         write_atomic(&dir.join("history.json"), &serde_json::to_vec_pretty(&self.history)?)?;
         if !self.hidden.is_empty() || dir.join("hidden.json").exists() {
             write_atomic(&dir.join("hidden.json"), &serde_json::to_vec(&self.hidden)?)?;
+        }
+        if !self.recent_boards.is_empty() || dir.join("recent_boards.json").exists() {
+            write_atomic(&dir.join("recent_boards.json"), &serde_json::to_vec_pretty(&self.recent_boards)?)?;
         }
         if self.seen_dirty.replace(false) {
             write_atomic(&dir.join("seen.json"), &serde_json::to_vec(&self.seen)?)?;
@@ -197,6 +205,14 @@ impl Store {
         map.retain(|_, t| now - t.last <= SEEN_FOR);
         self.seen_dirty.set(true);
         new
+    }
+
+    /// A board's catalog was opened: it goes to the front of the recent boards.
+    pub fn board_opened(&mut self, site: &str, board: &str) {
+        let key = format!("{site}/{board}");
+        self.recent_boards.retain(|b| *b != key);
+        self.recent_boards.insert(0, key);
+        self.recent_boards.truncate(RECENT_BOARDS);
     }
 
     /// A thread was opened with `replies` replies.
@@ -361,6 +377,18 @@ mod tests {
             s.toggle_hidden("4chan", "g", no);
         }
         assert!(!s.is_hidden("4chan", "g", 0) && !s.is_hidden("4chan", "g", 1) && s.is_hidden("4chan", "g", 2));
+    }
+
+    #[test]
+    fn recent_boards_are_recent_first_and_bounded() {
+        let mut s = Store::default();
+        for i in 0..25 {
+            s.board_opened("4chan", &format!("b{i}"));
+        }
+        s.board_opened("4chan", "b10");
+        assert_eq!(s.recent_boards.len(), RECENT_BOARDS);
+        assert_eq!(s.recent_boards[..2], ["4chan/b10", "4chan/b24"]);
+        assert_eq!(s.recent_boards.iter().filter(|b| *b == "4chan/b10").count(), 1);
     }
 
     #[test]

@@ -8,6 +8,7 @@ expression: snapshot(&mut a)
     ◷  History         2 threads recent
     ★  4chan /g/       Technology                                                              1
     ★  lainchan /λ/    Programming                                                             2
+    ↺  4chan /a/       Anime & Manga
        4chan            fourchan    https://4chan.org
        lainchan         vichan      https://lainchan.org
        wizchan          vichan      https://wizchan.org
@@ -30,5 +31,4 @@ expression: snapshot(&mut a)
        junkuchan        jschan      https://junkuchan.org
        nukechan         jschan      https://nukechan.net
        palanq           foolfuuka   https://archive.palanq.win
-       b4k              foolfuuka   https://arch.b4k.dev
  enter open   / filter   o browser   r reload   , settings   ? help

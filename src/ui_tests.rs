@@ -528,6 +528,8 @@ fn home_with_favorites() {
     let mut a = app(false);
     a.favorites = vec![crate::app::BoardRef::parse("4chan/g").unwrap(), crate::app::BoardRef::parse("lainchan/λ").unwrap()];
     a.home_titles.insert("4chan/g".into(), "Technology".into());
+    a.home_titles.insert("4chan/a".into(), "Anime & Manga".into());
+    a.store.recent_boards = vec!["4chan/g".into(), "4chan/a".into()];
     a.site_list.state.select(Some(2));
     insta::assert_snapshot!(snapshot(&mut a));
 }

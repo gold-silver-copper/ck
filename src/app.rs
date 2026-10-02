@@ -95,6 +95,8 @@ pub enum SiteRow {
     Watched,
     History,
     Favorite(usize),
+    /// An index into `store.recent_boards`.
+    Recent(usize),
     Site(usize),
 }
 
@@ -787,6 +789,7 @@ impl App {
         let rows: Vec<SiteRow> = [SiteRow::Watched, SiteRow::History]
             .into_iter()
             .chain((0..self.favorites.len()).map(SiteRow::Favorite))
+            .chain(self.recent_rows().into_iter().map(SiteRow::Recent))
             .chain((0..self.sites.len()).map(SiteRow::Site))
             .collect();
         let names = rows.iter().map(|r| match r {
@@ -795,6 +798,10 @@ impl App {
             SiteRow::Favorite(i) => {
                 let f = &self.favorites[*i];
                 format!("{} /{}/ {}", f.site, f.board, self.board_title(f))
+            }
+            SiteRow::Recent(i) => {
+                let r = BoardRef::parse(&self.store.recent_boards[*i]).unwrap_or_else(|| BoardRef { site: String::new(), board: String::new() });
+                format!("{} /{}/ {}", r.site, r.board, self.board_title(&r))
             }
             SiteRow::Site(i) => self.sites[*i].cfg.name.clone(),
         });
@@ -1274,6 +1281,7 @@ impl App {
         let site = self.current_site().cfg.name.clone();
         let board = self.catalog_board.clone();
         self.catalog_new = self.store.catalog_seen(&site, &board, &nos, self.clock.now());
+        self.store.board_opened(&site, &board);
         self.save();
     }
 
@@ -2304,9 +2312,18 @@ impl App {
 
     fn remove_entry(&mut self) {
         if self.view == View::Sites {
-            if let Some(SiteRow::Favorite(i)) = self.selected_site_row() {
-                let f = self.favorites.remove(i);
-                self.save_favorites(&format!("/{}/ off the favorites", f.board));
+            match self.selected_site_row() {
+                Some(SiteRow::Favorite(i)) => {
+                    let f = self.favorites.remove(i);
+                    self.save_favorites(&format!("/{}/ off the favorites", f.board));
+                }
+                Some(SiteRow::Recent(i)) => {
+                    self.store.recent_boards.remove(i);
+                    self.save();
+                    let len = self.visible_sites().len();
+                    self.site_list.clamp(len);
+                }
+                _ => {}
             }
             return;
         }
@@ -2352,6 +2369,11 @@ impl App {
                 Some(SiteRow::Watched) => self.view = View::Watched,
                 Some(SiteRow::History) => self.view = View::History,
                 Some(SiteRow::Favorite(i)) => self.open_favorite(i),
+                Some(SiteRow::Recent(i)) => {
+                    if let Some(b) = BoardRef::parse(&self.store.recent_boards[i]) {
+                        self.open_board(&b);
+                    }
+                }
                 Some(SiteRow::Site(i)) => self.enter_site(i),
                 None => {}
             }
@@ -3367,6 +3389,29 @@ mod tests {
         app.view = View::Sites;
         app.on_key(KeyEvent::from(KeyCode::Char('3')));
         assert!(app.status.as_ref().unwrap().0.contains("No favorites yet"));
+    }
+
+    #[test]
+    fn recent_boards_on_the_home_screen() {
+        let mut app = local_app();
+        for board in ["a/x", "b/y", "a/xy"] {
+            app.goto_str(board);
+            app.handle(Msg::Catalog(app.req, Ok(vec![])));
+        }
+        assert_eq!(app.store.recent_boards, ["a/xy", "b/y", "a/x"]);
+        // Favorites aren't repeated as recent.
+        app.favorites.push(BoardRef::parse("b/y").unwrap());
+        app.view = View::Sites;
+        let rows = app.visible_sites();
+        assert_eq!(rows[2..5], [SiteRow::Favorite(0), SiteRow::Recent(0), SiteRow::Recent(2)]);
+        // Enter opens; x forgets it.
+        app.site_list.state.select(Some(4));
+        app.enter();
+        assert_eq!((app.view, app.board.as_ref().unwrap().uri.as_str()), (View::Catalog, "x"));
+        app.view = View::Sites;
+        app.site_list.state.select(Some(3));
+        app.act(Action::Remove);
+        assert_eq!(app.store.recent_boards, ["b/y", "a/x"]);
     }
 
     #[test]

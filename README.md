@@ -82,7 +82,7 @@ the action name is in brackets. The `?` help lists the same, with your keys.
 |------|--------|
 | `1`–`9` | open a favorite board (home screen) |
 | `*`  | favorite board on / off (also in a catalog) [`favorite`] |
-| `x`  | on the home screen: take a favorite off [`remove`] |
+| `x`  | on the home screen: take a favorite off, forget a recent board [`remove`] |
 
 **Watched, History**
 
@@ -150,6 +150,9 @@ needs `set -g set-clipboard on`. On a local machine ck also uses `pbcopy`, `wl-c
 `*` on a board (in the Boards list, or in its catalog) makes it a favorite; favorites are
 listed at the top, and `1`–`9` open the first nine directly. `x` on a favorite takes it
 off. They're kept in the config as `favorites = ["4chan/g", "lainchan/λ"]`.
+
+Under them, marked ↺, are the last five boards you opened (that aren't favorites); `x`
+forgets one. The list is kept in the data directory (`recent_boards.json`).
 
 ### Tabs
 
@@ -266,7 +269,7 @@ yours (and watches the thread). Replies to it are counted in Watched ("1 reply t
 quotes of it read `>>123 (You)`, and they get their own notification.
 
 ck keeps its state as JSON in `$XDG_DATA_HOME/ck` (default `~/.local/share/ck`):
-`watched.json` and `history.json`, `hidden.json` (what you hid with `H`), `seen.json`
+`watched.json` and `history.json`, `recent_boards.json`, `hidden.json` (what you hid with `H`), `seen.json`
 (catalog threads seen, for "new" and `+N`), and `session.json` (your tabs, for the next
 start). Board lists fetched from sites are saved there too (`boards/`), so a site's boards
 show up instantly next time; they're refreshed quietly in the background once a day, and

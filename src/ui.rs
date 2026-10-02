@@ -530,6 +530,15 @@ fn draw_sites(f: &mut Frame, app: &mut App, area: Rect) {
                 let key = if i < 9 { vec![chip(format!("{}", i + 1), t.text_dim, t.surface_high)] } else { Vec::new() };
                 vec![spread(left, key, width)]
             }
+            SiteRow::Recent(i) => {
+                let r = crate::app::BoardRef::parse(&app.store.recent_boards[i]);
+                let (name, title) = r.as_ref().map_or((String::new(), ""), |r| (format!("{} /{}/", r.site, r.board), app.board_title(r)));
+                vec![Line::from(vec![
+                    Span::styled("↺  ", Style::new().fg(t.text_dim)),
+                    Span::styled(format!("{:<16}", truncate(&name, 15)), Style::new().fg(t.text)),
+                    Span::styled(title.to_string(), dim()),
+                ])]
+            }
             SiteRow::Site(i) => {
                 let s = &app.sites[i];
                 let url = s.cfg.url.clone().unwrap_or_else(|| "https://4chan.org".into());

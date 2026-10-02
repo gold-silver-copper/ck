@@ -24,6 +24,9 @@ impl BoardRef {
     }
 }
 
+/// Recent boards shown on the home screen.
+const RECENT_SHOWN: usize = 5;
+
 impl App {
     /// Board titles for the home screen's rows, from loaded, configured or saved board lists.
     pub fn refresh_home_titles(&mut self) {
@@ -65,11 +68,19 @@ impl App {
             View::Catalog | View::Thread => self.board.as_ref()?.uri.clone(),
             View::Sites => match self.selected_site_row()? {
                 SiteRow::Favorite(i) => return self.favorites.get(i).cloned(),
+                SiteRow::Recent(i) => return BoardRef::parse(&self.store.recent_boards[i]),
                 _ => return None,
             },
             _ => return None,
         };
         Some(BoardRef { site, board })
+    }
+
+    /// Recently opened boards for the home screen (indices into `store.recent_boards`): the
+    /// last few that aren't favorites.
+    pub fn recent_rows(&self) -> Vec<usize> {
+        let fav: Vec<String> = self.favorites.iter().map(BoardRef::key).collect();
+        (0..self.store.recent_boards.len()).filter(|&i| !fav.contains(&self.store.recent_boards[i])).take(RECENT_SHOWN).collect()
     }
 
     pub fn selected_site_row(&self) -> Option<SiteRow> {
