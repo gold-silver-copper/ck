@@ -47,6 +47,8 @@ refresh_watched_secs = 60
 # Favorite boards, shown at the top of the home screen (1-9 open them). * on a board adds
 # or removes one, and saves the list here.
 favorites = []
+# Sites left off the home screen (x on a site there hides it and saves the list here).
+hidden_sites = []
 
 # Start where you left off: the same view, thread and selected post as when ck quit.
 restore_session = true

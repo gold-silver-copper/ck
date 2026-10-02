@@ -11,7 +11,17 @@ expression: snapshot(&mut a)
     ↺  4chan /a/       Anime & Manga
        4chan            fourchan    https://4chan.org
        lainchan         vichan      https://lainchan.org
+       wizchan          vichan      https://wizchan.org                                   hidden
+       uboachan         vichan      https://uboachan.net                                  hidden
+       endchan          lynxchan    https://endchan.net                                   hidden
+       kohlchan         lynxchan    https://kohlchan.net                                  hidden
        desuarchive      foolfuuka   https://desuarchive.org
+       zzzchan          jschan      https://zzzchan.xyz                                   hidden
+       2ch              makaba      https://2ch.hk                                        hidden
+       smuglo.li        vichan      https://smuglo.li                                     hidden
+       kissu            vichan      https://kissu.moe                                     hidden
+       tvch             vichan      https://tvch.moe                                      hidden
+       sushigirl        vichan      https://sushigirl.cafe                                hidden
        leftypol         vichan      https://leftypol.org
        8kun             vichan      https://8kun.top
        alogs            lynxchan    https://alogs.space
@@ -21,14 +31,4 @@ expression: snapshot(&mut a)
        junkuchan        jschan      https://junkuchan.org
        nukechan         jschan      https://nukechan.net
        palanq           foolfuuka   https://archive.palanq.win
-       b4k              foolfuuka   https://arch.b4k.dev
-       10 hidden sites · enter shows them
-
-
-
-
-
-
-
-
  enter open   / filter   o browser   r reload   , settings   ? help

@@ -82,7 +82,7 @@ the action name is in brackets. The `?` help lists the same, with your keys.
 |------|--------|
 | `1`–`9` | open a favorite board (home screen) |
 | `*`  | favorite board on / off (also in a catalog) [`favorite`] |
-| `x`  | on the home screen: take a favorite off, forget a recent board [`remove`] |
+| `x`  | on the home screen: take a favorite off, forget a recent board, hide / show a site [`remove`] |
 
 **Watched, History**
 
@@ -153,6 +153,10 @@ off. They're kept in the config as `favorites = ["4chan/g", "lainchan/λ"]`.
 
 Under them, marked ↺, are the last five boards you opened (that aren't favorites); `x`
 forgets one. The list is kept in the data directory (`recent_boards.json`).
+
+`x` on a site hides it from the home screen (`hidden_sites = [...]` in the config). The
+last row says how many are hidden; `enter` on it shows them (marked "hidden"), and `x` on
+one brings it back.
 
 ### Tabs
 
@@ -388,7 +392,8 @@ All settings are optional; see `config.example.toml` for every option with comme
 - `restore_session = false` to start at the site list instead of where you left off (the
   view, thread and selected post, catalog sort and filter, saved in the data directory
   as `session.json`). `ck URL` always starts at the URL.
-- `favorites = ["4chan/g", ...]`: favorite boards, see [The home screen](#the-home-screen).
+- `favorites = ["4chan/g", ...]`, `hidden_sites = ["wizchan", ...]`: see
+  [The home screen](#the-home-screen).
 - `notify = "auto" | "bell" | "off"`, `notify_command = [...]`: see
   [Notifications](#notifications).
 - `[[filter]]`: hide or highlight threads and posts, see [Filters](#filters-and-hiding).

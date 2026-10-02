@@ -128,6 +128,24 @@ impl App {
         }
     }
 
+    pub fn is_site_hidden(&self, i: usize) -> bool {
+        self.hidden_sites.contains(&self.sites[i].cfg.name)
+    }
+
+    /// `x` on a site: leave it off the home screen (or, when hidden ones are shown, bring
+    /// it back). Kept in the config as `hidden_sites`.
+    pub fn toggle_site_hidden(&mut self, i: usize) {
+        let name = self.sites[i].cfg.name.clone();
+        let hidden = !self.hidden_sites.remove(&name);
+        if hidden {
+            self.hidden_sites.insert(name.clone());
+        }
+        let list: toml_edit::Array = self.hidden_sites.iter().map(String::as_str).collect();
+        let what = if hidden { format!("{name} as hidden (the last row shows hidden sites)") } else { format!("{name} as shown") };
+        self.save_config(&what, |d| d["hidden_sites"] = toml_edit::value(list));
+        self.clamp_home();
+    }
+
     fn clamp_home(&mut self) {
         let len = self.visible_sites().len();
         self.site_list.clamp(len);

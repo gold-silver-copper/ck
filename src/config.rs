@@ -21,6 +21,9 @@ pub struct Config {
     /// Seconds between background refreshes of each watched thread (at least 60).
     #[serde(default = "default_refresh_watched")]
     pub refresh_watched_secs: u64,
+    /// Sites left off the home screen (by name).
+    #[serde(default)]
+    pub hidden_sites: Vec<String>,
     /// Favorite boards, `site/board`, shown at the top of the home screen.
     #[serde(default)]
     pub favorites: Vec<String>,

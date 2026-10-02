@@ -543,12 +543,20 @@ fn draw_sites(f: &mut Frame, app: &mut App, area: Rect) {
                 let s = &app.sites[i];
                 let url = s.cfg.url.clone().unwrap_or_else(|| "https://4chan.org".into());
                 let kind = format!("{:?}", s.cfg.kind).to_lowercase();
-                vec![Line::from(vec![
+                let hidden = app.is_site_hidden(i);
+                let spans = vec![
                     Span::raw("   "),
-                    Span::styled(format!("{:<16}", s.cfg.name), bold(t.text)),
+                    Span::styled(format!("{:<16}", s.cfg.name), if hidden { dim() } else { bold(t.text) }),
                     chip(format!("{kind:<9}"), t.text_dim, t.surface_high),
                     Span::styled(format!("  {url}"), dim()),
-                ])]
+                ];
+                let right = if hidden { vec![chip("hidden", t.text_dim, t.surface_high)] } else { Vec::new() };
+                vec![spread(spans, right, width)]
+            }
+            SiteRow::HiddenSites => {
+                let n = app.hidden_sites.len();
+                let what = if app.show_hidden_sites { "enter hides them again" } else { "enter shows them" };
+                vec![Line::from(vec![Span::raw("   "), Span::styled(format!("{} · {what}", plural(n, "hidden site")), dim())])]
             }
         })
         .collect();

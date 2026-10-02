@@ -98,6 +98,8 @@ pub enum SiteRow {
     /// An index into `store.recent_boards`.
     Recent(usize),
     Site(usize),
+    /// "N hidden sites": enter shows them (or hides them again).
+    HiddenSites,
 }
 
 pub struct Site {
@@ -521,6 +523,9 @@ pub struct App {
     /// Favorite boards (from the config), and board titles for the home screen.
     pub favorites: Vec<BoardRef>,
     pub home_titles: HashMap<String, String>,
+    /// Sites left off the home screen (from the config), and whether they're shown anyway.
+    pub hidden_sites: std::collections::BTreeSet<String>,
+    pub show_hidden_sites: bool,
     pub board_list: Picker,
     pub catalog_list: Picker,
     pub catalog_sort: Sort,
@@ -682,6 +687,8 @@ impl App {
             site_list: Picker::default(),
             favorites: cfg.favorites.iter().filter_map(|f| BoardRef::parse(f)).collect(),
             home_titles: HashMap::new(),
+            hidden_sites: cfg.hidden_sites.iter().cloned().collect(),
+            show_hidden_sites: false,
             board_list: Picker::default(),
             catalog_list: Picker::default(),
             catalog_sort: Sort::default(),
@@ -790,7 +797,8 @@ impl App {
             .into_iter()
             .chain((0..self.favorites.len()).map(SiteRow::Favorite))
             .chain(self.recent_rows().into_iter().map(SiteRow::Recent))
-            .chain((0..self.sites.len()).map(SiteRow::Site))
+            .chain((0..self.sites.len()).filter(|&i| self.show_hidden_sites || !self.is_site_hidden(i)).map(SiteRow::Site))
+            .chain((!self.hidden_sites.is_empty()).then_some(SiteRow::HiddenSites))
             .collect();
         let names = rows.iter().map(|r| match r {
             SiteRow::Watched => "Watched".to_string(),
@@ -804,6 +812,7 @@ impl App {
                 format!("{} /{}/ {}", r.site, r.board, self.board_title(&r))
             }
             SiteRow::Site(i) => self.sites[*i].cfg.name.clone(),
+            SiteRow::HiddenSites => "hidden sites".to_string(),
         });
         filtered(&self.site_list.filter, names).into_iter().map(|i| rows[i]).collect()
     }
@@ -2323,6 +2332,7 @@ impl App {
                     let len = self.visible_sites().len();
                     self.site_list.clamp(len);
                 }
+                Some(SiteRow::Site(i)) => self.toggle_site_hidden(i),
                 _ => {}
             }
             return;
@@ -2375,6 +2385,11 @@ impl App {
                     }
                 }
                 Some(SiteRow::Site(i)) => self.enter_site(i),
+                Some(SiteRow::HiddenSites) => {
+                    self.show_hidden_sites = !self.show_hidden_sites;
+                    let len = self.visible_sites().len();
+                    self.site_list.clamp(len);
+                }
                 None => {}
             }
             return;
@@ -3412,6 +3427,28 @@ mod tests {
         app.site_list.state.select(Some(3));
         app.act(Action::Remove);
         assert_eq!(app.store.recent_boards, ["b/y", "a/x"]);
+    }
+
+    #[test]
+    fn hiding_sites_from_the_home_screen() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = local_app();
+        app.config_path = Some(dir.path().join("config.toml"));
+        let sites = |app: &App| app.visible_sites().into_iter().filter(|r| matches!(r, SiteRow::Site(_) | SiteRow::HiddenSites)).collect::<Vec<_>>();
+        assert_eq!(sites(&app), [SiteRow::Site(0), SiteRow::Site(1)]);
+        app.site_list.state.select(Some(2));
+        app.act(Action::Remove);
+        assert_eq!(sites(&app), [SiteRow::Site(1), SiteRow::HiddenSites]);
+        let c: Config = toml::from_str(&std::fs::read_to_string(dir.path().join("config.toml")).unwrap()).unwrap();
+        assert_eq!(c.hidden_sites, ["a"]);
+        // The last row shows them; x on one brings it back.
+        app.site_list.state.select(Some(3));
+        app.enter();
+        assert_eq!(sites(&app), [SiteRow::Site(0), SiteRow::Site(1), SiteRow::HiddenSites]);
+        app.site_list.state.select(Some(2));
+        app.act(Action::Remove);
+        assert_eq!(sites(&app), [SiteRow::Site(0), SiteRow::Site(1)]);
+        assert!(app.hidden_sites.is_empty());
     }
 
     #[test]

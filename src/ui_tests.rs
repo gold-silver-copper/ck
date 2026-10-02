@@ -530,6 +530,12 @@ fn home_with_favorites() {
     a.home_titles.insert("4chan/g".into(), "Technology".into());
     a.home_titles.insert("4chan/a".into(), "Anime & Manga".into());
     a.store.recent_boards = vec!["4chan/g".into(), "4chan/a".into()];
+    for name in ["wizchan", "uboachan", "endchan", "kohlchan", "zzzchan", "2ch", "smuglo.li", "kissu", "tvch", "sushigirl"] {
+        a.hidden_sites.insert(name.into());
+    }
     a.site_list.state.select(Some(2));
     insta::assert_snapshot!(snapshot(&mut a));
+    a.show_hidden_sites = true;
+    a.site_list.state.select(Some(8));
+    insta::assert_snapshot!("home_showing_hidden_sites", snapshot(&mut a));
 }
