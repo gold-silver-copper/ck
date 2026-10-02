@@ -4,7 +4,7 @@ use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
 
-use crate::app::{App, Clock, Preview, SettingsPopup, ThreadView, View, Viewer};
+use crate::app::{App, Clock, Part, Preview, SettingsPopup, ThreadView, View, Viewer};
 use crate::images::Images;
 use crate::markup::{Flavor, parse_html};
 use crate::model::{Attachment, Board, Post};
@@ -562,4 +562,91 @@ fn thread_lines_are_cached_but_never_stale() {
     a.set_theme(crate::theme::BUILTIN[1].1);
     render(&mut a);
     assert!(!std::rc::Rc::ptr_eq(&after[1], &blocks(&a)[1]));
+}
+
+#[test]
+fn focused_quote_peeks_at_its_post() {
+    use ratatui::crossterm::event::{KeyCode, KeyEvent};
+    let mut a = thread_app(false);
+    a.tab.thread.as_mut().unwrap().select(1);
+    render(&mut a);
+    // tab: the post's first part, its quote of the OP, which shows the OP without taking keys.
+    a.on_key(KeyEvent::from(KeyCode::Tab));
+    let (text, buf) = render(&mut a);
+    insta::assert_snapshot!(text);
+    let t = theme();
+    let focused: String = buf.content().iter().filter(|c| c.bg == t.primary).map(|c| c.symbol()).collect();
+    assert!(focused.contains(">>1000"), "{focused:?}");
+    // Keys still move the focus: on to the Replies label, then the reply.
+    a.on_key(KeyEvent::from(KeyCode::Tab));
+    a.on_key(KeyEvent::from(KeyCode::Tab));
+    let focused: String = render(&mut a).1.content().iter().filter(|c| c.bg == t.primary).map(|c| c.symbol()).collect();
+    assert!(focused.contains(">>1003"), "{focused:?}");
+}
+
+#[test]
+fn focused_file() {
+    use ratatui::crossterm::event::{KeyCode, KeyEvent};
+    let mut a = thread_app(false);
+    render(&mut a);
+    a.on_key(KeyEvent::from(KeyCode::Tab));
+    insta::assert_snapshot!(snapshot(&mut a));
+}
+
+#[test]
+fn actions_menu() {
+    use ratatui::crossterm::event::{KeyCode, KeyEvent};
+    let mut a = thread_app(false);
+    a.tab.thread.as_mut().unwrap().select(1);
+    render(&mut a);
+    a.on_key(KeyEvent::from(KeyCode::Char('.')));
+    insta::assert_snapshot!(snapshot(&mut a));
+    // On a focused quote it starts with what enter does to it.
+    a.on_key(KeyEvent::from(KeyCode::Esc));
+    a.on_key(KeyEvent::from(KeyCode::Tab));
+    a.on_key(KeyEvent::from(KeyCode::Char('.')));
+    let text = render(&mut a).0;
+    assert!(text.contains("enter  go to >>1000") && text.contains("copy its address"), "{text}");
+}
+
+#[test]
+fn link_hints() {
+    use ratatui::crossterm::event::{KeyCode, KeyEvent};
+    let mut a = thread_app(false);
+    render(&mut a);
+    a.on_key(KeyEvent::from(KeyCode::Char('f')));
+    insta::assert_snapshot!("link_hints_thread", snapshot(&mut a));
+    // A label picks its target: here, post 1001's quote of the OP, which jumps there.
+    let h = a.hints.as_ref().unwrap();
+    let label = h.targets.iter().find(|x| matches!(&x.to, crate::app::HintTo::Thread(1, Some(_)))).unwrap().label.clone();
+    for c in label.chars() {
+        a.on_key(KeyEvent::from(KeyCode::Char(c)));
+    }
+    assert!(a.hints.is_none());
+    assert_eq!(a.tab.thread.as_ref().unwrap().selected, 0);
+    // In a catalog: a label per thread; picking one opens it.
+    let mut c = catalog_app(false);
+    render(&mut c);
+    c.on_key(KeyEvent::from(KeyCode::Char('f')));
+    insta::assert_snapshot!("link_hints_catalog", snapshot(&mut c));
+    c.on_key(KeyEvent::from(KeyCode::Char('s')));
+    assert_eq!((c.tab.view, c.tab.pending_thread), (View::Thread, c.tab.catalog[1].no));
+}
+
+#[test]
+fn clicking_a_part_focuses_it() {
+    use ratatui::crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+    let mut a = thread_app(false);
+    let (text, _) = render(&mut a);
+    // Where ">>1000" is drawn in post 1001.
+    let (row, line) = text.lines().enumerate().find(|(_, l)| l.contains(">>1000 (OP)")).unwrap();
+    let col = line.find(">>1000").unwrap() as u16 + 2;
+    let click = MouseEvent { kind: MouseEventKind::Down(MouseButton::Left), column: col, row: row as u16, modifiers: ratatui::crossterm::event::KeyModifiers::NONE };
+    a.on_mouse(click, std::time::Instant::now());
+    let t = a.tab.thread.as_ref().unwrap();
+    assert_eq!(t.selected, 1);
+    assert!(matches!(&t.focus, Some(Part::Link(_))), "{:?}", t.focus);
+    // Right-click: the menu for it.
+    a.on_mouse(MouseEvent { kind: MouseEventKind::Down(MouseButton::Right), ..click }, std::time::Instant::now());
+    assert!(a.menu.as_ref().is_some_and(|m| m.items.iter().any(|i| matches!(i, crate::app::MenuItem::Enter(l) if l == "go to >>1000"))));
 }

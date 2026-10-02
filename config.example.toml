@@ -291,10 +291,12 @@ url = "https://arch.b4k.dev"
 # Navigation keys (j/k/g/G/h/l/J/K, arrows, enter, esc, space, ctrl-d/u) are fixed.
 # Actions and their defaults:
 #   everywhere: quit = "q", help = "?", search = "/", reload = "r", browser = "o", settings = ",",
-#               goto = ":", next_tab = "tab", prev_tab = "shift-tab", close_tab = "ctrl-w"
+#               goto = ":", next_tab = "]", prev_tab = "[", close_tab = "ctrl-w", menu = "."
+#   everywhere but the image viewer: hints = "f"
 #   catalog:    view = "v", watch = "w", sort = "s", compact = "c", links = "O", hide = "H",
-#               show_hidden = "Z", archive_search = "f"
-#   thread:     view, watch, links, hide, show_hidden, mine = "m", expand = "e", gallery = "V",
+#               show_hidden = "Z", archive_search = "A"
+#   thread:     next_part = "tab", prev_part = "shift-tab",
+#               view, watch, links, hide, show_hidden, mine = "m", expand = "e", gallery = "V",
 #               image_search = "R", open_file = "i",
 #               replies = "b", jump_back = "u", unread = "U",
 #               preview = "p", next_match = "n", prev_match = "N", spoiler = "s",

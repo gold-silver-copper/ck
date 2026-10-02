@@ -29,7 +29,7 @@ impl Search {
 impl App {
     /// The archive to search for the current board: the site itself if it's an archive,
     /// else its configured `archive`.
-    fn archive_site(&self) -> Option<usize> {
+    pub(super) fn archive_site(&self) -> Option<usize> {
         let site = self.current_site();
         if site.cfg.kind == SiteKind::Foolfuuka {
             return Some(self.tab.site);

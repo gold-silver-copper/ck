@@ -59,8 +59,12 @@ actions! {
     Reload, "reload", Key::char('r'), &[Scope::Global], "reload";
     Browser, "browser", Key::char('o'), &[Scope::Global], "open in the browser";
     Goto, "goto", Key::char(':'), &[Scope::Global], "go to a URL or site/board/thread";
-    NextTab, "next_tab", Key::code(KeyCode::Tab), &[Scope::Global], "next tab";
-    PrevTab, "prev_tab", Key::code(KeyCode::BackTab), &[Scope::Global], "previous tab";
+    NextTab, "next_tab", Key::char(']'), &[Scope::Global], "next tab";
+    PrevTab, "prev_tab", Key::char('['), &[Scope::Global], "previous tab";
+    Menu, "menu", Key::char('.'), &[Scope::Global, Scope::Viewer], "what you can do with what's selected";
+    Hints, "hints", Key::char('f'), &[Scope::Lists, Scope::Catalog, Scope::Thread, Scope::Saved], "label what's on screen; type a label to open it";
+    NextPart, "next_part", Key::code(KeyCode::Tab), &[Scope::Thread], "focus the post's next image or link (then the next post's)";
+    PrevPart, "prev_part", Key::code(KeyCode::BackTab), &[Scope::Thread], "focus the previous image or link";
     CloseTab, "close_tab", Key::ctrl('w'), &[Scope::Global], "close the tab";
     View, "view", Key::char('v'), &[Scope::Catalog, Scope::Thread], "view the post's images";
     Watch, "watch", Key::char('w'), &[Scope::Catalog, Scope::Thread], "watch / unwatch the thread";
@@ -78,7 +82,7 @@ actions! {
     Download, "download", Key::char('d'), &[Scope::Thread], "save the post's files";
     DownloadThread, "download_thread", Key::char('D'), &[Scope::Thread], "save the thread's files";
     Archive, "archive", Key::char('a'), &[Scope::Thread], "open a 404'd thread in the archive";
-    ArchiveSearch, "archive_search", Key::char('f'), &[Scope::Catalog], "search the board's archive";
+    ArchiveSearch, "archive_search", Key::char('A'), &[Scope::Catalog], "search the board's archive";
     Links, "links", Key::char('O'), &[Scope::Catalog, Scope::Thread], "the post's links and files";
     Hide, "hide", Key::char('H'), &[Scope::Catalog, Scope::Thread], "hide / unhide the thread or post";
     ShowHidden, "show_hidden", Key::char('Z'), &[Scope::Catalog, Scope::Thread], "show hidden threads and posts";

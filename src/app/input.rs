@@ -7,6 +7,8 @@ use super::*;
 enum Modal {
     Settings,
     Help,
+    Menu,
+    Hints,
     ImageSearch,
     Viewer,
     Preview,
@@ -26,7 +28,8 @@ impl App {
         if matches!(ev.kind, MouseEventKind::ScrollDown | MouseEventKind::ScrollUp) {
             let key = |c| KeyEvent::from(if c { KeyCode::Down } else { KeyCode::Up });
             match self.modal() {
-                Some(Modal::Help | Modal::Viewer | Modal::Preview | Modal::Links | Modal::ImageSearch) => self.on_key(key(down)),
+                Some(Modal::Help | Modal::Menu | Modal::Viewer | Modal::Preview | Modal::Links | Modal::ImageSearch) => self.on_key(key(down)),
+                Some(Modal::Hints) => self.hints = None,
                 _ if self.tab.view == View::Thread => {
                     if let Some(t) = &mut self.tab.thread {
                         t.scroll_lines(if down { 3 } else { -3 });
@@ -37,20 +40,48 @@ impl App {
             }
             return;
         }
-        if ev.kind != MouseEventKind::Down(MouseButton::Left) {
+        let right = ev.kind == MouseEventKind::Down(MouseButton::Right);
+        if ev.kind != MouseEventKind::Down(MouseButton::Left) && !right {
+            return;
+        }
+        // A right-click selects what's under it and opens its menu (or closes one that's open).
+        if right {
+            match self.modal() {
+                Some(Modal::Menu) => self.menu = None,
+                None => {
+                    self.select_at(ev.column, ev.row);
+                    self.open_menu();
+                }
+                _ => {}
+            }
             return;
         }
         let pos = ratatui::layout::Position::new(ev.column, ev.row);
         // Popups and inputs that aren't the tab's own stay with it: no switching under them.
         let app_wide = matches!(
             self.modal(),
-            Some(Modal::Settings | Modal::Help | Modal::ImageSearch | Modal::Goto | Modal::SearchInput | Modal::Searching | Modal::Filtering)
+            Some(
+                Modal::Settings
+                    | Modal::Help
+                    | Modal::Menu
+                    | Modal::Hints
+                    | Modal::ImageSearch
+                    | Modal::Goto
+                    | Modal::SearchInput
+                    | Modal::Searching
+                    | Modal::Filtering
+            )
         );
         if let Some(&(_, i)) = self.tab_chips.iter().find(|(r, _)| r.contains(pos)).filter(|_| !app_wide) {
             self.switch_tab(i);
             return;
         }
         match self.modal() {
+            Some(Modal::Menu) => return self.on_menu_click(ev.column, ev.row),
+            Some(Modal::Hints) => {
+                self.hints = None;
+                return;
+            }
             Some(Modal::Links) => return self.on_links_click(ev.column, ev.row, now),
             Some(Modal::ImageSearch) => return self.on_image_search_click(ev.column, ev.row),
             Some(Modal::Help | Modal::Preview) => {
@@ -75,8 +106,14 @@ impl App {
                 }
             }
         } else if self.tab.view == View::Thread {
+            // A click on a part focuses it (a double click opens it).
+            let part = self.thread_part_at(ev.column, ev.row).and_then(|(_, part)| part);
             if let Some(t) = &mut self.tab.thread {
                 t.set_cursor(target);
+                if t.focus != part {
+                    t.focus = part;
+                    t.layout = None;
+                }
             }
             if double {
                 self.on_key(KeyEvent::from(KeyCode::Enter));
@@ -97,6 +134,8 @@ impl App {
         let open = [
             (self.settings_popup.is_some(), Modal::Settings),
             (self.show_help, Modal::Help),
+            (self.menu.is_some(), Modal::Menu),
+            (self.hints.is_some(), Modal::Hints),
             (self.image_search_panel.is_some(), Modal::ImageSearch),
             (self.tab.viewer.is_some(), Modal::Viewer),
             (self.tab.preview.is_some(), Modal::Preview),
@@ -108,6 +147,24 @@ impl App {
             (self.filtering, Modal::Filtering),
         ];
         open.into_iter().find_map(|(on, modal)| on.then_some(modal))
+    }
+
+    /// Select what's at a screen position: a list row, or a post (and its part) in a thread.
+    fn select_at(&mut self, col: u16, row: u16) {
+        if self.tab.view == View::Thread {
+            if let Some((e, part)) = self.thread_part_at(col, row)
+                && let Some(t) = &mut self.tab.thread
+            {
+                t.set_cursor(e);
+                t.focus = part;
+                t.layout = None;
+            }
+        } else if let Some(target) = self.click_target(col, row)
+            && let Some((p, len)) = self.picker()
+            && target < len
+        {
+            p.state.select(Some(target));
+        }
     }
 
     /// The list row or thread post at a screen position.
@@ -141,6 +198,8 @@ impl App {
         if let Some(modal) = self.modal() {
             match modal {
                 Modal::Settings => self.on_settings_popup_key(key),
+                Modal::Menu => self.on_menu_key(key),
+                Modal::Hints => self.on_hints_key(key),
                 Modal::Help => match key.code {
                     KeyCode::Char('j') | KeyCode::Down => self.help_scroll = self.help_scroll.saturating_add(1),
                     KeyCode::Char('k') | KeyCode::Up => self.help_scroll = self.help_scroll.saturating_sub(1),
@@ -177,6 +236,13 @@ impl App {
         }
         match key.code {
             KeyCode::F(5) => self.refresh(),
+            // Esc backs out a step: from a focused part to its post first.
+            KeyCode::Esc if self.focused().is_some() => {
+                if let Some(t) = &mut self.tab.thread {
+                    t.focus = None;
+                    t.layout = None;
+                }
+            }
             KeyCode::Esc if self.tab.view == View::Thread && self.tab.thread.as_ref().is_some_and(|t| !t.search.is_empty()) => {
                 if let Some(t) = &mut self.tab.thread {
                     t.set_search(String::new());
@@ -239,8 +305,18 @@ impl App {
             }
             Action::Search => self.filtering = true,
             Action::Reload => self.refresh(),
-            Action::Browser => self.open_in_browser(),
-            Action::View => self.open_viewer(),
+            Action::Browser => match self.focused_url() {
+                Some((_, url)) => self.open_url(&url),
+                None => self.open_in_browser(),
+            },
+            Action::View => match self.focused() {
+                Some(&Part::File(k)) => self.view_file(k),
+                _ => self.open_viewer(),
+            },
+            Action::Menu => self.open_menu(),
+            Action::Hints => self.open_hints(),
+            Action::NextPart => self.step_part(true),
+            Action::PrevPart => self.step_part(false),
             Action::Watch => self.toggle_watch(),
             Action::Remove => self.remove_entry(),
             Action::Goto => self.goto = Some(String::new()),
@@ -266,7 +342,10 @@ impl App {
                 }
             }
             Action::ShowHidden => self.toggle_show_hidden(),
-            Action::Copy => self.copy(false),
+            Action::Copy => match self.focused_url() {
+                Some((what, url)) => self.copy_text(what, url),
+                None => self.copy(false),
+            },
             Action::CopyLink => self.copy(true),
             Action::Sort => {
                 self.tab.catalog_sort = self.tab.catalog_sort.next();
@@ -278,7 +357,11 @@ impl App {
                 self.info(format!("Sorted by {}", self.tab.catalog_sort.as_str()));
             }
             Action::Compact => self.cycle_layout(),
-            Action::Download => self.download(false),
+            Action::Download => {
+                if !self.download_focused() {
+                    self.download(false);
+                }
+            }
             Action::DownloadThread => self.download(true),
             Action::Archive => match self.tab.archive_offer.take() {
                 Some(key) => {
@@ -352,6 +435,11 @@ impl App {
             KeyCode::PageUp => t.scroll_lines(-(half * 2 - 1)),
             KeyCode::Char('g') | KeyCode::Home => t.select_entry(0),
             KeyCode::Char('G') | KeyCode::End => t.select_entry(usize::MAX),
+            KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right if t.focus.is_some() => {
+                if let Some(part) = t.focus.clone() {
+                    self.activate(part);
+                }
+            }
             KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right => {
                 let quotes = t.current().map(|p| p.quotes.clone()).unwrap_or_default();
                 if !quotes.into_iter().any(|q| t.jump_to(q)) {

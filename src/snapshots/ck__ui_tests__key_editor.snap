@@ -14,19 +14,19 @@ expression: snapshot(&mut a)
       r               reload           reload                               everywhere
       o               browser          open in the browser                  everywhere
       :               goto             go to a URL or site/board/thread     everywhere
-      tab             next_tab         next tab                             everywhere
-      shift-tab       prev_tab         previous tab                         everywhere
+      ]               next_tab         next tab                             everywhere
+      [               prev_tab         previous tab                         everywhere
+      .               menu             what you can do with what's selected everywhere, image v…
       ctrl-w          close_tab        close the tab                        everywhere
 
     Lists
+      f               hints            label what's on screen; type a labe… lists, catalog, thr…
       *               favorite         favorite board: on / off             lists, catalog
 
     Catalog
       v               view             view the post's images               catalog, thread
       w               watch            watch / unwatch the thread           catalog, thread
       s               sort             cycle the sort order                 catalog
-      c               compact          layout: cards, compact, grid         catalog
-      f               archive_search   search the board's archive           catalog
 
     Changed keys are saved in [keys]; navigation keys are fixed.
 

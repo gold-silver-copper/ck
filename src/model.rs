@@ -14,7 +14,7 @@ pub struct Board {
 }
 
 /// Where a quote link points, as far as the markup tells.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Link {
     /// `None`: the current board.
     pub board: Option<String>,
@@ -22,6 +22,23 @@ pub struct Link {
     pub thread: Option<u64>,
     /// `None` for a board link like `>>>/g/`.
     pub post: Option<u64>,
+}
+
+/// Where a link in a post's text goes.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum Target {
+    Quote(Link),
+    Url(String),
+}
+
+/// A link in a post's text: the body line it's on, the byte range of its text in that
+/// line, and where it goes. In the order they appear.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Anchor {
+    pub line: usize,
+    pub start: usize,
+    pub end: usize,
+    pub to: Target,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -70,6 +87,8 @@ pub struct Post {
     pub links: Vec<Link>,
     /// Web links in the comment.
     pub urls: Vec<String>,
+    /// Every link in the text, where it is.
+    pub anchors: Vec<Anchor>,
     pub files: Vec<Attachment>,
     // Catalog-only fields.
     pub replies: Option<u32>,

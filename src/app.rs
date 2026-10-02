@@ -25,6 +25,7 @@ use crate::model::{Attachment, Board, Link, Post};
 use crate::store::{Store, ThreadKey};
 use crate::theme::{self, ThemeDef, ThemeSetting};
 
+mod focus;
 mod gallery;
 mod input;
 mod generals;
@@ -35,6 +36,7 @@ mod search;
 mod session;
 mod tabs;
 mod settings;
+pub use focus::{HintTarget, HintTo, Hints, Menu, MenuItem};
 pub use gallery::Gallery;
 pub use home::BoardRef;
 pub use links::{ImageSearchPanel, LinkItem, LinksPanel};
@@ -160,6 +162,48 @@ pub struct ThreadView {
     pub show_hidden: bool,
     /// Posts marked as yours.
     pub mine: HashSet<u64>,
+    /// The part of the selected post that has focus (`tab`); `None`: the post itself.
+    pub focus: Option<Part>,
+    /// Scroll the focused part into view at the next draw.
+    pub follow_focus: bool,
+}
+
+/// A part of a post that can take focus, be clicked or get a hint.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum Part {
+    File(usize),
+    Link(crate::model::Target),
+    /// The "Replies" label: shows them inline.
+    Replies,
+}
+
+/// A post's parts in reading order: its files, the links in its text, then its replies.
+pub fn parts(p: &Post, backlinks: &[u64]) -> Vec<Part> {
+    let mut out: Vec<Part> = (0..p.files.len()).map(Part::File).collect();
+    let mut add = |part: Part| {
+        if !out.contains(&part) {
+            out.push(part);
+        }
+    };
+    for a in &p.anchors {
+        add(Part::Link(a.to.clone()));
+    }
+    if !backlinks.is_empty() {
+        add(Part::Replies);
+        for &no in backlinks {
+            add(Part::Link(crate::model::Target::Quote(Link { board: None, thread: None, post: Some(no) })));
+        }
+    }
+    out
+}
+
+/// Where a part was drawn in an entry's block: the line, first column and width.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Spot {
+    pub part: Part,
+    pub line: usize,
+    pub col: u16,
+    pub width: u16,
 }
 
 pub struct ThreadLayout {
@@ -170,6 +214,8 @@ pub struct ThreadLayout {
     pub starts: Vec<usize>,
     /// `(line, entry)` for each entry drawn with a thumbnail in the left column.
     pub thumbs: Vec<(usize, usize)>,
+    /// Where each entry's parts are, in its block.
+    pub spots: Vec<Rc<[Spot]>>,
 }
 
 impl ThreadLayout {
@@ -190,7 +236,7 @@ impl ThreadLayout {
 
 /// A post's lines as last laid out, by (post, text width, with a thumbnail), with a hash of
 /// what else they show (time, marks, highlights, ...): reused while that's the same.
-pub type LineCache = HashMap<(u64, u16, bool), (u64, Rc<[Line<'static>]>)>;
+pub type LineCache = HashMap<(u64, u16, bool), (u64, Rc<[Line<'static>]>, Rc<[Spot]>)>;
 
 impl ThreadView {
     pub fn new(board: String, no: u64, mut posts: Vec<Post>) -> Self {
@@ -282,9 +328,62 @@ impl ThreadView {
     /// Select an entry (without scrolling).
     pub fn set_cursor(&mut self, e: usize) {
         if let Some(entry) = self.entries.get(e) {
+            // Another entry: the focus was in the old one.
+            if (e != self.cursor || entry.post != self.selected) && self.focus.take().is_some() {
+                self.layout = None;
+            }
             self.cursor = e;
             self.selected = entry.post;
         }
+    }
+
+    /// The parts of entry `e`'s post (none when it's collapsed).
+    pub fn parts_of(&self, e: usize) -> Vec<Part> {
+        let Some(&Entry { post, .. }) = self.entries.get(e) else { return Vec::new() };
+        match (self.posts.get(post), self.backlinks.get(post)) {
+            (Some(p), Some(b)) if !self.is_collapsed(post) => parts(p, b),
+            _ => Vec::new(),
+        }
+    }
+
+    /// Focus the next (or previous) part: on through the selected post's parts, then the
+    /// next post's. The post itself comes before its parts. False at either end.
+    pub fn step_part(&mut self, forward: bool) -> bool {
+        let mut e = self.entry();
+        let parts = self.parts_of(e);
+        let at = self.focus.as_ref().and_then(|f| parts.iter().position(|p| p == f));
+        let next = match (at, forward) {
+            (None, true) => Some(0),
+            (None, false) => None,
+            (Some(i), true) => Some(i + 1),
+            (Some(i), false) => i.checked_sub(1),
+        };
+        let found = match next.and_then(|i| parts.get(i)) {
+            Some(part) => Some((e, part.clone())),
+            // The post itself, from its first part.
+            None if !forward && at.is_some() => {
+                self.focus = None;
+                self.layout = None;
+                self.follow_focus = true;
+                return true;
+            }
+            None => loop {
+                e = if forward { e + 1 } else if let Some(p) = e.checked_sub(1) { p } else { break None };
+                if e >= self.entries.len() {
+                    break None;
+                }
+                let parts = self.parts_of(e);
+                if let Some(part) = if forward { parts.first() } else { parts.last() } {
+                    break Some((e, part.clone()));
+                }
+            },
+        };
+        let Some((e, part)) = found else { return false };
+        self.set_cursor(e);
+        self.focus = Some(part);
+        self.layout = None;
+        self.follow_focus = true;
+        true
     }
 
     /// Rebuild `entries` from `expanded`, keeping the cursor on the same path if it's still there.
@@ -344,7 +443,7 @@ impl ThreadView {
     }
 
     /// Select a post's top-level entry.
-    fn select(&mut self, i: usize) {
+    pub fn select(&mut self, i: usize) {
         let i = i.min(self.posts.len().saturating_sub(1));
         let e = self.entries.iter().position(|e| e.depth == 0 && e.post == i).unwrap_or(0);
         self.select_entry(e);
@@ -537,6 +636,9 @@ pub struct App {
     pub grid_cols: usize,
     /// The settings popup open, if any.
     pub settings_popup: Option<SettingsPopup>,
+    /// The menu for what's selected (`.`), and link hints on screen (`f`).
+    pub menu: Option<Menu>,
+    pub hints: Option<Hints>,
     pub settings_list: Picker,
     /// The current theme's name, and the config's custom themes.
     pub theme_name: String,
@@ -670,6 +772,8 @@ impl App {
                 None => layout,
             }),
             settings_popup: None,
+            menu: None,
+            hints: None,
             settings_list: Picker::top(),
             theme_name,
             themes,
@@ -1242,6 +1346,8 @@ impl App {
                 tv.revealed = old.revealed.iter().filter_map(|&i| tv.index.get(&old.posts[i].no).copied()).collect();
                 tv.reveal_all = old.reveal_all;
                 tv.set_search(old.search);
+                // The focused part, if the post still has it.
+                tv.focus = old.focus.filter(|f| tv.parts_of(tv.entry()).contains(f));
             }
             None => {
                 tv.new_after = self.store.last_seen(&key);
@@ -1323,6 +1429,10 @@ impl App {
             t.mine = mine;
             t.show_hidden = show;
             t.layout = None;
+            // A post just collapsed (hidden) has no parts to focus.
+            if t.focus.as_ref().is_some_and(|f| !t.parts_of(t.entry()).contains(f)) {
+                t.focus = None;
+            }
         }
     }
 

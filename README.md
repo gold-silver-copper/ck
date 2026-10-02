@@ -33,6 +33,8 @@ What it does, besides browsing:
 - **Threads** with replies expandable inline, quote previews, search, a links panel, and
   copying text and links to the clipboard; save a thread as a page for offline reading.
 - **Archive search** on FoolFuuka archives (desuarchive and others).
+- **Few keys to learn**: `.` lists what you can do with what's selected, `tab` steps through
+  a post's images and links, and `f` labels everything on screen to open by typing.
 - **Themes**, all **keys remappable**, and a settings screen that edits the config file.
 
 ck follows 4chan's API rules on every site: at most one API request per second per host,
@@ -47,6 +49,17 @@ Or from a checkout: `cargo run --release`. `ck --help` shows where the config, d
 thumbnail cache live.
 
 ## Keys
+
+You don't need to know many. Select something, then:
+
+- `.` (or right-click) lists everything you can do with it, each with its key, so the menu
+  is also how you learn the shortcuts;
+- in a thread, `tab` steps through the post's images, links and replies (the footer says
+  what the keys do to the focused one), `enter` opens it, `esc` goes back to the post;
+- `f` puts a label on everything on screen; type one to open it.
+
+`y` copies and `o` opens in the browser whatever is selected or focused: a post, a file, a
+link. `d` saves it.
 
 Navigation (fixed):
 
@@ -71,7 +84,9 @@ the action name is in brackets. The `?` help lists the same, with your keys.
 | `r` / `o` | reload / open the board or thread in a browser [`reload`, `browser`] |
 | `:`  | go to a URL or a site/board/thread, see [Going to a URL](#going-to-a-url) [`goto`] |
 | `,`  | settings: theme, colors, keys, and more [`settings`] |
-| tab / shift-tab | next / previous tab [`next_tab`, `prev_tab`] |
+| `.`, right-click | what you can do with what's selected, with each one's key [`menu`] |
+| `f`  | label what's on screen (posts, images, links, rows); type a label to open it [`hints`] |
+| `]` / `[` | next / previous tab [`next_tab`, `prev_tab`] |
 | ctrl-w | close the tab [`close_tab`] |
 | `?`  | help [`help`] |
 | `q`, ctrl-c | quit [`quit`] |
@@ -116,7 +131,7 @@ the action name is in brackets. The `?` help lists the same, with your keys.
 | `c`  | cycle the layout: cards, compact (a line per thread), grid (thumbnails in columns), remembered per board [`compact`] |
 | `O`  | the OP's links and files [`links`] |
 | `H` / `Z` | hide / unhide the thread; show hidden threads, dimmed [`hide`, `show_hidden`] |
-| `f`  | search the board's archive [`archive_search`] |
+| `A`  | search the board's archive [`archive_search`] |
 | `y` / `Y` | copy the OP's subject and text / the thread's link [`copy`, `copy_link`] |
 
 **Thread**
@@ -124,7 +139,9 @@ the action name is in brackets. The `?` help lists the same, with your keys.
 | key  | action |
 |------|--------|
 | `J`/`K`, space | scroll by line / page |
-| `enter`, `l` | follow a `>>quote`, also into other threads and boards |
+| tab / shift-tab | focus the post's next / previous image, link or reply (then on into the next post) [`next_part`, `prev_part`] |
+| `enter`, `l` | on a focused part: view the image, go to the quoted post (it shows while focused), open the link, show the replies; on the post: follow its `>>quote`, also into other threads and boards |
+| `esc` | from a focused part back to the post |
 | `p` / `b` | preview the posts a post quotes / jump to the first reply [`preview`, `replies`] |
 | `u` / `U` | jump back (also to the previous thread) / to the first unread post [`jump_back`, `unread`] |
 | `n` / `N` | next / previous search match [`next_match`, `prev_match`] |
@@ -139,7 +156,7 @@ the action name is in brackets. The `?` help lists the same, with your keys.
 | `m`  | mark the post as yours, to be told about replies [`mine`] |
 | `F`  | follow the thread as a general: when it dies or fills up, the next one is watched [`follow`] |
 | `a`  | after a 404: open the thread in the site's archive [`archive`] |
-| `y` / `Y` | copy the post's text / its link [`copy`, `copy_link`] |
+| `y` / `Y` | copy the post's text (a focused part: its URL) / the post's link [`copy`, `copy_link`] |
 
 In the gallery (`V`), `h`/`j`/`k`/`l` move, `enter` views (`h`/`l` there go through every
 file of the thread), `d` saves the file, `esc` returns to its post.
@@ -167,7 +184,7 @@ one brings it back.
 `T` opens the selected thread in a new tab, next to the current one (in a thread, the
 quoted thread `enter` would go to). Each tab has its own place: view, board, catalog,
 thread, and jump trail. The tabs show as chips under the top bar when there's more than
-one; `tab` and `shift-tab` move between them (or click one), `ctrl-w` closes one (not
+one; `]` and `[` move between them (or click one), `ctrl-w` closes one (not
 the last). Up to 9. Only the tab on screen refreshes its thread in the background;
 another tab's thread is refreshed when you come back to it (watched threads are refreshed
 anyway). The tabs are part of the session that's restored at the next start.
@@ -298,7 +315,7 @@ jschan board lists, FoolFuuka catalogs) show each page as it arrives.
 
 ## Searching archives
 
-`f` in a catalog searches the board's posts on a FoolFuuka archive: the site itself if
+`A` in a catalog searches the board's posts on a FoolFuuka archive: the site itself if
 it's one (desuarchive, palanq, b4k), or the archive configured for it with `archive`
 (4chan's boards use desuarchive in the default config). Results show each post with its
 thread; `enter` opens the thread on the archive with the post selected, `esc` goes back.
@@ -417,7 +434,7 @@ All settings are optional; see `config.example.toml` for every option with comme
 - `[[filter]]`: hide or highlight threads and posts, see [Filters](#filters-and-hiding).
 - `[[image_search]]`: reverse image search engines, see
   [Reverse image search](#reverse-image-search).
-- `archive = "desuarchive"` on a `[[site]]`: the archive for 404'd threads and `f` searches.
+- `archive = "desuarchive"` on a `[[site]]`: the archive for 404'd threads and `A` searches.
 - `[keys]`: `action = "key"` or `action = ["key", ...]`, e.g. `watch = "W"`; see
   [Remapping keys](#remapping-keys). Unknown actions, things that aren't keys, and two
   commands on one key in the same view are reported at startup.

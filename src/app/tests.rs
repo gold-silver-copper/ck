@@ -67,7 +67,7 @@ fn mouse_click_selects_thread_post() {
     let mut t = ThreadView::new("g".into(), 1, vec![post(1), post(2), post(3)]);
     // Each post: header, two lines, a blank.
     let block: Rc<[Line]> = vec![Line::raw(""); 4].into();
-    t.layout = Some(ThreadLayout { width: 40, blocks: vec![block.clone(), block.clone(), block], starts: vec![0, 4, 8, 12], thumbs: vec![] });
+    t.layout = Some(ThreadLayout { width: 40, blocks: vec![block.clone(), block.clone(), block], starts: vec![0, 4, 8, 12], thumbs: vec![], spots: vec![Rc::from([]); 3] });
     t.viewport = 10;
     app.tab.thread = Some(t);
     app.tab.view = View::Thread;
@@ -743,10 +743,10 @@ fn new_tabs_switching_closing_and_the_session() {
     app.on_key(key('T'));
     assert_eq!((app.tabs.len(), app.active, app.tab.view, app.tab.pending_thread), (2, 1, View::Thread, 2));
     assert_eq!(app.tab_label(0), "/x/");
-    // tab / shift-tab switch; each tab keeps its place.
-    app.on_key(KeyEvent::from(KeyCode::Tab));
+    // ] / [ switch; each tab keeps its place.
+    app.on_key(key(']'));
     assert_eq!((app.active, app.tab.view, app.tab.catalog.len()), (0, View::Catalog, 3));
-    app.on_key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT));
+    app.on_key(key('['));
     assert_eq!((app.active, app.tab.view), (1, View::Thread));
     // The session has both.
     app.save_session(None);
@@ -951,7 +951,7 @@ fn background_changes_are_saved_together() {
 #[test]
 fn tab_switches_keep_layouts_and_theme_changes_redo_them_all() {
     let mut app = local_app();
-    let layout = || Some(ThreadLayout { width: 40, blocks: Vec::new(), starts: vec![0, 0], thumbs: Vec::new() });
+    let layout = || Some(ThreadLayout { width: 40, blocks: Vec::new(), starts: vec![0, 0], thumbs: Vec::new(), spots: Vec::new() });
     app.tab.thread = Some(ThreadView::new("x".into(), 1, vec![Post { no: 1, ..Default::default() }]));
     app.tab.thread.as_mut().unwrap().layout = layout();
     app.tabs.push(Tab::new(0, Instant::now()));
@@ -1012,4 +1012,88 @@ fn filtering_a_big_catalog_is_fast() {
     // A frame is ~16ms; even unoptimized (and on a busy machine), filtering should take a
     // fraction of it.
     assert!(per_call < Duration::from_millis(25), "filtering took {per_call:?}");
+}
+
+#[test]
+fn tab_focuses_parts_and_the_verbs_follow_it() {
+    use crate::model::Target;
+    let mut app = local_app();
+    app.images = Images::offline();
+    app.goto_str("a/x/1");
+    let html = r##"<a href="#p1" class="quotelink">&gt;&gt;1</a> see https://example.com/a"##;
+    let file = |name: &str| Attachment { filename: name.into(), url: format!("http://127.0.0.1:3/x/src/{name}"), ..Default::default() };
+    let reply = Post { no: 2, files: vec![file("a.png"), file("b.webm")], ..crate::markup::parse_html(html, crate::markup::Flavor::Vichan).into() };
+    app.handle(Msg::Thread(app.tab.req, Ok(vec![Post { no: 1, ..Default::default() }, reply, Post { no: 3, ..Default::default() }])));
+    let tab = |app: &mut App, shift: bool| app.on_key(if shift { KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT) } else { KeyEvent::from(KeyCode::Tab) });
+    let focus = |app: &App| app.tab.thread.as_ref().unwrap().focus.clone();
+    let selected = |app: &App| app.tab.thread.as_ref().unwrap().selected;
+    // The OP has a reply (2 quotes it): its Replies label, then the reply's number.
+    tab(&mut app, false);
+    assert_eq!((selected(&app), focus(&app)), (0, Some(Part::Replies)));
+    tab(&mut app, false);
+    tab(&mut app, false);
+    // On into post 2: its files, then its quote and its URL.
+    assert_eq!((selected(&app), focus(&app)), (1, Some(Part::File(0))));
+    // v and d act on the focused file.
+    app.on_key(KeyEvent::from(KeyCode::Char('d')));
+    assert_eq!(app.downloads.total, 1);
+    tab(&mut app, false);
+    tab(&mut app, false);
+    assert!(matches!(focus(&app), Some(Part::Link(Target::Quote(_)))));
+    tab(&mut app, false);
+    assert_eq!(focus(&app), Some(Part::Link(Target::Url("https://example.com/a".into()))));
+    // y and o take the URL; enter opens it.
+    app.on_key(KeyEvent::from(KeyCode::Char('y')));
+    assert_eq!(app.copied.as_deref(), Some("https://example.com/a"));
+    app.opened = None;
+    app.on_key(KeyEvent::from(KeyCode::Enter));
+    assert_eq!(app.opened.as_deref(), Some("https://example.com/a"));
+    // shift-tab goes back; esc goes back to the post itself.
+    tab(&mut app, true);
+    assert!(matches!(focus(&app), Some(Part::Link(Target::Quote(_)))));
+    app.on_key(KeyEvent::from(KeyCode::Esc));
+    assert_eq!((selected(&app), focus(&app), app.tab.view), (1, None, View::Thread));
+    // enter on the focused quote jumps to the post (and u comes back).
+    tab(&mut app, false);
+    tab(&mut app, false);
+    tab(&mut app, false);
+    app.on_key(KeyEvent::from(KeyCode::Enter));
+    assert_eq!((selected(&app), focus(&app)), (0, None));
+    app.on_key(KeyEvent::from(KeyCode::Char('u')));
+    assert_eq!(selected(&app), 1);
+    // A file in the viewer, at that file.
+    tab(&mut app, false);
+    tab(&mut app, false);
+    app.on_key(KeyEvent::from(KeyCode::Enter));
+    assert_eq!(app.tab.viewer.as_ref().map(|v| v.index), Some(1));
+    app.tab.viewer = None;
+    // Past the last part with any: a message, the focus stays.
+    for _ in 0..10 {
+        tab(&mut app, false);
+    }
+    assert_eq!(app.status.as_ref().map(|s| s.text.as_str()), Some("No more images or links below"));
+}
+
+#[test]
+fn the_menu_runs_what_it_lists() {
+    let mut app = local_app();
+    app.goto_str("a/x/1");
+    app.handle(Msg::Thread(app.tab.req, Ok(vec![Post { no: 1, files: vec![Attachment { filename: "a.png".into(), url: "http://127.0.0.1:3/a.png".into(), ..Default::default() }], ..Default::default() }])));
+    app.on_key(KeyEvent::from(KeyCode::Char('.')));
+    let m = app.menu.as_ref().unwrap();
+    let has = |a: Action| m.items.iter().any(|i| matches!(i, MenuItem::Act(x, _) if *x == a));
+    assert!(has(Action::View) && has(Action::Watch) && has(Action::Gallery) && !has(Action::Preview));
+    // A row's own key runs it, and the menu closes.
+    app.on_key(KeyEvent::from(KeyCode::Char('w')));
+    assert!(app.menu.is_none() && app.status.as_ref().is_some_and(|s| s.text.starts_with("Watching")));
+    // So does enter on a row.
+    app.on_key(KeyEvent::from(KeyCode::Char('.')));
+    let at = app.menu.as_ref().unwrap().items.iter().position(|i| matches!(i, MenuItem::Act(Action::Watch, _))).unwrap();
+    app.menu.as_mut().unwrap().list.select(Some(at));
+    app.on_key(KeyEvent::from(KeyCode::Enter));
+    assert!(app.menu.is_none() && app.status.as_ref().is_some_and(|s| s.text.starts_with("Stopped watching")));
+    // Esc just closes it.
+    app.on_key(KeyEvent::from(KeyCode::Char('.')));
+    app.on_key(KeyEvent::from(KeyCode::Esc));
+    assert!(app.menu.is_none());
 }

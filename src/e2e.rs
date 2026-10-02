@@ -206,7 +206,8 @@ fn ready(t: &Tmux) {
 const KEYS: &[&str] = &[
     "j", "j", "j", "k", "Enter", "Enter", "Escape", "h", "l", "g", "G", "Down", "Up", "PageDown", "PageUp", "Home", "End",
     "Tab", "BTab", "Space", "BSpace", "w", "s", "c", "v", "i", "b", "u", "U", "p", "n", "N", "S", "d", "D", "a", "x", "y",
-    "Y", "O", "H", "Z", "R", "V", "E", "e", "m", "T", "*", "F", "f", "r", "F5", ",", "?", "C-w", "z", "1", "2",
+    "Y", "O", "H", "Z", "R", "V", "E", "e", "m", "T", "*", "F", "f", "r", "F5", ",", "?", "C-w", "z", "1", "2", ".", "[",
+    "]", "A", "Tab", "Tab", "a", "s", "d",
 ];
 
 #[test]

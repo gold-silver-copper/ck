@@ -53,6 +53,7 @@ impl App {
         match (key.code, action) {
             (KeyCode::Enter, _) | (_, Some(Action::View)) => self.view_from_gallery(cur),
             (_, Some(Action::Download | Action::DownloadThread)) => self.download_file(cur),
+            (_, Some(Action::Menu)) => self.open_menu(),
             (_, Some(Action::Copy)) => {
                 if let Some(url) = g.files.get(cur).map(|(_, f)| f.url.clone()) {
                     self.copy_text("file URL", url);

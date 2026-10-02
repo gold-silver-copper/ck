@@ -14,7 +14,7 @@ use ratatui_image::Image;
 use unicode_width::UnicodeWidthStr;
 
 use crate::app::{
-    App, Clock, Hit, LineCache, LinkItem, SETTING_SECTIONS, SettingsPopup, SiteRow, Sort, Status, ThreadLayout, ThreadView, View, key_rows,
+    App, Clock, Hit, LineCache, LinkItem, Part, SETTING_SECTIONS, Spot, SettingsPopup, SiteRow, Sort, Status, ThreadLayout, ThreadView, View, key_rows,
     setting_rows,
 };
 use crate::http;
@@ -35,9 +35,9 @@ const MIN_THUMB_WIDTH: u16 = 60;
 /// Space on each side of the content, and inside cards before the text (the first column of
 /// which holds the selection stripe).
 const MARGIN: u16 = 2;
-const PAD: u16 = 2;
+pub(crate) const PAD: u16 = 2;
 /// How far in each level of replies shown inline (`e`) sits.
-const INDENT: u16 = 4;
+pub(crate) const INDENT: u16 = 4;
 
 // ----- small helpers -----
 
@@ -105,7 +105,10 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             View::Boards => draw_boards(f, app, content),
             View::Catalog => draw_catalog(f, app, content),
             View::Thread if app.tab.gallery.is_some() => draw_gallery(f, app, content),
-            View::Thread => draw_thread(f, app, content),
+            View::Thread => {
+                draw_thread(f, app, content);
+                draw_peek(f, app, content);
+            }
             View::Watched => draw_watched(f, app, content),
             View::History => draw_history(f, app, content),
             View::Settings => draw_settings(f, app, content),
@@ -124,6 +127,12 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         if app.show_help {
             draw_help(f, app);
         }
+    }
+    if app.hints.is_some() {
+        draw_hints(f, app);
+    }
+    if app.menu.is_some() {
+        draw_menu(f, app);
     }
     if app.image_search_panel.is_some() {
         draw_image_search(f, app);
@@ -360,18 +369,52 @@ fn footer_hints(app: &App) -> Vec<(String, &'static str)> {
             (k(Action::Copy), "copy URL"),
             ("esc".into(), "back to the post"),
         ],
-        View::Thread => vec![
-            ("j/k".into(), "post"),
-            ("enter".into(), "quote"),
-            (k(Action::Preview), "preview"),
-            (k(Action::JumpBack), "back"),
-            (k(Action::Search), "search"),
-            (k(Action::Unread), "unread"),
-            (k(Action::View), "view"),
-            (k(Action::Watch), "watch"),
-        ],
+        // What the keys do to the focused part, when there is one.
+        View::Thread => match app.focused() {
+            Some(Part::File(_)) => vec![
+                ("enter".into(), "view"),
+                (k(Action::Download), "save"),
+                (k(Action::Copy), "copy URL"),
+                (k(Action::Browser), "browser"),
+                (k(Action::NextPart), "next"),
+                (k(Action::Menu), "more"),
+                ("esc".into(), "the post"),
+            ],
+            Some(Part::Link(crate::model::Target::Url(_))) => vec![
+                ("enter".into(), "open"),
+                (k(Action::Copy), "copy"),
+                (k(Action::NextPart), "next"),
+                (k(Action::Menu), "more"),
+                ("esc".into(), "the post"),
+            ],
+            Some(Part::Link(crate::model::Target::Quote(_))) => vec![
+                ("enter".into(), "go to it"),
+                (k(Action::Copy), "copy link"),
+                (k(Action::NextPart), "next"),
+                (k(Action::Menu), "more"),
+                ("esc".into(), "the post"),
+            ],
+            Some(Part::Replies) => vec![
+                ("enter".into(), "show / hide replies"),
+                (k(Action::NextPart), "next"),
+                (k(Action::Menu), "more"),
+                ("esc".into(), "the post"),
+            ],
+            None => vec![
+                ("j/k".into(), "post"),
+                (k(Action::NextPart), "images & links"),
+                (k(Action::Hints), "hints"),
+                (k(Action::Menu), "more"),
+                ("enter".into(), "quote"),
+                (k(Action::JumpBack), "back"),
+                (k(Action::Search), "search"),
+                (k(Action::Watch), "watch"),
+            ],
+        },
         View::Catalog => vec![
             ("enter".into(), "open"),
+            (k(Action::Hints), "hints"),
+            (k(Action::Menu), "more"),
             (k(Action::Search), "filter"),
             (k(Action::View), "view"),
             (k(Action::Watch), "watch"),
@@ -381,6 +424,7 @@ fn footer_hints(app: &App) -> Vec<(String, &'static str)> {
         ],
         View::Watched | View::History => vec![
             ("enter".into(), "open"),
+            (k(Action::Menu), "more"),
             (k(Action::Remove), "remove"),
             (k(Action::Search), "filter"),
             (k(Action::Browser), "browser"),
@@ -389,6 +433,7 @@ fn footer_hints(app: &App) -> Vec<(String, &'static str)> {
         View::Search => vec![("enter".into(), "open the thread"), (k(Action::NextMatch), "more results"), ("esc".into(), "back")],
         _ => vec![
             ("enter".into(), "open"),
+            (k(Action::Menu), "more"),
             (k(Action::Search), "filter"),
             (k(Action::Browser), "browser"),
             (k(Action::Reload), "reload"),
@@ -982,6 +1027,16 @@ fn draw_thread(f: &mut Frame, app: &mut App, area: Rect) {
     }
     let Some(l) = t.layout.as_ref() else { return };
     let cursor = t.entry();
+    // A part just focused is scrolled into view (the post itself: its top).
+    if std::mem::take(&mut t.follow_focus) {
+        let at = l.spots.get(cursor).and_then(|s| s.iter().find(|s| Some(&s.part) == t.focus.as_ref()));
+        let line = l.starts[cursor] + at.map_or(0, |s| s.line);
+        if line < t.scroll {
+            t.scroll = line;
+        } else if line >= t.scroll + t.viewport {
+            t.scroll = (line + 2).saturating_sub(t.viewport).min(l.len().saturating_sub(t.viewport));
+        }
+    }
     for row in 0..area.height {
         let i = t.scroll + row as usize;
         let Some((e, line)) = l.line(i) else { break };
@@ -1046,50 +1101,59 @@ fn draw_thread(f: &mut Frame, app: &mut App, area: Rect) {
 fn layout_thread(t: &mut ThreadView, width: u16, thumbs: bool, clock: Clock) -> ThreadLayout {
     let old = std::mem::take(&mut t.cache);
     let mut cache = LineCache::new();
-    let (mut blocks, mut starts, mut thumb_at) = (Vec::with_capacity(t.entries.len()), Vec::with_capacity(t.entries.len() + 1), Vec::new());
+    let n = t.entries.len();
+    let (mut blocks, mut spots, mut starts, mut thumb_at) = (Vec::with_capacity(n), Vec::with_capacity(n), Vec::with_capacity(n + 1), Vec::new());
+    let cursor = t.entry();
     let mut len = 0;
     for (e, entry) in t.entries.iter().enumerate() {
         let (i, p) = (entry.post, &t.posts[entry.post]);
         let text_width = width.saturating_sub(PAD + 2 + INDENT * entry.depth as u16).max(10) as usize;
         let thumb = thumbs && !p.files.is_empty() && text_width > THUMB.width as usize + 12;
         starts.push(len);
-        let block: Rc<[Line<'static>]> = if t.is_collapsed(i) {
+        let (block, at): (Rc<[Line<'static>]>, Rc<[Spot]>) = if t.is_collapsed(i) {
             // A hidden post is one line, so replies to it still make sense.
             let why = t.marks.get(i).and_then(|m| m.hidden.as_deref()).filter(|l| !l.is_empty());
             let why = why.map_or("hidden".to_string(), |l| format!("hidden by the filter \"{l}\""));
-            vec![Line::styled(format!("No.{}  {why}", p.no), Style::new().fg(theme().text_dim)), Line::raw("")].into()
+            (vec![Line::styled(format!("No.{}  {why}", p.no), Style::new().fg(theme().text_dim)), Line::raw("")].into(), Rc::from([]))
         } else {
-            let ctx = post_ctx(t, i, clock);
+            let mut ctx = post_ctx(t, i, clock);
+            ctx.focus = t.focus.as_ref().filter(|_| e == cursor);
             let key = (p.no, text_width as u16, thumb);
             let shows = shown_with(t, i, p, &ctx);
-            let block = match cache.get(&key).or(old.get(&key)).filter(|(h, _)| *h == shows) {
-                Some((_, block)) => block.clone(),
+            let (block, at) = match cache.get(&key).or(old.get(&key)).filter(|(h, ..)| *h == shows) {
+                Some((_, block, at)) => (block.clone(), at.clone()),
                 None => {
+                    // A padding line above: the spots are a line further down.
                     let mut lines = vec![Line::raw("")];
-                    if thumb {
-                        let text = post_lines(p, &ctx, text_width - THUMB.width as usize - 2);
+                    let (text, mut at) = if thumb {
+                        let (text, at) = post_lines(p, &ctx, text_width - THUMB.width as usize - 2);
                         let mut text = beside_tile(text, THUMB.width + 2);
                         text.resize(text.len().max(THUMB.height as usize), Line::raw(""));
-                        lines.extend(text);
+                        (text, at.into_iter().map(|s| Spot { col: s.col + THUMB.width + 2, ..s }).collect())
                     } else {
-                        lines.extend(post_lines(p, &ctx, text_width));
-                    }
+                        post_lines(p, &ctx, text_width)
+                    };
+                    lines.extend(text);
                     lines.extend([Line::raw(""), Line::raw("")]);
-                    Rc::from(lines)
+                    for s in &mut at {
+                        s.line += 1;
+                    }
+                    (Rc::from(lines), Rc::from(at))
                 }
             };
-            cache.insert(key, (shows, block.clone()));
+            cache.insert(key, (shows, block.clone(), at.clone()));
             if thumb {
                 thumb_at.push((len + 1, e));
             }
-            block
+            (block, at)
         };
         len += block.len();
         blocks.push(block);
+        spots.push(at);
     }
     starts.push(len);
     t.cache = cache;
-    ThreadLayout { width, blocks, starts, thumbs: thumb_at }
+    ThreadLayout { width, blocks, starts, thumbs: thumb_at, spots }
 }
 
 /// A hash of what a post's lines show besides the post itself, for the line cache: its
@@ -1105,6 +1169,7 @@ fn shown_with(t: &ThreadView, i: usize, p: &Post, ctx: &PostCtx) -> u64 {
     let in_added = !s.is_empty() && (s.contains(['(', ')']) || " (op)".contains(s) || " (you)".contains(s));
     let highlighted = t.matches.binary_search(&i).is_ok() || (quotes_marked && in_added);
     (ago(p.time, ctx.clock), ctx.is_op, ctx.is_new, ctx.reveal, ctx.mark, ctx.mine.contains(&p.no), quotes_marked, ctx.backlinks).hash(&mut h);
+    ctx.focus.hash(&mut h);
     if highlighted {
         ctx.search.hash(&mut h);
     }
@@ -1124,6 +1189,8 @@ struct PostCtx<'a> {
     mark: Option<&'a Mark>,
     /// Posts marked as yours.
     mine: &'a std::collections::HashSet<u64>,
+    /// The focused part, when this is the selected entry.
+    focus: Option<&'a Part>,
 }
 
 fn post_ctx(t: &ThreadView, i: usize, clock: Clock) -> PostCtx<'_> {
@@ -1137,6 +1204,7 @@ fn post_ctx(t: &ThreadView, i: usize, clock: Clock) -> PostCtx<'_> {
         search: t.search.to_lowercase(),
         mark: t.marks.get(i),
         mine: &t.mine,
+        focus: None,
     }
 }
 
@@ -1145,8 +1213,13 @@ fn search_hl() -> Style {
     Style::new().fg(t.on_search).bg(t.search)
 }
 
-fn post_lines(p: &Post, ctx: &PostCtx, width: usize) -> Vec<Line<'static>> {
+/// A post as wrapped lines, and where its parts landed in them. Parts are drawn with a
+/// tag (an underline color nothing else uses) that's found after wrapping, then cleared.
+fn post_lines(p: &Post, ctx: &PostCtx, width: usize) -> (Vec<Line<'static>>, Vec<Spot>) {
     let t = theme();
+    let parts = crate::app::parts(p, ctx.backlinks);
+    let index = |part: &Part| parts.iter().position(|x| x == part);
+    let tag = |style: Style, k: usize| Style { underline_color: Some(Color::Rgb(0xfe, (k >> 8) as u8, k as u8)), ..style };
     let mut head = vec![Span::styled(p.name.clone(), bold(t.name)), Span::raw("  ")];
     if ctx.is_op {
         head.extend([chip("OP", t.on_primary_container, t.primary_container), Span::raw(" ")]);
@@ -1171,19 +1244,31 @@ fn post_lines(p: &Post, ctx: &PostCtx, width: usize) -> Vec<Line<'static>> {
         let subject = markup::highlight(&Line::styled(s.clone(), bold(t.primary)), &ctx.search, search_hl());
         out.extend(markup::wrap(&subject, width));
     }
-    for file in &p.files {
+    for (k, file) in p.files.iter().enumerate() {
         let meta = file_facts(file);
         let meta = if meta.is_empty() { String::new() } else { format!("  {}", meta.join(" · ")) };
-        out.extend(markup::wrap(
-            &Line::from(vec![Span::styled(file.filename.clone(), Style::new().fg(t.text)), Span::styled(meta, dim())]),
-            width,
-        ));
+        let k = index(&Part::File(k)).unwrap_or(usize::MAX);
+        let line = Line::from(vec![Span::styled(file.filename.clone(), tag(Style::new().fg(t.text), k)), Span::styled(meta, dim())]);
+        out.extend(markup::wrap(&line, width));
     }
     if !p.body.is_empty() {
         out.push(Line::raw(""));
     }
-    for line in &p.body {
-        let mut line = if ctx.reveal { markup::reveal(line) } else { line.clone() };
+    for (n, line) in p.body.iter().enumerate() {
+        // Links first, by where they are in the parsed text (before anything is added to it).
+        let links: Vec<(usize, usize, usize)> = p
+            .anchors
+            .iter()
+            .filter(|a| a.line == n)
+            .filter_map(|a| Some((a.start, a.end, index(&Part::Link(a.to.clone()))?)))
+            .collect();
+        let line = if links.is_empty() {
+            line.clone()
+        } else {
+            let ranges: Vec<(usize, usize)> = links.iter().map(|&(a, b, _)| (a, b)).collect();
+            markup::restyle(line, &ranges, |style, r| tag(style, links[r].2))
+        };
+        let mut line = if ctx.reveal { markup::reveal(&line) } else { line };
         // Mark quotes of the OP like 4chan does. Quote links are always their own span.
         for s in &mut line.spans {
             if markup::is_quote_link(s.style) {
@@ -1207,13 +1292,38 @@ fn post_lines(p: &Post, ctx: &PostCtx, width: usize) -> Vec<Line<'static>> {
     }
     if !ctx.backlinks.is_empty() {
         out.push(Line::raw(""));
-        let mut spans = vec![Span::styled("Replies  ", dim())];
-        for no in ctx.backlinks {
-            spans.extend([Span::styled(format!(">>{no}"), Style::new().fg(t.quotelink)), Span::raw("  ")]);
+        let replies = index(&Part::Replies).unwrap_or(usize::MAX);
+        let mut spans = vec![Span::styled("Replies", tag(dim(), replies)), Span::raw("  ")];
+        for &no in ctx.backlinks {
+            let k = index(&Part::Link(crate::model::Target::Quote(crate::model::Link { board: None, thread: None, post: Some(no) })));
+            spans.extend([Span::styled(format!(">>{no}"), tag(Style::new().fg(t.quotelink), k.unwrap_or(usize::MAX))), Span::raw("  ")]);
         }
         out.extend(markup::wrap(&Line::from(spans), width));
     }
-    out
+    // Find the tags: where each part is, and the focused one's look.
+    let focused = ctx.focus.and_then(index);
+    let mut spots: Vec<Spot> = Vec::new();
+    for (row, line) in out.iter_mut().enumerate() {
+        let mut col = 0u16;
+        for s in &mut line.spans {
+            let w = s.width() as u16;
+            if let Some(Color::Rgb(0xfe, hi, lo)) = s.style.underline_color {
+                s.style.underline_color = None;
+                let k = (hi as usize) << 8 | lo as usize;
+                if let Some(part) = parts.get(k) {
+                    if focused == Some(k) {
+                        s.style = s.style.fg(t.on_primary).bg(t.primary);
+                    }
+                    match spots.last_mut() {
+                        Some(last) if last.part == *part && last.line == row && last.col + last.width == col => last.width += w,
+                        _ => spots.push(Spot { part: part.clone(), line: row, col, width: w }),
+                    }
+                }
+            }
+            col += w;
+        }
+    }
+    (out, spots)
 }
 
 // ----- panels: preview, help, settings pickers -----
@@ -1239,13 +1349,86 @@ fn panel(f: &mut Frame, width: u16, height: u16, title: &str, hint: &str) -> Rec
     Rect::new(r.x + 2, r.y + 2, r.width.saturating_sub(4), r.height.saturating_sub(3))
 }
 
+/// A focused quote of a post in this thread shows that post, without taking the keys: at
+/// the bottom of the thread, or the top when the quote is down there.
+fn draw_peek(f: &mut Frame, app: &App, area: Rect) {
+    use crate::model::Target;
+    let Some(Part::Link(Target::Quote(l))) = app.focused() else { return };
+    let Some(t) = &app.tab.thread else { return };
+    let Some(&i) = l.post.filter(|_| l.board.is_none() && l.thread.is_none_or(|n| n == t.no)).and_then(|n| t.index.get(&n)) else { return };
+    let th = theme();
+    let width = area.width.saturating_sub(6);
+    let mut lines = post_lines(&t.posts[i], &post_ctx(t, i, app.clock), width as usize).0;
+    let h = (lines.len() as u16 + 2).min(area.height / 2).max(3);
+    lines.truncate(h.saturating_sub(2) as usize);
+    // Where the quote is on screen decides where the peek goes.
+    let quote_y = t.layout.as_ref().and_then(|lay| {
+        let e = t.entry();
+        let s = lay.spots.get(e)?.iter().find(|s| app.focused() == Some(&s.part))?;
+        Some((lay.starts.get(e)? + s.line).saturating_sub(t.scroll))
+    });
+    let top = quote_y.is_some_and(|y| y as u16 >= area.height / 2);
+    let y = if top { area.y } else { area.bottom().saturating_sub(h) };
+    let r = Rect::new(area.x + 2, y, area.width.saturating_sub(4), h);
+    f.render_widget(Clear, r);
+    fill(f, r, th.surface_highest);
+    fill(f, Rect::new(r.x, r.y, 1, r.height), th.primary);
+    for (row, line) in lines.into_iter().enumerate() {
+        put(f, r.x + 2, r.y + 1 + row as u16, r.width.saturating_sub(4), line);
+    }
+}
+
+/// The menu for what's selected: each thing that can be done, with its key.
+fn draw_menu(f: &mut Frame, app: &mut App) {
+    let t = theme();
+    let keys: Vec<String> = app.menu.as_ref().map(|m| m.items.iter().map(|i| app.menu_key(i)).collect()).unwrap_or_default();
+    let Some(m) = &mut app.menu else { return };
+    let key_w = keys.iter().map(|k| k.width()).max().unwrap_or(1).max(5);
+    let label = |i: &crate::app::MenuItem| match i {
+        crate::app::MenuItem::Enter(l) | crate::app::MenuItem::Act(_, l) => l.clone(),
+    };
+    let w = (m.items.iter().map(|i| label(i).width()).max().unwrap_or(10) + key_w + 8).max(m.title.width() + 24) as u16;
+    let title = if m.title.is_empty() { "Actions".to_string() } else { m.title.clone() };
+    let inner = panel(f, w.min(90), m.items.len() as u16 + 3, &title, "enter run · esc close");
+    let rows = inner.height as usize;
+    let sel = m.list.selected().unwrap_or(0);
+    let off = scroll_to(m.list.offset(), sel, rows);
+    *m.list.offset_mut() = off;
+    m.area = inner;
+    for (k, item) in m.items.iter().enumerate().skip(off).take(rows) {
+        let y = inner.y + (k - off) as u16;
+        paint_row(f, Rect::new(inner.x - 2, y, inner.width + 4, 1), None, k == sel, false);
+        let key = keys.get(k).cloned().unwrap_or_default();
+        let line = Line::from(vec![Span::styled(format!("{key:<key_w$}  "), bold(t.primary)), Span::styled(label(item), Style::new().fg(t.text))]);
+        put(f, inner.x, y, inner.width, line);
+    }
+}
+
+/// Link hints: each label where its target is; typed letters dim, the rest bright.
+fn draw_hints(f: &mut Frame, app: &App) {
+    let t = theme();
+    let Some(h) = &app.hints else { return };
+    let area = f.area();
+    for target in h.targets.iter().filter(|x| x.label.starts_with(&h.typed)) {
+        if !area.contains(ratatui::layout::Position::new(target.x, target.y)) {
+            continue;
+        }
+        let rest = target.label.get(h.typed.len()..).unwrap_or_default();
+        let line = Line::from(vec![
+            Span::styled(h.typed.clone(), Style::new().fg(t.text_dim).bg(t.new)),
+            Span::styled(rest.to_string(), bold(t.background).bg(t.new)),
+        ]);
+        put(f, target.x, target.y, (target.label.len() as u16).min(area.right().saturating_sub(target.x)), line);
+    }
+}
+
 fn draw_preview(f: &mut Frame, app: &App) {
     let (Some(p), Some(t)) = (&app.tab.preview, &app.tab.thread) else { return };
     let w = f.area().width.saturating_sub(8).clamp(20, 110);
     let width = w.saturating_sub(4) as usize;
     let mut lines = Vec::new();
     for &i in &p.posts {
-        lines.extend(post_lines(&t.posts[i], &post_ctx(t, i, app.clock), width));
+        lines.extend(post_lines(&t.posts[i], &post_ctx(t, i, app.clock), width).0);
         lines.push(Line::raw(""));
     }
     for n in &p.elsewhere {
@@ -1668,7 +1851,7 @@ fn draw_viewer(f: &mut Frame, app: &mut App) {
 
 // ----- text -----
 
-fn truncate(s: &str, width: usize) -> String {
+pub(crate) fn truncate(s: &str, width: usize) -> String {
     if s.width() <= width {
         return s.to_string();
     }

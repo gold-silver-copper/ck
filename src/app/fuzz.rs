@@ -820,6 +820,13 @@ fn check(app: &App) {
         {
             fail(format!("tab {i}: {w}"));
         }
+        // The focus is one of the selected post's parts.
+        if let Some(t) = &tab.thread
+            && let Some(f) = &t.focus
+            && !t.parts_of(t.entry()).contains(f)
+        {
+            fail(format!("tab {i}: focus on {f:?}, not a part of post {}", t.selected));
+        }
         if tab.loading.is_some() && tab.req == 0 {
             fail(format!("tab {i} is loading with no request"));
         }
@@ -846,6 +853,18 @@ fn check(app: &App) {
         // Marks left from an emptied catalog are harmless; a catalog's own must line up.
         if !tab.catalog.is_empty() && tab.catalog_marks.len() != tab.catalog.len() {
             fail(format!("tab {i}: {} catalog marks for {} threads", tab.catalog_marks.len(), tab.catalog.len()));
+        }
+    }
+    if let Some(m) = &app.menu
+        && (m.items.is_empty() || m.list.selected().is_some_and(|k| k >= m.items.len()))
+    {
+        fail(format!("a menu of {} rows on row {:?}", m.items.len(), m.list.selected()));
+    }
+    // Hint labels: each one picks one target, so none starts another.
+    if let Some(h) = &app.hints {
+        let labels: Vec<&str> = h.targets.iter().map(|t| t.label.as_str()).collect();
+        if labels.iter().enumerate().any(|(i, a)| labels.iter().enumerate().any(|(j, b)| i != j && b.starts_with(a))) {
+            fail(format!("hint labels overlap: {labels:?}"));
         }
     }
     if app.settings_popup.is_some() && app.tab.view != View::Settings {

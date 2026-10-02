@@ -4,7 +4,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use unicode_width::UnicodeWidthStr;
 
-use crate::model::Link;
+use crate::model::{Anchor, Link, Target};
 use crate::theme::mark;
 
 // Parsed posts carry marker colors, mapped to the current theme when drawn (`theme::paint`).
@@ -30,12 +30,14 @@ pub struct Parsed {
     pub links: Vec<Link>,
     /// Web links: link targets and bare `http(s)://` URLs in the text.
     pub urls: Vec<String>,
+    /// Every link, where it is in `lines`.
+    pub anchors: Vec<Anchor>,
 }
 
 impl From<Parsed> for crate::model::Post {
     /// A post with this body (and its quotes and links), the rest left to fill in.
     fn from(p: Parsed) -> Self {
-        Self { body: p.lines, quotes: p.quotes, links: p.links, urls: p.urls, ..Default::default() }
+        Self { body: p.lines, quotes: p.quotes, links: p.links, urls: p.urls, anchors: p.anchors, ..Default::default() }
     }
 }
 
@@ -203,15 +205,40 @@ struct Builder {
     quotes: Vec<u64>,
     links: Vec<Link>,
     urls: Vec<String>,
+    anchors: Vec<Anchor>,
 }
 
 impl Builder {
+    /// Where the next text goes: the line, and the byte offset in it.
+    fn at(&self) -> (usize, usize) {
+        (self.lines.len(), self.cur.iter().map(|s| s.content.len()).sum())
+    }
+
+    /// Note a link over the text just pushed from `start` (joined to the previous piece of
+    /// the same link, when it's right before it on the line).
+    fn anchor(&mut self, (line, start): (usize, usize), to: Target) {
+        let end = self.at().1;
+        if end == start {
+            return;
+        }
+        match self.anchors.last_mut() {
+            Some(a) if a.line == line && a.end == start && a.to == to => a.end = end,
+            _ => self.anchors.push(Anchor { line, start, end, to }),
+        }
+    }
+
     /// Add text, turning `>>123`, `>>>/b/123` and `>>>/b/` into quote links, each its own
     /// span. `href` is the enclosing `<a>`'s target, which knows the thread of cross-thread links.
     fn text(&mut self, text: &str, style: Style, href: Option<&str>) {
+        // Text of a link to another site (a quote link's style is different).
+        let web = href.filter(|_| style.fg == Some(mark::LINK)).map(|h| Target::Url(h.to_string()));
         let mut rest = text;
         while let Some((before, from)) = rest.find(">>").and_then(|pos| rest.split_at_checked(pos)) {
+            let at = self.at();
             self.push(before, style);
+            if let Some(to) = &web {
+                self.anchor(at, to.clone());
+            }
             let Some(((quote, after), mut link)) = quote_at(from).and_then(|(len, link)| Some((from.split_at_checked(len)?, link)))
             else {
                 // Not a quote link: the `>>` is text.
@@ -234,13 +261,19 @@ impl Builder {
                 self.quotes.push(n);
             }
             if !self.links.contains(&link) {
-                self.links.push(link);
+                self.links.push(link.clone());
             }
+            let at = self.at();
             self.cur.push(Span::styled(quote.to_string(), style.patch(QUOTELINK)));
+            self.anchor(at, Target::Quote(link));
             self.sealed = true;
             rest = after;
         }
+        let at = self.at();
         self.push(rest, style);
+        if let Some(to) = web {
+            self.anchor(at, to);
+        }
     }
 
     /// Text inside a code block: whitespace kept, newlines are line breaks, no quote links.
@@ -293,19 +326,28 @@ impl Builder {
             self.lines.pop();
         }
         // Bare URLs: found per line, after <wbr> and the like have been joined up.
-        for line in self.lines.iter_mut().filter(|l| l.style != CODE_LINE) {
+        for (n, line) in self.lines.iter_mut().enumerate().filter(|(_, l)| l.style != CODE_LINE) {
             let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
             let ranges = find_urls(&text);
-            for url in ranges.iter().filter_map(|&(a, b)| text.get(a..b)) {
+            for &(a, b) in &ranges {
+                let Some(url) = text.get(a..b) else { continue };
                 if !self.urls.iter().any(|u| u == url) {
                     self.urls.push(url.to_string());
+                }
+                // A link whose text is its URL is noted once.
+                if !self.anchors.iter().any(|x| x.line == n && x.start < b && a < x.end) {
+                    self.anchors.push(Anchor { line: n, start: a, end: b, to: Target::Url(url.to_string()) });
                 }
             }
             if !ranges.is_empty() {
                 line.spans = style_ranges(std::mem::take(&mut line.spans), &ranges);
             }
         }
-        Parsed { lines: self.lines, quotes: self.quotes, links: self.links, urls: self.urls }
+        // Lines dropped from the end take their links along.
+        let lines = self.lines.len();
+        self.anchors.retain(|a| a.line < lines);
+        self.anchors.sort_by_key(|a| (a.line, a.start));
+        Parsed { lines: self.lines, quotes: self.quotes, links: self.links, urls: self.urls, anchors: self.anchors }
     }
 }
 
@@ -390,6 +432,31 @@ pub fn for_terminal(s: &str) -> std::borrow::Cow<'_, str> {
         }
     }
     std::borrow::Cow::Owned(out)
+}
+
+/// `line` with each byte range in `ranges` restyled by `f` (given the range's index), its
+/// spans split where needed.
+pub fn restyle(line: &Line<'static>, ranges: &[(usize, usize)], f: impl Fn(Style, usize) -> Style) -> Line<'static> {
+    let mut out = Vec::new();
+    let mut off = 0;
+    for s in &line.spans {
+        let len = s.content.len();
+        let mut cuts: Vec<usize> = ranges.iter().flat_map(|&(a, b)| [a, b]).filter(|&c| c > off && c < off + len).map(|c| c - off).collect();
+        cuts.sort_unstable();
+        cuts.dedup();
+        let mut at = 0;
+        for end in cuts.into_iter().chain([len]) {
+            let Some(piece) = s.content.get(at..end) else { continue };
+            let style = match ranges.iter().position(|&(a, b)| off + at >= a && off + at < b) {
+                Some(k) => f(s.style, k),
+                None => s.style,
+            };
+            out.push(Span::styled(piece.to_string(), style));
+            at = end;
+        }
+        off += len;
+    }
+    Line::from(out).style(line.style)
 }
 
 /// A quote link at the start of `s` (which starts with `>>`): its length and target.
@@ -768,6 +835,29 @@ mod tests {
             assert_eq!(got.width(), by_char, "{got:?}");
             assert!(got.width() <= raw.width(), "{raw:?}");
         }
+    }
+
+    #[test]
+    fn links_know_where_they_are() {
+        let html = r##"<a href="#p123" class="quotelink">&gt;&gt;123</a> see <a href="https://x.org/a">this page</a> and https://y.org/b<br>&gt;&gt;&gt;/g/456 <a href="https://y.org/b">https://y.org/b</a>"##;
+        let p = parse_html(html, Flavor::Fourchan);
+        let at = |a: &Anchor| {
+            let line: String = p.lines[a.line].spans.iter().map(|s| s.content.as_ref()).collect();
+            (a.line, line.get(a.start..a.end).unwrap_or_default().to_string())
+        };
+        let found: Vec<_> = p.anchors.iter().map(|a| (at(a), a.to.clone())).collect();
+        let quote = |board: Option<&str>, post| Target::Quote(Link { board: board.map(String::from), thread: None, post: Some(post) });
+        let url = |u: &str| Target::Url(u.into());
+        assert_eq!(
+            found,
+            [
+                ((0, ">>123".into()), quote(None, 123)),
+                ((0, "this page".into()), url("https://x.org/a")),
+                ((0, "https://y.org/b".into()), url("https://y.org/b")),
+                ((1, ">>>/g/456".into()), quote(Some("g"), 456)),
+                ((1, "https://y.org/b".into()), url("https://y.org/b")),
+            ]
+        );
     }
 
     #[test]

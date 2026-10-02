@@ -1,0 +1,34 @@
+---
+source: src/ui_tests.rs
+expression: snapshot(&mut a)
+---
+ ck  4chan  ›  /g/  ›  Snapshot thread                                            5 posts  ·  2 new
+
+                             No.1001             enter run · esc close
+    Anonymous   OP  2026-09
+    Snapshot thread          enter  go to the post it quotes
+    op.png  800x600 · 121 K  y      copy the post's text
+                             Y      copy the post's link
+    A thread for snapshot t  o      open the post in the browser
+    It has a few replies.    O      list its links and files
+                             p      preview the posts it quotes
+    Replies  >>1001          b      go to the first reply
+                             e      show its replies under it
+                             m      mark it as yours
+                             H      hide it
+    Anonymous  2026-09-21 1  w      stop watching the thread
+                             F      follow the thread as a general
+    >>1000 (OP)              V      all the thread's files
+    >implying                D      save all the thread's files
+                             U      the first unread post
+    Replies  >>1003          /      search the thread
+                             f      pick a link or post by its label
+                             E      save the thread as HTML and JSON
+                             r      reload
+    Anonymous  2026-09-21 1  :      go to a URL or site/board/thread
+                             ,      settings
+    Code:                    ?      every key
+    fn main() {              q      quit
+        println!("snapshot"
+    }
+ j/k post   tab images & links   f hints   . more   enter quote   u back   / search   w watch   , se
