@@ -167,16 +167,21 @@ fn draw_app_bar(f: &mut Frame, app: &App, area: Rect) {
     fill(f, area, t.bar);
     let (crumbs, meta) = location(app);
     let mut spans = vec![Span::styled(" ck ", bold(t.on_primary).bg(t.primary)), Span::raw(" ")];
+    let meta_w = meta.iter().map(|s| s.width()).sum::<usize>() as u16;
+    let left_w = area.width.saturating_sub(meta_w + 2);
+    // The last crumb (the most specific) gives way, with an ellipsis, when space is short.
     let n = crumbs.len();
+    let before: usize = 5 + crumbs.iter().take(n.saturating_sub(1)).map(|c| c.width() + 5).sum::<usize>();
     for (i, c) in crumbs.into_iter().enumerate() {
         if i > 0 {
             spans.push(Span::styled("  ›  ", dim()));
         }
-        let style = if i + 1 == n { bold(t.on_bar) } else { Style::new().fg(t.on_bar) };
-        spans.push(Span::styled(c, style));
+        if i + 1 == n {
+            spans.push(Span::styled(truncate(&c, (left_w as usize).saturating_sub(before)), bold(t.on_bar)));
+        } else {
+            spans.push(Span::styled(c, Style::new().fg(t.on_bar)));
+        }
     }
-    let meta_w = meta.iter().map(|s| s.width()).sum::<usize>() as u16;
-    let left_w = area.width.saturating_sub(meta_w + 1);
     put(f, area.x, area.y, left_w, Line::from(spans));
     put(f, area.x + left_w, area.y, area.width - left_w, Line::from(meta).right_aligned());
 }
@@ -1241,9 +1246,14 @@ fn panel(f: &mut Frame, width: u16, height: u16, title: &str, hint: &str) -> Rec
     fill(f, r, t.surface_highest);
     let title_row = Rect::new(r.x, r.y, r.width, 1);
     fill(f, title_row, t.primary_container);
-    let hint_w = hint.width() as u16 + 2;
+    // When both don't fit, the title wins.
+    let fits = title.width() + hint.width() + 6 <= r.width as usize;
+    let hint_w = if fits { hint.width() as u16 + 2 } else { 0 };
+    let title = truncate(title, (r.width.saturating_sub(hint_w) as usize).saturating_sub(3));
     put(f, r.x, r.y, r.width.saturating_sub(hint_w), Line::styled(format!("  {title}"), bold(t.on_primary_container)));
-    put(f, r.right().saturating_sub(hint_w), r.y, hint_w, Line::styled(format!("{hint}  "), Style::new().fg(t.on_primary_container)));
+    if fits {
+        put(f, r.right().saturating_sub(hint_w), r.y, hint_w, Line::styled(format!("{hint}  "), Style::new().fg(t.on_primary_container)));
+    }
     Rect::new(r.x + 2, r.y + 2, r.width.saturating_sub(4), r.height.saturating_sub(3))
 }
 
@@ -1458,11 +1468,16 @@ fn draw_help(f: &mut Frame, app: &App) {
 
 fn draw_settings(f: &mut Frame, app: &mut App, area: Rect) {
     let t = theme();
-    app.hit = Some(Hit::Settings { area });
     let selected = app.settings_list.state.selected().unwrap_or(0);
+    let rows = setting_rows();
+    // Scroll so the selected setting (and the note under the list, at the end) shows.
+    let at = rows.iter().position(|r| *r == Ok(selected)).unwrap_or(0);
+    let total = rows.len() + 2;
+    let offset = if at + 1 == rows.len() { total } else { at + 2 }.saturating_sub(area.height as usize);
+    app.hit = Some(Hit::Settings { area, offset });
     let items: Vec<_> = SETTING_SECTIONS.iter().flat_map(|(_, items)| items.iter().copied()).collect();
-    for (row, r) in setting_rows().into_iter().enumerate() {
-        let y = area.y + row as u16;
+    for (row, r) in rows.into_iter().enumerate().skip(offset) {
+        let y = area.y + (row - offset) as u16;
         if y >= area.bottom() {
             break;
         }
@@ -1491,7 +1506,7 @@ fn draw_settings(f: &mut Frame, app: &mut App, area: Rect) {
             }
         }
     }
-    let y = area.y + setting_rows().len() as u16 + 1;
+    let y = (area.y as usize + setting_rows().len() + 1).checked_sub(offset).map_or(area.bottom(), |y| y as u16);
     if y < area.bottom() {
         let note = match &app.config_path {
             Some(p) => format!(
@@ -1596,18 +1611,16 @@ fn draw_settings_popup(f: &mut Frame, app: &App) {
                 let changed = !app.keys.is_default(action);
                 let key_style = if changed { bold(t.primary) } else { bold(t.text) };
                 let scopes = scopes.iter().map(|s| s.label()).collect::<Vec<_>>().join(", ");
-                put(
-                    f,
-                    inner.x,
-                    y,
-                    inner.width,
-                    Line::from(vec![
-                        Span::styled(format!("  {:<16}", truncate(&app.keys.label(action), 15)), key_style),
-                        Span::styled(format!("{name:<17}"), dim()),
-                        Span::styled(format!("{:<37}", truncate(desc, 36)), Style::new().fg(t.text)),
-                        Span::styled(truncate(&scopes, (inner.width as usize).saturating_sub(72)), dim()),
-                    ]),
-                );
+                let mut spans = vec![Span::styled(format!("  {:<16}", truncate(&app.keys.label(action), 15)), key_style)];
+                // Narrow: just the key and what it does.
+                if inner.width >= 80 {
+                    spans.push(Span::styled(format!("{name:<17}"), dim()));
+                    spans.push(Span::styled(format!("{:<37}", truncate(desc, 36)), Style::new().fg(t.text)));
+                    spans.push(Span::styled(truncate(&scopes, (inner.width as usize).saturating_sub(72)), dim()));
+                } else {
+                    spans.push(Span::styled(truncate(desc, (inner.width as usize).saturating_sub(18)), Style::new().fg(t.text)));
+                }
+                put(f, inner.x, y, inner.width, Line::from(spans));
             }
             let y = inner.bottom().saturating_sub(1);
             let line = match (capture, rows.get(sel)) {

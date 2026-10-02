@@ -438,8 +438,8 @@ pub enum Hit {
     Thread { area: Rect },
     /// The catalog grid: its area, first visible item, columns, and cell size.
     Grid { area: Rect, offset: usize, cols: usize, cell: (u16, u16) },
-    /// The settings screen, laid out as `settings::rows()`.
-    Settings { area: Rect },
+    /// The settings screen, laid out as `settings::rows()` from `offset`.
+    Settings { area: Rect, offset: usize },
 }
 
 /// New posts in a watched thread, for a notification.
@@ -1634,7 +1634,7 @@ impl App {
             Hit::List { area, offset, item_height } if area.contains(pos) => {
                 Some(offset + ((row - area.y) / item_height.max(1)) as usize)
             }
-            Hit::Settings { area } if area.contains(pos) => settings::rows().get((row - area.y) as usize)?.ok(),
+            Hit::Settings { area, offset } if area.contains(pos) => settings::rows().get(offset + (row - area.y) as usize)?.ok(),
             Hit::Grid { area, offset, cols, cell } if area.contains(pos) => {
                 let c = ((col - area.x) / cell.0) as usize;
                 (c < cols).then(|| offset + ((row - area.y) / cell.1) as usize * cols + c)

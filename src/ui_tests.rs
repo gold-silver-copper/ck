@@ -499,3 +499,26 @@ fn help_fits_at_110x32_and_scrolls_when_small() {
     let (text, _) = render_at(&mut a, 60, 20);
     assert!(text.contains("copy text / link"), "{text}");
 }
+
+#[test]
+fn narrow_screens() {
+    let mut a = app(false);
+    // Settings scroll to the selected one.
+    a.open_settings();
+    let last = crate::app::SETTING_SECTIONS.iter().flat_map(|(_, i)| i.iter()).count() - 1;
+    a.settings_list.state.select(Some(last));
+    let (text, _) = render_at(&mut a, 60, 20);
+    assert!(text.contains("Key bindings"), "{text}");
+    // Long crumbs give way with an ellipsis, before the counts.
+    a.view = View::Thread;
+    let mut t = thread();
+    t.posts[0].subject = Some("A very long subject that can't possibly fit in a narrow terminal".into());
+    a.thread = Some(t);
+    let (text, _) = render_at(&mut a, 60, 20);
+    let bar = text.lines().next().unwrap();
+    assert!(bar.contains("…  ") && bar.ends_with("5 posts  ·  2 new"), "{bar}");
+    // Panels keep their title when the hint can't fit too.
+    a.open_image_search();
+    let (text, _) = render_at(&mut a, 40, 20);
+    assert!(text.contains("Search for this image") && !text.contains("imageenter"), "{text}");
+}
