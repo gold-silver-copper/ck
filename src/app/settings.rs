@@ -237,7 +237,7 @@ impl App {
             }
             Item::Filters => {
                 let path = self.config_path.as_ref().map_or("the config".into(), |p| tilde(&p.display().to_string()));
-                self.status = Some((format!("Filters are [[filter]] tables in {path} (see the README); they apply from the next start"), false));
+                self.info(format!("Filters are [[filter]] tables in {path} (see the README); they apply from the next start"));
             }
             Item::RefreshThread => {
                 let secs = next(REFRESH_THREAD, self.refresh_thread.as_secs());
@@ -315,7 +315,7 @@ impl App {
                             Some(Popup::Colors { list, editing: None })
                         }
                         Err(e) => {
-                            self.status = Some((format!("{e:#}"), true));
+                            self.error(e);
                             Some(Popup::Colors { list, editing: Some(text) })
                         }
                     }
@@ -434,7 +434,7 @@ impl App {
                 let what = format!("{name} = {}", self.keys.label(action));
                 self.save_config(&what, |d| config::set_key(d, name, binding.as_ref()));
             }
-            Err(e) => self.status = Some((format!("{e:#}"), true)),
+            Err(e) => self.error(e),
         }
     }
 
@@ -451,7 +451,7 @@ impl App {
                 self.set_theme(t);
                 self.save_config(&format!("theme {name}"), |d| config::set_theme(d, name));
             }
-            Err(e) => self.status = Some((format!("{e:#}"), true)),
+            Err(e) => self.error(e),
         }
     }
 
@@ -489,16 +489,16 @@ impl App {
                     config::set_theme_color(d, &name, base.as_deref(), role, color.as_deref());
                 });
             }
-            Err(e) => self.status = Some((format!("{e:#}"), true)),
+            Err(e) => self.error(e),
         }
     }
 
     /// Write a change to the config file and say where it went.
     pub fn save_config(&mut self, what: &str, f: impl FnOnce(&mut toml_edit::DocumentMut)) {
-        self.status = Some(match self.edit_config(f) {
-            Ok(path) => (format!("Saved {what} in {path}"), false),
-            Err(e) => (format!("Changed {what} for now; couldn't save it: {e:#}"), true),
-        });
+        match self.edit_config(f) {
+            Ok(path) => self.info(format!("Saved {what} in {path}")),
+            Err(e) => self.error(format!("Changed {what} for now; couldn't save it: {e:#}")),
+        }
     }
 
     /// Edit the config file; returns its path, for messages.

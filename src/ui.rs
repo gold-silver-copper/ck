@@ -15,7 +15,7 @@ use ratatui_image::Image;
 use unicode_width::UnicodeWidthStr;
 
 use crate::app::{
-    App, Clock, Hit, LineCache, LinkItem, SETTING_SECTIONS, SettingsPopup, SiteRow, Sort, ThreadLayout, ThreadView, View, key_rows,
+    App, Clock, Hit, LineCache, LinkItem, SETTING_SECTIONS, SettingsPopup, SiteRow, Sort, Status, ThreadLayout, ThreadView, View, key_rows,
     setting_rows,
 };
 use crate::http;
@@ -283,6 +283,15 @@ fn location(app: &App) -> (Vec<String>, Vec<Span<'static>>) {
     (crumbs, spans)
 }
 
+/// A status message: a ✓ or ! badge, then the text.
+fn status_spans(s: &Status, t: Theme) -> Vec<Span<'static>> {
+    let (mark, bg) = if s.error { ("!", t.error) } else { ("✓", t.success) };
+    vec![
+        Span::styled(format!(" {mark} "), bold(t.background).bg(bg)),
+        Span::styled(format!(" {}", s.text), Style::new().fg(t.on_bar)),
+    ]
+}
+
 /// Key hints, input, or status, on a solid bar; background work shows at the right.
 fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
     let t = theme();
@@ -307,7 +316,7 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
             Span::styled(
                 match (&app.goto, &app.status) {
                     // Tab completion's candidates.
-                    (Some(_), Some((msg, false))) => format!("   {msg}"),
+                    (Some(_), Some(Status { text, error: false })) => format!("   {text}"),
                     (Some(_), _) => "   enter go   tab complete   esc cancel".into(),
                     _ => "   enter accept   esc clear".into(),
                 },
@@ -319,13 +328,8 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
             Span::styled(format!(" {} ", SPINNER[app.tick % SPINNER.len()]), bold(t.primary)),
             Span::styled(format!("{label}…"), Style::new().fg(t.on_bar)),
         ])
-    } else if let Some((msg, is_err)) = &app.status {
-        let (mark, bg) = if *is_err { ("!", t.error) } else { ("✓", t.success) };
-        Line::from(vec![
-            Span::raw(" "),
-            Span::styled(format!(" {mark} "), bold(t.background).bg(bg)),
-            Span::styled(format!(" {msg}"), Style::new().fg(t.on_bar)),
-        ])
+    } else if let Some(s) = &app.status {
+        Line::from([vec![Span::raw(" ")], status_spans(s, t)].concat())
     } else {
         let mut spans = vec![Span::raw(" ")];
         for (key, label) in footer_hints(app) {
@@ -1750,10 +1754,8 @@ fn draw_viewer(f: &mut Frame, app: &mut App) {
     );
     fill(f, bottom, t.bar);
     let mut hints = vec![Span::raw(" ")];
-    if let Some((msg, is_err)) = &app.status {
-        let (mark, bg) = if *is_err { ("!", t.error) } else { ("✓", t.success) };
-        hints.push(Span::styled(format!(" {mark} "), bold(t.background).bg(bg)));
-        hints.push(Span::styled(format!(" {msg}"), Style::new().fg(t.on_bar)));
+    if let Some(s) = &app.status {
+        hints.extend(status_spans(s, t));
     } else {
         for (k, label) in [("h/l", "previous / next"), ("i", "open externally"), ("esc", "close")] {
             hints.push(Span::styled(k, bold(t.primary)));

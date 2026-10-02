@@ -42,7 +42,7 @@ impl App {
     pub fn start_archive_search(&mut self) {
         match self.archive_site() {
             Some(_) => self.search_input = Some(String::new()),
-            None => self.status = Some(("This site has no archive to search (see `archive` in the config)".into(), false)),
+            None => self.info("This site has no archive to search (see `archive` in the config)"),
         }
     }
 
@@ -95,7 +95,8 @@ impl App {
                 s.total = p.total.or(s.total);
                 s.hits.extend(p.hits);
                 if s.hits.is_empty() {
-                    self.status = Some((format!("No posts on /{}/ match \"{}\"", s.board, s.query), false));
+                    let msg = format!("No posts on /{}/ match \"{}\"", s.board, s.query);
+                    self.info(msg);
                 }
             }
             Err(e) => self.error(e),

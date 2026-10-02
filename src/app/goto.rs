@@ -16,7 +16,7 @@ impl App {
         let board = self.board.as_ref().map(|b| b.uri.clone());
         match route::resolve(input, &self.site_infos(), (self.site, board.as_deref())) {
             Ok(target) => self.go(target),
-            Err(e) => self.status = Some((format!("{e:#}"), true)),
+            Err(e) => self.error(e),
         }
     }
 
@@ -128,7 +128,7 @@ impl App {
         let lower = partial.to_lowercase();
         let matches: Vec<&String> = candidates.iter().filter(|c| c.to_lowercase().starts_with(&lower)).collect();
         match matches.as_slice() {
-            [] => self.status = Some((format!("Nothing starts with \"{partial}\""), false)),
+            [] => self.info(format!("Nothing starts with \"{partial}\"")),
             [one] => {
                 let slash = if site.is_none() && self.sites.iter().any(|s| s.cfg.name == **one) { "/" } else { "" };
                 self.goto = Some(format!("{prefix}{one}{slash}"));
@@ -142,7 +142,7 @@ impl App {
                 }
                 let shown: Vec<&str> = many.iter().take(10).map(|s| s.as_str()).collect();
                 let more = if many.len() > 10 { format!(" (+{})", many.len() - 10) } else { String::new() };
-                self.status = Some((format!("{}{more}", shown.join("  ")), false));
+                self.info(format!("{}{more}", shown.join("  ")));
             }
         }
     }

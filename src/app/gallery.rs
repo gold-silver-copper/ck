@@ -22,7 +22,7 @@ impl App {
         let files: Vec<(usize, Attachment)> =
             t.posts.iter().enumerate().flat_map(|(i, p)| p.files.iter().map(move |f| (i, f.clone()))).collect();
         if files.is_empty() {
-            self.status = Some(("Thread has no files".into(), false));
+            self.info("Thread has no files");
             return;
         }
         let mut state = ListState::default();

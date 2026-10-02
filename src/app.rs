@@ -450,6 +450,20 @@ pub enum Hit {
     Settings { area: Rect, offset: usize },
 }
 
+/// A message in the footer, for a moment (errors a little longer).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Status {
+    pub text: String,
+    pub error: bool,
+}
+
+impl Status {
+    /// How long it replaces the key hints.
+    fn ttl(&self) -> Duration {
+        Duration::from_secs(if self.error { 5 } else { 2 })
+    }
+}
+
 /// New posts in a watched thread, for a notification.
 struct Note {
     key: ThreadKey,
@@ -585,7 +599,7 @@ pub struct App {
     pub filtering: bool,
     /// Label of the in-flight request, if any.
     pub loading: Option<String>,
-    pub status: Option<(String, bool)>,
+    pub status: Option<Status>,
     /// The status message as last seen by `expire_status`, and when it appeared.
     status_since: Option<(String, Instant)>,
     pub show_help: bool,
@@ -957,11 +971,11 @@ impl App {
         }
         for m in &messages {
             if let Err(e) = crate::notify::send(&method, "ck", m) {
-                self.status = Some((format!("Couldn't notify: {e:#}"), true));
+                self.error(format!("Couldn't notify: {e:#}"));
             }
         }
         if let Some(m) = messages.first() {
-            self.status.get_or_insert_with(|| (m.clone(), false));
+            self.status.get_or_insert_with(|| Status { text: m.clone(), error: false });
         }
         self.notified.extend(messages);
         let len = self.notified.len();
@@ -987,8 +1001,8 @@ impl App {
         if let Some(t) = self.images.next_frame() {
             at(t);
         }
-        if let (Some((_, is_err)), Some((_, since))) = (&self.status, &self.status_since) {
-            at(*since + Duration::from_secs(if *is_err { 5 } else { 2 }));
+        if let (Some(s), Some((_, since))) = (&self.status, &self.status_since) {
+            at(*since + s.ttl());
         }
         if self.view == View::Thread && self.thread.is_some() && self.loading.is_none() {
             at(self.thread_checked + self.refresh_thread);
@@ -1045,7 +1059,7 @@ impl App {
                         }
                         Ok(None) => {
                             let msg = format!("Post {post} isn't in this thread, and this site can't say which thread it's in");
-                            self.status = Some((msg, true));
+                            self.error(msg);
                         }
                         Err(e) => self.error(e),
                     }
@@ -1055,7 +1069,7 @@ impl App {
                     self.search_results(page, res);
                 }
                 Msg::Cached(id, age) if id == self.req && self.status.is_none() => {
-                    self.status = Some((format!("Up to date (checked {}s ago)", age.as_secs()), false));
+                    self.info(format!("Up to date (checked {}s ago)", age.as_secs()));
                 }
                 Msg::Boards(id, site, res) => {
                     if id == self.req {
@@ -1108,7 +1122,7 @@ impl App {
                         Err(e) if restoring && http::is_not_found(&e) => {
                             self.view = View::Catalog;
                             self.load_catalog();
-                            self.status = Some(("The thread you had open last time is gone (archived or deleted)".into(), false));
+                            self.info("The thread you had open last time is gone (archived or deleted)");
                         }
                         Err(e) if http::is_not_found(&e) => {
                             let Some(key) = self.board.as_ref().map(|b| self.key(&b.uri, self.pending_thread)) else {
@@ -1131,24 +1145,29 @@ impl App {
     /// Status messages replace the footer's key hints only briefly: info for 2 seconds,
     /// errors for 5. A new or changed message restarts the timer.
     fn expire_status(&mut self, now: Instant) {
-        let Some((msg, is_err)) = &self.status else {
+        let Some(status) = &self.status else {
             self.status_since = None;
             return;
         };
         match &self.status_since {
-            Some((seen, since)) if seen == msg => {
-                let ttl = Duration::from_secs(if *is_err { 5 } else { 2 });
-                if now.duration_since(*since) >= ttl {
+            Some((seen, since)) if *seen == status.text => {
+                if now.duration_since(*since) >= status.ttl() {
                     self.status = None;
                     self.status_since = None;
                 }
             }
-            _ => self.status_since = Some((msg.clone(), now)),
+            _ => self.status_since = Some((status.text.clone(), now)),
         }
     }
 
-    fn error(&mut self, e: anyhow::Error) {
-        self.status = Some((format!("{e:#}"), true));
+    /// Say something in the footer for a moment.
+    pub fn info(&mut self, text: impl Into<String>) {
+        self.status = Some(Status { text: text.into(), error: false });
+    }
+
+    /// Say something went wrong (shown a little longer).
+    pub fn error(&mut self, e: impl std::fmt::Display) {
+        self.status = Some(Status { text: format!("{e:#}"), error: true });
     }
 
     /// Run `job` on a thread, as the current request (shown as `label`). The job gets the
@@ -1181,7 +1200,7 @@ impl App {
         if complete && self.sites[site].cfg.boards.is_none() {
             let name = self.sites[site].cfg.name.clone();
             if let Err(e) = self.store.save_boards(&name, &boards, self.clock.now()) {
-                self.status = Some((format!("Couldn't save the board list: {e:#}"), true));
+                self.error(format!("Couldn't save the board list: {e:#}"));
             }
         }
         self.sites[site].boards = Some(boards);
@@ -1257,7 +1276,7 @@ impl App {
         self.save_pending = false;
         self.saved_at = Instant::now();
         if let Err(e) = self.store.save() {
-            self.status = Some((format!("Couldn't save watched threads: {e:#}"), true));
+            self.error(format!("Couldn't save watched threads: {e:#}"));
         }
     }
 
@@ -1390,17 +1409,14 @@ impl App {
         };
         if let Some(label) = mark.and_then(|m| m.hidden).filter(|l| !l.is_empty()) {
             let msg = format!("Hidden by the filter \"{label}\"; change [[filter]] in the config to show it");
-            self.status = Some((msg, false));
+            self.info(msg);
             return;
         }
         let site = self.current_site().cfg.name.clone();
         let hidden = self.store.toggle_hidden(&site, &board, no);
         self.save_now();
         let show = self.keys.key(Action::ShowHidden);
-        self.status = Some((
-            if hidden { format!("Hid {what} {no} ({show} shows hidden ones)") } else { format!("Unhid {what} {no}") },
-            false,
-        ));
+        self.info(if hidden { format!("Hid {what} {no} ({show} shows hidden ones)") } else { format!("Unhid {what} {no}") });
         self.remark_catalog();
         self.remark_thread();
         if let Some((p, len)) = self.picker() {
@@ -1423,7 +1439,7 @@ impl App {
             p.clamp(len);
         }
         let msg = if self.show_hidden { "Showing hidden threads and posts" } else { "Leaving out hidden threads and posts" };
-        self.status = Some((msg.into(), false));
+        self.info(msg);
     }
 
     // ----- watched threads and auto-refresh -----
@@ -1546,20 +1562,20 @@ impl App {
         let dir = download::dir(self.download_dir.as_deref(), &site.cfg.name, &t.board, t.no);
         let url = site.backend.thread_url(&b.uri, t.no);
         let about = crate::export::About { site: &site.cfg.name, board: &t.board, thread: t.no, url: &url, saved: self.clock.now() };
-        self.status = Some(match crate::export::save(&t.posts, &about, &theme::theme(), &dir) {
-            Ok(()) => (format!("Saved thread.html and thread.json in {}", tilde(&dir.display().to_string())), false),
-            Err(e) => (format!("Couldn't save the thread: {e:#}"), true),
-        });
+        match crate::export::save(&t.posts, &about, &theme::theme(), &dir) {
+            Ok(()) => self.info(format!("Saved thread.html and thread.json in {}", tilde(&dir.display().to_string()))),
+            Err(e) => self.error(format!("Couldn't save the thread: {e:#}")),
+        }
     }
 
     /// Fetch `(url, path)` jobs into `dir` in the background.
     fn start_download(&mut self, jobs: Vec<(String, std::path::PathBuf)>, dir: std::path::PathBuf, none: &str) {
         if jobs.is_empty() {
-            self.status = Some((none.into(), false));
+            self.info(none);
             return;
         }
         if let Err(e) = std::fs::create_dir_all(&dir) {
-            self.status = Some((format!("Couldn't create {}: {e}", dir.display()), true));
+            self.error(format!("Couldn't create {}: {e}", dir.display()));
             return;
         }
         let d = &mut self.downloads;
@@ -1608,7 +1624,7 @@ impl App {
                     if d.failed > 0 {
                         msg.push_str(&format!(", {} failed ({})", d.failed, d.last_error.as_deref().unwrap_or("")));
                     }
-                    self.status = Some((msg, d.failed > 0));
+                    self.status = Some(Status { text: msg, error: d.failed > 0 });
                 }
             }
         }
@@ -1632,7 +1648,7 @@ impl App {
         self.store.board_prefs.entry(key).or_default().layout = Some(layout);
         self.save_now();
         let board = self.board.as_ref().map_or(String::new(), |b| format!(" for /{}/", b.uri));
-        self.status = Some((format!("Layout{board}: {} (the default is in Settings)", layout.as_str()), false));
+        self.info(format!("Layout{board}: {} (the default is in Settings)", layout.as_str()));
     }
 
     /// The board's own sort, when its catalog opens.
@@ -1652,13 +1668,13 @@ impl App {
             Ok(path) => {
                 self.store.settings.compact_catalog = None;
                 self.store.settings.catalog_layout = None;
-                self.status = Some((format!("Default catalog layout: {name} (saved in {path})"), false));
+                self.info(format!("Default catalog layout: {name} (saved in {path})"));
             }
             Err(e) => {
                 self.store.settings.compact_catalog = None;
                 self.store.settings.catalog_layout = Some(self.default_layout);
                 self.save_now();
-                self.status = Some((format!("Default catalog layout: {name} (kept in the data directory: {e:#})"), false));
+                self.info(format!("Default catalog layout: {name} (kept in the data directory: {e:#})"));
             }
         }
     }
@@ -1768,10 +1784,10 @@ impl App {
         let archive = self.sites.iter().find(|s| s.cfg.name == key.site).and_then(|s| s.cfg.archive.clone());
         match archive.filter(|a| self.sites.iter().any(|s| s.cfg.name == *a)) {
             Some(a) => {
-                self.status = Some((format!("Thread was deleted or archived. Press a to open it in {a}"), true));
+                self.error(format!("Thread was deleted or archived. Press a to open it in {a}"));
                 self.archive_offer = Some(ThreadKey { site: a, board: key.board.clone(), no: key.no });
             }
-            None => self.status = Some(("Thread was deleted or archived".into(), true)),
+            None => self.error("Thread was deleted or archived"),
         }
     }
 
@@ -1795,7 +1811,7 @@ impl App {
         let key = self.key(&board, no);
         let watching = self.store.toggle_watch(key.clone(), subject, posts, last_seen);
         self.watched_checked.remove(&key);
-        self.status = Some((if watching { format!("Watching thread {no}") } else { format!("Stopped watching thread {no}") }, false));
+        self.info(if watching { format!("Watching thread {no}") } else { format!("Stopped watching thread {no}") });
         self.save_now();
     }
 
@@ -1820,10 +1836,7 @@ impl App {
                 true
             }
         };
-        self.status = Some((
-            if mine { format!("Marked No.{no} as yours; replies to it will be counted and notified") } else { format!("No.{no} isn't marked as yours any more") },
-            false,
-        ));
+        self.info(if mine { format!("Marked No.{no} as yours; replies to it will be counted and notified") } else { format!("No.{no} isn't marked as yours any more") });
         self.save_now();
         self.remark_thread();
     }
@@ -1831,7 +1844,7 @@ impl App {
     /// Open a thread from Watched or History, switching site and board as needed.
     fn open_key(&mut self, key: ThreadKey) {
         let Some(site) = self.sites.iter().position(|s| s.cfg.name == key.site) else {
-            self.status = Some((format!("No site named {} in the config", key.site), true));
+            self.error(format!("No site named {} in the config", key.site));
             return;
         };
         self.switch_site(site);
@@ -2024,7 +2037,7 @@ impl App {
                 if let Some(t) = &mut self.thread {
                     match t.toggle_expanded() {
                         Ok(_) => {}
-                        Err(msg) => self.status = Some((msg.into(), false)),
+                        Err(msg) => self.info(msg),
                     }
                 }
             }
@@ -2038,7 +2051,7 @@ impl App {
                 let key = self.board_key();
                 self.store.board_prefs.entry(key).or_default().sort = (self.catalog_sort != Sort::Bump).then_some(self.catalog_sort);
                 self.save_now();
-                self.status = Some((format!("Sorted by {}", self.catalog_sort.label()), false));
+                self.info(format!("Sorted by {}", self.catalog_sort.label()));
             }
             Action::Compact => self.cycle_layout(),
             Action::Download => self.download(false),
@@ -2048,7 +2061,7 @@ impl App {
                     self.open_key(key);
                     self.return_to = None;
                 }
-                None => self.status = Some(("Nothing to open in an archive".into(), false)),
+                None => self.info("Nothing to open in an archive"),
             },
             Action::OpenFile
             | Action::Replies
@@ -2138,13 +2151,14 @@ impl App {
             Action::Preview => self.open_preview(),
             Action::NextMatch | Action::PrevMatch if t.matches.is_empty() => {
                 let msg = if t.search.is_empty() { format!("No search; press {search_key} to search the thread") } else { "No matches".into() };
-                self.status = Some((msg, false));
+                self.info(msg);
             }
             Action::NextMatch | Action::PrevMatch => {
                 if let Some(i) = t.next_match(action == Action::NextMatch) {
                     t.select(i);
                     let k = t.matches.iter().position(|&m| m == i).unwrap_or(0);
-                    self.status = Some((format!("Match {}/{} for \"{}\"", k + 1, t.matches.len(), t.search), false));
+                    let msg = format!("Match {}/{} for \"{}\"", k + 1, t.matches.len(), t.search);
+                    self.info(msg);
                 }
             }
             Action::Spoiler => {
@@ -2159,13 +2173,13 @@ impl App {
                 t.revealed.clear();
                 t.layout = None;
                 let msg = if t.reveal_all { "Showing all spoilers" } else { "Hiding spoilers" };
-                self.status = Some((msg.into(), false));
+                self.info(msg);
             }
             Action::Replies => match t.backlinks[t.selected].first() {
                 Some(&no) => {
                     t.jump_to(no);
                 }
-                None => self.status = Some(("No replies to this post".into(), false)),
+                None => self.info("No replies to this post"),
             },
             Action::JumpBack => {
                 if let Some(i) = t.jumps.pop() {
@@ -2181,11 +2195,11 @@ impl App {
                     t.jumps.push(t.selected);
                     t.select(i);
                 }
-                None => self.status = Some(("No unread posts".into(), false)),
+                None => self.info("No unread posts"),
             },
             Action::OpenFile => match t.current().and_then(|p| p.files.first()).cloned() {
                 Some(f) => self.open_file(&f),
-                None => self.status = Some(("Post has no file".into(), false)),
+                None => self.info("Post has no file"),
             },
             _ => {}
         }
@@ -2203,14 +2217,15 @@ impl App {
             }
             KeyCode::Enter => {
                 self.searching = false;
-                match t.next_match(true) {
+                let msg = match t.next_match(true) {
                     Some(i) => {
                         t.select(i);
-                        self.status = Some((format!("{} posts match \"{}\" (n/N to move)", t.matches.len(), t.search), false));
+                        format!("{} posts match \"{}\" (n/N to move)", t.matches.len(), t.search)
                     }
-                    None if t.search.is_empty() => {}
-                    None => self.status = Some((format!("No posts match \"{}\"", t.search), false)),
-                }
+                    None if t.search.is_empty() => return,
+                    None => format!("No posts match \"{}\"", t.search),
+                };
+                self.info(msg);
             }
             KeyCode::Backspace => {
                 let mut q = t.search.clone();
@@ -2231,7 +2246,7 @@ impl App {
         let posts: Vec<usize> = p.quotes.iter().filter_map(|q| t.index.get(q).copied()).collect();
         let elsewhere: Vec<u64> = p.links.iter().filter_map(|l| l.post).filter(|n| !t.index.contains_key(n)).collect();
         if posts.is_empty() && elsewhere.is_empty() {
-            self.status = Some(("Post quotes nothing".into(), false));
+            self.info("Post quotes nothing");
             return;
         }
         self.preview = Some(Preview { posts, elsewhere, scroll: 0 });
@@ -2263,7 +2278,7 @@ impl App {
     fn follow_link(&mut self) {
         match self.outgoing_link() {
             Some(link) => self.follow(link),
-            None => self.status = Some(("Post quotes nothing in this thread".into(), false)),
+            None => self.info("Post quotes nothing in this thread"),
         }
     }
 
@@ -2326,7 +2341,7 @@ impl App {
         self.from_catalog = false;
         self.gallery = None;
         if announce {
-            self.status = Some((format!("Opening /{}/{no} (u goes back)", board.uri), false));
+            self.info(format!("Opening /{}/{no} (u goes back)", board.uri));
         }
         self.board = Some(board);
         self.pending_post = post;
@@ -2350,7 +2365,7 @@ impl App {
             // Space pauses an animated GIF; otherwise it's the next file.
             KeyCode::Char(' ') if self.images.toggle_pause(&v.files[v.index].url) => {
                 let paused = self.images.is_paused(&v.files[v.index].url);
-                self.status = Some((if paused { "Paused (space plays)" } else { "Playing" }.into(), false));
+                self.info(if paused { "Paused (space plays)" } else { "Playing" });
             }
             KeyCode::Char('l' | 'j' | ' ') | KeyCode::Right | KeyCode::Down => v.index = (v.index + 1) % n,
             KeyCode::Char('i') | KeyCode::Enter => {
@@ -2372,13 +2387,13 @@ impl App {
 
     fn open_viewer(&mut self) {
         if !self.images.enabled() {
-            self.status = Some(("Images are off (images = \"off\" in the config); i opens the file".into(), false));
+            self.info("Images are off (images = \"off\" in the config); i opens the file");
             return;
         }
         let link = self.selected_link();
         match self.selected_post().map(|p| p.files.clone()) {
             Some(files) if !files.is_empty() => self.viewer = Some(Viewer { files, index: 0, link }),
-            _ => self.status = Some(("Post has no file".into(), false)),
+            _ => self.info("Post has no file"),
         }
     }
 
@@ -2392,10 +2407,10 @@ impl App {
                 .stderr(std::process::Stdio::null());
             #[cfg(unix)]
             std::os::unix::process::CommandExt::process_group(&mut cmd, 0);
-            self.status = Some(match cmd.spawn() {
-                Ok(_) => (format!("Playing {} in mpv", f.filename), false),
-                Err(e) => (format!("Couldn't start mpv: {e}"), true),
-            });
+            match cmd.spawn() {
+                Ok(_) => self.info(format!("Playing {} in mpv", f.filename)),
+                Err(e) => self.error(format!("Couldn't start mpv: {e}")),
+            }
         } else {
             self.open_url(&f.url);
         }
@@ -2423,7 +2438,7 @@ impl App {
         match self.view {
             View::Watched => {
                 let w = self.store.watched.remove(i);
-                self.status = Some((format!("Stopped watching thread {}", w.key.no), false));
+                self.info(format!("Stopped watching thread {}", w.key.no));
             }
             View::History => {
                 self.store.history.remove(i);
@@ -2603,18 +2618,18 @@ impl App {
         };
         let Some((what, text)) = what else { return };
         if text.is_empty() {
-            self.status = Some(("Nothing to copy: the post has no text".into(), false));
+            self.info("Nothing to copy: the post has no text");
             return;
         }
         self.copy_text(what, text);
     }
 
     pub fn copy_text(&mut self, what: &str, text: String) {
-        self.status = Some(match crate::clipboard::copy(&text) {
-            Ok(()) if what == "text" => (format!("Copied {} characters", text.chars().count()), false),
-            Ok(()) => (format!("Copied {what}: {text}"), false),
-            Err(e) => (format!("Couldn't copy: {e:#}"), true),
-        });
+        match crate::clipboard::copy(&text) {
+            Ok(()) if what == "text" => self.info(format!("Copied {} characters", text.chars().count())),
+            Ok(()) => self.info(format!("Copied {what}: {text}")),
+            Err(e) => self.error(format!("Couldn't copy: {e:#}")),
+        }
         self.copied = Some(text);
     }
 
@@ -2654,10 +2669,10 @@ impl App {
         if cfg!(test) {
             return;
         }
-        self.status = Some(match open::that_detached(url) {
-            Ok(()) => (format!("Opened {url}"), false),
-            Err(e) => (format!("Couldn't open {url}: {e}"), true),
-        });
+        match open::that_detached(url) {
+            Ok(()) => self.info(format!("Opened {url}")),
+            Err(e) => self.error(format!("Couldn't open {url}: {e}")),
+        }
     }
 }
 
@@ -2774,7 +2789,7 @@ mod tests {
         assert_eq!(app.next_wake(now), Duration::from_millis(100));
         app.loading = None;
         // A status message wakes the loop when it's due to disappear.
-        app.status = Some(("hi".into(), false));
+        app.info("hi");
         app.status_since = Some(("hi".into(), now - Duration::from_millis(1700)));
         assert_eq!(app.next_wake(now), Duration::from_millis(300));
         app.status = None;
@@ -2885,7 +2900,7 @@ mod tests {
         press(&mut app, KeyCode::Enter);
         press(&mut app, KeyCode::Char('v'));
         assert_eq!(app.keys.label(Action::Watch), "W, alt-w");
-        assert!(app.status.as_ref().is_some_and(|(m, err)| *err && m.contains("'v'")), "{:?}", app.status);
+        assert!(app.status.as_ref().is_some_and(|s| s.error && s.text.contains("'v'")), "{:?}", app.status);
         // x resets to the default, which removes the entry.
         press(&mut app, KeyCode::Char('x'));
         assert!(app.keys.is_default(Action::Watch));
@@ -2909,7 +2924,7 @@ mod tests {
         app.view = View::Thread;
         app.act(Action::Copy);
         assert_eq!(app.copied.as_deref(), Some(">>1\n>green\nsecret text"));
-        assert_eq!(app.status.as_ref().unwrap().0, "Copied 22 characters");
+        assert_eq!(app.status.as_ref().unwrap().text, "Copied 22 characters");
         app.act(Action::CopyLink);
         assert_eq!(app.copied.as_deref(), Some("https://boards.4chan.org/g/thread/1#p2"));
         // The viewer copies the file's URL, or the post's link.
@@ -2971,7 +2986,7 @@ mod tests {
         assert_eq!((app.site, app.view), (1, View::Boards));
         // Errors are said, not acted on.
         app.goto_str("https://example.com/g/");
-        assert!(app.status.as_ref().unwrap().1);
+        assert!(app.status.as_ref().unwrap().error);
         assert_eq!(app.view, View::Boards);
     }
 
@@ -2983,7 +2998,7 @@ mod tests {
         app.on_key(KeyEvent::from(KeyCode::Tab));
         // x and xy: completes the common part and lists both.
         assert_eq!(app.goto.as_deref(), Some("a/x"));
-        assert!(app.status.as_ref().unwrap().0.contains("xy"));
+        assert!(app.status.as_ref().unwrap().text.contains("xy"));
         app.on_key(KeyEvent::from(KeyCode::Char('y')));
         app.on_key(KeyEvent::from(KeyCode::Enter));
         assert_eq!((app.goto.as_deref(), app.view, app.board.as_ref().unwrap().uri.as_str()), (None, View::Catalog, "xy"));
@@ -3032,7 +3047,7 @@ mod tests {
         // A post without links says so.
         app.thread = Some(ThreadView::new("x".into(), 1, vec![Post { no: 1, ..Default::default() }]));
         app.act(Action::Links);
-        assert!(app.links.is_none() && app.status.as_ref().unwrap().0 == "Post has no links");
+        assert!(app.links.is_none() && app.status.as_ref().unwrap().text == "Post has no links");
     }
 
     #[test]
@@ -3063,7 +3078,7 @@ mod tests {
         assert_eq!(app.selected_index(), Some(1));
         app.catalog_list.state.select(Some(0));
         app.act(Action::Hide);
-        assert!(app.status.as_ref().unwrap().0.contains("filter \"spam\""));
+        assert!(app.status.as_ref().unwrap().text.contains("filter \"spam\""));
         app.catalog_list.state.select(Some(2));
         app.act(Action::Hide);
         assert!(!app.store.hidden_on("a", "x").contains(&3));
@@ -3296,7 +3311,7 @@ mod tests {
         }
         assert_eq!(app.req, req + 1);
         app.handle(Msg::Search(app.req, 2, Err(anyhow::anyhow!("You're searching too fast."))));
-        assert!(app.status.as_ref().is_some_and(|(m, err)| *err && m.contains("too fast")));
+        assert!(app.status.as_ref().is_some_and(|s| s.error && s.text.contains("too fast")));
         // Enter: the thread, on the archive, with the post selected.
         app.search_list.state.select(Some(1));
         app.enter();
@@ -3308,7 +3323,7 @@ mod tests {
         // Sites without an archive say so.
         app.sites[0].cfg.archive = None;
         app.act(Action::ArchiveSearch);
-        assert!(app.search_input.is_none() && app.status.as_ref().unwrap().0.contains("no archive"));
+        assert!(app.search_input.is_none() && app.status.as_ref().unwrap().text.contains("no archive"));
     }
 
     #[test]
@@ -3486,7 +3501,7 @@ mod tests {
         assert!(app.favorites.is_empty());
         app.view = View::Sites;
         app.on_key(KeyEvent::from(KeyCode::Char('3')));
-        assert!(app.status.as_ref().unwrap().0.contains("No favorites yet"));
+        assert!(app.status.as_ref().unwrap().text.contains("No favorites yet"));
     }
 
     #[test]
@@ -3654,7 +3669,7 @@ mod tests {
     fn status_messages_expire() {
         let mut app = test_app();
         let t0 = Instant::now();
-        app.status = Some(("No unread posts".into(), false));
+        app.info("No unread posts");
         app.expire_status(t0);
         app.expire_status(t0 + Duration::from_millis(1500));
         assert!(app.status.is_some());
@@ -3662,11 +3677,11 @@ mod tests {
         assert!(app.status.is_none());
 
         // Errors stay longer, and a new message restarts the timer.
-        app.status = Some(("Rate limited".into(), true));
+        app.error("Rate limited");
         app.expire_status(t0);
         app.expire_status(t0 + Duration::from_secs(4));
         assert!(app.status.is_some());
-        app.status = Some(("Thread was deleted or archived".into(), true));
+        app.error("Thread was deleted or archived");
         app.expire_status(t0 + Duration::from_secs(4));
         app.expire_status(t0 + Duration::from_secs(8));
         assert!(app.status.is_some());

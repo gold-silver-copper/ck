@@ -72,7 +72,7 @@ fn main() -> Result<()> {
     let picker = (config.images == ImagesMode::Auto).then(detect_images);
     let mut app = App::new(config, keys, picker, store);
     if let Some(w) = warnings.first() {
-        app.status = Some((w.clone(), true));
+        app.error(w);
     }
     match start_at {
         Some(at) => app.goto_str(&at),

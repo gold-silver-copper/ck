@@ -57,12 +57,12 @@ impl App {
         if let Some(w) = self.store.watched_mut(&key)
             && let Some(pattern) = w.general.take()
         {
-            self.status = Some((format!("Stopped following {pattern} (still watching the thread)"), false));
+            self.info(format!("Stopped following {pattern} (still watching the thread)"));
             self.save();
             return;
         }
         let Some(pattern) = general_pattern(&subject) else {
-            self.status = Some(("Can't tell which general this is: its subject has no /tag/ or name".into(), true));
+            self.error("Can't tell which general this is: its subject has no /tag/ or name");
             return;
         };
         if self.store.watched(&key).is_none() {
@@ -73,7 +73,7 @@ impl App {
         }
         self.save();
         let msg = format!("Following {pattern}: when this thread dies or fills up, the next one is watched");
-        self.status = Some((msg, false));
+        self.info(msg);
     }
 
     /// Generals whose thread is dead or full: look for the next one (in the background, at
@@ -133,7 +133,7 @@ impl App {
         let method = crate::notify::method(self.notify_mode, self.notify_command.as_deref(), &|k| std::env::var(k).ok());
         let _ = crate::notify::send(&method, "ck", &msg);
         self.notified.push(msg.clone());
-        self.status = Some((msg, false));
+        self.info(msg);
     }
 }
 

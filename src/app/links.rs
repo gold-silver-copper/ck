@@ -49,7 +49,7 @@ impl App {
         items.extend(post.urls.iter().cloned().map(LinkItem::Url));
         items.extend(post.files.iter().cloned().map(LinkItem::File));
         if items.is_empty() {
-            self.status = Some(("Post has no links".into(), false));
+            self.info("Post has no links");
             return;
         }
         let mut list = ListState::default();
@@ -142,7 +142,7 @@ impl App {
         let files: Vec<(String, String)> =
             files.iter().filter_map(|f| Some((f.filename.clone(), if f.is_image() { f.url.clone() } else { f.thumb.clone()? }))).collect();
         if files.is_empty() {
-            self.status = Some(("Post has no image to search for".into(), false));
+            self.info("Post has no image to search for");
             return;
         }
         let mut rows = Vec::new();

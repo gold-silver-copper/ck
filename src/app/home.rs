@@ -57,7 +57,7 @@ impl App {
     pub fn open_board(&mut self, b: &BoardRef) {
         match self.sites.iter().position(|s| s.cfg.name == b.site) {
             Some(site) => self.go(Target { site, board: Some(b.board.clone()), thread: None, post: None }),
-            None => self.status = Some((format!("No site named {} in the config", b.site), true)),
+            None => self.error(format!("No site named {} in the config", b.site)),
         }
     }
 
@@ -129,9 +129,9 @@ impl App {
             }
             None if self.favorites.is_empty() => {
                 let key = self.keys.key(crate::keys::Action::Favorite);
-                self.status = Some((format!("No favorites yet: {key} on a board adds one"), false));
+                self.info(format!("No favorites yet: {key} on a board adds one"));
             }
-            None => self.status = Some((format!("There are {} favorites", self.favorites.len()), false)),
+            None => self.info(format!("There are {} favorites", self.favorites.len())),
         }
     }
 
