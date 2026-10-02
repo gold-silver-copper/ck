@@ -207,10 +207,8 @@ fn catalog_with_thumbnail_placeholders() {
 
 #[test]
 fn catalog_compact() {
-    let mut a = app(true);
-    a.tab.view = View::Catalog;
+    let mut a = catalog_app(true);
     a.default_layout = crate::config::CatalogLayout::Compact;
-    a.tab.catalog = catalog();
     a.tab.catalog_list.state.select(Some(0));
     insta::assert_snapshot!(snapshot(&mut a));
 }
@@ -231,22 +229,18 @@ fn help() {
 
 #[test]
 fn quote_preview() {
-    let mut a = app(false);
-    a.tab.view = View::Thread;
-    let mut t = thread();
+    let mut a = thread_app(false);
+    let t = a.tab.thread.as_mut().unwrap();
     t.selected = 3;
-    a.tab.thread = Some(t);
     a.tab.preview = Some(Preview { posts: vec![1], elsewhere: vec![], scroll: 0 });
     insta::assert_snapshot!(snapshot(&mut a));
 }
 
 #[test]
 fn search_highlight() {
-    let mut a = app(false);
-    a.tab.view = View::Thread;
-    let mut t = thread();
+    let mut a = thread_app(false);
+    let t = a.tab.thread.as_mut().unwrap();
     t.set_search("Snapshot".into());
-    a.tab.thread = Some(t);
     let (text, buf) = render(&mut a);
     insta::assert_snapshot!(text);
     // Every visible "snapshot" (any case) in the thread is highlighted, and nothing else.
@@ -331,13 +325,11 @@ fn key_editor() {
 
 #[test]
 fn links_panel() {
-    let mut a = app(false);
-    a.tab.view = View::Thread;
-    let mut t = thread();
+    let mut a = thread_app(false);
+    let t = a.tab.thread.as_mut().unwrap();
     t.selected = 4;
     t.posts[4].urls = vec!["https://example.com/a-long-path?with=query".into()];
     t.posts[4].files = vec![file("notes.pdf")];
-    a.tab.thread = Some(t);
     a.open_links();
     insta::assert_snapshot!(snapshot(&mut a));
 }
@@ -349,10 +341,8 @@ fn with_filters(a: &mut App) {
 
 #[test]
 fn filtered_catalog_and_thread() {
-    let mut a = app(true);
+    let mut a = catalog_app(true);
     with_filters(&mut a);
-    a.tab.view = View::Catalog;
-    a.tab.catalog = catalog();
     a.store.toggle_hidden("4chan", "g", 1100);
     a.remark_catalog();
     a.tab.catalog_list.state.select(Some(0));
@@ -399,30 +389,24 @@ fn replies_inline() {
 
 #[test]
 fn catalog_grid() {
-    let mut a = app(true);
-    a.tab.view = View::Catalog;
+    let mut a = catalog_app(true);
     a.default_layout = crate::config::CatalogLayout::Grid;
-    a.tab.catalog = catalog();
     a.tab.catalog_list.state.select(Some(1));
     insta::assert_snapshot!(snapshot(&mut a));
     insta::assert_snapshot!("catalog_grid_backgrounds", bg_map(&mut a));
     assert_eq!(a.grid_cols, 4);
     // Without images, the grid is drawn as cards.
-    let mut b = app(false);
-    b.tab.view = View::Catalog;
+    let mut b = catalog_app(false);
     b.default_layout = crate::config::CatalogLayout::Grid;
-    b.tab.catalog = catalog();
     let text = snapshot(&mut b);
     assert!(text.contains("312 replies") && b.grid_cols == 0, "{text}");
 }
 
 #[test]
 fn gallery() {
-    let mut a = app(true);
-    a.tab.view = View::Thread;
-    let mut t = thread();
+    let mut a = thread_app(true);
+    let t = a.tab.thread.as_mut().unwrap();
     t.posts[2].files = vec![file("code.png"), file("clip.webm")];
-    a.tab.thread = Some(t);
     a.open_gallery();
     a.on_key(ratatui::crossterm::event::KeyEvent::from(ratatui::crossterm::event::KeyCode::Char('l')));
     insta::assert_snapshot!(snapshot(&mut a));
@@ -446,11 +430,9 @@ fn archive_search_results() {
 
 #[test]
 fn image_search_panel() {
-    let mut a = app(false);
-    a.tab.view = View::Thread;
-    let mut t = thread();
+    let mut a = thread_app(false);
+    let t = a.tab.thread.as_mut().unwrap();
     t.posts[0].files.push(file("second.jpg"));
-    a.tab.thread = Some(t);
     a.open_image_search();
     insta::assert_snapshot!(snapshot(&mut a));
 }
