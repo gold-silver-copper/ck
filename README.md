@@ -20,7 +20,8 @@ If-Modified-Since on every refetch, and no refetching the same page within 10 se
 
     cargo install ck
 
-Or from a checkout: `cargo run --release`.
+Or from a checkout: `cargo run --release`. `ck --help` shows where the config, data and
+thumbnail cache live.
 
 ## Keys
 

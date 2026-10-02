@@ -40,12 +40,7 @@ fn main() -> Result<()> {
             return Ok(());
         }
         Some("-h" | "--help") => {
-            println!("ck - browse imageboards from the terminal\n");
-            println!("usage: ck [--print-config]\n");
-            match Config::path() {
-                Some(p) => println!("config: {}", p.display()),
-                None => println!("config: (no home directory)"),
-            }
+            print!("{}", help_text());
             return Ok(());
         }
         _ => {}
@@ -75,9 +70,37 @@ fn main() -> Result<()> {
     result
 }
 
+fn help_text() -> String {
+    let path = |p: Option<std::path::PathBuf>| p.map_or("(no home directory)".into(), |p| p.display().to_string());
+    let config_state = if Config::path().is_some_and(|p| p.exists()) { "" } else { " (not created; using defaults)" };
+    format!(
+        "ck {} - browse imageboards from the terminal (read-only)
+
+usage: ck                  start
+       ck --print-config   print the default config (a starting point for your own)
+       ck --help           this help
+
+config:  {}{config_state}
+data:    {}   (watched threads, history, saved board lists)
+cache:   {}   (thumbnails, at most 200 MB)
+
+Press ? inside ck for the keys. See the README for configuration.
+",
+        env!("CARGO_PKG_VERSION"),
+        path(Config::path()),
+        path(Store::dir()),
+        path(disk_cache::DiskCache::default_dir()),
+    )
+}
+
 /// Ask the terminal which image protocol it speaks; half-blocks if it doesn't answer.
 /// Must run after entering the alternate screen and before reading any events.
 fn detect_images() -> Picker {
+    // Terminals that can't show graphics: don't wait for an answer that won't come (it
+    // would also swallow the first keypress).
+    if matches!(std::env::var("TERM").as_deref(), Ok("dumb" | "linux")) {
+        return Picker::halfblocks();
+    }
     let options = QueryStdioOptions { timeout: Duration::from_secs(1), ..Default::default() };
     Picker::from_query_stdio_with_options(options).unwrap_or_else(|_| Picker::halfblocks())
 }
