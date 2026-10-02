@@ -271,7 +271,8 @@ url = "https://arch.b4k.dev"
 # pageup, pagedown, space, f1-f12). Settings (`,`) has a key editor that saves here.
 # Navigation keys (j/k/g/G/h/l/J/K, arrows, enter, esc, space, ctrl-d/u) are fixed.
 # Actions and their defaults:
-#   everywhere: quit = "q", help = "?", search = "/", reload = "r", browser = "o", settings = ","
+#   everywhere: quit = "q", help = "?", search = "/", reload = "r", browser = "o", settings = ",",
+#               goto = ":"
 #   catalog:    view = "v", watch = "w", sort = "s", compact = "c"
 #   thread:     view, watch, open_file = "i", replies = "b", jump_back = "u", unread = "U",
 #               preview = "p", next_match = "n", prev_match = "N", spoiler = "s",

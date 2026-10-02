@@ -220,7 +220,9 @@ fn location(app: &App) -> (Vec<String>, Vec<Span<'static>>) {
 fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
     let t = theme();
     fill(f, area, t.bar);
-    let typing = if app.searching {
+    let typing = if let Some(g) = &app.goto {
+        Some(("go to", g.as_str()))
+    } else if app.searching {
         Some(("search", app.thread.as_ref().map_or("", |th| th.search.as_str())))
     } else if app.filtering {
         Some(("filter", current_filter(app)))
@@ -233,7 +235,15 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
             chip(what, t.on_primary, t.primary),
             Span::styled(format!(" {q}"), Style::new().fg(t.on_bar)),
             Span::styled("▏", Style::new().fg(t.primary)),
-            Span::styled("   enter accept   esc clear", dim()),
+            Span::styled(
+                match (&app.goto, &app.status) {
+                    // Tab completion's candidates.
+                    (Some(_), Some((msg, false))) => format!("   {msg}"),
+                    (Some(_), _) => "   enter go   tab complete   esc cancel".into(),
+                    _ => "   enter accept   esc clear".into(),
+                },
+                dim(),
+            ),
         ])
     } else if let Some(label) = &app.loading {
         Line::from(vec![
@@ -922,6 +932,7 @@ fn help_sections(keys: &KeyMap) -> Vec<(&'static str, Vec<(String, &'static str)
                 (k(Action::Search), "filter list"),
                 (k(Action::Reload), "reload"),
                 (k(Action::Browser), "open in browser"),
+                (k(Action::Goto), "go to a URL or site/board/thread"),
                 (k(Action::Settings), "settings: theme, keys, …"),
                 (format!("{}, ctrl-c", k(Action::Quit)), "quit"),
                 ("mouse".into(), "wheel scroll, click, dbl-click"),

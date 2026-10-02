@@ -50,7 +50,7 @@ pub fn build(cfg: &SiteConfig) -> Arc<dyn Backend> {
     }
 }
 
-fn to_board(b: &BoardConfig) -> Board {
+pub fn to_board(b: &BoardConfig) -> Board {
     match b {
         BoardConfig::Uri(uri) => Board { uri: uri.clone(), title: String::new(), nsfw: None },
         BoardConfig::Full { uri, title } => Board { uri: uri.clone(), title: title.clone(), nsfw: None },

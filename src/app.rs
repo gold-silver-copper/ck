@@ -22,6 +22,7 @@ use crate::model::{Attachment, Board, Link, Post};
 use crate::store::{Store, ThreadKey};
 use crate::theme::{self, ThemeDef, ThemeSetting};
 
+mod goto;
 mod settings;
 pub use settings::{Popup as SettingsPopup, SECTIONS as SETTING_SECTIONS, key_rows, rows as setting_rows, tilde};
 
@@ -402,8 +403,10 @@ pub struct App {
     pub preview: Option<Preview>,
     /// True while typing a thread search.
     pub searching: bool,
-    /// Threads left by following cross-thread links: (board, thread, selected post), for `u`.
-    trail: Vec<(Board, u64, u64)>,
+    /// What's typed after `:`, while it's being typed.
+    pub goto: Option<String>,
+    /// Threads left by following cross-thread links: (site, board, thread, selected post), for `u`.
+    trail: Vec<(usize, Board, u64, u64)>,
     /// Post to select once the loading thread arrives.
     pending_post: Option<u64>,
     /// Board the loaded catalog belongs to.
@@ -508,6 +511,7 @@ impl App {
             viewer: None,
             preview: None,
             searching: false,
+            goto: None,
             trail: Vec::new(),
             pending_post: None,
             catalog_board: String::new(),
@@ -679,6 +683,7 @@ impl App {
                 Msg::Wake => {}
                 Msg::Input(Event::Key(key)) if key.kind == KeyEventKind::Press => self.on_key(key),
                 Msg::Input(Event::Mouse(m)) => self.on_mouse(m, Instant::now()),
+                Msg::Input(Event::Paste(text)) => self.paste(&text),
                 Msg::Input(_) => {}
                 Msg::Refreshed(key, res) => self.refreshed(key, res),
                 Msg::Download(ev) => self.download_event(ev),
@@ -687,7 +692,7 @@ impl App {
                     match res {
                         Ok(Some(no)) => {
                             if let Some(t) = &self.thread {
-                                self.trail.push((self.board.clone().unwrap_or(board.clone()), t.no, t.posts[t.selected].no));
+                                self.trail.push((self.site, self.board.clone().unwrap_or(board.clone()), t.no, t.posts[t.selected].no));
                             }
                             self.open_thread_at(board, no, Some(post), true);
                         }
@@ -1191,11 +1196,7 @@ impl App {
             self.status = Some((format!("No site named {} in the config", key.site), true));
             return;
         };
-        if site != self.site {
-            self.board_list = Picker::default();
-            self.board_list.state.select(Some(0));
-        }
-        self.site = site;
+        self.switch_site(site);
         let board = self.boards().iter().find(|b| b.uri == key.board).cloned();
         self.board = Some(board.unwrap_or(Board { uri: key.board, title: String::new(), nsfw: None }));
         self.return_to = Some(self.view);
@@ -1203,6 +1204,27 @@ impl App {
         self.thread = None;
         self.view = View::Thread;
         self.load_thread(key.no);
+    }
+
+    /// Make `site` the current one, with its board list if it's saved (else fetched in the
+    /// background), so going back to Boards shows it.
+    fn switch_site(&mut self, site: usize) {
+        if site == self.site {
+            return;
+        }
+        self.board_list = Picker::default();
+        self.board_list.state.select(Some(0));
+        self.site = site;
+        if self.sites[site].boards.is_none() {
+            let cfg = &self.sites[site].cfg;
+            if let Some(b) = &cfg.boards {
+                self.sites[site].boards = Some(b.iter().map(backend::to_board).collect());
+            } else if let Some((boards, _)) = self.store.load_boards(&cfg.name) {
+                self.sites[site].boards = Some(boards);
+            } else {
+                self.refresh_boards_in_background(site);
+            }
+        }
     }
 
     // ----- input -----
@@ -1236,6 +1258,10 @@ impl App {
         }
         if self.preview.is_some() {
             self.on_preview_key(key.code);
+            return;
+        }
+        if self.goto.is_some() {
+            self.on_goto_key(key);
             return;
         }
         if self.searching {
@@ -1314,6 +1340,7 @@ impl App {
             Action::View => self.open_viewer(),
             Action::Watch => self.toggle_watch(),
             Action::Remove => self.remove_entry(),
+            Action::Goto => self.goto = Some(String::new()),
             Action::Copy => self.copy(false),
             Action::CopyLink => self.copy(true),
             Action::Sort => {
@@ -1428,8 +1455,9 @@ impl App {
             Action::JumpBack => {
                 if let Some(i) = t.jumps.pop() {
                     t.select(i);
-                } else if let Some((board, no, post)) = self.trail.pop() {
+                } else if let Some((site, board, no, post)) = self.trail.pop() {
                     // Back to the thread we came from by a cross-thread link.
+                    self.switch_site(site);
                     self.open_thread_at(board, no, Some(post), false);
                 }
             }
@@ -1537,7 +1565,7 @@ impl App {
         };
         match (link.thread, link.post) {
             (Some(no), post) => {
-                let from = (board, t.no, t.posts[t.selected].no);
+                let from = (self.site, board, t.no, t.posts[t.selected].no);
                 self.trail.push(from);
                 self.open_thread_at(target, no, post, true);
             }
@@ -2109,6 +2137,73 @@ mod tests {
         assert_eq!(app.copied.as_deref(), Some("Subj\nhello"));
         app.act(Action::CopyLink);
         assert_eq!(app.copied.as_deref(), Some("https://boards.4chan.org/g/thread/7"));
+    }
+
+    /// Two sites on hosts that refuse connections: nothing leaves the machine. (Their own
+    /// port, so the requests don't take rate-limit slots other tests' hosts need.)
+    fn local_app() -> App {
+        let cfg: Config = toml::from_str(
+            "[[site]]\nname = \"a\"\nkind = \"vichan\"\nurl = \"http://127.0.0.1:3\"\nboards = [\"x\", \"xy\"]\n\
+             [[site]]\nname = \"b\"\nkind = \"vichan\"\nurl = \"http://localhost:3\"\nboards = [\"y\"]",
+        )
+        .unwrap();
+        let mut app = App::new(cfg, KeyMap::default(), None, Store::default());
+        app.config_path = None;
+        app
+    }
+
+    #[test]
+    fn goto_opens_places_and_u_comes_back() {
+        let mut app = local_app();
+        app.goto_str("b/y/5#6");
+        assert_eq!((app.site, app.view, app.pending_thread, app.pending_post), (1, View::Thread, 5, Some(6)));
+        assert_eq!(app.board.as_ref().unwrap().uri, "y");
+        // Esc from there returns to where : was typed.
+        assert_eq!(app.return_to, Some(View::Sites));
+        // From a thread, `u` comes back across sites.
+        app.thread = Some(ThreadView::new("y".into(), 5, vec![Post { no: 5, ..Default::default() }, Post { no: 6, ..Default::default() }]));
+        app.thread.as_mut().unwrap().selected = 1;
+        app.goto_str("http://127.0.0.1:3/x/res/3.html#4");
+        assert_eq!((app.site, app.pending_thread, app.board.as_ref().unwrap().uri.as_str()), (0, 3, "x"));
+        app.thread = None;
+        app.act(Action::JumpBack);
+        assert!(app.thread.is_none());
+        // (JumpBack needs a loaded thread; simulate the arrival of thread 3.)
+        app.thread = Some(ThreadView::new("x".into(), 3, vec![Post { no: 3, ..Default::default() }]));
+        app.act(Action::JumpBack);
+        assert_eq!((app.site, app.pending_thread, app.pending_post, app.board.as_ref().unwrap().uri.as_str()), (1, 5, Some(6), "y"));
+        // A board opens its catalog; a site its boards.
+        app.goto_str("a/xy");
+        assert_eq!((app.site, app.view, app.board.as_ref().unwrap().uri.as_str()), (0, View::Catalog, "xy"));
+        app.goto_str("b");
+        assert_eq!((app.site, app.view), (1, View::Boards));
+        // Errors are said, not acted on.
+        app.goto_str("https://example.com/g/");
+        assert!(app.status.as_ref().unwrap().1);
+        assert_eq!(app.view, View::Boards);
+    }
+
+    #[test]
+    fn goto_input_completes_and_takes_pastes() {
+        let mut app = local_app();
+        app.act(Action::Goto);
+        app.paste("a/");
+        app.on_key(KeyEvent::from(KeyCode::Tab));
+        // x and xy: completes the common part and lists both.
+        assert_eq!(app.goto.as_deref(), Some("a/x"));
+        assert!(app.status.as_ref().unwrap().0.contains("xy"));
+        app.on_key(KeyEvent::from(KeyCode::Char('y')));
+        app.on_key(KeyEvent::from(KeyCode::Enter));
+        assert_eq!((app.goto.as_deref(), app.view, app.board.as_ref().unwrap().uri.as_str()), (None, View::Catalog, "xy"));
+        // Site names complete with a slash.
+        app.act(Action::Goto);
+        app.on_key(KeyEvent::from(KeyCode::Char('b')));
+        app.on_key(KeyEvent::from(KeyCode::Tab));
+        assert_eq!(app.goto.as_deref(), Some("b/"));
+        app.on_key(KeyEvent::from(KeyCode::Esc));
+        // A paste with nothing being typed starts the input.
+        app.paste("http://localhost:3/y/res/1.html\n");
+        assert_eq!(app.goto.as_deref(), Some("http://localhost:3/y/res/1.html"));
     }
 
     #[test]

@@ -53,6 +53,7 @@ is in brackets):
 | `/`  | everywhere            | filter the list; in a thread, search it [`search`]         |
 | `r`  | everywhere            | reload [`reload`]                                          |
 | `o`  | everywhere            | open the board/thread in a browser [`browser`]             |
+| `:`  | everywhere            | go to a URL or a board/thread, see below [`goto`]           |
 | `,`  | everywhere            | settings: theme, colors, and more [`settings`]             |
 | `?`  | everywhere            | help [`help`]                                              |
 | `q`  | everywhere            | quit [`quit`]                                              |
@@ -79,6 +80,23 @@ In the image viewer: `h`/`l` or arrows for the previous/next file, `i` to open i
 Copying uses the terminal's clipboard escape (OSC 52), which also works over SSH; in tmux it
 needs `set -g set-clipboard on`. On a local machine ck also uses `pbcopy`, `wl-copy`,
 `xclip` or `xsel` when one is installed.
+
+### Going to a URL
+
+`:` asks where to go. Paste a thread or board URL from any configured site (pasting while
+nothing else is being typed starts this by itself), or type a short form:
+
+| input                  | goes to                                            |
+|------------------------|----------------------------------------------------|
+| `g`, `/g/`             | /g/ on the current site                            |
+| `123`                  | thread 123 on the current board                    |
+| `4chan`                | 4chan's board list                                 |
+| `4chan/g`, `4chan/g/123` | a board, a thread                                |
+| `lainchan/λ/42#43`     | a thread, with post 43 selected                    |
+| `>>>/g/123`            | a cross-board quote: thread 123 on /g/             |
+
+`tab` completes site and board names. `esc` (or `u` from a thread) goes back to where you
+were. `ck URL` (or `ck 4chan/g`) starts there.
 
 ### Remapping keys
 

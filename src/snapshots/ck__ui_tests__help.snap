@@ -14,21 +14,21 @@ expression: snapshot(&mut a)
        kohlchan          /                   filter list
        desuarchive       r                   reload
        zzzchan           o                   open in browser
-       2ch               ,                   settings: theme, keys, …
-       smuglo.li         q, ctrl-c           quit
-       kissu             mouse               wheel scroll, click, dbl-click
-       tvch
-       sushigirl       Catalog
-       leftypol          v                   view the OP's images
-       8kun              w                   watch / unwatch the thread
-       alogs             s                   cycle sort order
-       trashchan         c                   compact layout on / off
-       ptchan            y / Y               copy the OP's text / link
-       erischan
-       junkuchan       Thread
-       nukechan          j / k               next / previous post
-       palanq            J / K, space        scroll by line / page
-       b4k               enter, l            follow quote (any thread)
-                         p                   preview the quoted posts
+       2ch               :                   go to a URL or site/board/thread
+       smuglo.li         ,                   settings: theme, keys, …
+       kissu             q, ctrl-c           quit
+       tvch              mouse               wheel scroll, click, dbl-click
+       sushigirl
+       leftypol        Catalog
+       8kun              v                   view the OP's images
+       alogs             w                   watch / unwatch the thread
+       trashchan         s                   cycle sort order
+       ptchan            c                   compact layout on / off
+       erischan          y / Y               copy the OP's text / link
+       junkuchan
+       nukechan        Thread
+       palanq            j / k               next / previous post
+       b4k               J / K, space        scroll by line / page
+                         enter, l            follow quote (any thread)
 
  enter open   / filter   o browser   r reload   , settings   ? help

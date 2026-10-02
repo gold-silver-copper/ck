@@ -65,6 +65,10 @@ pub fn background<T>(f: impl FnOnce() -> T) -> T {
 
 /// Note user input (keys, clicks), which holds background refreshes back briefly.
 pub fn user_input() {
+    // Tests press keys in parallel; that mustn't hold back other tests' requests.
+    if cfg!(test) {
+        return;
+    }
     *LAST_INPUT.lock().unwrap() = Some(Instant::now());
 }
 

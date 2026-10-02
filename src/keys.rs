@@ -36,6 +36,7 @@ pub enum Action {
     Remove,
     Copy,
     CopyLink,
+    Goto,
 }
 
 /// Where a key applies. Global keys work in every view but the image viewer.
@@ -75,6 +76,7 @@ pub const ACTIONS: &[(Action, &str, &str, &[Scope], &str)] = &[
     (Action::Search, "search", "/", &[Scope::Global], "filter the list; search a thread"),
     (Action::Reload, "reload", "r", &[Scope::Global], "reload"),
     (Action::Browser, "browser", "o", &[Scope::Global], "open in the browser"),
+    (Action::Goto, "goto", ":", &[Scope::Global], "go to a URL or site/board/thread"),
     (Action::View, "view", "v", &[Scope::Catalog, Scope::Thread], "view the post's images"),
     (Action::Watch, "watch", "w", &[Scope::Catalog, Scope::Thread], "watch / unwatch the thread"),
     (Action::Sort, "sort", "s", &[Scope::Catalog], "cycle the sort order"),

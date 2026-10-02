@@ -13,6 +13,7 @@ expression: snapshot(&mut a)
       /               search           filter the list; search a thread     everywhere
       r               reload           reload                               everywhere
       o               browser          open in the browser                  everywhere
+      :               goto             go to a URL or site/board/thread     everywhere
 
     Catalog
       v               view             view the post's images               catalog, thread
@@ -26,7 +27,6 @@ expression: snapshot(&mut a)
       i               open_file        open the file (videos in mpv)        thread
       b               replies          jump to the first reply              thread
       u               jump_back        jump back (also to the last thread)  thread
-      U               unread           jump to the first unread post        thread
 
     Press the new key for quit   esc cancels
 

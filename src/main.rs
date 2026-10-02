@@ -11,6 +11,7 @@ mod images;
 mod keys;
 mod markup;
 mod model;
+mod route;
 mod store;
 mod theme;
 mod ui;
@@ -23,7 +24,7 @@ use anyhow::Result;
 use std::io::stdout;
 use std::time::Instant;
 
-use ratatui::crossterm::event::{DisableMouseCapture, EnableMouseCapture};
+use ratatui::crossterm::event::{DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture};
 use ratatui::crossterm::execute;
 use ratatui_image::picker::Picker;
 use ratatui_image::picker::cap_parser::QueryStdioOptions;
@@ -34,16 +35,20 @@ use crate::keys::KeyMap;
 use crate::store::Store;
 
 fn main() -> Result<()> {
-    match std::env::args().nth(1).as_deref() {
-        Some("--print-config") => {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let mut start_at = None;
+    match args.iter().map(String::as_str).collect::<Vec<_>>().as_slice() {
+        [] => {}
+        ["--print-config"] => {
             print!("{}", config::DEFAULT_CONFIG);
             return Ok(());
         }
-        Some("-h" | "--help") => {
+        ["-h" | "--help"] => {
             print!("{}", help_text());
             return Ok(());
         }
-        _ => {}
+        [a] if !a.starts_with('-') => start_at = Some(a.to_string()),
+        _ => anyhow::bail!("usage: ck [URL | site/board/thread]   (ck --help for more)"),
     }
 
     let config = Config::load()?;
@@ -54,10 +59,10 @@ fn main() -> Result<()> {
     let (store, warnings) = Store::load(Store::dir());
     let mut terminal = ratatui::init();
     // ratatui::init restores the terminal on panic; also turn mouse capture off first.
-    let _ = execute!(stdout(), EnableMouseCapture);
+    let _ = execute!(stdout(), EnableMouseCapture, EnableBracketedPaste);
     let hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
-        let _ = execute!(stdout(), DisableMouseCapture);
+        let _ = execute!(stdout(), DisableMouseCapture, DisableBracketedPaste);
         hook(info);
     }));
     let picker = (config.images == ImagesMode::Auto).then(detect_images);
@@ -65,8 +70,11 @@ fn main() -> Result<()> {
     if let Some(w) = warnings.first() {
         app.status = Some((w.clone(), true));
     }
+    if let Some(at) = start_at {
+        app.goto_str(&at);
+    }
     let result = run(&mut terminal, &mut app);
-    let _ = execute!(stdout(), DisableMouseCapture);
+    let _ = execute!(stdout(), DisableMouseCapture, DisableBracketedPaste);
     ratatui::restore();
     result
 }
@@ -78,6 +86,8 @@ fn help_text() -> String {
         "ck {} - browse imageboards from the terminal (read-only)
 
 usage: ck                  start
+       ck URL              start at a board or thread: a URL, or a short form like
+                           4chan/g, 4chan/g/123 or lainchan/λ/42#43
        ck --print-config   print the default config (a starting point for your own)
        ck --help           this help
 
