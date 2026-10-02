@@ -111,7 +111,7 @@ impl App {
                 self.load_catalog();
             }
             ("thread", Some(board), Some(no)) => {
-                self.open_thread_at(board, no, p.selected, false);
+                self.open_thread_at(board, no, p.selected);
                 self.tab.restoring = true;
             }
             _ => self.tab.view = View::Sites,

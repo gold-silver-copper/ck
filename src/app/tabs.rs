@@ -174,7 +174,7 @@ impl App {
         self.switch_tab(at);
         self.tab.board = board;
         match open {
-            Open::Thread(board, no) => self.open_thread_at(board, no, None, false),
+            Open::Thread(board, no) => self.open_thread_at(board, no, None),
             Open::Key(key) => self.open_key(key),
             Open::Link(link) => self.follow(link),
         }

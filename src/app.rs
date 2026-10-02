@@ -951,7 +951,7 @@ impl App {
                         if let Some(t) = &self.tab.thread {
                             self.tab.trail.push((self.tab.site, self.tab.board.clone().unwrap_or(board.clone()), t.no, t.current().map_or(t.no, |p| p.no)));
                         }
-                        self.open_thread_at(board, no, Some(post), true);
+                        self.open_thread_at(board, no, Some(post));
                     }
                     Ok(None) => {
                         self.error(format!("Post {post} isn't in this thread, and this site can't say which thread it's in"));
@@ -1705,7 +1705,7 @@ impl App {
                 if let Some(t) = self.tab.thread.as_ref().filter(|_| self.tab.view == View::Thread) {
                     self.tab.trail.push((self.tab.site, board, t.no, t.current().map_or(t.no, |p| p.no)));
                 }
-                self.open_thread_at(target, no, post, true);
+                self.open_thread_at(target, no, post);
             }
             (None, None) => {
                 // A board link: open its catalog.
@@ -1728,12 +1728,9 @@ impl App {
     }
 
     /// Open a thread on the current site, selecting `post` when it arrives.
-    fn open_thread_at(&mut self, board: Board, no: u64, post: Option<u64>, announce: bool) {
+    fn open_thread_at(&mut self, board: Board, no: u64, post: Option<u64>) {
         self.tab.from_catalog = false;
         self.tab.gallery = None;
-        if announce {
-            self.info(format!("Opening /{}/{no} (u goes back)", board.uri));
-        }
         self.tab.board = Some(board);
         self.tab.pending_post = post;
         self.tab.thread = None;

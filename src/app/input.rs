@@ -400,7 +400,7 @@ impl App {
                 } else if let Some((site, board, no, post)) = self.tab.trail.pop() {
                     // Back to the thread we came from by a cross-thread link.
                     self.switch_site(site);
-                    self.open_thread_at(board, no, Some(post), false);
+                    self.open_thread_at(board, no, Some(post));
                 }
             }
             Action::Unread => match (0..t.posts.len()).find(|&i| t.is_new(i)) {

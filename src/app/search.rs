@@ -117,7 +117,7 @@ impl App {
         let Some((thread, post)) = self.tab.search_list.state.selected().and_then(|i| s.hits.get(i)) else { return };
         let (thread, no) = (*thread, post.no);
         let board = self.find_board(post.board.as_deref().unwrap_or(&s.board));
-        self.open_thread_at(board, thread, Some(no), false);
+        self.open_thread_at(board, thread, Some(no));
         self.tab.return_to = Some(View::Search);
     }
 

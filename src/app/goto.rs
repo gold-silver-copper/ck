@@ -37,7 +37,7 @@ impl App {
         let board = self.find_board(&uri);
         match (target.thread, target.post) {
             (Some(no), post) => {
-                self.open_thread_at(board, no, post, false);
+                self.open_thread_at(board, no, post);
                 if !from_thread && back_to != View::Settings {
                     self.tab.return_to = Some(back_to);
                 }
