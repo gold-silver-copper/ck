@@ -336,7 +336,7 @@ mod tests {
         let path = dir.path().join("config.toml");
         std::fs::write(&path, "[[site]]\nname = \"x\"\nkind = \"4chan\"\n\n# my keys\n[keys]\nsort = \"z\"\n").unwrap();
         edit_at(&path, |d| {
-            set_key(d, "watch", Some(&Binding::Many(vec!["W".into(), "ctrl-w".into()])));
+            set_key(d, "watch", Some(&Binding::Many(vec!["W".into(), "alt-w".into()])));
             set_key(d, "sort", None);
             set_key(d, "help", Some(&Binding::One("f1".into())));
         })
@@ -345,7 +345,7 @@ mod tests {
         assert!(text.contains("# my keys"), "{text}");
         let c: Config = toml::from_str(&text).unwrap();
         assert_eq!(c.keys.len(), 2);
-        assert_eq!(c.keys["watch"], Binding::Many(vec!["W".into(), "ctrl-w".into()]));
+        assert_eq!(c.keys["watch"], Binding::Many(vec!["W".into(), "alt-w".into()]));
         assert!(crate::keys::KeyMap::new(&c.keys).is_ok());
     }
     use crate::theme::ThemeSetting;

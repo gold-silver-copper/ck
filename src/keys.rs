@@ -46,6 +46,10 @@ pub enum Action {
     Export,
     ArchiveSearch,
     ImageSearch,
+    NewTab,
+    NextTab,
+    PrevTab,
+    CloseTab,
 }
 
 /// Where a key applies. Global keys work in every view but the image viewer.
@@ -86,6 +90,9 @@ pub const ACTIONS: &[(Action, &str, &str, &[Scope], &str)] = &[
     (Action::Reload, "reload", "r", &[Scope::Global], "reload"),
     (Action::Browser, "browser", "o", &[Scope::Global], "open in the browser"),
     (Action::Goto, "goto", ":", &[Scope::Global], "go to a URL or site/board/thread"),
+    (Action::NextTab, "next_tab", "tab", &[Scope::Global], "next tab"),
+    (Action::PrevTab, "prev_tab", "shift-tab", &[Scope::Global], "previous tab"),
+    (Action::CloseTab, "close_tab", "ctrl-w", &[Scope::Global], "close the tab"),
     (Action::View, "view", "v", &[Scope::Catalog, Scope::Thread], "view the post's images"),
     (Action::Watch, "watch", "w", &[Scope::Catalog, Scope::Thread], "watch / unwatch the thread"),
     (Action::Sort, "sort", "s", &[Scope::Catalog], "cycle the sort order"),
@@ -111,6 +118,7 @@ pub const ACTIONS: &[(Action, &str, &str, &[Scope], &str)] = &[
     (Action::Export, "export", "E", &[Scope::Thread], "save the thread as HTML and JSON"),
     (Action::Expand, "expand", "e", &[Scope::Thread], "show / hide the post's replies under it"),
     (Action::Mine, "mine", "m", &[Scope::Thread], "mark the post as yours (notified of replies)"),
+    (Action::NewTab, "new_tab", "T", &[Scope::Catalog, Scope::Thread, Scope::Saved], "open the thread (or link) in a new tab"),
     (Action::Remove, "remove", "x", &[Scope::Saved], "remove the entry"),
     (Action::Copy, "copy", "y", &[Scope::Catalog, Scope::Thread, Scope::Saved, Scope::Viewer], "copy the text (viewer: file URL)"),
     (Action::CopyLink, "copy_link", "Y", &[Scope::Catalog, Scope::Thread, Scope::Saved, Scope::Viewer], "copy the link"),
@@ -217,7 +225,7 @@ impl fmt::Display for Key {
     }
 }
 
-/// `watch = "W"` or `watch = ["W", "ctrl-w"]`.
+/// `watch = "W"` or `watch = ["W", "alt-w"]`.
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(untagged)]
 pub enum Binding {
@@ -433,12 +441,12 @@ mod tests {
 
     #[test]
     fn several_keys_per_action() {
-        let overrides = HashMap::from([("watch".to_string(), Binding::Many(vec!["W".into(), "ctrl-w".into()]))]);
+        let overrides = HashMap::from([("watch".to_string(), Binding::Many(vec!["W".into(), "alt-w".into()]))]);
         let m = KeyMap::new(&overrides).unwrap();
         assert_eq!(m.action(Scope::Catalog, &ch('W')), Some(Action::Watch));
-        assert_eq!(m.action(Scope::Catalog, &ev(KeyCode::Char('w'), KeyModifiers::CONTROL)), Some(Action::Watch));
-        assert_eq!(m.label(Action::Watch), "W, ctrl-w");
-        assert_eq!(m.binding(Action::Watch), Some(Binding::Many(vec!["W".into(), "ctrl-w".into()])));
+        assert_eq!(m.action(Scope::Catalog, &ev(KeyCode::Char('w'), KeyModifiers::ALT)), Some(Action::Watch));
+        assert_eq!(m.label(Action::Watch), "W, alt-w");
+        assert_eq!(m.binding(Action::Watch), Some(Binding::Many(vec!["W".into(), "alt-w".into()])));
         assert_eq!(m.binding(Action::Sort), None);
         // Conflicts are checked across every key of every action.
         let bad = HashMap::from([("sort".to_string(), Binding::Many(vec!["z".into(), "W".into()])), ("watch".to_string(), Binding::One("W".into()))]);

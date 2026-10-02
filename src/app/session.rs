@@ -55,8 +55,8 @@ impl App {
         place
     }
 
-    pub fn session(&self) -> Session {
-        Session { tabs: vec![self.place()], active: 0 }
+    pub fn session(&mut self) -> Session {
+        Session { tabs: self.places(), active: self.active }
     }
 
     /// Save the session now (on quit), or every so often if it changed.
@@ -80,13 +80,18 @@ impl App {
         }
     }
 
-    /// Start where the last run left off.
+    /// Start where the last run left off, with the same tabs.
     pub fn restore_session(&mut self) {
         let Some(session) = self.store.load_session() else { return };
         self.session_saved.0 = Some(session.clone());
-        if let Some(place) = session.tabs.get(session.active).or(session.tabs.first()) {
+        for (i, place) in session.tabs.iter().take(super::MAX_TABS).enumerate() {
+            if i > 0 {
+                self.tabs.push(super::Tab::new(0));
+                self.switch_tab(i);
+            }
             self.go_to_place(place);
         }
+        self.switch_tab(session.active.min(self.tabs.len() - 1));
     }
 
     /// Open a saved place: the view shows at once, and loads like it would by hand.

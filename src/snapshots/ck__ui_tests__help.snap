@@ -16,19 +16,19 @@ expression: snapshot(&mut a)
        zzzchan           o                   open in browser
        2ch               :                   go to a URL or site/board/thread
        smuglo.li         ,                   settings: theme, keys, …
-       kissu             q, ctrl-c           quit
-       tvch              mouse               wheel scroll, click, dbl-click
-       sushigirl
-       leftypol        Catalog
-       8kun              v                   view the OP's images
-       alogs             O                   the OP's links and files
-       trashchan         f                   search the board's archive
-       ptchan            H / Z               hide the thread / show hidden
-       erischan          w                   watch / unwatch the thread
-       junkuchan         s                   cycle sort order
-       nukechan          c                   compact layout on / off
-       palanq            y / Y               copy the OP's text / link
-       b4k
-                       Thread
+       kissu             tab / shift-tab     next / previous tab
+       tvch              ctrl-w              close the tab
+       sushigirl         q, ctrl-c           quit
+       leftypol          mouse               wheel scroll, click, dbl-click
+       8kun
+       alogs           Catalog
+       trashchan         v                   view the OP's images
+       ptchan            O                   the OP's links and files
+       erischan          f                   search the board's archive
+       junkuchan         H / Z               hide the thread / show hidden
+       nukechan          w                   watch / unwatch the thread
+       palanq            T                   open the thread in a new tab
+       b4k               s                   cycle sort order
+                         c                   compact layout on / off
 
  enter open   / filter   o browser   r reload   , settings   ? help

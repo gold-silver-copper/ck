@@ -33,7 +33,7 @@ mod settings;
 pub use gallery::Gallery;
 pub use links::{ImageSearchPanel, LinkItem, LinksPanel};
 pub use search::Search;
-pub use tabs::Tab;
+pub use tabs::{MAX_TABS, Tab};
 pub use settings::{Popup as SettingsPopup, SECTIONS as SETTING_SECTIONS, key_rows, rows as setting_rows, tilde};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -619,6 +619,8 @@ pub struct App {
     download_dir: Option<String>,
     /// Set by the UI every frame.
     pub hit: Option<Hit>,
+    /// Where each tab's chip was drawn, for clicks.
+    pub tab_chips: Vec<(Rect, usize)>,
     /// Last left click: when, and the list index or thread post it hit.
     last_click: Option<(Instant, usize)>,
     pub tick: usize,
@@ -750,6 +752,7 @@ impl App {
             downloads: Downloads::default(),
             download_dir: cfg.download_dir.clone(),
             hit: None,
+            tab_chips: Vec::new(),
             last_click: None,
             tick: 0,
             quit: false,
@@ -1564,6 +1567,11 @@ impl App {
         if ev.kind != MouseEventKind::Down(MouseButton::Left) {
             return;
         }
+        let pos = ratatui::layout::Position::new(ev.column, ev.row);
+        if let Some(&(_, i)) = self.tab_chips.iter().find(|(r, _)| r.contains(pos)) {
+            self.switch_tab(i);
+            return;
+        }
         if self.links.is_some() {
             self.on_links_click(ev.column, ev.row, now);
             return;
@@ -1887,6 +1895,10 @@ impl App {
             Action::Export => self.export_thread(),
             Action::ArchiveSearch => self.start_archive_search(),
             Action::ImageSearch => self.open_image_search(),
+            Action::NewTab => self.new_tab(),
+            Action::NextTab => self.cycle_tab(true),
+            Action::PrevTab => self.cycle_tab(false),
+            Action::CloseTab => self.close_tab(),
             Action::Expand => {
                 if let Some(t) = &mut self.thread {
                     match t.toggle_expanded() {
@@ -2124,7 +2136,16 @@ impl App {
     /// Follow the selected post's first link that leads out of this thread, preferring links
     /// to posts over links to boards.
     fn follow_link(&mut self) {
-        let (Some(t), Some(board)) = (&self.thread, &self.board) else { return };
+        match self.outgoing_link() {
+            Some(link) => self.follow(link),
+            None => self.status = Some(("Post quotes nothing in this thread".into(), false)),
+        }
+    }
+
+    /// The selected post's first link out of this thread (to a post rather than a board, if
+    /// it has both).
+    fn outgoing_link(&self) -> Option<Link> {
+        let (Some(t), Some(board)) = (&self.thread, &self.board) else { return None };
         let here = |l: &Link| l.board.as_ref().is_none_or(|b| *b == board.uri);
         let leaves = |l: &&Link| {
             let in_thread = here(l)
@@ -2132,11 +2153,7 @@ impl App {
             !in_thread
         };
         let links = &t.posts[t.selected].links;
-        let out = links.iter().filter(leaves).find(|l| l.post.is_some()).or_else(|| links.iter().find(leaves));
-        match out.cloned() {
-            Some(link) => self.follow(link),
-            None => self.status = Some(("Post quotes nothing in this thread".into(), false)),
-        }
+        links.iter().filter(leaves).find(|l| l.post.is_some()).or_else(|| links.iter().find(leaves)).cloned()
     }
 
     /// Go where a quote link leads: a thread (remembered for `u`), a board, or a post whose
@@ -2701,14 +2718,14 @@ mod tests {
         assert_eq!(app.keys.label(Action::Watch), "W");
         // `a` adds a second key.
         press(&mut app, KeyCode::Char('a'));
-        app.on_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL));
-        assert_eq!(app.keys.label(Action::Watch), "W, ctrl-w");
+        app.on_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::ALT));
+        assert_eq!(app.keys.label(Action::Watch), "W, alt-w");
         let text = std::fs::read_to_string(dir.path().join("config.toml")).unwrap();
-        assert!(text.contains(r#"watch = ["W", "ctrl-w"]"#), "{text}");
+        assert!(text.contains(r#"watch = ["W", "alt-w"]"#), "{text}");
         // A key another command uses in the same view is refused.
         press(&mut app, KeyCode::Enter);
         press(&mut app, KeyCode::Char('v'));
-        assert_eq!(app.keys.label(Action::Watch), "W, ctrl-w");
+        assert_eq!(app.keys.label(Action::Watch), "W, alt-w");
         assert!(app.status.as_ref().is_some_and(|(m, err)| *err && m.contains("'v'")), "{:?}", app.status);
         // x resets to the default, which removes the entry.
         press(&mut app, KeyCode::Char('x'));
@@ -3233,6 +3250,48 @@ mod tests {
         app.tabs.truncate(1);
         app.handle(Msg::Thread(stale, Ok(vec![Post { no: 9, ..Default::default() }])));
         assert!(app.thread.is_none());
+    }
+
+    #[test]
+    fn new_tabs_switching_closing_and_the_session() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = local_app();
+        app.store = Store::load(Some(dir.path().to_path_buf())).0;
+        app.goto_str("a/x");
+        app.handle(Msg::Catalog(app.req, Ok((1..=3).map(|no| Post { no, ..Default::default() }).collect())));
+        app.catalog_list.state.select(Some(1));
+        let key = |c| KeyEvent::from(KeyCode::Char(c));
+        // T: thread 2 in a new tab after this one.
+        app.on_key(key('T'));
+        assert_eq!((app.tabs.len(), app.active, app.view, app.pending_thread), (2, 1, View::Thread, 2));
+        assert_eq!(app.tab_label(0), "/x/");
+        // tab / shift-tab switch; each tab keeps its place.
+        app.on_key(KeyEvent::from(KeyCode::Tab));
+        assert_eq!((app.active, app.view, app.catalog.len()), (0, View::Catalog, 3));
+        app.on_key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT));
+        assert_eq!((app.active, app.view), (1, View::Thread));
+        // The session has both.
+        app.save_session(None);
+        let s = app.store.load_session().unwrap();
+        assert_eq!((s.tabs.len(), s.active, s.tabs[1].thread), (2, 1, Some(2)));
+        // ctrl-w closes; the last tab stays.
+        app.on_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL));
+        assert_eq!((app.tabs.len(), app.active, app.view), (1, 0, View::Catalog));
+        app.on_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL));
+        assert_eq!(app.tabs.len(), 1);
+        // At most MAX_TABS.
+        for _ in 0..MAX_TABS + 2 {
+            app.switch_tab(0);
+            app.new_tab();
+        }
+        assert_eq!(app.tabs.len(), MAX_TABS);
+        // A new run restores the tabs.
+        let mut next = local_app();
+        next.store = Store::load(Some(dir.path().to_path_buf())).0;
+        next.restore_session();
+        assert_eq!((next.tabs.len(), next.active, next.view, next.pending_thread), (2, 1, View::Thread, 2));
+        next.switch_tab(0);
+        assert_eq!((next.view, next.board.as_ref().unwrap().uri.as_str()), (View::Catalog, "x"));
     }
 
     #[test]

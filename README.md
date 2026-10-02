@@ -54,6 +54,9 @@ is in brackets):
 | `r`  | everywhere            | reload [`reload`]                                          |
 | `o`  | everywhere            | open the board/thread in a browser [`browser`]             |
 | `:`  | everywhere            | go to a URL or a board/thread, see below [`goto`]           |
+| `T`  | catalog, thread, Watched, History | open the thread in a new tab (in a thread: the quote `enter` would follow) [`new_tab`] |
+| tab / shift-tab | everywhere | next / previous tab [`next_tab`, `prev_tab`]                |
+| ctrl-w | everywhere          | close the tab [`close_tab`]                                |
 | `,`  | everywhere            | settings: theme, colors, and more [`settings`]             |
 | `?`  | everywhere            | help [`help`]                                              |
 | `q`  | everywhere            | quit [`quit`]                                              |
@@ -89,6 +92,16 @@ In the image viewer: `h`/`l` or arrows for the previous/next file, `i` to open i
 Copying uses the terminal's clipboard escape (OSC 52), which also works over SSH; in tmux it
 needs `set -g set-clipboard on`. On a local machine ck also uses `pbcopy`, `wl-copy`,
 `xclip` or `xsel` when one is installed.
+
+### Tabs
+
+`T` opens the selected thread in a new tab, next to the current one (in a thread, the
+quoted thread `enter` would go to). Each tab has its own place: view, board, catalog,
+thread, and jump trail. The tabs show as chips under the top bar when there's more than
+one; `tab` and `shift-tab` move between them (or click one), `ctrl-w` closes one (not
+the last). Up to 9. Only the tab on screen refreshes its thread in the background;
+another tab's thread is refreshed when you come back to it (watched threads are refreshed
+anyway). The tabs are part of the session that's restored at the next start.
 
 ### Going to a URL
 

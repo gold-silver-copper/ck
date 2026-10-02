@@ -466,3 +466,15 @@ fn image_search_panel() {
     a.open_image_search();
     insta::assert_snapshot!(snapshot(&mut a));
 }
+
+#[test]
+fn tabs_row() {
+    let mut a = app(false);
+    a.view = View::Catalog;
+    a.catalog = catalog();
+    a.catalog_list.state.select(Some(1));
+    a.new_tab();
+    a.thread = Some(thread());
+    insta::assert_snapshot!(snapshot(&mut a));
+    insta::assert_snapshot!("tabs_row_backgrounds", bg_map(&mut a));
+}

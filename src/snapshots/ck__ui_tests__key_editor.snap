@@ -14,6 +14,9 @@ expression: snapshot(&mut a)
       r               reload           reload                               everywhere
       o               browser          open in the browser                  everywhere
       :               goto             go to a URL or site/board/thread     everywhere
+      tab             next_tab         next tab                             everywhere
+      shift-tab       prev_tab         previous tab                         everywhere
+      ctrl-w          close_tab        close the tab                        everywhere
 
     Catalog
       v               view             view the post's images               catalog, thread
@@ -24,9 +27,6 @@ expression: snapshot(&mut a)
       O               links            the post's links and files           catalog, thread
       H               hide             hide / unhide the thread or post     catalog, thread
       Z               show_hidden      show hidden threads and posts        catalog, thread
-      y               copy             copy the text (viewer: file URL)     catalog, thread, wa…
-      Y               copy_link        copy the link                        catalog, thread, wa…
-
 
     Changed keys are saved in [keys]; navigation keys are fixed.
 

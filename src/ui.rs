@@ -95,10 +95,11 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     if app.viewer.is_some() {
         draw_viewer(f, app);
     } else {
-        let [bar, _, body, footer] =
+        let [bar, gap, body, footer] =
             Layout::vertical([Constraint::Length(1), Constraint::Length(1), Constraint::Min(1), Constraint::Length(1)])
                 .areas(f.area());
         draw_app_bar(f, app, bar);
+        draw_tab_row(f, app, gap.inner(Margin::new(MARGIN, 0)));
         let content = body.inner(Margin::new(MARGIN, 0));
         match app.view {
             View::Sites => draw_sites(f, app, content),
@@ -131,6 +132,32 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     app.images.end_frame();
     if !app.truecolor {
         downgrade(f.buffer_mut());
+    }
+}
+
+/// With more than one tab, their chips in the row under the bar (the current one stands
+/// out); clicking one switches to it.
+fn draw_tab_row(f: &mut Frame, app: &mut App, area: Rect) {
+    app.tab_chips.clear();
+    let n = app.tabs.len();
+    if n < 2 {
+        return;
+    }
+    let t = theme();
+    let each = (area.width as usize / n).clamp(8, 28);
+    let mut x = area.x;
+    for i in 0..n {
+        let label = app.tab_label(i);
+        let text = format!(" {} {} ", i + 1, truncate(&label, each.saturating_sub(5)));
+        let w = (text.width() as u16).min(area.right().saturating_sub(x));
+        if w == 0 {
+            break;
+        }
+        let style = if i == app.active { bold(t.on_primary_container).bg(t.primary_container) } else { Style::new().fg(t.text_dim).bg(t.surface_high) };
+        let r = Rect::new(x, area.y, w, 1);
+        put(f, x, area.y, w, Line::styled(text, style));
+        app.tab_chips.push((r, i));
+        x += w + 1;
     }
 }
 
@@ -1327,6 +1354,8 @@ fn help_sections(keys: &KeyMap) -> Vec<(&'static str, Vec<(String, &'static str)
                 (k(Action::Browser), "open in browser"),
                 (k(Action::Goto), "go to a URL or site/board/thread"),
                 (k(Action::Settings), "settings: theme, keys, …"),
+                (pair(Action::NextTab, Action::PrevTab), "next / previous tab"),
+                (k(Action::CloseTab), "close the tab"),
                 (format!("{}, ctrl-c", k(Action::Quit)), "quit"),
                 ("mouse".into(), "wheel scroll, click, dbl-click"),
             ],
@@ -1339,6 +1368,7 @@ fn help_sections(keys: &KeyMap) -> Vec<(&'static str, Vec<(String, &'static str)
                 (k(Action::ArchiveSearch), "search the board's archive"),
                 (pair(Action::Hide, Action::ShowHidden), "hide the thread / show hidden"),
                 (k(Action::Watch), "watch / unwatch the thread"),
+                (k(Action::NewTab), "open the thread in a new tab"),
                 (k(Action::Sort), "cycle sort order"),
                 (k(Action::Compact), "compact layout on / off"),
                 (pair(Action::Copy, Action::CopyLink), "copy the OP's text / link"),
@@ -1368,13 +1398,18 @@ fn help_sections(keys: &KeyMap) -> Vec<(&'static str, Vec<(String, &'static str)
                 (k(Action::Export), "save the thread as HTML and JSON"),
                 (k(Action::Watch), "watch / unwatch the thread"),
                 (k(Action::Unread), "jump to the first unread post"),
+                (k(Action::NewTab), "follow the quote in a new tab"),
                 (k(Action::Archive), "open 404'd thread in archive"),
                 (pair(Action::Copy, Action::CopyLink), "copy the post's text / link"),
             ],
         ),
         (
             "Watched, History",
-            vec![(k(Action::Remove), "remove the entry"), (pair(Action::Copy, Action::CopyLink), "copy subject and link / link")],
+            vec![
+                (k(Action::Remove), "remove the entry"),
+                (k(Action::NewTab), "open in a new tab"),
+                (pair(Action::Copy, Action::CopyLink), "copy subject and link / link"),
+            ],
         ),
         (
             "Image viewer",

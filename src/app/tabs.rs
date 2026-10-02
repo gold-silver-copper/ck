@@ -5,10 +5,13 @@
 use std::collections::HashSet;
 use std::time::Instant;
 
-use super::{App, Gallery, LinksPanel, Msg, Picker, Preview, Search, Sort, ThreadView, View, Viewer};
+use super::{App, Gallery, LinksPanel, Msg, Picker, Preview, Search, Sort, ThreadView, View, Viewer, thread_subject};
 use crate::filter::Mark;
 use crate::model::{Board, Post};
 use crate::store::ThreadKey;
+
+/// Tabs open at once, at most.
+pub const MAX_TABS: usize = 9;
 
 /// One tab's place. Mirrors the per-place fields of `App`.
 pub struct Tab {
@@ -155,5 +158,112 @@ impl App {
     /// The inactive tab whose request this is.
     pub(super) fn tab_of(&self, id: u64) -> Option<usize> {
         (id != 0).then(|| self.tabs.iter().enumerate().position(|(i, t)| i != self.active && t.req == id)).flatten()
+    }
+}
+
+/// What `T` opens in a new tab.
+enum Open {
+    Thread(Board, u64),
+    Key(ThreadKey),
+    Link(crate::model::Link),
+}
+
+impl App {
+    /// `T`: open the selected thread (or the link enter would follow) in a new tab, after
+    /// this one.
+    pub fn new_tab(&mut self) {
+        if self.tabs.len() >= MAX_TABS {
+            self.status = Some((format!("{MAX_TABS} tabs is the most; close one with {}", self.keys.key(crate::keys::Action::CloseTab)), false));
+            return;
+        }
+        let open = match self.view {
+            View::Catalog => self.selected_index().map(|i| {
+                let p = &self.catalog[i];
+                Open::Thread(self.find_board(&self.board_of(p)), p.no)
+            }),
+            View::Watched => self.selected_index().map(|i| Open::Key(self.store.watched[i].key.clone())),
+            View::History => self.selected_index().map(|i| Open::Key(self.store.history[i].key.clone())),
+            View::Thread => match self.outgoing_link() {
+                Some(link) => Some(Open::Link(link)),
+                None => {
+                    self.status = Some(("The post quotes nothing in another thread to open in a tab".into(), false));
+                    return;
+                }
+            },
+            _ => None,
+        };
+        let Some(open) = open else { return };
+        let (site, board) = (self.site, self.board.clone());
+        let at = self.active + 1;
+        self.tabs.insert(at, Tab::new(site));
+        self.switch_tab(at);
+        self.board = board;
+        match open {
+            Open::Thread(board, no) => self.open_thread_at(board, no, None, false),
+            Open::Key(key) => self.open_key(key),
+            Open::Link(link) => self.follow(link),
+        }
+    }
+
+    pub fn cycle_tab(&mut self, forward: bool) {
+        let n = self.tabs.len();
+        if n < 2 {
+            self.status = Some((format!("One tab: {} opens a thread in a new one", self.keys.key(crate::keys::Action::NewTab)), false));
+            return;
+        }
+        self.switch_tab(if forward { (self.active + 1) % n } else { (self.active + n - 1) % n });
+    }
+
+    /// Close the active tab (not the last one).
+    pub fn close_tab(&mut self) {
+        let n = self.tabs.len();
+        if n < 2 {
+            self.status = Some(("This is the only tab (q quits)".into(), false));
+            return;
+        }
+        let old = self.active;
+        let to = if old + 1 < n { old + 1 } else { old - 1 };
+        self.switch_tab(to);
+        self.tabs.remove(old);
+        if to > old {
+            self.active -= 1;
+        }
+    }
+
+    /// Run `f` with tab `i` as the active one (without the redraw a real switch does).
+    fn in_tab<T>(&mut self, i: usize, f: impl FnOnce(&Self) -> T) -> T {
+        if i == self.active {
+            return f(self);
+        }
+        let mut tabs = std::mem::take(&mut self.tabs);
+        self.swap_tab(&mut tabs[self.active]);
+        self.swap_tab(&mut tabs[i]);
+        let out = f(self);
+        self.swap_tab(&mut tabs[i]);
+        self.swap_tab(&mut tabs[self.active]);
+        self.tabs = tabs;
+        out
+    }
+
+    /// Every tab's place, for the session.
+    pub fn places(&mut self) -> Vec<crate::store::Place> {
+        (0..self.tabs.len()).map(|i| self.in_tab(i, |app| app.place())).collect()
+    }
+
+    /// What a tab shows, in a few words.
+    pub fn tab_label(&mut self, i: usize) -> String {
+        self.in_tab(i, |app| match app.view {
+            View::Thread => match &app.thread {
+                Some(t) => thread_subject(&t.posts),
+                None => format!("/{}/{}", app.board.as_ref().map_or("", |b| b.uri.as_str()), app.pending_thread),
+            },
+            View::Catalog => format!("/{}/", app.board.as_ref().map_or("", |b| b.uri.as_str())),
+            View::Boards => app.current_site().cfg.name.clone(),
+            View::Search => app.search.as_ref().map_or("Search".into(), |s| format!("Search: {}", s.query)),
+            View::Sites => "Sites".into(),
+            View::Watched => "Watched".into(),
+            View::History => "History".into(),
+            View::Settings => "Settings".into(),
+        })
     }
 }
