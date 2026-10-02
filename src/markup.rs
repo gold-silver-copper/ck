@@ -386,44 +386,15 @@ fn quote_at(s: &str) -> Option<(usize, Link)> {
 }
 
 /// Read a quote link's target from its href: `#p123`, `/g/thread/123#p456`,
-/// `//boards.4chan.org/g/`, `/b/res/123.html#456`, ...
+/// `//boards.4chan.org/g/`, `/b/res/123.html#456`, ... (any host is dropped).
 fn parse_href(href: &str) -> Link {
     let (path, frag) = href.split_once('#').unwrap_or((href, ""));
-    // Drop the scheme and host, keep the path.
     let path = match path.split_once("//") {
         Some((_, rest)) => rest.find('/').and_then(|i| rest.get(i..)).unwrap_or_default(),
         None => path,
     };
-    let segs: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
-    let post = frag.trim_start_matches(['p', 'q']).parse().ok();
-    let number = |s: &str| s.trim_end_matches(".html").trim_end_matches(".json").parse().ok();
-    match segs[..] {
-        [board, "thread" | "res", t, ..] => Link { board: Some(percent_decode(board)), thread: number(t), post },
-        // FoolFuuka links posts it can't place in a thread as /board/post/123/.
-        [board, "post", p, ..] => Link { board: Some(percent_decode(board)), thread: None, post: number(p) },
-        [board] | [board, "index.html" | "catalog" | "catalog.html"] => {
-            Link { board: Some(percent_decode(board)), thread: None, post }
-        }
-        _ => Link { board: None, thread: None, post },
-    }
-}
-
-fn percent_decode(s: &str) -> String {
-    let bytes = s.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'%'
-            && let Some(b) = s.get(i + 1..i + 3).and_then(|h| u8::from_str_radix(h, 16).ok())
-        {
-            out.push(b);
-            i += 3;
-            continue;
-        }
-        out.push(bytes[i]);
-        i += 1;
-    }
-    String::from_utf8_lossy(&out).into_owned()
+    let (board, thread, post) = crate::route::parse_path(path, frag);
+    Link { board, thread, post }
 }
 
 /// The post number a quote-link span points at, if the whole span is `>>123`.
