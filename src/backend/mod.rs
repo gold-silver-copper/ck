@@ -113,6 +113,7 @@ mod tests {
     #[test]
     #[ignore]
     fn live_default_sites() {
+        crate::http::NETWORK.store(true, std::sync::atomic::Ordering::Relaxed);
         let cfg: Config = toml::from_str(crate::config::DEFAULT_CONFIG).unwrap();
         let mut failures = Vec::new();
         for site in &cfg.sites {

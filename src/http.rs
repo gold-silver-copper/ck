@@ -72,6 +72,11 @@ pub fn serve_test_host(host: &str, answer: Option<TestHost>) {
     };
 }
 
+/// Tests never reach the network unless this is set (only the live test sets it): real
+/// hosts are refused, so a test that would load something from a real site fails fast.
+#[cfg(test)]
+pub static NETWORK: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 /// Whether this thread's requests are at background priority (tests only).
 #[cfg(test)]
 pub fn is_background() -> bool {
@@ -150,6 +155,10 @@ fn throttle(url: &str, prio: Priority) -> Result<()> {
     let host = host(url);
     if cfg!(test) && host.ends_with(".invalid") {
         anyhow::bail!("{url}: a test host, not fetched");
+    }
+    #[cfg(test)]
+    if !NETWORK.load(std::sync::atomic::Ordering::Relaxed) && !host.starts_with("127.0.0.1") && !host.starts_with("localhost") {
+        anyhow::bail!("{url}: tests don't use the network");
     }
     let interval = if lock(&MEDIA_HOSTS).contains(host) { MEDIA_INTERVAL } else { API_INTERVAL };
     let start = Instant::now();
