@@ -21,7 +21,7 @@ use anyhow::Result;
 use std::io::stdout;
 use std::time::Instant;
 
-use ratatui::crossterm::event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyEventKind};
+use ratatui::crossterm::event::{DisableMouseCapture, EnableMouseCapture};
 use ratatui::crossterm::execute;
 use ratatui_image::picker::Picker;
 use ratatui_image::picker::cap_parser::QueryStdioOptions;
@@ -81,17 +81,14 @@ fn detect_images() -> Picker {
     Picker::from_query_stdio_with_options(options).unwrap_or_else(|_| Picker::halfblocks())
 }
 
+/// Draw, then sleep until input, a finished request, or the next deadline.
 fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
+    app.listen_for_input();
+    app.poll();
     while !app.quit {
-        app.poll();
         terminal.draw(|f| ui::draw(f, app))?;
-        if event::poll(Duration::from_millis(100))? {
-            match event::read()? {
-                Event::Key(key) if key.kind == KeyEventKind::Press => app.on_key(key),
-                Event::Mouse(m) => app.on_mouse(m, Instant::now()),
-                _ => {}
-            }
-        } else {
+        let timeout = app.next_wake(Instant::now());
+        if !app.wait(timeout) {
             app.tick = app.tick.wrapping_add(1);
         }
     }

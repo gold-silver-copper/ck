@@ -4,7 +4,9 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+use ratatui::crossterm::event::{
+    self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+};
 use ratatui::layout::Rect;
 use ratatui::text::Line;
 use ratatui::widgets::ListState;
@@ -27,6 +29,9 @@ pub enum View {
     Watched,
     History,
 }
+
+/// Watched-thread refreshes running at once.
+const MAX_REFRESHING: usize = 2;
 
 /// Catalog sort orders, cycled with `s`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -326,6 +331,9 @@ enum Msg {
     /// The thread a quoted post is in: (board, post, thread).
     Found(u64, Board, u64, Result<Option<u64>>),
     Download(DlEvent),
+    Input(Event),
+    /// Something else (a loaded image) needs a redraw.
+    Wake,
 }
 
 pub struct App {
@@ -427,7 +435,12 @@ impl App {
             status_since: None,
             show_help: false,
             help_scroll: 0,
-            images: Images::new(picker),
+            images: Images::new(picker, {
+                let tx = tx.clone();
+                Arc::new(move || {
+                    let _ = tx.send(Msg::Wake);
+                })
+            }),
             viewer: None,
             preview: None,
             searching: false,
@@ -524,12 +537,78 @@ impl App {
 
     // ----- background loading -----
 
+    /// Block until something happens (input, a finished request, a loaded image) or
+    /// `timeout` passes, then handle everything pending. Returns whether anything arrived.
+    pub fn wait(&mut self, timeout: Duration) -> bool {
+        let got = match self.rx.recv_timeout(timeout) {
+            Ok(msg) => {
+                self.handle(msg);
+                true
+            }
+            Err(_) => false,
+        };
+        self.poll();
+        got
+    }
+
+    /// Handle everything pending without blocking. Queued input is all handled before the
+    /// next draw, so held-down keys don't build up a lag.
     pub fn poll(&mut self) {
-        self.expire_status(Instant::now());
         self.images.poll();
-        self.background();
         while let Ok(msg) = self.rx.try_recv() {
+            self.handle(msg);
+        }
+        self.background();
+        self.expire_status(Instant::now());
+    }
+
+    /// How long the main loop may sleep: until the next animation frame, status expiry or
+    /// due refresh, and at most a second (relative times like "5s ago" stay current).
+    pub fn next_wake(&self, now: Instant) -> Duration {
+        let mut wake = Duration::from_secs(1);
+        let animating = self.loading.is_some() || !self.refreshing.is_empty() || self.downloads.running > 0 || self.viewer.is_some();
+        if animating {
+            wake = wake.min(Duration::from_millis(100));
+        }
+        let mut at = |t: Instant| wake = wake.min(t.saturating_duration_since(now));
+        if let (Some((_, is_err)), Some((_, since))) = (&self.status, &self.status_since) {
+            at(*since + Duration::from_secs(if *is_err { 5 } else { 2 }));
+        }
+        if self.view == View::Thread && self.thread.is_some() && self.loading.is_none() {
+            at(self.thread_checked + self.refresh_thread);
+        }
+        // At capacity, a finished refresh wakes the loop anyway (and due ones mustn't spin it).
+        if self.refreshing.len() < MAX_REFRESHING {
+            for w in self.store.watched.iter().filter(|w| !w.dead && !self.refreshing.contains(&w.key)) {
+                match self.watched_checked.get(&w.key) {
+                    Some(t) => at(*t + self.refresh_watched),
+                    None => at(now),
+                }
+            }
+        }
+        wake
+    }
+
+    /// Read terminal input on a thread, into the same channel as everything else. Start it
+    /// only after image protocol detection, which reads stdin itself.
+    pub fn listen_for_input(&self) {
+        let tx = self.tx.clone();
+        std::thread::spawn(move || {
+            while let Ok(ev) = event::read() {
+                if tx.send(Msg::Input(ev)).is_err() {
+                    return;
+                }
+            }
+        });
+    }
+
+    fn handle(&mut self, msg: Msg) {
+        {
             match msg {
+                Msg::Wake => {}
+                Msg::Input(Event::Key(key)) if key.kind == KeyEventKind::Press => self.on_key(key),
+                Msg::Input(Event::Mouse(m)) => self.on_mouse(m, Instant::now()),
+                Msg::Input(_) => {}
                 Msg::Refreshed(key, res) => self.refreshed(key, res),
                 Msg::Download(ev) => self.download_event(ev),
                 Msg::Found(id, board, post, res) if id == self.req => {
@@ -584,7 +663,7 @@ impl App {
                         Ok(posts) => self.set_thread(posts),
                         Err(e) if http::is_not_found(&e) => {
                             let Some(key) = self.board.as_ref().map(|b| self.key(&b.uri, self.pending_thread)) else {
-                                continue;
+                                return;
                             };
                             self.thread_gone(&key);
                             if let Some(w) = self.store.watched_mut(&key) {
@@ -722,7 +801,7 @@ impl App {
             self.thread_checked = Instant::now();
             self.refresh_in_background(key.clone());
         }
-        if self.refreshing.len() >= 2 {
+        if self.refreshing.len() >= MAX_REFRESHING {
             return;
         }
         let due = self.store.watched.iter().find(|w| {
@@ -1651,6 +1730,54 @@ mod tests {
         assert_eq!(app.thread.as_ref().unwrap().selected, 2);
         app.on_mouse(mouse(MouseEventKind::ScrollDown, 3, 3), Instant::now());
         assert_eq!(app.thread.as_ref().unwrap().scroll, 2);
+    }
+
+    #[test]
+    fn sleeps_until_the_next_thing_to_do() {
+        let mut app = test_app();
+        let now = Instant::now();
+        // Idle: at most a second.
+        assert_eq!(app.next_wake(now), Duration::from_secs(1));
+        // A spinner animates.
+        app.loading = Some("Loading".into());
+        assert_eq!(app.next_wake(now), Duration::from_millis(100));
+        app.loading = None;
+        // A status message wakes the loop when it's due to disappear.
+        app.status = Some(("hi".into(), false));
+        app.status_since = Some(("hi".into(), now - Duration::from_millis(1700)));
+        assert_eq!(app.next_wake(now), Duration::from_millis(300));
+        app.status = None;
+        app.status_since = None;
+        // A watched thread that was never refreshed is due now.
+        app.store.watched.push(crate::store::Watched {
+            key: ThreadKey { site: "4chan".into(), board: "g".into(), no: 1 },
+            subject: String::new(),
+            posts: 1,
+            last_seen: 1,
+            unread: 0,
+            dead: false,
+        });
+        assert_eq!(app.next_wake(now), Duration::ZERO);
+        // But while the maximum number of refreshes is running, due ones don't spin the loop.
+        for no in [2, 3] {
+            app.refreshing.insert(ThreadKey { site: "4chan".into(), board: "g".into(), no });
+        }
+        assert_eq!(app.next_wake(now), Duration::from_millis(100));
+    }
+
+    #[test]
+    fn wakes_as_soon_as_a_message_arrives() {
+        let mut app = test_app();
+        let tx = app.tx.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(20));
+            let _ = tx.send(Msg::Wake);
+        });
+        let start = Instant::now();
+        assert!(app.wait(Duration::from_secs(5)));
+        assert!(start.elapsed() < Duration::from_millis(500), "{:?}", start.elapsed());
+        // With nothing to wait for, it times out.
+        assert!(!app.wait(Duration::from_millis(10)));
     }
 
     #[test]

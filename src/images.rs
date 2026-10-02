@@ -43,6 +43,9 @@ struct Queue {
 
 type Done = (String, Option<Result<DynamicImage, String>>);
 
+/// Called by workers after each result, to wake the UI's main loop.
+pub type Waker = Arc<dyn Fn() + Send + Sync>;
+
 pub struct Images {
     picker: Option<Picker>,
     slots: HashMap<String, Slot>,
@@ -55,13 +58,13 @@ pub struct Images {
 
 impl Images {
     /// `None` disables images entirely: no workers, no requests.
-    pub fn new(picker: Option<Picker>) -> Self {
+    pub fn new(picker: Option<Picker>, wake: Waker) -> Self {
         let queue = Arc::new(Queue::default());
         let (tx, rx) = channel();
         if picker.is_some() {
             for _ in 0..WORKERS {
-                let (q, tx) = (queue.clone(), tx.clone());
-                std::thread::spawn(move || worker(&q, &tx));
+                let (q, tx, wake) = (queue.clone(), tx.clone(), wake.clone());
+                std::thread::spawn(move || worker(&q, &tx, &*wake));
             }
         }
         Self { picker, slots: HashMap::new(), queue, rx, frame: Vec::new(), tick: 0, bytes: 0 }
@@ -196,7 +199,7 @@ impl Images {
     }
 }
 
-fn worker(q: &Queue, tx: &Sender<Done>) {
+fn worker(q: &Queue, tx: &Sender<Done>, wake: &dyn Fn()) {
     loop {
         let url = {
             let mut st = q.state.lock().unwrap();
@@ -217,6 +220,7 @@ fn worker(q: &Queue, tx: &Sender<Done>) {
         if tx.send((url, Some(res))).is_err() {
             return;
         }
+        wake();
     }
 }
 
@@ -232,7 +236,7 @@ mod tests {
 
     #[test]
     fn off_makes_no_requests() {
-        let mut im = Images::new(None);
+        let mut im = Images::new(None, Arc::new(|| {}));
         assert!(matches!(im.get("http://x/a.jpg", Size::new(4, 4)), State::Failed));
         im.end_frame();
         assert!(im.queue.state.lock().unwrap().0.is_empty());
@@ -240,7 +244,7 @@ mod tests {
 
     #[test]
     fn eviction_respects_budget() {
-        let mut im = Images::new(None);
+        let mut im = Images::new(None, Arc::new(|| {}));
         let (tx, rx) = channel();
         im.rx = rx;
         // Each 2048x2048 RGBA image counts as 32 MiB (doubled for its protocol).
