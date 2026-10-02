@@ -930,6 +930,10 @@ impl App {
         if let Some(since) = self.notes_since {
             at(since + Duration::from_secs(3));
         }
+        // An animated GIF in the viewer: its next frame.
+        if let Some(t) = self.images.next_frame() {
+            at(t);
+        }
         if let (Some((_, is_err)), Some((_, since))) = (&self.status, &self.status_since) {
             at(*since + Duration::from_secs(if *is_err { 5 } else { 2 }));
         }
@@ -2222,6 +2226,11 @@ impl App {
                 self.viewer = None;
             }
             KeyCode::Char('h' | 'k') | KeyCode::Left | KeyCode::Up => v.index = (v.index + n - 1) % n,
+            // Space pauses an animated GIF; otherwise it's the next file.
+            KeyCode::Char(' ') if self.images.toggle_pause(&v.files[v.index].url) => {
+                let paused = self.images.is_paused(&v.files[v.index].url);
+                self.status = Some((if paused { "Paused (space plays)" } else { "Playing" }.into(), false));
+            }
             KeyCode::Char('l' | 'j' | ' ') | KeyCode::Right | KeyCode::Down => v.index = (v.index + 1) % n,
             KeyCode::Char('i') | KeyCode::Enter => {
                 let f = v.files[v.index].clone();

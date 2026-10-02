@@ -86,7 +86,8 @@ is in brackets):
 | `y`  | catalog, thread, Watched, History, viewer | copy the post's text (catalog: the OP's; Watched/History: subject and link; viewer: the file's URL) [`copy`] |
 | `Y`  | catalog, thread, Watched, History, viewer | copy the link to the post or thread [`copy_link`] |
 
-In the image viewer: `h`/`l` or arrows for the previous/next file, `i` to open it externally,
+In the image viewer: `h`/`l` or arrows for the previous/next file (animated GIFs play;
+`space` pauses one), `i` to open it externally,
 `y`/`Y` to copy the file's URL / the post's link, `esc` or `q` to close.
 
 Copying uses the terminal's clipboard escape (OSC 52), which also works over SSH; in tmux it
@@ -219,6 +220,10 @@ Catalog and thread views show thumbnails, and `v` opens a full-screen viewer. ck
 terminal which image protocol it supports (kitty, sixel, iTerm2) and falls back to unicode
 half-blocks, which work everywhere. The detected protocol is shown at the bottom of the `?`
 help. Thumbnails are skipped in terminals narrower than 60 columns.
+
+Animated GIFs play in the viewer, at up to 20 frames a second (frames are prepared in the
+background, and scaled down if a long GIF would take too much memory). Videos open
+externally with `i`.
 
 Images load in the background through the same rate limiter as everything else, only for
 what's on screen (or about to be), and are kept in a bounded in-memory cache. Thumbnails

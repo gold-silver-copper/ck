@@ -478,3 +478,4 @@ fn tabs_row() {
     insta::assert_snapshot!(snapshot(&mut a));
     insta::assert_snapshot!("tabs_row_backgrounds", bg_map(&mut a));
 }
+

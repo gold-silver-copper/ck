@@ -1415,6 +1415,7 @@ fn help_sections(keys: &KeyMap) -> Vec<(&'static str, Vec<(String, &'static str)
             "Image viewer",
             vec![
                 ("h / l, ← / →".into(), "previous / next file"),
+                ("space".into(), "pause an animated GIF"),
                 ("i".into(), "open externally"),
                 (pair(Action::Copy, Action::CopyLink), "copy the file's URL / post link"),
                 (k(Action::ImageSearch), "reverse image search"),
@@ -1689,9 +1690,15 @@ fn draw_viewer(f: &mut Frame, app: &mut App) {
     );
     fill(f, bottom, t.bar);
     let mut hints = vec![Span::raw(" ")];
-    for (k, label) in [("h/l", "previous / next"), ("i", "open externally"), ("esc", "close")] {
-        hints.push(Span::styled(k, bold(t.primary)));
-        hints.push(Span::styled(format!(" {label}   "), dim()));
+    if let Some((msg, is_err)) = &app.status {
+        let (mark, bg) = if *is_err { ("!", t.error) } else { ("✓", t.success) };
+        hints.push(Span::styled(format!(" {mark} "), bold(t.background).bg(bg)));
+        hints.push(Span::styled(format!(" {msg}"), Style::new().fg(t.on_bar)));
+    } else {
+        for (k, label) in [("h/l", "previous / next"), ("i", "open externally"), ("esc", "close")] {
+            hints.push(Span::styled(k, bold(t.primary)));
+            hints.push(Span::styled(format!(" {label}   "), dim()));
+        }
     }
     put(f, bottom.x, bottom.y, bottom.width, Line::from(hints));
     let area = middle.inner(Margin::new(MARGIN, 0));

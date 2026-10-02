@@ -32,6 +32,44 @@ const MAX_DIM: u32 = 2048;
 /// A new size for an image that's already shown (a resize) is encoded once it has held
 /// this long, instead of on every step of the resize.
 const RESIZE_DEBOUNCE: Duration = Duration::from_millis(150);
+/// Animations redraw at most this often (20 per second); frames due sooner are skipped,
+/// so they keep their speed.
+const MIN_FRAME: Duration = Duration::from_millis(50);
+/// An animated GIF's decoded frames are scaled down to fit in this (well within the cache
+/// budget); one that would need more than 4x less is shown still.
+const ANIMATION_BYTES: usize = 40 * 1024 * 1024;
+
+/// An animated GIF's frames and how long each shows.
+type Frames = Arc<Vec<(DynamicImage, Duration)>>;
+
+/// An animation encoded for one size, playing.
+struct Animation {
+    size: Size,
+    frames: Vec<(Protocol, Duration)>,
+    total: Duration,
+    start: Instant,
+    /// Paused at this point in the loop.
+    paused: Option<Duration>,
+}
+
+impl Animation {
+    fn at(&self, now: Instant) -> Duration {
+        let t = self.paused.unwrap_or_else(|| now.duration_since(self.start));
+        Duration::from_nanos((t.as_nanos() % self.total.as_nanos().max(1)) as u64)
+    }
+
+    /// The frame showing now, and how long until the next one.
+    fn frame(&self, now: Instant) -> (usize, Duration) {
+        let mut t = self.at(now);
+        for (i, (_, d)) in self.frames.iter().enumerate() {
+            if t < *d {
+                return (i, *d - t);
+            }
+            t -= *d;
+        }
+        (0, self.frames[0].1)
+    }
+}
 
 /// Thumbnails are cached on disk; full-size images only in memory.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -60,6 +98,10 @@ enum Slot {
         asked: Option<(Size, Instant)>,
         bytes: usize,
         used: u64,
+        /// An animated GIF's frames, their encoding, and the size being encoded.
+        frames: Option<Frames>,
+        animation: Option<Animation>,
+        animating: Option<Size>,
     },
 }
 
@@ -84,11 +126,15 @@ enum Done {
     /// Not fetched: it scrolled out of view before a worker got to it.
     Skipped(String),
     /// Decoded, and already sent to be encoded at this size if the UI had given one.
-    Fetched(String, Result<Arc<DynamicImage>, String>, Option<Size>),
+    Fetched(String, Result<(Arc<DynamicImage>, Option<Frames>), String>, Option<Size>),
     Encoded(String, Size, Result<Protocol, String>),
+    EncodedFrames(String, Size, Result<Vec<(Protocol, Duration)>, String>),
 }
 
-type EncodeJob = (String, Size, Arc<DynamicImage>);
+enum EncodeJob {
+    One(String, Size, Arc<DynamicImage>),
+    Frames(String, Size, Frames),
+}
 
 /// Called by workers after each result, to wake the UI's main loop.
 pub type Waker = Arc<dyn Fn() + Send + Sync>;
@@ -102,6 +148,10 @@ pub struct Images {
     frame: Vec<(String, Kind, Option<Size>)>,
     tick: u64,
     bytes: usize,
+    /// When the animation drawn this frame shows its next frame (as of the last finished
+    /// frame, and in the one being drawn).
+    next_frame: Option<Instant>,
+    drawing_next: Option<Instant>,
 }
 
 impl Images {
@@ -125,7 +175,7 @@ impl Images {
             }
             encode = Some(enc_tx);
         }
-        Self { picker, slots: HashMap::new(), queue, rx, encode, frame: Vec::new(), tick: 0, bytes: 0 }
+        Self { picker, slots: HashMap::new(), queue, rx, encode, frame: Vec::new(), tick: 0, bytes: 0, next_frame: None, drawing_next: None }
     }
 
     /// Images "on", but nothing is ever fetched or encoded: everything stays a placeholder.
@@ -134,7 +184,7 @@ impl Images {
         let (_tx, rx) = channel();
         let picker = Some(Picker::halfblocks());
         let queue = Arc::new(Queue::default());
-        Self { picker, slots: HashMap::new(), queue, rx, encode: None, frame: Vec::new(), tick: 0, bytes: 0 }
+        Self { picker, slots: HashMap::new(), queue, rx, encode: None, frame: Vec::new(), tick: 0, bytes: 0, next_frame: None, drawing_next: None }
     }
 
     /// An encoder thread but no fetch workers (tests and benchmarks).
@@ -147,8 +197,17 @@ impl Images {
     #[cfg(test)]
     pub fn insert_decoded(&mut self, url: &str, img: DynamicImage) {
         let bytes = img.as_bytes().len() * 2;
-        let slot = Slot::Ready { img: Arc::new(img), protos: Vec::new(), pending: None, asked: None, bytes, used: 0 };
+        let slot = Slot::Ready { img: Arc::new(img), protos: Vec::new(), pending: None, asked: None, bytes, used: 0, frames: None, animation: None, animating: None };
         self.slots.insert(url.to_string(), slot);
+    }
+
+    /// Put an animation's decoded frames in the cache (tests).
+    #[cfg(test)]
+    pub fn insert_frames(&mut self, url: &str, frames: Vec<(DynamicImage, Duration)>) {
+        self.insert_decoded(url, frames[0].0.clone());
+        if let Some(Slot::Ready { frames: f, .. }) = self.slots.get_mut(url) {
+            *f = Some(Arc::new(frames));
+        }
     }
 
     pub fn enabled(&self) -> bool {
@@ -172,13 +231,34 @@ impl Images {
         }
         self.frame.push((url.to_string(), kind, Some(size)));
         self.tick += 1;
-        let Some(Slot::Ready { img, protos, pending, asked, used, .. }) = self.slots.get_mut(url) else {
+        let Some(Slot::Ready { img, protos, pending, asked, used, frames, animation, animating, .. }) = self.slots.get_mut(url) else {
             return match self.slots.get(url) {
                 Some(Slot::Failed) => State::Failed,
                 _ => State::Loading,
             };
         };
         *used = self.tick;
+        // Animated: the frame due now, once the frames are encoded for this size.
+        if let Some(f) = frames.as_ref().filter(|_| kind == Kind::Full) {
+            match animation {
+                Some(a) if a.size == size => {
+                    let now = Instant::now();
+                    let (i, left) = a.frame(now);
+                    if a.paused.is_none() {
+                        let next = now + left.max(MIN_FRAME);
+                        self.drawing_next = Some(self.drawing_next.map_or(next, |t| t.min(next)));
+                    }
+                    return State::Ready(&a.frames[i].0);
+                }
+                _ if *animating != Some(size) => {
+                    if let Some(enc) = &self.encode {
+                        let _ = enc.send(EncodeJob::Frames(url.to_string(), size, f.clone()));
+                        *animating = Some(size);
+                    }
+                }
+                _ => {}
+            }
+        }
         if let Some(i) = protos.iter().position(|(s, _)| *s == size) {
             return State::Ready(&protos[i].1);
         }
@@ -195,7 +275,7 @@ impl Images {
             if (protos.is_empty() || settled)
                 && let Some(enc) = &self.encode
             {
-                let _ = enc.send((url.to_string(), size, img.clone()));
+                let _ = enc.send(EncodeJob::One(url.to_string(), size, img.clone()));
                 *pending = Some(size);
             }
         }
@@ -203,6 +283,26 @@ impl Images {
             Some((_, p)) => State::Ready(p),
             None => State::Rendering,
         }
+    }
+
+    /// When the animation on screen next changes, if one is playing.
+    pub fn next_frame(&self) -> Option<Instant> {
+        self.next_frame
+    }
+
+    /// Pause or resume an animated image. Returns false if it isn't one (yet).
+    pub fn toggle_pause(&mut self, url: &str) -> bool {
+        let Some(Slot::Ready { animation: Some(a), .. }) = self.slots.get_mut(url) else { return false };
+        let now = Instant::now();
+        match a.paused.take() {
+            Some(at) => a.start = now - at,
+            None => a.paused = Some(a.at(now)),
+        }
+        true
+    }
+
+    pub fn is_paused(&self, url: &str) -> bool {
+        matches!(self.slots.get(url), Some(Slot::Ready { animation: Some(a), .. }) if a.paused.is_some())
     }
 
     /// Ask for an image without drawing it (prefetch for rows about to scroll into view).
@@ -218,6 +318,8 @@ impl Images {
             return;
         }
         let frame = std::mem::take(&mut self.frame);
+        // Only an animation drawn this frame keeps the loop waking.
+        self.next_frame = self.drawing_next.take();
         let mut st = self.queue.state.lock().unwrap();
         st.wanted = frame.iter().map(|(u, ..)| u.clone()).collect();
         for (url, kind, size) in frame {
@@ -241,11 +343,12 @@ impl Images {
                 Done::Fetched(url, Err(_), _) => {
                     self.slots.insert(url, Slot::Failed);
                 }
-                Done::Fetched(url, Ok(img), pending) => {
-                    let bytes = img.as_bytes().len() * 2;
+                Done::Fetched(url, Ok((img, frames)), pending) => {
+                    let frame_bytes: usize = frames.iter().flat_map(|f| f.iter()).map(|(f, _)| f.as_bytes().len()).sum();
+                    let bytes = img.as_bytes().len() * 2 + frame_bytes;
                     self.bytes += bytes;
                     self.tick += 1;
-                    let slot = Slot::Ready { img, protos: Vec::new(), pending, asked: None, bytes, used: self.tick };
+                    let slot = Slot::Ready { img, protos: Vec::new(), pending, asked: None, bytes, used: self.tick, frames, animation: None, animating: None };
                     self.slots.insert(url, slot);
                     self.evict();
                 }
@@ -267,21 +370,35 @@ impl Images {
                         }
                     }
                 }
+                Done::EncodedFrames(url, size, res) => {
+                    let Some(Slot::Ready { animation, animating, .. }) = self.slots.get_mut(&url) else { continue };
+                    if *animating == Some(size) {
+                        *animating = None;
+                    }
+                    // If the frames can't be encoded, the first frame stays up, still.
+                    if let Some(frames) = res.ok().filter(|f| !f.is_empty()) {
+                        let total = frames.iter().map(|(_, d)| *d).sum();
+                        *animation = Some(Animation { size, frames, total, start: Instant::now(), paused: None });
+                    }
+                }
             }
         }
     }
 
+    /// Drop the least recently used images while over budget, but never the newest one:
+    /// dropping an image just loaded would only have it fetched again, and again.
     fn evict(&mut self) {
         while self.bytes > BUDGET_BYTES {
-            let oldest = self
+            let mut ready: Vec<(u64, &String)> = self
                 .slots
                 .iter()
                 .filter_map(|(k, s)| match s {
                     Slot::Ready { used, .. } => Some((*used, k)),
                     _ => None,
                 })
-                .min()
-                .map(|(_, k)| k.clone());
+                .collect();
+            ready.sort_unstable();
+            let oldest = ready.first().filter(|_| ready.len() > 1).map(|(_, k)| (*k).clone());
             let Some(k) = oldest else { break };
             if let Some(Slot::Ready { bytes, .. }) = self.slots.remove(&k) {
                 self.bytes -= bytes;
@@ -314,14 +431,14 @@ fn worker(q: &Queue, tx: &Sender<Done>, encode: &Sender<EncodeJob>, wake: &dyn F
                 st = q.cv.wait(st).unwrap();
             }
         };
-        let res = fetch(&url, if kind == Kind::Thumb { disk } else { None }).map(Arc::new);
+        let res = fetch(&url, kind, if kind == Kind::Thumb { disk } else { None }).map(|(img, frames)| (Arc::new(img), frames));
         if let Some(h) = host {
             q.state.lock().unwrap().busy.remove(&h);
             q.cv.notify_all();
         }
         // Encode right away for the size the UI asked for, saving a round trip.
         let pending = match (&res, size) {
-            (Ok(img), Some(size)) => encode.send((url.clone(), size, img.clone())).is_ok().then_some(size),
+            (Ok((img, _)), Some(size)) => encode.send(EncodeJob::One(url.clone(), size, img.clone())).is_ok().then_some(size),
             _ => None,
         };
         if tx.send(Done::Fetched(url, res, pending)).is_err() {
@@ -332,9 +449,15 @@ fn worker(q: &Queue, tx: &Sender<Done>, encode: &Sender<EncodeJob>, wake: &dyn F
 }
 
 fn encoder(picker: &Picker, jobs: &Receiver<EncodeJob>, tx: &Sender<Done>, wake: &dyn Fn()) {
-    while let Ok((url, size, img)) = jobs.recv() {
-        let res = encode(picker, &img, size);
-        if tx.send(Done::Encoded(url, size, res)).is_err() {
+    while let Ok(job) = jobs.recv() {
+        let done = match job {
+            EncodeJob::One(url, size, img) => Done::Encoded(url, size, encode(picker, &img, size)),
+            EncodeJob::Frames(url, size, frames) => {
+                let res = frames.iter().map(|(f, d)| encode(picker, f, size).map(|p| (p, *d))).collect();
+                Done::EncodedFrames(url, size, res)
+            }
+        };
+        if tx.send(done).is_err() {
             return;
         }
         wake();
@@ -360,10 +483,11 @@ fn runnable(busy: &HashSet<String>, url: &str, kind: Kind, disk: Option<&DiskCac
 
 /// Load an image: a thumbnail from the disk cache if it's there, else over HTTP (caching
 /// thumbnails that decode). A cached file that won't decode is deleted and fetched again.
-fn fetch(url: &str, disk: Option<&DiskCache>) -> Result<DynamicImage, String> {
+/// Full-size animated GIFs come with their frames.
+fn fetch(url: &str, kind: Kind, disk: Option<&DiskCache>) -> Result<(DynamicImage, Option<Frames>), String> {
     if let Some(bytes) = disk.and_then(|d| d.get(url)) {
         match decode(&bytes) {
-            Ok(img) => return Ok(img),
+            Ok(img) => return Ok((img, None)),
             Err(_) => disk.unwrap().remove(url),
         }
     }
@@ -372,7 +496,51 @@ fn fetch(url: &str, disk: Option<&DiskCache>) -> Result<DynamicImage, String> {
     if let Some(d) = disk {
         let _ = d.put(url, &bytes);
     }
-    Ok(img)
+    let frames = if kind == Kind::Full { gif_frames(&bytes) } else { None };
+    Ok((img, frames))
+}
+
+/// An animated GIF's frames with their delays, if it has more than one. Frames are scaled
+/// down as far as needed (up to 4x) to fit in `ANIMATION_BYTES`; past that it's shown still.
+fn gif_frames(bytes: &[u8]) -> Option<Frames> {
+    gif_frames_within(bytes, ANIMATION_BYTES)
+}
+
+fn gif_frames_within(bytes: &[u8], budget: usize) -> Option<Frames> {
+    use image::AnimationDecoder;
+    if !bytes.starts_with(b"GIF8") || bytes.len() < 10 {
+        return None;
+    }
+    // Frames, from their graphic control blocks (a slight overcount at worst), and the
+    // canvas size from the header: what the frames will take decoded.
+    let count = bytes.windows(3).filter(|w| *w == [0x21, 0xf9, 0x04]).count().max(1);
+    let (w, h) = (u16::from_le_bytes([bytes[6], bytes[7]]) as f64, u16::from_le_bytes([bytes[8], bytes[9]]) as f64);
+    let need = count as f64 * w * h * 4.0;
+    let scale = (budget as f64 / need).sqrt().min(1.0);
+    if scale < 0.25 {
+        return None;
+    }
+    let decoder = image::codecs::gif::GifDecoder::new(std::io::Cursor::new(bytes)).ok()?;
+    let mut frames = Vec::new();
+    let mut size = 0;
+    for frame in decoder.into_frames() {
+        let frame = frame.ok()?;
+        let (num, den) = frame.delay().numer_denom_ms();
+        // Like browsers: no delay (or almost none) means 100ms.
+        let ms = num.checked_div(den).unwrap_or(0);
+        let delay = Duration::from_millis(if ms < 20 { 100 } else { ms as u64 });
+        let mut img = DynamicImage::ImageRgba8(frame.into_buffer());
+        if scale < 1.0 {
+            let (fw, fh) = ((img.width() as f64 * scale) as u32, (img.height() as f64 * scale) as u32);
+            img = img.resize_exact(fw.max(1), fh.max(1), FilterType::Triangle);
+        }
+        size += img.as_bytes().len();
+        if size > budget {
+            return None;
+        }
+        frames.push((img, delay));
+    }
+    (frames.len() > 1).then(|| Arc::new(frames))
 }
 
 fn decode(bytes: &[u8]) -> Result<DynamicImage, String> {
@@ -453,11 +621,87 @@ mod tests {
         // An unroutable URL: any request would fail, so success means it came from disk.
         let url = "http://127.0.0.1:9/thumb.png";
         disk.put(url, &png).unwrap();
-        assert_eq!(fetch(url, Some(&disk)).unwrap().width(), 4);
+        assert_eq!(fetch(url, Kind::Thumb, Some(&disk)).unwrap().0.width(), 4);
         // A corrupt entry is deleted (and the fetch then fails here, offline).
         disk.put(url, b"not an image").unwrap();
-        assert!(fetch(url, Some(&disk)).is_err());
+        assert!(fetch(url, Kind::Thumb, Some(&disk)).is_err());
         assert!(!disk.contains(url));
+    }
+
+    fn gif(frames: &[(u8, u16)]) -> Vec<u8> {
+        let mut out = Vec::new();
+        {
+            let mut enc = image::codecs::gif::GifEncoder::new(&mut out);
+            for &(shade, ms) in frames {
+                let buf = image::RgbaImage::from_pixel(8, 6, image::Rgba([shade, shade, shade, 255]));
+                let delay = image::Delay::from_numer_denom_ms(ms as u32, 1);
+                enc.encode_frame(image::Frame::from_parts(buf, 0, 0, delay)).unwrap();
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn gif_frames_and_delays() {
+        let frames = gif_frames(&gif(&[(0, 50), (128, 0), (255, 200)])).unwrap();
+        let delays: Vec<u128> = frames.iter().map(|(_, d)| d.as_millis()).collect();
+        // A missing delay plays as 100ms, like in browsers.
+        assert_eq!(delays, [50, 100, 200]);
+        assert!(gif_frames(&gif(&[(0, 50)])).is_none());
+        // Too big for the budget: scaled down to fit (4 frames of 8x6 need 768 bytes).
+        let bytes = gif(&[(0, 40), (60, 40), (120, 40), (180, 40)]);
+        let frames = gif_frames_within(&bytes, 400).unwrap();
+        assert_eq!((frames[0].0.width(), frames[0].0.height()), (5, 4));
+        // More than 4x too big: still.
+        assert!(gif_frames_within(&bytes, 40).is_none());
+        assert!(gif_frames(b"\x89PNG").is_none());
+    }
+
+    #[test]
+    fn animations_play_pause_and_wake_the_loop() {
+        let mut im = Images::with_picker(Picker::halfblocks());
+        let frames = gif_frames(&gif(&[(0, 50), (255, 50)])).unwrap();
+        im.insert_frames("g", frames.iter().cloned().collect());
+        let size = Size::new(20, 6);
+        // The first frame shows still while the frames are encoded; then it plays.
+        let mut playing = false;
+        for _ in 0..1000 {
+            im.poll();
+            let _ = im.get("g", size, Kind::Full);
+            im.end_frame();
+            if im.next_frame().is_some() {
+                playing = true;
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(playing);
+        let next = im.next_frame().unwrap();
+        assert!(next <= Instant::now() + MIN_FRAME);
+        // Paused: nothing to wake for.
+        assert!(im.toggle_pause("g"));
+        let _ = im.get("g", size, Kind::Full);
+        im.end_frame();
+        assert!(im.next_frame().is_none());
+        // A frame without the viewer: nothing either.
+        assert!(im.toggle_pause("g"));
+        im.end_frame();
+        assert!(im.next_frame().is_none());
+        // Still images can't be paused.
+        im.insert_decoded("still", DynamicImage::new_rgb8(4, 4));
+        assert!(!im.toggle_pause("still"));
+    }
+
+    #[test]
+    fn the_newest_image_is_never_evicted() {
+        let mut im = Images::new(None, Arc::new(|| {}), None);
+        let (tx, rx) = channel();
+        im.rx = rx;
+        // One image over the whole budget on its own: kept, not dropped and fetched again.
+        let img = Arc::new(DynamicImage::new_rgba8(4096, 4096));
+        tx.send(Done::Fetched("big".into(), Ok((img, None)), None)).unwrap();
+        im.poll();
+        assert!(matches!(im.slots.get("big"), Some(Slot::Ready { .. })));
     }
 
     #[test]
@@ -468,7 +712,7 @@ mod tests {
         // Each 2048x2048 RGBA image counts as 32 MiB (doubled for its protocol).
         for i in 0..4 {
             let img = Arc::new(DynamicImage::new_rgba8(2048, 2048));
-            tx.send(Done::Fetched(format!("u{i}"), Ok(img), None)).unwrap();
+            tx.send(Done::Fetched(format!("u{i}"), Ok((img, None)), None)).unwrap();
         }
         im.poll();
         assert!(im.bytes <= BUDGET_BYTES);
@@ -476,3 +720,4 @@ mod tests {
         assert!(im.slots.contains_key("u3"));
     }
 }
+
