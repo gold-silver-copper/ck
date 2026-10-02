@@ -286,7 +286,8 @@ url = "https://arch.b4k.dev"
 #               open_file = "i",
 #               replies = "b", jump_back = "u", unread = "U",
 #               preview = "p", next_match = "n", prev_match = "N", spoiler = "s",
-#               all_spoilers = "S", download = "d", download_thread = "D", archive = "a"
+#               all_spoilers = "S", download = "d", download_thread = "D", export = "E",
+#               archive = "a"
 #   Watched/History: remove = "x"
 #   catalog, thread, Watched/History, image viewer: copy = "y", copy_link = "Y"
 [keys]

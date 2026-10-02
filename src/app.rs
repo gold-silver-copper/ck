@@ -1359,6 +1359,19 @@ impl App {
         self.start_download(jobs, dir, if whole_thread { "Thread has no files" } else { "Post has no file" });
     }
 
+    /// `E`: save the thread as thread.html and thread.json in its download folder.
+    fn export_thread(&mut self) {
+        let (Some(t), Some(b)) = (&self.thread, &self.board) else { return };
+        let site = self.current_site();
+        let dir = download::dir(self.download_dir.as_deref(), &site.cfg.name, &t.board, t.no);
+        let url = site.backend.thread_url(&b.uri, t.no);
+        let about = crate::export::About { site: &site.cfg.name, board: &t.board, thread: t.no, url: &url, saved: self.clock.now() };
+        self.status = Some(match crate::export::save(&t.posts, &about, &theme::theme(), &dir) {
+            Ok(()) => (format!("Saved thread.html and thread.json in {}", tilde(&dir.display().to_string())), false),
+            Err(e) => (format!("Couldn't save the thread: {e:#}"), true),
+        });
+    }
+
     /// Fetch `(url, path)` jobs into `dir` in the background.
     fn start_download(&mut self, jobs: Vec<(String, std::path::PathBuf)>, dir: std::path::PathBuf, none: &str) {
         if jobs.is_empty() {
@@ -1766,6 +1779,7 @@ impl App {
             Action::Hide => self.toggle_hidden(),
             Action::Mine => self.toggle_mine(),
             Action::Gallery => self.open_gallery(),
+            Action::Export => self.export_thread(),
             Action::Expand => {
                 if let Some(t) = &mut self.thread {
                     match t.toggle_expanded() {
@@ -2365,7 +2379,7 @@ pub fn copy_text(p: &Post, subject: bool) -> String {
 }
 
 /// A thread's subject for lists: its subject, or the start of the OP's text.
-fn thread_subject(posts: &[Post]) -> String {
+pub fn thread_subject(posts: &[Post]) -> String {
     let Some(op) = posts.first() else { return String::new() };
     op.subject.clone().unwrap_or_else(|| op.plain_text().chars().take(80).collect())
 }

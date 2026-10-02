@@ -1275,6 +1275,7 @@ fn help_sections(keys: &KeyMap) -> Vec<(&'static str, Vec<(String, &'static str)
                 (k(Action::Expand), "show / hide replies under the post"),
                 (k(Action::Mine), "mark as yours: notified of replies"),
                 (pair(Action::Download, Action::DownloadThread), "save files: post / thread"),
+                (k(Action::Export), "save the thread as HTML and JSON"),
                 (k(Action::Watch), "watch / unwatch the thread"),
                 (k(Action::Unread), "jump to the first unread post"),
                 (k(Action::Archive), "open 404'd thread in archive"),

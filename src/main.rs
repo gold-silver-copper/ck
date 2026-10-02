@@ -6,6 +6,7 @@ mod bench;
 mod config;
 mod disk_cache;
 mod download;
+mod export;
 mod filter;
 mod http;
 mod images;
