@@ -234,6 +234,11 @@ impl ThreadView {
         i > 0 && !self.show_hidden && self.marks.get(i).is_some_and(|m| m.hidden.is_some())
     }
 
+    /// The selected post.
+    pub fn current(&self) -> Option<&Post> {
+        self.posts.get(self.selected)
+    }
+
     pub fn is_revealed(&self, i: usize) -> bool {
         self.reveal_all || self.revealed.contains(&i)
     }
@@ -817,8 +822,8 @@ impl App {
                 format!("{} /{}/ {}", f.site, f.board, self.board_title(f))
             }
             SiteRow::Recent(i) => {
-                let r = BoardRef::parse(&self.store.recent_boards[*i]).unwrap_or_else(|| BoardRef { site: String::new(), board: String::new() });
-                format!("{} /{}/ {}", r.site, r.board, self.board_title(&r))
+                let r = self.recent_board(*i);
+                r.map_or(String::new(), |r| format!("{} /{}/ {}", r.site, r.board, self.board_title(&r)))
             }
             SiteRow::Site(i) => self.sites[*i].cfg.name.clone(),
             SiteRow::HiddenSites => "hidden sites".to_string(),
@@ -878,7 +883,7 @@ impl App {
             View::History => &mut self.history_list,
             View::Settings => &mut self.settings_list,
             View::Search => &mut self.search_list,
-            View::Thread => unreachable!(),
+            View::Thread => return None,
         };
         Some((p, len))
     }
@@ -1028,7 +1033,7 @@ impl App {
                     match res {
                         Ok(Some(no)) => {
                             if let Some(t) = &self.thread {
-                                self.trail.push((self.site, self.board.clone().unwrap_or(board.clone()), t.no, t.posts[t.selected].no));
+                                self.trail.push((self.site, self.board.clone().unwrap_or(board.clone()), t.no, t.current().map_or(t.no, |p| p.no)));
                             }
                             self.open_thread_at(board, no, Some(post), true);
                         }
@@ -1330,11 +1335,12 @@ impl App {
         let marks = t.posts.iter().map(|p| self.mark(&t.board, p)).collect();
         let mine = self.store.watched(&self.key(&t.board, t.no)).map(|w| w.mine.iter().copied().collect()).unwrap_or_default();
         let show = self.show_hidden;
-        let t = self.thread.as_mut().expect("checked above");
-        t.marks = marks;
-        t.mine = mine;
-        t.show_hidden = show;
-        t.layout = None;
+        if let Some(t) = &mut self.thread {
+            t.marks = marks;
+            t.mine = mine;
+            t.show_hidden = show;
+            t.layout = None;
+        }
     }
 
     /// `H`: hide or unhide the selected thread (catalog) or post (thread) by hand.
@@ -1348,7 +1354,7 @@ impl App {
             View::Thread => {
                 let Some(t) = &self.thread else { return };
                 let what = if t.selected == 0 { "thread" } else { "post" };
-                (t.board.clone(), t.posts[t.selected].no, what, t.marks.get(t.selected).cloned())
+                (t.board.clone(), t.current().map_or(t.no, |p| p.no), what, t.marks.get(t.selected).cloned())
             }
             _ => return,
         };
@@ -1497,7 +1503,7 @@ impl App {
     /// Save the selected post's files, or the whole thread's.
     fn download(&mut self, whole_thread: bool) {
         let Some(t) = &self.thread else { return };
-        let posts: Vec<&Post> = if whole_thread { t.posts.iter().collect() } else { vec![&t.posts[t.selected]] };
+        let posts: Vec<&Post> = if whole_thread { t.posts.iter().collect() } else { t.current().into_iter().collect() };
         let dir = download::dir(self.download_dir.as_deref(), &self.current_site().cfg.name, &t.board, t.no);
         let jobs = download::jobs(&posts, &dir);
         self.start_download(jobs, dir, if whole_thread { "Thread has no files" } else { "Post has no file" });
@@ -1772,7 +1778,7 @@ impl App {
     fn toggle_mine(&mut self) {
         let Some(t) = &self.thread else { return };
         let key = self.key(&t.board, t.no);
-        let no = t.posts[t.selected].no;
+        let Some(no) = t.current().map(|p| p.no) else { return };
         if self.store.watched(&key).is_none() {
             let max_no = t.posts.iter().map(|p| p.no).max().unwrap_or(0);
             self.store.toggle_watch(key.clone(), thread_subject(&t.posts), t.posts.len(), max_no);
@@ -2090,7 +2096,7 @@ impl App {
             KeyCode::Char('g') | KeyCode::Home => t.select_entry(0),
             KeyCode::Char('G') | KeyCode::End => t.select_entry(usize::MAX),
             KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right => {
-                let quotes = t.posts[t.selected].quotes.clone();
+                let quotes = t.current().map(|p| p.quotes.clone()).unwrap_or_default();
                 if !quotes.into_iter().any(|q| t.jump_to(q)) {
                     self.follow_link();
                 }
@@ -2151,7 +2157,7 @@ impl App {
                 }
                 None => self.status = Some(("No unread posts".into(), false)),
             },
-            Action::OpenFile => match t.posts[t.selected].files.first().cloned() {
+            Action::OpenFile => match t.current().and_then(|p| p.files.first()).cloned() {
                 Some(f) => self.open_file(&f),
                 None => self.status = Some(("Post has no file".into(), false)),
             },
@@ -2195,7 +2201,7 @@ impl App {
 
     fn open_preview(&mut self) {
         let Some(t) = &self.thread else { return };
-        let p = &t.posts[t.selected];
+        let Some(p) = t.current() else { return };
         let posts: Vec<usize> = p.quotes.iter().filter_map(|q| t.index.get(q).copied()).collect();
         let elsewhere: Vec<u64> = p.links.iter().filter_map(|l| l.post).filter(|n| !t.index.contains_key(n)).collect();
         if posts.is_empty() && elsewhere.is_empty() {
@@ -2245,7 +2251,7 @@ impl App {
                 && (l.thread == Some(t.no) || (l.thread.is_none() && l.post.is_some_and(|p| t.index.contains_key(&p))));
             !in_thread
         };
-        let links = &t.posts[t.selected].links;
+        let links = &t.current()?.links;
         links.iter().filter(leaves).find(|l| l.post.is_some()).or_else(|| links.iter().find(leaves)).cloned()
     }
 
@@ -2260,7 +2266,7 @@ impl App {
         match (link.thread, link.post) {
             (Some(no), post) => {
                 if let Some(t) = self.thread.as_ref().filter(|_| self.view == View::Thread) {
-                    self.trail.push((self.site, board, t.no, t.posts[t.selected].no));
+                    self.trail.push((self.site, board, t.no, t.current().map_or(t.no, |p| p.no)));
                 }
                 self.open_thread_at(target, no, post, true);
             }
@@ -2333,7 +2339,7 @@ impl App {
     fn selected_post(&self) -> Option<&Post> {
         match self.view {
             View::Catalog => self.selected_index().map(|i| &self.catalog[i]),
-            View::Thread => self.thread.as_ref().map(|t| &t.posts[t.selected]),
+            View::Thread => self.thread.as_ref().and_then(ThreadView::current),
             _ => None,
         }
     }
@@ -2430,7 +2436,7 @@ impl App {
                 Some(SiteRow::History) => self.view = View::History,
                 Some(SiteRow::Favorite(i)) => self.open_favorite(i),
                 Some(SiteRow::Recent(i)) => {
-                    if let Some(b) = BoardRef::parse(&self.store.recent_boards[i]) {
+                    if let Some(b) = self.recent_board(i) {
                         self.open_board(&b);
                     }
                 }
@@ -2562,7 +2568,7 @@ impl App {
                 format!("{subject}\n{url}").trim().to_string()
             };
             match self.view {
-                View::Thread => self.thread.as_ref().map(|t| ("text", copy_text(&t.posts[t.selected], false))),
+                View::Thread => self.thread.as_ref().and_then(ThreadView::current).map(|p| ("text", copy_text(p, false))),
                 View::Catalog => self.selected_post().map(|p| ("text", copy_text(p, true))),
                 View::Watched => self.selected_index().map(|i| ("text", saved(&self.store.watched[i].key, &self.store.watched[i].subject))),
                 View::History => self.selected_index().map(|i| ("text", saved(&self.store.history[i].key, &self.store.history[i].subject))),
@@ -2606,7 +2612,7 @@ impl App {
                 let p = &self.catalog[i];
                 backend.thread_url(p.board.as_deref().unwrap_or(&b.uri), p.no)
             }),
-            (View::Thread, Some(b)) => self.thread.as_ref().and_then(|t| self.thread_link(&self.key(&b.uri, t.no), Some(t.posts[t.selected].no))),
+            (View::Thread, Some(b)) => self.thread.as_ref().and_then(|t| self.thread_link(&self.key(&b.uri, t.no), Some(t.current()?.no))),
             _ => None,
         }
     }

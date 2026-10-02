@@ -1,0 +1,5 @@
+# Tests may unwrap and panic; the code they test may not (see [lints] in Cargo.toml).
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true
+allow-indexing-slicing-in-tests = true

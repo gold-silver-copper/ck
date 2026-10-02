@@ -14,12 +14,12 @@ const RECHECK: Duration = Duration::from_secs(10 * 60);
 /// General` → `/lmg/`), or else the subject without a trailing number (`Coffee Brewing #12`
 /// → `Coffee Brewing`).
 pub fn general_pattern(subject: &str) -> Option<String> {
-    let tag = subject.match_indices('/').zip(subject.match_indices('/').skip(1)).find_map(|((a, _), (b, _))| {
-        let inner = &subject[a + 1..b];
-        (2..=12).contains(&inner.len()) && inner.chars().all(|c| c.is_ascii_alphanumeric() || "+-_".contains(c))
-    }.then(|| subject[a..=b].to_string()));
-    if let Some(tag) = tag {
-        return Some(tag);
+    // The pieces between two slashes: all but the first and last of a split.
+    let parts: Vec<&str> = subject.split('/').collect();
+    let between = parts.get(1..parts.len().saturating_sub(1)).unwrap_or_default();
+    let is_tag = |p: &&&str| (2..=12).contains(&p.len()) && p.chars().all(|c| c.is_ascii_alphanumeric() || "+-_".contains(c));
+    if let Some(tag) = between.iter().find(is_tag) {
+        return Some(format!("/{tag}/"));
     }
     let base = subject.trim().trim_end_matches(|c: char| c.is_ascii_digit() || " #.-:".contains(c));
     let base = base.strip_suffix(" Thread").or_else(|| base.strip_suffix(" thread")).unwrap_or(base).trim();

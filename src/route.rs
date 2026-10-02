@@ -61,7 +61,7 @@ pub fn resolve(input: &str, sites: &[SiteInfo], here: (usize, Option<&str>)) -> 
         let Some(site) = sites.iter().position(|s| s.hosts.iter().any(|h| h == host)) else {
             bail!("No site in the config is on {host}");
         };
-        let after = &rest[rest.find('/').unwrap_or(rest.len())..];
+        let after = rest.find('/').and_then(|i| rest.get(i..)).unwrap_or_default();
         let (path, fragment) = after.split_once('#').unwrap_or((after, ""));
         let path = path.split('?').next().unwrap_or(path);
         let (board, thread, post) = parse_path(path, fragment);
@@ -115,7 +115,7 @@ pub fn parse_path(path: &str, fragment: &str) -> (Option<String>, Option<u64>, O
 /// The number at the start of `s` (`123`, `123.html`, `123+50.html`, `123-slug`).
 fn number(s: &str) -> Option<u64> {
     let end = s.find(|c: char| !c.is_ascii_digit()).unwrap_or(s.len());
-    s[..end].parse().ok()
+    s.get(..end)?.parse().ok()
 }
 
 /// Undo percent-encoding (`%CE%BB` is λ).

@@ -1,6 +1,7 @@
 //! A bounded on-disk cache of thumbnail bytes, keyed by URL, in $XDG_CACHE_HOME/ck/thumbs.
 //! Thumbnails never change at a given URL, so a hit needs no request at all.
 
+use crate::http::lock;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -50,7 +51,7 @@ impl DiskCache {
     pub fn remove(&self, url: &str) {
         if let Ok(meta) = fs::metadata(self.path(url))
             && fs::remove_file(self.path(url)).is_ok()
-            && let Some(used) = self.used.lock().unwrap().as_mut()
+            && let Some(used) = lock(&self.used).as_mut()
         {
             *used = used.saturating_sub(meta.len());
         }
@@ -63,7 +64,7 @@ impl DiskCache {
         let tmp = path.with_extension("tmp");
         fs::write(&tmp, bytes)?;
         fs::rename(&tmp, &path)?;
-        let mut used = self.used.lock().unwrap();
+        let mut used = lock(&self.used);
         let total = match *used {
             Some(n) => n + bytes.len() as u64,
             None => entries(&self.dir).iter().map(|e| e.1).sum(),

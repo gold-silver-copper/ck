@@ -77,9 +77,12 @@ pub fn parse_html(html: &str, flavor: Flavor) -> Parsed {
     let mut rest = html;
 
     while !rest.is_empty() {
-        let lt = rest.find('<').unwrap_or(rest.len());
-        if lt > 0 && !stack.iter().any(|o| o.name == "small" && flavor == Flavor::Jschan) {
-            let text = decode(&rest[..lt]);
+        let (text, tag_and_after) = match rest.split_once('<') {
+            Some((text, after)) => (text, Some(after)),
+            None => (rest, None),
+        };
+        if !text.is_empty() && !stack.iter().any(|o| o.name == "small" && flavor == Flavor::Jschan) {
+            let text = decode(text);
             let style = stack.last().map(|o| o.style).unwrap_or_default();
             if stack.iter().any(|o| o.code) {
                 b.code_text(&text, style);
@@ -100,14 +103,13 @@ pub fn parse_html(html: &str, flavor: Flavor) -> Parsed {
                 }
             }
         }
-        rest = &rest[lt..];
-        let Some(gt) = rest.find('>') else {
-            // Unterminated tag (or the end): treat the remainder as text.
-            b.text(&decode(rest), stack.last().map(|o| o.style).unwrap_or_default(), None);
+        let Some(after) = tag_and_after else { break };
+        let Some((tag, after_tag)) = after.split_once('>') else {
+            // Unterminated tag: treat the remainder as text.
+            b.text(&decode(&format!("<{after}")), stack.last().map(|o| o.style).unwrap_or_default(), None);
             break;
         };
-        let tag = &rest[1..gt];
-        rest = &rest[gt + 1..];
+        rest = after_tag;
 
         let closing = tag.starts_with('/');
         let tag_body = tag.trim_start_matches('/').trim_end_matches('/');
@@ -215,13 +217,16 @@ impl Builder {
     /// span. `href` is the enclosing `<a>`'s target, which knows the thread of cross-thread links.
     fn text(&mut self, text: &str, style: Style, href: Option<&str>) {
         let mut rest = text;
-        while let Some(pos) = rest.find(">>") {
-            let Some((len, mut link)) = quote_at(&rest[pos..]) else {
-                self.push(&rest[..pos + 2], style);
-                rest = &rest[pos + 2..];
+        while let Some((before, from)) = rest.find(">>").and_then(|pos| rest.split_at_checked(pos)) {
+            self.push(before, style);
+            let Some(((quote, after), mut link)) = quote_at(from).and_then(|(len, link)| Some((from.split_at_checked(len)?, link)))
+            else {
+                // Not a quote link: the `>>` is text.
+                let (arrows, after) = from.split_at_checked(2).unwrap_or((from, ""));
+                self.push(arrows, style);
+                rest = after;
                 continue;
             };
-            self.push(&rest[..pos], style);
             // The href is canonical (the text may use a board alias, like /lambda/ for /λ/).
             if let Some(h) = href.map(parse_href) {
                 link.board = h.board.or(link.board);
@@ -230,7 +235,7 @@ impl Builder {
             }
             // `>>>/b/123` names a board; only a bare `>>123` can be in this thread.
             if let Some(n) = link.post
-                && !rest[pos..].starts_with(">>>")
+                && !quote.starts_with(">>>")
                 && !self.quotes.contains(&n)
             {
                 self.quotes.push(n);
@@ -238,9 +243,9 @@ impl Builder {
             if !self.links.contains(&link) {
                 self.links.push(link);
             }
-            self.cur.push(Span::styled(rest[pos..pos + len].to_string(), style.patch(quotelink())));
+            self.cur.push(Span::styled(quote.to_string(), style.patch(quotelink())));
             self.sealed = true;
-            rest = &rest[pos + len..];
+            rest = after;
         }
         self.push(rest, style);
     }
@@ -296,9 +301,9 @@ impl Builder {
         for line in self.lines.iter_mut().filter(|l| l.style != CODE_LINE) {
             let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
             let ranges = find_urls(&text);
-            for &(a, b) in &ranges {
-                if !self.urls.iter().any(|u| *u == text[a..b]) {
-                    self.urls.push(text[a..b].to_string());
+            for url in ranges.iter().filter_map(|&(a, b)| text.get(a..b)) {
+                if !self.urls.iter().any(|u| u == url) {
+                    self.urls.push(url.to_string());
                 }
             }
             if !ranges.is_empty() {
@@ -314,14 +319,18 @@ impl Builder {
 fn find_urls(s: &str) -> Vec<(usize, usize)> {
     let mut out = Vec::new();
     let mut from = 0;
-    while let Some(i) = [s[from..].find("http://"), s[from..].find("https://")].into_iter().flatten().min() {
+    while let Some(tail) = s.get(from..)
+        && let Some(i) = [tail.find("http://"), tail.find("https://")].into_iter().flatten().min()
+    {
         let start = from + i;
-        let end = s[start..].find(|c: char| c.is_whitespace() || matches!(c, '<' | '>' | '"' | '`')).map_or(s.len(), |e| start + e);
-        let mut url = &s[start..end];
+        let url_end = |c: char| c.is_whitespace() || matches!(c, '<' | '>' | '"' | '`');
+        let end = s.get(start..).and_then(|u| u.find(url_end)).map_or(s.len(), |e| start + e);
+        let mut url = s.get(start..end).unwrap_or_default();
+        // Trailing punctuation, and closing brackets without an opening one, aren't part of it.
         loop {
             let unbalanced = |open, close| url.ends_with(close) && url.matches(open).count() < url.matches(close).count();
             if url.ends_with(['.', ',', ';', ':', '!', '?', '\'', '*']) || unbalanced('(', ')') || unbalanced('[', ']') {
-                url = &url[..url.len() - 1];
+                url = url.get(..url.len() - 1).unwrap_or_default();
             } else {
                 break;
             }
@@ -348,7 +357,7 @@ fn style_ranges(spans: Vec<Span<'static>>, ranges: &[(usize, usize)]) -> Vec<Spa
         cuts.dedup();
         let mut at = 0;
         for end in cuts.into_iter().chain([len]) {
-            let piece = &s.content[at..end];
+            let piece = s.content.get(at..end).unwrap_or_default();
             let inside = ranges.iter().any(|&(a, b)| off + at >= a && off + at < b);
             let style = if inside && !keep { s.style.patch(link()) } else { s.style };
             out.push(Span::styled(piece.to_string(), style));
@@ -363,16 +372,15 @@ fn style_ranges(spans: Vec<Span<'static>>, ranges: &[(usize, usize)]) -> Vec<Spa
 fn quote_at(s: &str) -> Option<(usize, Link)> {
     if let Some(rest) = s.strip_prefix(">>>/") {
         // >>>/board/ or >>>/board/123
-        let board_len = rest.find('/')?;
-        let board = &rest[..board_len];
+        let (board, after) = rest.split_once('/')?;
         if board.is_empty() || board.contains(|c: char| c.is_whitespace() || c == '>') {
             return None;
         }
-        let digits: String = rest[board_len + 1..].chars().take_while(|c| c.is_ascii_digit()).collect();
+        let digits: String = after.chars().take_while(|c| c.is_ascii_digit()).collect();
         let link = Link { board: Some(board.to_string()), thread: None, post: digits.parse().ok() };
-        return Some((4 + board_len + 1 + digits.len(), link));
+        return Some((4 + board.len() + 1 + digits.len(), link));
     }
-    let digits: String = s[2..].chars().take_while(|c| c.is_ascii_digit()).collect();
+    let digits: String = s.strip_prefix(">>")?.chars().take_while(|c| c.is_ascii_digit()).collect();
     let post = digits.parse().ok()?;
     Some((2 + digits.len(), Link { board: None, thread: None, post: Some(post) }))
 }
@@ -383,7 +391,7 @@ fn parse_href(href: &str) -> Link {
     let (path, frag) = href.split_once('#').unwrap_or((href, ""));
     // Drop the scheme and host, keep the path.
     let path = match path.split_once("//") {
-        Some((_, rest)) => rest.find('/').map_or("", |i| &rest[i..]),
+        Some((_, rest)) => rest.find('/').and_then(|i| rest.get(i..)).unwrap_or_default(),
         None => path,
     };
     let segs: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
@@ -456,27 +464,27 @@ pub fn highlight(line: &Line<'static>, needle: &str, hl: Style) -> Line<'static>
             spans.push(s.clone());
             continue;
         }
+        // Lowercasing kept the offsets, so they're valid in the original too.
+        let piece = |a: usize, b: usize| s.content.get(a..b).unwrap_or_default().to_string();
         let mut at = 0;
         for (i, m) in lower.match_indices(needle) {
             if i > at {
-                spans.push(Span::styled(s.content[at..i].to_string(), s.style));
+                spans.push(Span::styled(piece(at, i), s.style));
             }
-            spans.push(Span::styled(s.content[i..i + m.len()].to_string(), s.style.patch(hl)));
+            spans.push(Span::styled(piece(i, i + m.len()), s.style.patch(hl)));
             at = i + m.len();
         }
         if at < s.content.len() {
-            spans.push(Span::styled(s.content[at..].to_string(), s.style));
+            spans.push(Span::styled(piece(at, s.content.len()), s.style));
         }
     }
     Line::from(spans).style(line.style)
 }
 
 fn attr(tag: &str, key: &str) -> Option<String> {
-    let needle = format!("{key}=");
-    let start = tag.find(&needle)? + needle.len();
-    let rest = &tag[start..];
+    let (_, rest) = tag.split_once(&format!("{key}="))?;
     let value = match rest.chars().next()? {
-        q @ ('"' | '\'') => rest[1..].split(q).next()?,
+        q @ ('"' | '\'') => rest.strip_prefix(q)?.split(q).next()?,
         _ => rest.split(|c: char| c.is_whitespace()).next()?,
     };
     Some(value.to_string())
@@ -561,18 +569,12 @@ fn push_merged(cur: &mut Vec<Span<'static>>, text: &str, style: Style) {
 /// Split into alternating runs of spaces and non-spaces.
 fn split_keep_spaces(s: &str) -> Vec<&str> {
     let mut out = Vec::new();
-    let mut start = 0;
-    let mut in_space = None;
-    for (i, c) in s.char_indices() {
-        let sp = c == ' ';
-        if in_space.is_some_and(|prev| prev != sp) {
-            out.push(&s[start..i]);
-            start = i;
-        }
-        in_space = Some(sp);
-    }
-    if start < s.len() {
-        out.push(&s[start..]);
+    let mut rest = s;
+    while let Some(first) = rest.chars().next() {
+        let run = rest.find(|c: char| (c == ' ') != (first == ' ')).unwrap_or(rest.len());
+        let (word, after) = rest.split_at_checked(run).unwrap_or((rest, ""));
+        out.push(word);
+        rest = after;
     }
     out
 }

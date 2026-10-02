@@ -518,8 +518,9 @@ fn next(choices: &[u64], current: u64) -> u64 {
 
 /// A path with the home directory shown as `~`.
 pub fn tilde(path: &str) -> String {
-    match dirs::home_dir().map(|h| h.display().to_string()) {
-        Some(home) if path.starts_with(&home) => format!("~{}", &path[home.len()..]),
-        _ => path.to_string(),
+    let home = dirs::home_dir().map(|h| h.display().to_string()).unwrap_or_default();
+    match path.strip_prefix(&home).filter(|_| !home.is_empty()) {
+        Some(rest) => format!("~{rest}"),
+        None => path.to_string(),
     }
 }

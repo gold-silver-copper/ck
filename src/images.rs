@@ -21,7 +21,7 @@ use ratatui_image::picker::Picker;
 use ratatui_image::protocol::Protocol;
 
 use crate::disk_cache::DiskCache;
-use crate::http;
+use crate::http::{self, lock};
 
 const WORKERS: usize = 4;
 /// Decoded images (plus their encoded protocols, estimated at the same size) kept in memory.
@@ -220,7 +220,7 @@ impl Images {
 
     #[cfg(test)]
     pub fn queued(&self) -> usize {
-        self.queue.state.lock().unwrap().jobs.len()
+        lock(&self.queue.state).jobs.len()
     }
 
     /// The image at `url` fitted into `size` cells, starting a fetch or an encoding if needed.
@@ -320,7 +320,7 @@ impl Images {
         let frame = std::mem::take(&mut self.frame);
         // Only an animation drawn this frame keeps the loop waking.
         self.next_frame = self.drawing_next.take();
-        let mut st = self.queue.state.lock().unwrap();
+        let mut st = lock(&self.queue.state);
         st.wanted = frame.iter().map(|(u, ..)| u.clone()).collect();
         for (url, kind, size) in frame {
             if !self.slots.contains_key(&url) {
@@ -410,17 +410,19 @@ impl Images {
 fn worker(q: &Queue, tx: &Sender<Done>, encode: &Sender<EncodeJob>, wake: &dyn Fn(), disk: Option<&DiskCache>) {
     loop {
         let (url, kind, size, host) = {
-            let mut st = q.state.lock().unwrap();
+            let mut st = lock(&q.state);
             loop {
                 // Drop what the UI no longer wants.
                 while let Some(i) = st.jobs.iter().position(|(u, ..)| !st.wanted.contains(u)) {
-                    let (url, ..) = st.jobs.remove(i).unwrap();
-                    if tx.send(Done::Skipped(url)).is_err() {
+                    if let Some((url, ..)) = st.jobs.remove(i)
+                        && tx.send(Done::Skipped(url)).is_err()
+                    {
                         return;
                     }
                 }
-                if let Some(i) = st.jobs.iter().position(|(u, k, _)| runnable(&st.busy, u, *k, disk)) {
-                    let (url, kind, size) = st.jobs.remove(i).unwrap();
+                if let Some(i) = st.jobs.iter().position(|(u, k, _)| runnable(&st.busy, u, *k, disk))
+                    && let Some((url, kind, size)) = st.jobs.remove(i)
+                {
                     let cached = kind == Kind::Thumb && disk.is_some_and(|d| d.contains(&url));
                     let host = (!cached && !http::is_media_host(&url)).then(|| http::host(&url).to_string());
                     if let Some(h) = &host {
@@ -428,12 +430,12 @@ fn worker(q: &Queue, tx: &Sender<Done>, encode: &Sender<EncodeJob>, wake: &dyn F
                     }
                     break (url, kind, size, host);
                 }
-                st = q.cv.wait(st).unwrap();
+                st = q.cv.wait(st).unwrap_or_else(std::sync::PoisonError::into_inner);
             }
         };
         let res = fetch(&url, kind, if kind == Kind::Thumb { disk } else { None }).map(|(img, frames)| (Arc::new(img), frames));
         if let Some(h) = host {
-            q.state.lock().unwrap().busy.remove(&h);
+            lock(&q.state).busy.remove(&h);
             q.cv.notify_all();
         }
         // Encode right away for the size the UI asked for, saving a round trip.
@@ -485,10 +487,12 @@ fn runnable(busy: &HashSet<String>, url: &str, kind: Kind, disk: Option<&DiskCac
 /// thumbnails that decode). A cached file that won't decode is deleted and fetched again.
 /// Full-size animated GIFs come with their frames.
 fn fetch(url: &str, kind: Kind, disk: Option<&DiskCache>) -> Result<(DynamicImage, Option<Frames>), String> {
-    if let Some(bytes) = disk.and_then(|d| d.get(url)) {
+    if let Some(d) = disk
+        && let Some(bytes) = d.get(url)
+    {
         match decode(&bytes) {
             Ok(img) => return Ok((img, None)),
-            Err(_) => disk.unwrap().remove(url),
+            Err(_) => d.remove(url),
         }
     }
     let bytes = http::get_bytes(url, MAX_DOWNLOAD).map_err(|e| format!("{e:#}"))?;
@@ -557,7 +561,7 @@ mod tests {
         let mut im = Images::new(None, Arc::new(|| {}), None);
         assert!(matches!(im.get("http://x/a.jpg", Size::new(4, 4), Kind::Thumb), State::Failed));
         im.end_frame();
-        assert!(im.queue.state.lock().unwrap().jobs.is_empty());
+        assert!(lock(&im.queue.state).jobs.is_empty());
     }
 
     /// Poll until `get` stops saying the image is being rendered (up to 10s: a debug build

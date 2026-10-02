@@ -33,3 +33,19 @@ ureq = "3"
 [dev-dependencies]
 insta = "1.48.0"
 tempfile = "3.27.0"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+unwrap_used = "forbid"
+expect_used = "forbid"
+panic = "forbid"
+unreachable = "forbid"
+todo = "forbid"
+unimplemented = "forbid"
+string_slice = "deny"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

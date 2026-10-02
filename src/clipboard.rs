@@ -43,7 +43,9 @@ fn pipe(argv: &[&str], text: &str) -> anyhow::Result<()> {
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()?;
-    child.stdin.take().expect("piped").write_all(text.as_bytes())?;
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin.write_all(text.as_bytes())?;
+    }
     // Some (xclip) stay running to serve the selection; reap them in the background.
     std::thread::spawn(move || child.wait());
     Ok(())

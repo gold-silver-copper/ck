@@ -256,7 +256,9 @@ pub fn set_theme(doc: &mut DocumentMut, name: &str) {
             legacy.insert(role, v.clone());
         }
         doc.remove("theme");
-        themes_table(doc).insert("legacy", Item::Table(legacy));
+        if let Some(themes) = themes_table(doc) {
+            themes.insert("legacy", Item::Table(legacy));
+        }
     }
     doc["theme"] = value(name);
 }
@@ -264,15 +266,12 @@ pub fn set_theme(doc: &mut DocumentMut, name: &str) {
 /// Set (or with `None`, remove) one role's color in `[themes.NAME]`, creating the table with
 /// `base = base` if it doesn't exist.
 pub fn set_theme_color(doc: &mut DocumentMut, name: &str, base: Option<&str>, role: &str, color: Option<&str>) {
-    let themes = themes_table(doc);
-    if !themes.contains_key(name) {
-        let mut t = Table::new();
-        if let Some(b) = base {
-            t.insert("base", value(b));
-        }
-        themes.insert(name, Item::Table(t));
+    let Some(themes) = themes_table(doc) else { return };
+    let mut new = Table::new();
+    if let Some(b) = base {
+        new.insert("base", value(b));
     }
-    let Some(t) = themes[name].as_table_mut() else { return };
+    let Some(t) = themes.entry(name).or_insert(Item::Table(new)).as_table_mut() else { return };
     match color {
         Some(c) => t[role] = value(c),
         None => {
@@ -296,13 +295,10 @@ pub fn set_key(doc: &mut DocumentMut, action: &str, binding: Option<&Binding>) {
     }
 }
 
-fn themes_table(doc: &mut DocumentMut) -> &mut Table {
-    if !doc.contains_key("themes") {
-        let mut t = Table::new();
-        t.set_implicit(true);
-        doc.insert("themes", Item::Table(t));
-    }
-    doc["themes"].as_table_mut().expect("themes is a table")
+fn themes_table(doc: &mut DocumentMut) -> Option<&mut Table> {
+    let mut implicit = Table::new();
+    implicit.set_implicit(true);
+    doc.entry("themes").or_insert(Item::Table(implicit)).as_table_mut()
 }
 
 impl Config {
@@ -320,7 +316,7 @@ impl Config {
                 .with_context(|| format!("reading {}", path.display()))?;
             return toml::from_str(&text).with_context(|| format!("parsing {}", path.display()));
         }
-        Ok(toml::from_str(DEFAULT_CONFIG).expect("built-in config is valid"))
+        toml::from_str(DEFAULT_CONFIG).context("parsing the built-in config")
     }
 }
 

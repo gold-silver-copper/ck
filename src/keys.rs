@@ -84,48 +84,48 @@ impl Scope {
 const VIEWS: [Scope; 5] = [Scope::Lists, Scope::Catalog, Scope::Thread, Scope::Saved, Scope::Viewer];
 
 /// Every action: config name, default key, scopes, and what it does.
-pub const ACTIONS: &[(Action, &str, &str, &[Scope], &str)] = &[
-    (Action::Quit, "quit", "q", &[Scope::Global], "quit"),
-    (Action::Help, "help", "?", &[Scope::Global], "help"),
-    (Action::Settings, "settings", ",", &[Scope::Global], "settings: theme, colors, keys, …"),
-    (Action::Search, "search", "/", &[Scope::Global], "filter the list; search a thread"),
-    (Action::Reload, "reload", "r", &[Scope::Global], "reload"),
-    (Action::Browser, "browser", "o", &[Scope::Global], "open in the browser"),
-    (Action::Goto, "goto", ":", &[Scope::Global], "go to a URL or site/board/thread"),
-    (Action::NextTab, "next_tab", "tab", &[Scope::Global], "next tab"),
-    (Action::PrevTab, "prev_tab", "shift-tab", &[Scope::Global], "previous tab"),
-    (Action::CloseTab, "close_tab", "ctrl-w", &[Scope::Global], "close the tab"),
-    (Action::View, "view", "v", &[Scope::Catalog, Scope::Thread], "view the post's images"),
-    (Action::Watch, "watch", "w", &[Scope::Catalog, Scope::Thread], "watch / unwatch the thread"),
-    (Action::Sort, "sort", "s", &[Scope::Catalog], "cycle the sort order"),
-    (Action::Compact, "compact", "c", &[Scope::Catalog], "layout: cards, compact, grid"),
-    (Action::OpenFile, "open_file", "i", &[Scope::Thread], "open the file (videos in mpv)"),
-    (Action::Replies, "replies", "b", &[Scope::Thread], "jump to the first reply"),
-    (Action::JumpBack, "jump_back", "u", &[Scope::Thread], "jump back (also to the last thread)"),
-    (Action::Unread, "unread", "U", &[Scope::Thread], "jump to the first unread post"),
-    (Action::Preview, "preview", "p", &[Scope::Thread], "preview the quoted posts"),
-    (Action::NextMatch, "next_match", "n", &[Scope::Thread], "next search match"),
-    (Action::PrevMatch, "prev_match", "N", &[Scope::Thread], "previous search match"),
-    (Action::Spoiler, "spoiler", "s", &[Scope::Thread], "show the post's spoilers"),
-    (Action::AllSpoilers, "all_spoilers", "S", &[Scope::Thread], "show all spoilers"),
-    (Action::Download, "download", "d", &[Scope::Thread], "save the post's files"),
-    (Action::DownloadThread, "download_thread", "D", &[Scope::Thread], "save the thread's files"),
-    (Action::Archive, "archive", "a", &[Scope::Thread], "open a 404'd thread in the archive"),
-    (Action::ArchiveSearch, "archive_search", "f", &[Scope::Catalog], "search the board's archive"),
-    (Action::Links, "links", "O", &[Scope::Catalog, Scope::Thread], "the post's links and files"),
-    (Action::Hide, "hide", "H", &[Scope::Catalog, Scope::Thread], "hide / unhide the thread or post"),
-    (Action::ShowHidden, "show_hidden", "Z", &[Scope::Catalog, Scope::Thread], "show hidden threads and posts"),
-    (Action::ImageSearch, "image_search", "R", &[Scope::Thread, Scope::Viewer], "reverse image search"),
-    (Action::Gallery, "gallery", "V", &[Scope::Thread], "the thread's files as a grid"),
-    (Action::Export, "export", "E", &[Scope::Thread], "save the thread as HTML and JSON"),
-    (Action::Expand, "expand", "e", &[Scope::Thread], "show / hide the post's replies under it"),
-    (Action::Mine, "mine", "m", &[Scope::Thread], "mark the post as yours (notified of replies)"),
-    (Action::NewTab, "new_tab", "T", &[Scope::Catalog, Scope::Thread, Scope::Saved], "open the thread (or link) in a new tab"),
-    (Action::Favorite, "favorite", "*", &[Scope::Lists, Scope::Catalog], "favorite board: on / off"),
-    (Action::Follow, "follow", "F", &[Scope::Catalog, Scope::Thread, Scope::Saved], "follow as a general: watch its next thread"),
-    (Action::Remove, "remove", "x", &[Scope::Saved, Scope::Lists], "remove the entry (home: a favorite)"),
-    (Action::Copy, "copy", "y", &[Scope::Catalog, Scope::Thread, Scope::Saved, Scope::Viewer], "copy the text (viewer: file URL)"),
-    (Action::CopyLink, "copy_link", "Y", &[Scope::Catalog, Scope::Thread, Scope::Saved, Scope::Viewer], "copy the link"),
+pub const ACTIONS: &[(Action, &str, Key, &[Scope], &str)] = &[
+    (Action::Quit, "quit", Key::char('q'), &[Scope::Global], "quit"),
+    (Action::Help, "help", Key::char('?'), &[Scope::Global], "help"),
+    (Action::Settings, "settings", Key::char(','), &[Scope::Global], "settings: theme, colors, keys, …"),
+    (Action::Search, "search", Key::char('/'), &[Scope::Global], "filter the list; search a thread"),
+    (Action::Reload, "reload", Key::char('r'), &[Scope::Global], "reload"),
+    (Action::Browser, "browser", Key::char('o'), &[Scope::Global], "open in the browser"),
+    (Action::Goto, "goto", Key::char(':'), &[Scope::Global], "go to a URL or site/board/thread"),
+    (Action::NextTab, "next_tab", Key::code(KeyCode::Tab), &[Scope::Global], "next tab"),
+    (Action::PrevTab, "prev_tab", Key::code(KeyCode::BackTab), &[Scope::Global], "previous tab"),
+    (Action::CloseTab, "close_tab", Key::ctrl('w'), &[Scope::Global], "close the tab"),
+    (Action::View, "view", Key::char('v'), &[Scope::Catalog, Scope::Thread], "view the post's images"),
+    (Action::Watch, "watch", Key::char('w'), &[Scope::Catalog, Scope::Thread], "watch / unwatch the thread"),
+    (Action::Sort, "sort", Key::char('s'), &[Scope::Catalog], "cycle the sort order"),
+    (Action::Compact, "compact", Key::char('c'), &[Scope::Catalog], "layout: cards, compact, grid"),
+    (Action::OpenFile, "open_file", Key::char('i'), &[Scope::Thread], "open the file (videos in mpv)"),
+    (Action::Replies, "replies", Key::char('b'), &[Scope::Thread], "jump to the first reply"),
+    (Action::JumpBack, "jump_back", Key::char('u'), &[Scope::Thread], "jump back (also to the last thread)"),
+    (Action::Unread, "unread", Key::char('U'), &[Scope::Thread], "jump to the first unread post"),
+    (Action::Preview, "preview", Key::char('p'), &[Scope::Thread], "preview the quoted posts"),
+    (Action::NextMatch, "next_match", Key::char('n'), &[Scope::Thread], "next search match"),
+    (Action::PrevMatch, "prev_match", Key::char('N'), &[Scope::Thread], "previous search match"),
+    (Action::Spoiler, "spoiler", Key::char('s'), &[Scope::Thread], "show the post's spoilers"),
+    (Action::AllSpoilers, "all_spoilers", Key::char('S'), &[Scope::Thread], "show all spoilers"),
+    (Action::Download, "download", Key::char('d'), &[Scope::Thread], "save the post's files"),
+    (Action::DownloadThread, "download_thread", Key::char('D'), &[Scope::Thread], "save the thread's files"),
+    (Action::Archive, "archive", Key::char('a'), &[Scope::Thread], "open a 404'd thread in the archive"),
+    (Action::ArchiveSearch, "archive_search", Key::char('f'), &[Scope::Catalog], "search the board's archive"),
+    (Action::Links, "links", Key::char('O'), &[Scope::Catalog, Scope::Thread], "the post's links and files"),
+    (Action::Hide, "hide", Key::char('H'), &[Scope::Catalog, Scope::Thread], "hide / unhide the thread or post"),
+    (Action::ShowHidden, "show_hidden", Key::char('Z'), &[Scope::Catalog, Scope::Thread], "show hidden threads and posts"),
+    (Action::ImageSearch, "image_search", Key::char('R'), &[Scope::Thread, Scope::Viewer], "reverse image search"),
+    (Action::Gallery, "gallery", Key::char('V'), &[Scope::Thread], "the thread's files as a grid"),
+    (Action::Export, "export", Key::char('E'), &[Scope::Thread], "save the thread as HTML and JSON"),
+    (Action::Expand, "expand", Key::char('e'), &[Scope::Thread], "show / hide the post's replies under it"),
+    (Action::Mine, "mine", Key::char('m'), &[Scope::Thread], "mark the post as yours (notified of replies)"),
+    (Action::NewTab, "new_tab", Key::char('T'), &[Scope::Catalog, Scope::Thread, Scope::Saved], "open the thread (or link) in a new tab"),
+    (Action::Favorite, "favorite", Key::char('*'), &[Scope::Lists, Scope::Catalog], "favorite board: on / off"),
+    (Action::Follow, "follow", Key::char('F'), &[Scope::Catalog, Scope::Thread, Scope::Saved], "follow as a general: watch its next thread"),
+    (Action::Remove, "remove", Key::char('x'), &[Scope::Saved, Scope::Lists], "remove the entry (home: a favorite)"),
+    (Action::Copy, "copy", Key::char('y'), &[Scope::Catalog, Scope::Thread, Scope::Saved, Scope::Viewer], "copy the text (viewer: file URL)"),
+    (Action::CopyLink, "copy_link", Key::char('Y'), &[Scope::Catalog, Scope::Thread, Scope::Saved, Scope::Viewer], "copy the link"),
 ];
 
 /// A key with its modifiers: `w`, `W`, `ctrl-w`, `alt-x`, `tab`, `shift-tab`, `f5`, ...
@@ -160,11 +160,11 @@ impl Key {
         Self { code: KeyCode::Char(c), mods: KeyModifiers::NONE }
     }
 
-    const fn ctrl(c: char) -> Self {
+    pub const fn ctrl(c: char) -> Self {
         Self { code: KeyCode::Char(c), mods: KeyModifiers::CONTROL }
     }
 
-    const fn code(code: KeyCode) -> Self {
+    pub const fn code(code: KeyCode) -> Self {
         Self { code, mods: KeyModifiers::NONE }
     }
 
@@ -289,13 +289,12 @@ pub struct KeyMap {
 
 impl Default for KeyMap {
     fn default() -> Self {
-        Self { keys: ACTIONS.iter().map(|&(a, ..)| (a, vec![default_key(a)])).collect() }
+        Self { keys: ACTIONS.iter().map(|&(a, _, key, ..)| (a, vec![key])).collect() }
     }
 }
 
-fn default_key(action: Action) -> Key {
-    let spec = ACTIONS.iter().find(|e| e.0 == action).expect("every action is listed").2;
-    Key::parse(spec).expect("default keys parse")
+fn default_keys(action: Action) -> Vec<Key> {
+    ACTIONS.iter().filter(|e| e.0 == action).map(|e| e.2).collect()
 }
 
 impl KeyMap {
@@ -356,7 +355,7 @@ impl KeyMap {
     }
 
     pub fn is_default(&self, action: Action) -> bool {
-        self.keys[&action] == [default_key(action)]
+        self.keys[&action] == default_keys(action)
     }
 
     /// The action bound to a key in `scope` (or a global one).
@@ -372,7 +371,7 @@ impl KeyMap {
     /// conflicts.
     pub fn with(&self, action: Action, keys: Option<Vec<Key>>) -> Result<Self> {
         let mut map = self.clone();
-        map.keys.insert(action, keys.unwrap_or_else(|| vec![default_key(action)]));
+        map.keys.insert(action, keys.unwrap_or_else(|| default_keys(action)));
         map.check()?;
         Ok(map)
     }

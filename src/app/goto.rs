@@ -27,7 +27,7 @@ impl App {
             && from_thread
             && target.thread.is_some()
         {
-            self.trail.push((self.site, b.clone(), t.no, t.posts[t.selected].no));
+            self.trail.push((self.site, b.clone(), t.no, t.current().map_or(t.no, |p| p.no)));
         }
         let back_to = self.view;
         self.switch_site(target.site);

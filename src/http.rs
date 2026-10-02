@@ -4,7 +4,7 @@
 use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
-use std::sync::{LazyLock, Mutex};
+use std::sync::{LazyLock, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
@@ -63,13 +63,18 @@ pub fn background<T>(f: impl FnOnce() -> T) -> T {
     r
 }
 
+/// Lock a mutex, even if a thread panicked while holding it (the data is still usable).
+pub fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
 /// Note user input (keys, clicks), which holds background refreshes back briefly.
 pub fn user_input() {
     // Tests press keys in parallel; that mustn't hold back other tests' requests.
     if cfg!(test) {
         return;
     }
-    *LAST_INPUT.lock().unwrap() = Some(Instant::now());
+    *lock(&LAST_INPUT) = Some(Instant::now());
 }
 
 /// HTTP failures worth telling apart from generic errors.
@@ -98,7 +103,7 @@ pub fn is_not_found(e: &anyhow::Error) -> bool {
 
 /// Mark a host as serving only media, so it gets `MEDIA_INTERVAL` instead of `API_INTERVAL`.
 pub fn register_media_host(url: &str) {
-    MEDIA_HOSTS.lock().unwrap().insert(host(url).to_string());
+    lock(&MEDIA_HOSTS).insert(host(url).to_string());
 }
 
 /// How long ago the last `get_json` on this thread was fetched, if it came from the cache
@@ -108,7 +113,7 @@ pub fn take_cached_age() -> Option<Duration> {
 }
 
 pub fn is_media_host(url: &str) -> bool {
-    MEDIA_HOSTS.lock().unwrap().contains(host(url))
+    lock(&MEDIA_HOSTS).contains(host(url))
 }
 
 pub fn host(url: &str) -> &str {
@@ -119,11 +124,11 @@ pub fn host(url: &str) -> &str {
 /// Block until a request to `url`'s host is allowed at `prio`.
 fn throttle(url: &str, prio: Priority) {
     let host = host(url);
-    let interval = if MEDIA_HOSTS.lock().unwrap().contains(host) { MEDIA_INTERVAL } else { API_INTERVAL };
+    let interval = if lock(&MEDIA_HOSTS).contains(host) { MEDIA_INTERVAL } else { API_INTERVAL };
     let start = Instant::now();
     loop {
         let now = Instant::now();
-        let idle = LAST_INPUT.lock().unwrap().map_or(Duration::MAX, |t| now.saturating_duration_since(t));
+        let idle = lock(&LAST_INPUT).map_or(Duration::MAX, |t| now.saturating_duration_since(t));
         match LIMITER.admit(host, interval, now, prio, now - start, idle) {
             Some(wait) => {
                 std::thread::sleep(wait);
@@ -144,7 +149,7 @@ pub struct Limiter {
 impl Limiter {
     /// Reserve a slot for `host` and return how long to wait for it.
     pub fn reserve(&self, host: &str, interval: Duration, now: Instant) -> Duration {
-        let mut next = self.next.lock().unwrap();
+        let mut next = lock(&self.next);
         let slot = next.get(host).copied().filter(|&t| t > now).unwrap_or(now);
         next.insert(host.to_string(), slot + interval);
         slot - now
@@ -173,7 +178,7 @@ impl Limiter {
 
     /// Reserve a slot for `host` only if one is free right now.
     pub fn try_reserve(&self, host: &str, interval: Duration, now: Instant) -> bool {
-        let mut next = self.next.lock().unwrap();
+        let mut next = lock(&self.next);
         if next.get(host).is_some_and(|&t| t > now) {
             return false;
         }
@@ -260,14 +265,14 @@ pub fn cached_get(
     transport: impl FnOnce(&str, Option<&str>) -> Result<Raw>,
 ) -> Result<(Value, Option<Duration>)> {
     let since = {
-        let c = cache.lock().unwrap();
+        let c = lock(cache);
         if let Some((body, age)) = c.fresh(url, now()) {
             return Ok((body, Some(age)));
         }
         c.last_modified(url)
     };
     let raw = transport(url, since.as_deref())?;
-    let body = cache.lock().unwrap().update(url, raw, now())?;
+    let body = lock(cache).update(url, raw, now())?;
     Ok((body, None))
 }
 
@@ -517,7 +522,7 @@ mod tests {
             let t = t0 + Duration::from_secs(i as u64);
             cached_get(&cache, url, || t, |_, _| Ok(raw(200, Some("x"), "1"))).unwrap();
         }
-        let c = cache.lock().unwrap();
+        let c = lock(&cache);
         assert_eq!(c.entries.len(), 2);
         assert!(!c.entries.contains_key("a"));
     }

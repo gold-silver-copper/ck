@@ -45,7 +45,7 @@ impl App {
             View::Thread => {
                 let t = self.thread.as_ref();
                 place.thread = t.map(|t| t.no).or((self.pending_thread > 0).then_some(self.pending_thread));
-                place.selected = t.map(|t| t.posts[t.selected].no).or(self.pending_post);
+                place.selected = t.and_then(|t| t.current()).map(|p| p.no).or(self.pending_post);
             }
             View::Catalog => {
                 place.selected = self.catalog_list.state.selected().and_then(|i| self.visible_catalog().get(i).map(|&k| self.catalog[k].no));

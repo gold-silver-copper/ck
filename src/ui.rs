@@ -531,7 +531,7 @@ fn draw_sites(f: &mut Frame, app: &mut App, area: Rect) {
                 vec![spread(left, key, width)]
             }
             SiteRow::Recent(i) => {
-                let r = crate::app::BoardRef::parse(&app.store.recent_boards[i]);
+                let r = app.recent_board(i);
                 let (name, title) = r.as_ref().map_or((String::new(), ""), |r| (format!("{} /{}/", r.site, r.board), app.board_title(r)));
                 vec![Line::from(vec![
                     Span::styled("↺  ", Style::new().fg(t.text_dim)),
@@ -1055,7 +1055,7 @@ fn draw_thread(f: &mut Frame, app: &mut App, area: Rect) {
         t.layout = Some(l);
         t.scroll_to_selected();
     }
-    let l = t.layout.as_ref().unwrap();
+    let Some(l) = t.layout.as_ref() else { return };
     let cursor = t.entry();
     for row in 0..area.height {
         let i = t.scroll + row as usize;
