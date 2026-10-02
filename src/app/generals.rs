@@ -72,8 +72,7 @@ impl App {
             w.general = Some(pattern.clone());
         }
         self.save();
-        let msg = format!("Following {pattern}: when this thread dies or fills up, the next one is watched");
-        self.info(msg);
+        self.info(format!("Following {pattern}: when this thread dies or fills up, the next one is watched"));
     }
 
     /// Generals whose thread is dead or full: look for the next one (in the background, at

@@ -64,7 +64,6 @@ const SAVE_EVERY: Duration = Duration::from_secs(2);
 /// Watched-thread refreshes running at once.
 const MAX_REFRESHING: usize = 2;
 
-
 /// A row of the home screen (the Sites view): Watched and History, favorite boards, then
 /// the sites.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -524,7 +523,8 @@ pub struct App {
     pub default_layout: CatalogLayout,
     /// Columns of the catalog grid as last drawn (0: not a grid).
     pub grid_cols: usize,
-    pub settings: settings::Settings,
+    /// The settings popup open, if any.
+    pub settings_popup: Option<SettingsPopup>,
     pub settings_list: Picker,
     /// The current theme's name, and the config's custom themes.
     pub theme_name: String,
@@ -653,7 +653,7 @@ impl App {
                 Some(false) => CatalogLayout::Cards,
                 None => layout,
             }),
-            settings: settings::Settings::default(),
+            settings_popup: None,
             settings_list: Picker::top(),
             theme_name,
             themes,
@@ -964,8 +964,7 @@ impl App {
                         self.open_thread_at(board, no, Some(post), true);
                     }
                     Ok(None) => {
-                        let msg = format!("Post {post} isn't in this thread, and this site can't say which thread it's in");
-                        self.error(msg);
+                        self.error(format!("Post {post} isn't in this thread, and this site can't say which thread it's in"));
                     }
                     Err(e) => self.error(e),
                 }
@@ -1197,7 +1196,7 @@ impl App {
             // On refresh, keep the selected post and what's at the top of the view.
             Some(old) => {
                 shown_max = old.posts.iter().map(|p| p.no).max();
-                tv.selected = tv.index.get(&old.posts[old.selected].no).copied().unwrap_or(0);
+                tv.selected = old.current().and_then(|p| tv.index.get(&p.no)).copied().unwrap_or(0);
                 // Expanded replies, the selected entry and the one at the top stay put.
                 tv.expanded = old.expanded.clone();
                 let cursor_path = old.entries.get(old.entry()).map(|e| e.path.clone());
@@ -1314,8 +1313,7 @@ impl App {
             _ => return,
         };
         if let Some(label) = mark.and_then(|m| m.hidden).filter(|l| !l.is_empty()) {
-            let msg = format!("Hidden by the filter \"{label}\"; change [[filter]] in the config to show it");
-            self.info(msg);
+            self.info(format!("Hidden by the filter \"{label}\"; change [[filter]] in the config to show it"));
             return;
         }
         let site = self.current_site().cfg.name.clone();
@@ -1340,8 +1338,7 @@ impl App {
             self.tab.catalog_list.state.select(Some(pos));
         }
         self.clamp_list();
-        let msg = if self.show_hidden { "Showing hidden threads and posts" } else { "Leaving out hidden threads and posts" };
-        self.info(msg);
+        self.info(if self.show_hidden { "Showing hidden threads and posts" } else { "Leaving out hidden threads and posts" });
     }
 
     // ----- watched threads and auto-refresh -----

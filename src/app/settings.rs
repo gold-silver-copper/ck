@@ -136,11 +136,6 @@ pub fn key_rows() -> Vec<Result<usize, &'static str>> {
     out
 }
 
-#[derive(Default)]
-pub struct Settings {
-    pub popup: Option<Popup>,
-}
-
 impl App {
     pub fn open_settings(&mut self) {
         if self.tab.view != View::Settings {
@@ -204,15 +199,13 @@ impl App {
         match item {
             Item::Theme => {
                 let names = theme::names(&self.themes);
-                let mut list = ListState::default();
-                list.select(Some(names.iter().position(|n| *n == self.theme_name).unwrap_or(0)));
+                let list = ListState::default().with_selected(Some(names.iter().position(|n| *n == self.theme_name).unwrap_or(0)));
                 let before = (self.theme_name.clone(), theme::theme());
-                self.settings.popup = Some(Popup::Themes { list, names, before });
+                self.settings_popup = Some(Popup::Themes { list, names, before });
             }
             Item::Colors => {
-                let mut list = ListState::default();
-                list.select(Some(0));
-                self.settings.popup = Some(Popup::Colors { list, editing: None });
+                let list = ListState::default().with_selected(Some(0));
+                self.settings_popup = Some(Popup::Colors { list, editing: None });
             }
             Item::ColorDepth => {
                 self.color_mode = match self.color_mode {
@@ -253,7 +246,7 @@ impl App {
                 self.save_config(&format!("notifications {mode}"), |d| d["notify"] = toml_edit::value(mode));
             }
             Item::DownloadDir => {
-                self.settings.popup = Some(Popup::Folder { value: self.download_dir.clone().unwrap_or_default() });
+                self.settings_popup = Some(Popup::Folder { value: self.download_dir.clone().unwrap_or_default() });
             }
             Item::Restore => {
                 self.restore_session = !self.restore_session;
@@ -263,17 +256,16 @@ impl App {
                 });
             }
             Item::Keys => {
-                let mut list = ListState::default();
-                list.select(key_rows().iter().position(Result::is_ok));
-                self.settings.popup = Some(Popup::Keys { list, capture: None });
+                let list = ListState::default().with_selected(key_rows().iter().position(Result::is_ok));
+                self.settings_popup = Some(Popup::Keys { list, capture: None });
             }
         }
     }
 
     /// Keys while a settings popup is open.
     pub fn on_settings_popup_key(&mut self, key: KeyEvent) {
-        let Some(popup) = self.settings.popup.take() else { return };
-        self.settings.popup = match popup {
+        let Some(popup) = self.settings_popup.take() else { return };
+        self.settings_popup = match popup {
             Popup::Themes { mut list, names, before } => match key.code {
                 KeyCode::Esc | KeyCode::Char('q') => {
                     self.theme_name = before.0;

@@ -52,8 +52,7 @@ impl App {
             self.info("Post has no links");
             return;
         }
-        let mut list = ListState::default();
-        list.select(Some(0));
+        let list = ListState::default().with_selected(Some(0));
         self.tab.links = Some(LinksPanel { items, list, area: Rect::default(), last_click: None });
     }
 
@@ -151,8 +150,7 @@ impl App {
             }
             rows.extend((0..self.image_search.len()).map(|e| Ok((url.clone(), e))));
         }
-        let mut list = ListState::default();
-        list.select(rows.iter().position(Result::is_ok));
+        let list = ListState::default().with_selected(rows.iter().position(Result::is_ok));
         self.image_search_panel = Some(ImageSearchPanel { rows, list, area: Rect::default() });
     }
 

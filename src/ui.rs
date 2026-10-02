@@ -112,7 +112,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         if app.tab.links.is_some() {
             draw_links(f, app);
         }
-        if app.settings.popup.is_some() {
+        if app.settings_popup.is_some() {
             draw_settings_popup(f, app);
         }
         if app.show_help {
@@ -1483,7 +1483,7 @@ fn draw_settings(f: &mut Frame, app: &mut App, area: Rect) {
 
 fn draw_settings_popup(f: &mut Frame, app: &App) {
     let t = theme();
-    match &app.settings.popup {
+    match &app.settings_popup {
         Some(SettingsPopup::Themes { list, names, .. }) => {
             let inner = panel(f, 52, names.len() as u16 + 3, "Theme", "enter keep · esc cancel");
             let sel = list.selected().unwrap_or(0);

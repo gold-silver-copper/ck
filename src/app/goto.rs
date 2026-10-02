@@ -85,7 +85,7 @@ impl App {
                 p.filter.push_str(&text);
                 p.clamp(len);
             }
-        } else if self.settings.popup.is_none() && !self.show_help && self.tab.viewer.is_none() {
+        } else if self.settings_popup.is_none() && !self.show_help && self.tab.viewer.is_none() {
             self.goto = Some(text);
         }
     }

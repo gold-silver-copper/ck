@@ -182,7 +182,7 @@ fn key_editor_rebinds_saves_and_refuses_clashes() {
     // Move to `watch` and rebind it to W.
     let rows = settings::key_rows();
     let watch = rows.iter().position(|r| *r == Ok(ACTIONS.iter().position(|e| e.0 == Action::Watch).unwrap())).unwrap();
-    while app.settings.popup.as_ref().is_some_and(|p| !matches!(p, SettingsPopup::Keys { list, .. } if list.selected() == Some(watch))) {
+    while app.settings_popup.as_ref().is_some_and(|p| !matches!(p, SettingsPopup::Keys { list, .. } if list.selected() == Some(watch))) {
         press(&mut app, KeyCode::Down);
     }
     press(&mut app, KeyCode::Enter);
@@ -205,7 +205,7 @@ fn key_editor_rebinds_saves_and_refuses_clashes() {
     let c: Config = toml::from_str(&std::fs::read_to_string(dir.path().join("config.toml")).unwrap()).unwrap();
     assert!(!c.keys.contains_key("watch"));
     // The new keys work at once.
-    app.settings.popup = None;
+    app.settings_popup = None;
     app.tab.view = View::Catalog;
     assert_eq!(app.keys.action(app.scope(), &KeyEvent::from(KeyCode::Char('w'))), Some(Action::Watch));
 }

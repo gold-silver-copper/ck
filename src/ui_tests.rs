@@ -295,7 +295,7 @@ fn theme_picker() {
     let mut a = app(false);
     a.open_settings();
     a.activate_setting();
-    assert!(matches!(a.settings.popup, Some(SettingsPopup::Themes { .. })));
+    assert!(matches!(a.settings_popup, Some(SettingsPopup::Themes { .. })));
     insta::assert_snapshot!(snapshot(&mut a));
 }
 
@@ -305,7 +305,7 @@ fn color_editor() {
     a.open_settings();
     a.settings_list.state.select(Some(1));
     a.activate_setting();
-    assert!(matches!(a.settings.popup, Some(SettingsPopup::Colors { .. })));
+    assert!(matches!(a.settings_popup, Some(SettingsPopup::Colors { .. })));
     insta::assert_snapshot!(snapshot(&mut a));
 }
 

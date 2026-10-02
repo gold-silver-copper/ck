@@ -25,9 +25,8 @@ impl App {
             self.info("Thread has no files");
             return;
         }
-        let mut state = ListState::default();
         // Start at the selected post's first file, or the next one after it.
-        state.select(Some(files.iter().position(|(i, _)| *i >= t.selected).unwrap_or(0)));
+        let state = ListState::default().with_selected(Some(files.iter().position(|(i, _)| *i >= t.selected).unwrap_or(0)));
         self.tab.gallery = Some(Gallery { files, state, cols: 1 });
     }
 

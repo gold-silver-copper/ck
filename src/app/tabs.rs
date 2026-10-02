@@ -205,22 +205,17 @@ impl App {
         }
     }
 
-    /// Run `f` with tab `i` as the active one (without the redraw a real switch does).
-    fn in_tab<T>(&mut self, i: usize, f: impl FnOnce(&Self) -> T) -> T {
-        if i == self.active {
-            return f(self);
-        }
-        std::mem::swap(&mut self.tab, &mut self.tabs[self.active]);
-        std::mem::swap(&mut self.tab, &mut self.tabs[i]);
-        let out = f(self);
-        std::mem::swap(&mut self.tab, &mut self.tabs[i]);
-        std::mem::swap(&mut self.tab, &mut self.tabs[self.active]);
-        out
-    }
-
     /// Every tab's place, for the session.
     pub fn places(&mut self) -> Vec<crate::store::Place> {
-        (0..self.tabs.len()).map(|i| self.in_tab(i, |app| app.place())).collect()
+        let active = self.active;
+        let places = (0..self.tabs.len())
+            .map(|i| {
+                self.switch_tab(i);
+                self.place()
+            })
+            .collect();
+        self.switch_tab(active);
+        places
     }
 
     /// What a tab shows, in a few words.

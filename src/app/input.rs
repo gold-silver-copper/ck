@@ -90,7 +90,7 @@ impl App {
     /// image search over the viewer). It gets every key; clicks go to it or close it.
     fn modal(&self) -> Option<Modal> {
         let open = [
-            (self.settings.popup.is_some(), Modal::Settings),
+            (self.settings_popup.is_some(), Modal::Settings),
             (self.show_help, Modal::Help),
             (self.image_search_panel.is_some(), Modal::ImageSearch),
             (self.tab.viewer.is_some(), Modal::Viewer),
@@ -388,7 +388,7 @@ impl App {
                 let msg = if t.reveal_all { "Showing all spoilers" } else { "Hiding spoilers" };
                 self.info(msg);
             }
-            Action::Replies => match t.backlinks[t.selected].first() {
+            Action::Replies => match t.backlinks.get(t.selected).and_then(|b| b.first()) {
                 Some(&no) => {
                     t.jump_to(no);
                 }
