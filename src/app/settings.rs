@@ -187,22 +187,15 @@ impl App {
                 self.settings_popup = Some(Popup::Colors { list, editing: None });
             }
             Item::ColorDepth => {
-                self.color_mode = match self.color_mode {
-                    ColorMode::Auto => ColorMode::Truecolor,
-                    ColorMode::Truecolor => ColorMode::Ansi256,
-                    ColorMode::Ansi256 => ColorMode::Auto,
-                };
+                self.color_mode = self.color_mode.next();
                 self.truecolor = self.color_mode.truecolor();
                 let mode = self.color_mode.as_str();
                 self.save_config(&format!("color depth {mode}"), |d| d["color"] = toml_edit::value(mode));
             }
             Item::Compact => self.cycle_default_layout(),
             Item::Images => {
-                self.images_mode = match self.images_mode {
-                    ImagesMode::Auto => ImagesMode::Off,
-                    ImagesMode::Off => ImagesMode::Auto,
-                };
-                let mode = if self.images_mode == ImagesMode::Auto { "auto" } else { "off" };
+                self.images_mode = self.images_mode.next();
+                let mode = self.images_mode.as_str();
                 self.save_config("images (from the next start)", |d| d["images"] = toml_edit::value(mode));
             }
             Item::Filters => {

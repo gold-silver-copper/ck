@@ -211,7 +211,7 @@ fn location(app: &App) -> (Vec<String>, Vec<Span<'static>>) {
                 meta.push(if app.show_hidden { format!("{hidden} hidden, shown") } else { format!("{hidden} hidden") });
             }
             if app.tab.catalog_sort != Sort::Bump {
-                meta.push(app.tab.catalog_sort.label().into());
+                meta.push(app.tab.catalog_sort.as_str().into());
             }
             vec![site(), board().unwrap_or_default()]
         }

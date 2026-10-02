@@ -15,23 +15,7 @@ pub enum NotifyMode {
     Off,
 }
 
-impl NotifyMode {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            NotifyMode::Auto => "auto",
-            NotifyMode::Bell => "bell",
-            NotifyMode::Off => "off",
-        }
-    }
-
-    pub fn next(self) -> Self {
-        match self {
-            NotifyMode::Auto => NotifyMode::Bell,
-            NotifyMode::Bell => NotifyMode::Off,
-            NotifyMode::Off => NotifyMode::Auto,
-        }
-    }
-}
+cycle!(NotifyMode { Auto => "auto", Bell => "bell", Off => "off" });
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Method {

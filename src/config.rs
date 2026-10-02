@@ -92,25 +92,7 @@ pub enum Sort {
     Oldest,
 }
 
-impl Sort {
-    pub fn next(self) -> Self {
-        match self {
-            Sort::Bump => Sort::Replies,
-            Sort::Replies => Sort::Newest,
-            Sort::Newest => Sort::Oldest,
-            Sort::Oldest => Sort::Bump,
-        }
-    }
-
-    pub fn label(self) -> &'static str {
-        match self {
-            Sort::Bump => "bump order",
-            Sort::Replies => "most replies",
-            Sort::Newest => "newest",
-            Sort::Oldest => "oldest",
-        }
-    }
-}
+cycle!(Sort { Bump => "bump order", Replies => "most replies", Newest => "newest", Oldest => "oldest" });
 
 /// A reverse image search engine: `{url}` in `url` becomes the file's (encoded) URL.
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
@@ -150,23 +132,7 @@ pub enum CatalogLayout {
     Grid,
 }
 
-impl CatalogLayout {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            CatalogLayout::Cards => "cards",
-            CatalogLayout::Compact => "compact",
-            CatalogLayout::Grid => "grid",
-        }
-    }
-
-    pub fn next(self) -> Self {
-        match self {
-            CatalogLayout::Cards => CatalogLayout::Compact,
-            CatalogLayout::Compact => CatalogLayout::Grid,
-            CatalogLayout::Grid => CatalogLayout::Cards,
-        }
-    }
-}
+cycle!(CatalogLayout { Cards => "cards", Compact => "compact", Grid => "grid" });
 
 #[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -175,6 +141,8 @@ pub enum ImagesMode {
     Auto,
     Off,
 }
+
+cycle!(ImagesMode { Auto => "auto", Off => "off" });
 
 /// Color depth: 24-bit if the terminal says it supports it, or forced either way.
 #[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
@@ -187,15 +155,9 @@ pub enum ColorMode {
     Ansi256,
 }
 
-impl ColorMode {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            ColorMode::Auto => "auto",
-            ColorMode::Truecolor => "truecolor",
-            ColorMode::Ansi256 => "256",
-        }
-    }
+cycle!(ColorMode { Auto => "auto", Truecolor => "truecolor", Ansi256 => "256" });
 
+impl ColorMode {
     pub fn truecolor(self) -> bool {
         match self {
             ColorMode::Auto => crate::theme::truecolor_terminal(),

@@ -270,7 +270,7 @@ impl App {
                 let key = self.board_key();
                 self.store.board_prefs.entry(key).or_default().sort = (self.tab.catalog_sort != Sort::Bump).then_some(self.tab.catalog_sort);
                 self.save_now();
-                self.info(format!("Sorted by {}", self.tab.catalog_sort.label()));
+                self.info(format!("Sorted by {}", self.tab.catalog_sort.as_str()));
             }
             Action::Compact => self.cycle_layout(),
             Action::Download => self.download(false),

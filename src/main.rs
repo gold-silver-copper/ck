@@ -1,3 +1,23 @@
+/// `as_str` (the name the config and the screen use) and `next` (cycling in this order)
+/// for an enum of options.
+macro_rules! cycle {
+    ($t:ident { $($v:ident => $s:literal),+ $(,)? }) => {
+        impl $t {
+            pub fn as_str(self) -> &'static str {
+                match self {
+                    $($t::$v => $s,)+
+                }
+            }
+
+            pub fn next(self) -> Self {
+                const ALL: &[$t] = &[$($t::$v),+];
+                let i = ALL.iter().position(|&v| v == self).unwrap_or(0);
+                ALL[(i + 1) % ALL.len()]
+            }
+        }
+    };
+}
+
 mod app;
 mod backend;
 mod clipboard;
