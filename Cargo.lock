@@ -234,6 +234,7 @@ dependencies = [
  "open",
  "ratatui",
  "ratatui-image",
+ "regex",
  "serde",
  "serde_json",
  "tempfile",

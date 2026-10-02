@@ -107,6 +107,7 @@ fn attachment(base: &str, f: &Value) -> Option<Attachment> {
         width: as_u64(&f["geometry"]["width"]).map(|n| n as u32),
         height: as_u64(&f["geometry"]["height"]).map(|n| n as u32),
         size: as_u64(&f["size"]),
+        md5: None,
     })
 }
 

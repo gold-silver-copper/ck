@@ -86,6 +86,7 @@ impl Futaba {
             width: as_u64(&f["w"]).map(|n| n as u32),
             height: as_u64(&f["h"]).map(|n| n as u32),
             size: as_u64(&f["fsize"]),
+            md5: as_str(&f["md5"]),
         })
     }
 
@@ -107,6 +108,7 @@ impl Futaba {
             width: as_u64(&v["w"]).map(|n| n as u32),
             height: as_u64(&v["h"]).map(|n| n as u32),
             size: as_u64(&v["fsize"]),
+            md5: as_str(&v["md5"]),
         })
     }
 

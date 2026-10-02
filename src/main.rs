@@ -6,6 +6,7 @@ mod bench;
 mod config;
 mod disk_cache;
 mod download;
+mod filter;
 mod http;
 mod images;
 mod keys;
@@ -54,6 +55,7 @@ fn main() -> Result<()> {
     let config = Config::load()?;
     // Config errors are reported before the terminal is taken over.
     let keys = KeyMap::new(&config.keys)?;
+    filter::Filters::new(&config.filters)?;
     // The theme is checked now, so a bad one is reported before the terminal is taken over.
     theme::set(theme::from_config(config.theme.as_ref(), &config.themes)?);
     let (store, warnings) = Store::load(Store::dir());

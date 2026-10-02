@@ -38,6 +38,9 @@ pub struct Config {
     pub themes: BTreeMap<String, ThemeDef>,
     #[serde(default)]
     pub color: ColorMode,
+    /// `[[filter]]`: hide or highlight threads and posts.
+    #[serde(default, rename = "filter")]
+    pub filters: Vec<crate::filter::FilterConfig>,
     #[serde(rename = "site")]
     pub sites: Vec<SiteConfig>,
 }

@@ -77,6 +77,7 @@ fn file(name: &str) -> Attachment {
         width: Some(800),
         height: Some(600),
         size: Some(123_456),
+        md5: None,
     }
 }
 
@@ -337,4 +338,34 @@ fn links_panel() {
     a.thread = Some(t);
     a.open_links();
     insta::assert_snapshot!(snapshot(&mut a));
+}
+
+fn with_filters(a: &mut App) {
+    #[derive(serde::Deserialize)]
+    struct C {
+        filter: Vec<crate::filter::FilterConfig>,
+    }
+    let cfg = "[[filter]]\npattern = \"Rust\"\naction = \"highlight\"\nlabel = \"rust\"\n[[filter]]\npattern = \"implying\"\nlabel = \"no implying\"";
+    a.filters = crate::filter::Filters::new(&toml::from_str::<C>(cfg).unwrap().filter).unwrap();
+}
+
+#[test]
+fn filtered_catalog_and_thread() {
+    let mut a = app(true);
+    with_filters(&mut a);
+    a.view = View::Catalog;
+    a.catalog = catalog();
+    a.store.toggle_hidden("4chan", "g", 1100);
+    a.remark_catalog();
+    a.catalog_list.state.select(Some(0));
+    insta::assert_snapshot!(snapshot(&mut a));
+    // Z: hidden ones shown, marked.
+    a.show_hidden = true;
+    insta::assert_snapshot!("filtered_catalog_shown", snapshot(&mut a));
+    insta::assert_snapshot!("filtered_catalog_backgrounds", bg_map(&mut a));
+    a.show_hidden = false;
+    a.view = View::Thread;
+    a.thread = Some(thread());
+    a.remark_thread();
+    insta::assert_snapshot!("filtered_thread", snapshot(&mut a));
 }

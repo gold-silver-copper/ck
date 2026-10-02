@@ -12,19 +12,19 @@ expression: snapshot(&mut a)
   Catalog
     Compact layout    off                               One line per thread
     Images            on  Theme                    enter keep · esc cancel  mage viewer (after a…
-
-  Background refresh      material
-    Open thread       ev  material-light                                    hread updates
-    Watched threads   ev  nord                                              ed thread updates
-                          gruvbox
-  Downloads               catppuccin
-    Folder            ~/  tokyo-night                                       es
-                          solarized-light
-  Keys                    terminal
-    Key bindings      de
+    Filters           0                                                     nfig; H hides by han…
+                          material
+  Background refresh      material-light
+    Open thread       ev  nord                                              hread updates
+    Watched threads   ev  gruvbox                                           ed thread updates
+                          catppuccin
+  Downloads               tokyo-night
+    Folder            ~/  solarized-light                                   es
+                          terminal
+  Keys
+    Key bindings      defaults                          Rebind any command
 
   There's no config file to save to (no home directory); changes last until ck quits.
-
 
 
 

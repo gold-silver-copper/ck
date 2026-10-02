@@ -34,6 +34,8 @@ pub struct Attachment {
     pub width: Option<u32>,
     pub height: Option<u32>,
     pub size: Option<u64>,
+    /// The file's MD5, base64-encoded as 4chan gives it, where the site says.
+    pub md5: Option<String>,
 }
 
 impl Attachment {

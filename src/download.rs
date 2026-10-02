@@ -82,6 +82,7 @@ mod tests {
             width: None,
             height: None,
             size: None,
+            md5: None,
         };
         let a = Post { no: 1, files: vec![file("a.png"), file("a.png"), file("b.png")], ..Default::default() };
         let b = Post { no: 2, files: vec![file("a.png")], ..Default::default() };

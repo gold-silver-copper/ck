@@ -81,6 +81,7 @@ impl Lynxchan {
                             width: as_u64(&f["width"]).map(|n| n as u32),
                             height: as_u64(&f["height"]).map(|n| n as u32),
                             size: as_u64(&f["size"]),
+                            md5: None,
                         })
                     })
                     .collect()
@@ -99,6 +100,7 @@ impl Lynxchan {
                 width: None,
                 height: None,
                 size: None,
+                md5: None,
             });
         }
         Post {

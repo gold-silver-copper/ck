@@ -273,8 +273,9 @@ url = "https://arch.b4k.dev"
 # Actions and their defaults:
 #   everywhere: quit = "q", help = "?", search = "/", reload = "r", browser = "o", settings = ",",
 #               goto = ":"
-#   catalog:    view = "v", watch = "w", sort = "s", compact = "c", links = "O"
-#   thread:     view, watch, links, open_file = "i", replies = "b", jump_back = "u", unread = "U",
+#   catalog:    view = "v", watch = "w", sort = "s", compact = "c", links = "O", hide = "H",
+#               show_hidden = "Z"
+#   thread:     view, watch, links, hide, show_hidden, open_file = "i", replies = "b", jump_back = "u", unread = "U",
 #               preview = "p", next_match = "n", prev_match = "N", spoiler = "s",
 #               all_spoilers = "S", download = "d", download_thread = "D", archive = "a"
 #   Watched/History: remove = "x"
@@ -282,6 +283,20 @@ url = "https://arch.b4k.dev"
 [keys]
 # watch = "W"
 # help = ["?", "f1"]
+
+# Filters hide (or highlight) threads and posts whose text matches a regex. `field` is
+# "subject", "comment", "name", "filename" or "md5" (a file's base64 MD5, compared
+# exactly), or a list; the default is subject and comment. Optional `sites` and `boards`
+# limit where a filter applies; `label` is what's shown on what it catches.
+#
+# [[filter]]
+# pattern = "(?i)crypto|nft"
+# label = "crypto"
+#
+# [[filter]]
+# pattern = "(?i)rust"
+# action = "highlight"
+# boards = ["g"]
 
 # Custom themes. Start from a built-in (`base`) or generate one from a single color
 # (`seed`, with mode = "dark" or "light"), then override any role. Colors are "#rrggbb",

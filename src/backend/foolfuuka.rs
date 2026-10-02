@@ -135,6 +135,7 @@ fn attachment(m: &Value) -> Option<Attachment> {
         width: as_u64(&m["media_w"]).map(|n| n as u32),
         height: as_u64(&m["media_h"]).map(|n| n as u32),
         size: as_u64(&m["media_size"]),
+        md5: as_str(&m["media_hash"]),
     })
 }
 

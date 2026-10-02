@@ -12,6 +12,7 @@ expression: snapshot(&mut a)
   Catalog
     Compact layout    off                               One line per thread
     Images            on                                Thumbnails and the image viewer (after a…
+    Filters           0 filters, 0 hidden by hand       [[filter]] in the config; H hides by han…
 
   Background refresh
     Open thread       every 10s                         How often the open thread updates
@@ -24,7 +25,6 @@ expression: snapshot(&mut a)
     Key bindings      defaults                          Rebind any command
 
   There's no config file to save to (no home directory); changes last until ck quits.
-
 
 
 

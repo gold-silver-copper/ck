@@ -71,6 +71,8 @@ is in brackets):
 | `d`/`D` | thread             | save the post's / whole thread's files [`download`, `download_thread`] |
 | `a`  | thread                | after a 404: open the thread in the site's archive [`archive`] |
 | `O`  | catalog, thread       | the post's links: quotes of other threads, web links, files; `enter` opens, `y` copies [`links`] |
+| `H`  | catalog, thread       | hide / unhide the thread or post [`hide`]                  |
+| `Z`  | catalog, thread       | show hidden threads and posts, dimmed [`show_hidden`]      |
 | `x`  | Watched, History      | remove the entry [`remove`]                                |
 | `y`  | catalog, thread, Watched, History, viewer | copy the post's text (catalog: the OP's; Watched/History: subject and link; viewer: the file's URL) [`copy`] |
 | `Y`  | catalog, thread, Watched, History, viewer | copy the link to the post or thread [`copy_link`] |
@@ -118,6 +120,36 @@ Keys are a character (`"w"`, `"W"`, `":"`), `ctrl-` or `alt-` with one, or a nam
 `home`, `end`, `pageup`, `pagedown`, `space`, `f1`–`f12`. Navigation keys (the first
 table) are fixed, as are keys inside text inputs and popups. In the image viewer only
 the viewer's own commands apply.
+
+## Filters and hiding
+
+`H` hides the selected catalog thread or thread post; `Z` shows hidden ones again
+(dimmed and marked) so they can be unhidden with another `H`. Hidden posts collapse to
+one line, so replies to them still make sense. What you hide is remembered per board in
+the data directory.
+
+Filters in the config hide or highlight automatically:
+
+```toml
+[[filter]]
+pattern = "(?i)crypto|nft"     # a regex; (?i) for any case
+label = "crypto"               # shown on what it hides or highlights
+
+[[filter]]
+pattern = "(?i)rust"
+action = "highlight"           # "hide" (the default) or "highlight"
+field = ["subject", "comment"] # subject, comment, name, filename, md5; default subject + comment
+sites = ["4chan"]              # optional: only these sites
+boards = ["g"]                 #           and these boards
+
+[[filter]]
+pattern = "u8Vh17KxaDvUJ6bBcmE/eg=="   # field = "md5": a file's MD5 (base64, as 4chan shows it)
+field = "md5"
+```
+
+Highlighted threads and posts get the label as a chip and an accent stripe; the catalog's
+header says how many are hidden. A bad pattern is reported at startup with its filter's
+number.
 
 ## Watched threads and history
 
@@ -210,6 +242,7 @@ All settings are optional; see `config.example.toml` for every option with comme
 - `refresh_thread_secs`, `refresh_watched_secs`
 - `compact_catalog = true` (also toggled with `c`, which saves it here, comments intact)
 - `download_dir = "~/stuff/{site}/{board}/{thread}"`
+- `[[filter]]`: hide or highlight threads and posts, see [Filters](#filters-and-hiding).
 - `[keys]`: `action = "key"` or `action = ["key", ...]`, e.g. `watch = "W"`; see
   [Remapping keys](#remapping-keys). Unknown actions, things that aren't keys, and two
   commands on one key in the same view are reported at startup.

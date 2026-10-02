@@ -19,6 +19,7 @@ use crate::app::{
 use crate::http;
 use crate::images::{Images, Kind, State};
 use crate::keys::{self, Action, KeyMap};
+use crate::filter::Mark;
 use crate::markup;
 use crate::model::{Attachment, Post};
 use crate::theme::{self, ROLES, Theme, theme};
@@ -164,6 +165,10 @@ fn location(app: &App) -> (Vec<String>, Vec<Span<'static>>) {
         }
         View::Catalog => {
             meta.push(plural(app.catalog.len(), "thread"));
+            let hidden = app.catalog_marks.iter().filter(|m| m.hidden.is_some()).count();
+            if hidden > 0 {
+                meta.push(if app.show_hidden { format!("{hidden} hidden, shown") } else { format!("{hidden} hidden") });
+            }
             if app.catalog_sort != Sort::Bump {
                 meta.push(app.catalog_sort.label().into());
             }
@@ -340,7 +345,9 @@ fn current_filter(app: &App) -> &str {
 
 /// Draw items `height` rows tall with `gap` rows of background between them. With `card`
 /// each item sits on that color; the selected one gets the selection color and an accent
-/// stripe. Returns where it went, for mouse clicks.
+/// stripe, as do items marked in `stripes` (highlighted by a filter). Returns where it
+/// went, for mouse clicks.
+#[allow(clippy::too_many_arguments)]
 fn draw_rows(
     f: &mut Frame,
     area: Rect,
@@ -349,26 +356,46 @@ fn draw_rows(
     height: u16,
     gap: u16,
     card: Option<Color>,
+    stripes: &[bool],
 ) -> Option<Hit> {
-    if items.is_empty() || area.is_empty() {
+    let mut items: Vec<Option<Vec<Line<'static>>>> = items.into_iter().map(Some).collect();
+    let n = items.len();
+    draw_rows_with(f, area, n, &mut |k| items[k].take().unwrap_or_default(), state, height, gap, card, stripes)
+}
+
+/// `draw_rows` for long lists: `build` makes only the items that are on screen.
+#[allow(clippy::too_many_arguments)]
+fn draw_rows_with(
+    f: &mut Frame,
+    area: Rect,
+    count: usize,
+    build: &mut dyn FnMut(usize) -> Vec<Line<'static>>,
+    state: &mut ListState,
+    height: u16,
+    gap: u16,
+    card: Option<Color>,
+    stripes: &[bool],
+) -> Option<Hit> {
+    if count == 0 || area.is_empty() {
         return None;
     }
     let t = theme();
     let per = height + gap;
     let fit = ((area.height + gap) / per).max(1) as usize;
-    let sel = state.selected().unwrap_or(0).min(items.len() - 1);
-    let mut off = state.offset().min(items.len() - 1);
+    let sel = state.selected().unwrap_or(0).min(count - 1);
+    let mut off = state.offset().min(count - 1);
     if sel < off {
         off = sel;
     } else if sel >= off + fit {
         off = sel + 1 - fit;
     }
     *state.offset_mut() = off;
-    for (k, lines) in items.into_iter().enumerate().skip(off) {
+    for k in off..count {
         let y = area.y + (k - off) as u16 * per;
         if y >= area.bottom() {
             break;
         }
+        let lines = build(k);
         let h = height.min(area.bottom() - y);
         let row = Rect::new(area.x, y, area.width, h);
         let selected = k == sel;
@@ -377,6 +404,9 @@ fn draw_rows(
             fill(f, Rect::new(row.x, y, 1, h), t.primary);
         } else if let Some(c) = card {
             fill(f, row, c);
+        }
+        if stripes.get(k).copied().unwrap_or(false) {
+            fill(f, Rect::new(row.x, y, 1, h), t.primary);
         }
         for (r, line) in lines.into_iter().take(h as usize).enumerate() {
             put(f, row.x + PAD, y + r as u16, row.width.saturating_sub(PAD + 1), line);
@@ -434,7 +464,7 @@ fn draw_sites(f: &mut Frame, app: &mut App, area: Rect) {
             }
         })
         .collect();
-    app.hit = draw_rows(f, area, items, &mut app.site_list.state, 1, 0, None);
+    app.hit = draw_rows(f, area, items, &mut app.site_list.state, 1, 0, None, &[]);
     if app.hit.is_none() {
         empty(f, area, "No sites match");
     }
@@ -473,7 +503,7 @@ fn draw_watched(f: &mut Frame, app: &mut App, area: Rect) {
             vec![spread(thread_row(&w.key, &w.subject), right, width)]
         })
         .collect();
-    app.hit = draw_rows(f, area, items, &mut app.watched_list.state, 1, 0, None);
+    app.hit = draw_rows(f, area, items, &mut app.watched_list.state, 1, 0, None, &[]);
     if app.hit.is_none() {
         let msg = format!("No watched threads. Press {} in a catalog or thread to watch one.", app.keys.key(Action::Watch));
         empty(f, area, &msg);
@@ -490,7 +520,7 @@ fn draw_history(f: &mut Frame, app: &mut App, area: Rect) {
             vec![spread(thread_row(&v.key, &v.subject), vec![Span::styled(ago(v.opened, app.clock), dim())], width)]
         })
         .collect();
-    app.hit = draw_rows(f, area, items, &mut app.history_list.state, 1, 0, None);
+    app.hit = draw_rows(f, area, items, &mut app.history_list.state, 1, 0, None, &[]);
     if app.hit.is_none() {
         empty(f, area, "No history yet");
     }
@@ -514,7 +544,7 @@ fn draw_boards(f: &mut Frame, app: &mut App, area: Rect) {
             vec![Line::from(spans)]
         })
         .collect();
-    app.hit = draw_rows(f, area, items, &mut app.board_list.state, 1, 0, None);
+    app.hit = draw_rows(f, area, items, &mut app.board_list.state, 1, 0, None, &[]);
     if app.hit.is_none() && app.loading.is_none() {
         empty(f, area, "No boards");
     }
@@ -525,11 +555,20 @@ fn draw_catalog(f: &mut Frame, app: &mut App, area: Rect) {
     let thumbs = app.images.enabled() && area.width >= MIN_THUMB_WIDTH && !app.compact;
     let width = area.width.saturating_sub(PAD + 2) as usize;
     let visible = app.visible_catalog();
-    let items: Vec<Vec<Line>> = visible
-        .iter()
-        .map(|&i| {
+    let mut build = |k: usize| -> Vec<Line<'static>> {
+        let i = visible[k];
+        {
             let p = &app.catalog[i];
+            let mark = app.catalog_marks.get(i).cloned().unwrap_or_default();
             let mut head = Vec::new();
+            if let Some(label) = &mark.hidden {
+                head.push(chip(hidden_label(label), t.text_dim, t.surface_high));
+                head.push(Span::raw(" "));
+            }
+            if let Some(label) = &mark.highlight {
+                head.push(chip(label.clone(), t.on_primary_container, t.primary_container));
+                head.push(Span::raw(" "));
+            }
             if p.sticky {
                 head.push(chip("pinned", t.text_dim, t.surface_high));
                 head.push(Span::raw(" "));
@@ -543,8 +582,9 @@ fn draw_catalog(f: &mut Frame, app: &mut App, area: Rect) {
                 head.push(chip(format!("/{b}/"), t.on_primary_container, t.primary_container));
                 head.push(Span::raw(" "));
             }
+            let subject_style = if mark.hidden.is_some() { dim() } else { bold(t.text) };
             match &p.subject {
-                Some(s) => head.push(Span::styled(s.clone(), bold(t.text))),
+                Some(s) => head.push(Span::styled(s.clone(), subject_style)),
                 None => head.push(Span::styled(format!("No.{}", p.no), dim())),
             }
             // Some overboards don't give counts; show nothing rather than zeros.
@@ -578,8 +618,8 @@ fn draw_catalog(f: &mut Frame, app: &mut App, area: Rect) {
                 lines = beside(Vec::new(), lines, CAT_THUMB.width + 1);
             }
             lines
-        })
-        .collect();
+        }
+    };
     let (height, gap, card) = if app.compact {
         (1, 0, None)
     } else if thumbs {
@@ -587,7 +627,10 @@ fn draw_catalog(f: &mut Frame, app: &mut App, area: Rect) {
     } else {
         (2, 1, Some(t.surface))
     };
-    app.hit = draw_rows(f, area, items, &mut app.catalog_list.state, height, gap, card);
+    let stripes: Vec<bool> = visible.iter().map(|&i| app.catalog_marks.get(i).is_some_and(|m| m.highlight.is_some())).collect();
+    let mut state = std::mem::take(&mut app.catalog_list.state);
+    app.hit = draw_rows_with(f, area, visible.len(), &mut build, &mut state, height, gap, card, &stripes);
+    app.catalog_list.state = state;
     if app.hit.is_none() {
         if app.loading.is_none() {
             empty(f, area, "No threads");
@@ -612,6 +655,11 @@ fn draw_catalog(f: &mut Frame, app: &mut App, area: Rect) {
             app.images.want(url, Kind::Thumb);
         }
     }
+}
+
+/// A hidden item's chip: by which filter, or by hand.
+fn hidden_label(filter: &str) -> String {
+    if filter.is_empty() { "hidden".into() } else { format!("hidden: {filter}") }
 }
 
 fn line_text(l: &Line) -> String {
@@ -715,7 +763,7 @@ fn draw_thread(f: &mut Frame, app: &mut App, area: Rect) {
         let y = area.y + row;
         let selected = post == t.selected;
         fill(f, Rect::new(area.x, y, area.width, 1), if selected { th.selection } else { th.surface });
-        if selected {
+        if selected || t.marks.get(post).is_some_and(|m| m.highlight.is_some()) {
             fill(f, Rect::new(area.x, y, 1, 1), th.primary);
         }
         if line.style == markup::CODE_LINE {
@@ -769,6 +817,14 @@ fn layout_thread(t: &ThreadView, width: u16, thumbs: bool, clock: Clock) -> Thre
     let mut thumb_at = Vec::new();
     for (i, p) in t.posts.iter().enumerate() {
         starts.push(lines.len());
+        // A hidden post is one line, so replies to it still make sense.
+        if t.is_collapsed(i) {
+            let why = t.marks[i].hidden.as_deref().filter(|l| !l.is_empty());
+            let why = why.map_or("hidden".to_string(), |l| format!("hidden by the filter \"{l}\""));
+            lines.push(Line::styled(format!("No.{}  {why}", p.no), Style::new().fg(theme().text_dim)));
+            lines.push(Line::raw(""));
+            continue;
+        }
         lines.push(Line::raw(""));
         match p.files.first().filter(|_| thumbs) {
             Some(_) => {
@@ -797,6 +853,7 @@ struct PostCtx<'a> {
     /// Lowercase search query to highlight.
     search: String,
     clock: Clock,
+    mark: Option<&'a Mark>,
 }
 
 fn post_ctx(t: &ThreadView, i: usize, clock: Clock) -> PostCtx<'_> {
@@ -808,6 +865,7 @@ fn post_ctx(t: &ThreadView, i: usize, clock: Clock) -> PostCtx<'_> {
         op_no: t.no,
         reveal: t.is_revealed(i),
         search: t.search.to_lowercase(),
+        mark: t.marks.get(i),
     }
 }
 
@@ -826,6 +884,16 @@ fn post_lines(p: &Post, ctx: &PostCtx, width: usize) -> Vec<Line<'static>> {
     if ctx.is_new {
         head.push(chip("new", t.background, t.new));
         head.push(Span::raw(" "));
+    }
+    if let Some(m) = ctx.mark {
+        if let Some(label) = &m.hidden {
+            head.push(chip(hidden_label(label), t.text_dim, t.surface_high));
+            head.push(Span::raw(" "));
+        }
+        if let Some(label) = &m.highlight {
+            head.push(chip(label.clone(), t.on_primary_container, t.primary_container));
+            head.push(Span::raw(" "));
+        }
     }
     head.push(Span::styled(format!("{}  No.{}", fmt_time(p.time, ctx.clock), p.no), dim()));
     let mut out = markup::wrap(&Line::from(head), width);
@@ -986,6 +1054,7 @@ fn help_sections(keys: &KeyMap) -> Vec<(&'static str, Vec<(String, &'static str)
             vec![
                 (k(Action::View), "view the OP's images"),
                 (k(Action::Links), "the OP's links and files"),
+                (pair(Action::Hide, Action::ShowHidden), "hide the thread / show hidden"),
                 (k(Action::Watch), "watch / unwatch the thread"),
                 (k(Action::Sort), "cycle sort order"),
                 (k(Action::Compact), "compact layout on / off"),
@@ -1007,6 +1076,7 @@ fn help_sections(keys: &KeyMap) -> Vec<(&'static str, Vec<(String, &'static str)
                 (k(Action::OpenFile), "open file (videos in mpv)"),
                 (k(Action::View), "view the post's images"),
                 (k(Action::Links), "the post's links and files"),
+                (pair(Action::Hide, Action::ShowHidden), "hide the post / show hidden"),
                 (pair(Action::Download, Action::DownloadThread), "save files: post / thread"),
                 (k(Action::Watch), "watch / unwatch the thread"),
                 (k(Action::Unread), "jump to the first unread post"),

@@ -8,6 +8,8 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use crate::model::Board;
 
 const HISTORY_LEN: usize = 100;
+/// Threads and posts hidden by hand, kept per board; the oldest go first.
+const HIDDEN_PER_BOARD: usize = 3000;
 
 /// Identifies a thread across sites.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -55,6 +57,8 @@ pub struct Store {
     /// Most recent first.
     pub history: Vec<Visit>,
     pub settings: Settings,
+    /// Thread and post numbers hidden by hand, by `site/board`, oldest first.
+    pub hidden: std::collections::BTreeMap<String, Vec<u64>>,
 }
 
 /// A site's fetched board list, saved so the next start can show it at once.
@@ -82,6 +86,7 @@ impl Store {
             store.watched = load_file(&dir.join("watched.json"), &mut warnings);
             store.history = load_file(&dir.join("history.json"), &mut warnings);
             store.settings = load_file(&dir.join("settings.json"), &mut warnings);
+            store.hidden = load_file(&dir.join("hidden.json"), &mut warnings);
         }
         (store, warnings)
     }
@@ -91,6 +96,9 @@ impl Store {
         std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
         write_atomic(&dir.join("watched.json"), &serde_json::to_vec_pretty(&self.watched)?)?;
         write_atomic(&dir.join("history.json"), &serde_json::to_vec_pretty(&self.history)?)?;
+        if !self.hidden.is_empty() || dir.join("hidden.json").exists() {
+            write_atomic(&dir.join("hidden.json"), &serde_json::to_vec(&self.hidden)?)?;
+        }
         if self.settings.compact_catalog.is_some() {
             write_atomic(&dir.join("settings.json"), &serde_json::to_vec_pretty(&self.settings)?)?;
         }
@@ -115,6 +123,28 @@ impl Store {
         }
         let saved = SavedBoards { fetched: now, boards: boards.to_vec() };
         write_atomic(&path, &serde_json::to_vec(&saved)?)
+    }
+
+    pub fn is_hidden(&self, site: &str, board: &str, no: u64) -> bool {
+        self.hidden.get(&format!("{site}/{board}")).is_some_and(|v| v.contains(&no))
+    }
+
+    /// Hide a thread or post, or unhide it; returns whether it's hidden now.
+    pub fn toggle_hidden(&mut self, site: &str, board: &str, no: u64) -> bool {
+        let key = format!("{site}/{board}");
+        let list = self.hidden.entry(key.clone()).or_default();
+        if let Some(i) = list.iter().position(|&n| n == no) {
+            list.remove(i);
+            if list.is_empty() {
+                self.hidden.remove(&key);
+            }
+            return false;
+        }
+        list.push(no);
+        if list.len() > HIDDEN_PER_BOARD {
+            list.remove(0);
+        }
+        true
     }
 
     pub fn watched(&self, key: &ThreadKey) -> Option<&Watched> {
@@ -214,6 +244,24 @@ mod tests {
         assert_eq!(warnings.len(), 1);
         assert!(s3.history.is_empty() && s3.watched.len() == 1);
         assert!(dir.path().join("history.json.corrupt").exists());
+    }
+
+    #[test]
+    fn hidden_threads_and_posts() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut s, _) = Store::load(Some(dir.path().to_path_buf()));
+        assert!(s.toggle_hidden("4chan", "g", 5));
+        assert!(s.is_hidden("4chan", "g", 5) && !s.is_hidden("4chan", "v", 5));
+        s.save().unwrap();
+        let (mut s, w) = Store::load(Some(dir.path().to_path_buf()));
+        assert!(w.is_empty() && s.is_hidden("4chan", "g", 5));
+        assert!(!s.toggle_hidden("4chan", "g", 5));
+        assert!(s.hidden.is_empty());
+        // Bounded per board, oldest out first.
+        for no in 0..HIDDEN_PER_BOARD as u64 + 2 {
+            s.toggle_hidden("4chan", "g", no);
+        }
+        assert!(!s.is_hidden("4chan", "g", 0) && !s.is_hidden("4chan", "g", 1) && s.is_hidden("4chan", "g", 2));
     }
 
     #[test]

@@ -18,6 +18,7 @@ pub enum Item {
     ColorDepth,
     Compact,
     Images,
+    Filters,
     RefreshThread,
     RefreshWatched,
     DownloadDir,
@@ -27,7 +28,7 @@ pub enum Item {
 /// The settings, by section, in display order.
 pub const SECTIONS: &[(&str, &[Item])] = &[
     ("Appearance", &[Item::Theme, Item::Colors, Item::ColorDepth]),
-    ("Catalog", &[Item::Compact, Item::Images]),
+    ("Catalog", &[Item::Compact, Item::Images, Item::Filters]),
     ("Background refresh", &[Item::RefreshThread, Item::RefreshWatched]),
     ("Downloads", &[Item::DownloadDir]),
     ("Keys", &[Item::Keys]),
@@ -66,6 +67,7 @@ impl Item {
             Item::ColorDepth => "Color depth",
             Item::Compact => "Compact layout",
             Item::Images => "Images",
+            Item::Filters => "Filters",
             Item::RefreshThread => "Open thread",
             Item::RefreshWatched => "Watched threads",
             Item::DownloadDir => "Folder",
@@ -80,6 +82,7 @@ impl Item {
             Item::ColorDepth => "24-bit color, or the nearest of 256",
             Item::Compact => "One line per thread",
             Item::Images => "Thumbnails and the image viewer (after a restart)",
+            Item::Filters => "[[filter]] in the config; H hides by hand, Z shows hidden",
             Item::RefreshThread => "How often the open thread updates",
             Item::RefreshWatched => "How often each watched thread updates",
             Item::DownloadDir => "Where d / D save files",
@@ -163,6 +166,10 @@ impl App {
                 ImagesMode::Auto => "on".into(),
                 ImagesMode::Off => "off".into(),
             },
+            Item::Filters => {
+                let hidden: usize = self.store.hidden.values().map(Vec::len).sum();
+                format!("{} filters, {hidden} hidden by hand", self.filters.len())
+            }
             Item::RefreshThread => format!("every {}s", self.refresh_thread.as_secs()),
             Item::RefreshWatched => format!("every {}s", self.refresh_watched.as_secs()),
             Item::DownloadDir => self.download_dir.clone().unwrap_or_else(|| "~/Downloads/ck/{site}/{board}/{thread}".into()),
@@ -207,6 +214,10 @@ impl App {
                 };
                 let mode = if self.images_mode == ImagesMode::Auto { "auto" } else { "off" };
                 self.save_config("images (from the next start)", |d| d["images"] = toml_edit::value(mode));
+            }
+            Item::Filters => {
+                let path = self.config_path.as_ref().map_or("the config".into(), |p| tilde(&p.display().to_string()));
+                self.status = Some((format!("Filters are [[filter]] tables in {path} (see the README); they apply from the next start"), false));
             }
             Item::RefreshThread => {
                 let secs = next(REFRESH_THREAD, self.refresh_thread.as_secs());

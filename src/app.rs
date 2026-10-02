@@ -15,6 +15,7 @@ use crate::backend::{self, Backend};
 use crate::config::{ColorMode, Config, ImagesMode, SiteConfig};
 use crate::disk_cache::DiskCache;
 use crate::download;
+use crate::filter::{Filters, Mark};
 use crate::http;
 use crate::images::Images;
 use crate::keys::{Action, KeyMap, Scope};
@@ -135,6 +136,9 @@ pub struct ThreadView {
     /// Posts whose spoilers are shown, or all of them.
     pub revealed: HashSet<usize>,
     pub reveal_all: bool,
+    /// What filters and hiding say about each post, and whether hidden ones are shown.
+    pub marks: Vec<Mark>,
+    pub show_hidden: bool,
 }
 
 pub struct ThreadLayout {
@@ -176,7 +180,14 @@ impl ThreadView {
             matches: Vec::new(),
             revealed: HashSet::new(),
             reveal_all: false,
+            marks: Vec::new(),
+            show_hidden: false,
         }
+    }
+
+    /// The post is collapsed to a line: hidden, not shown anyway, and not the OP.
+    pub fn is_collapsed(&self, i: usize) -> bool {
+        i > 0 && !self.show_hidden && self.marks.get(i).is_some_and(|m| m.hidden.is_some())
     }
 
     pub fn is_revealed(&self, i: usize) -> bool {
@@ -390,6 +401,11 @@ pub struct App {
     pub site: usize,
     pub board: Option<Board>,
     pub catalog: Vec<Post>,
+    /// What filters and hiding say about each catalog thread.
+    pub catalog_marks: Vec<Mark>,
+    pub filters: Filters,
+    /// Show hidden threads and posts (dimmed) instead of leaving them out.
+    pub show_hidden: bool,
     pub thread: Option<ThreadView>,
     /// True while typing into the filter.
     pub filtering: bool,
@@ -499,6 +515,9 @@ impl App {
             site: 0,
             board: None,
             catalog: Vec::new(),
+            catalog_marks: Vec::new(),
+            filters: Filters::new(&cfg.filters).unwrap_or_default(),
+            show_hidden: false,
             thread: None,
             filtering: false,
             loading: None,
@@ -579,7 +598,9 @@ impl App {
 
     pub fn visible_catalog(&self) -> Vec<usize> {
         let needle = self.catalog_list.filter.to_lowercase();
-        let mut v: Vec<usize> = (0..self.catalog.len()).filter(|&i| self.catalog[i].search_text().contains(&needle)).collect();
+        let shown = |i: usize| self.show_hidden || self.catalog_marks.get(i).is_none_or(|m| m.hidden.is_none());
+        let mut v: Vec<usize> =
+            (0..self.catalog.len()).filter(|&i| shown(i) && self.catalog[i].search_text().contains(&needle)).collect();
         let c = &self.catalog;
         match self.catalog_sort {
             Sort::Bump => {}
@@ -731,6 +752,7 @@ impl App {
                 }
                 Msg::CatalogPartial(id, posts) if id == self.req => {
                     self.catalog = posts;
+                    self.remark_catalog();
                     let len = self.visible_catalog().len();
                     self.catalog_list.clamp(len);
                 }
@@ -739,6 +761,7 @@ impl App {
                     match res {
                         Ok(posts) => {
                             self.catalog = posts;
+                            self.remark_catalog();
                             let len = self.visible_catalog().len();
                             self.catalog_list.clamp(len);
                         }
@@ -918,6 +941,92 @@ impl App {
         self.store.visit(&key, &subject, tv.posts.len(), max_no, self.clock.now());
         self.save();
         self.thread = Some(tv);
+        self.remark_thread();
+    }
+
+    // ----- filters and hiding -----
+
+    fn mark(&self, board: &str, p: &Post) -> Mark {
+        let site = &self.current_site().cfg.name;
+        let mut m = self.filters.check(site, board, p);
+        if m.hidden.is_none() && self.store.is_hidden(site, board, p.no) {
+            m.hidden = Some(String::new());
+        }
+        m
+    }
+
+    pub fn remark_catalog(&mut self) {
+        let marks = self.catalog.iter().map(|p| self.mark(&self.board_of(p), p)).collect();
+        self.catalog_marks = marks;
+    }
+
+    /// The board a catalog thread is on (overboards mix boards).
+    fn board_of(&self, p: &Post) -> String {
+        let loaded = Some(self.catalog_board.clone()).filter(|b| !b.is_empty());
+        p.board.clone().or(loaded).or_else(|| self.board.as_ref().map(|b| b.uri.clone())).unwrap_or_default()
+    }
+
+    pub fn remark_thread(&mut self) {
+        let Some(t) = &self.thread else { return };
+        let marks = t.posts.iter().map(|p| self.mark(&t.board, p)).collect();
+        let show = self.show_hidden;
+        let t = self.thread.as_mut().expect("checked above");
+        t.marks = marks;
+        t.show_hidden = show;
+        t.layout = None;
+    }
+
+    /// `H`: hide or unhide the selected thread (catalog) or post (thread) by hand.
+    fn toggle_hidden(&mut self) {
+        let (board, no, what, mark) = match self.view {
+            View::Catalog => {
+                let Some(i) = self.selected_index() else { return };
+                let p = &self.catalog[i];
+                (self.board_of(p), p.no, "thread", self.catalog_marks.get(i).cloned())
+            }
+            View::Thread => {
+                let Some(t) = &self.thread else { return };
+                let what = if t.selected == 0 { "thread" } else { "post" };
+                (t.board.clone(), t.posts[t.selected].no, what, t.marks.get(t.selected).cloned())
+            }
+            _ => return,
+        };
+        if let Some(label) = mark.and_then(|m| m.hidden).filter(|l| !l.is_empty()) {
+            let msg = format!("Hidden by the filter \"{label}\"; change [[filter]] in the config to show it");
+            self.status = Some((msg, false));
+            return;
+        }
+        let site = self.current_site().cfg.name.clone();
+        let hidden = self.store.toggle_hidden(&site, &board, no);
+        self.save();
+        let show = self.keys.key(Action::ShowHidden);
+        self.status = Some((
+            if hidden { format!("Hid {what} {no} ({show} shows hidden ones)") } else { format!("Unhid {what} {no}") },
+            false,
+        ));
+        self.remark_catalog();
+        self.remark_thread();
+        if let Some((p, len)) = self.picker() {
+            p.clamp(len);
+        }
+    }
+
+    /// `Z`: show hidden threads and posts (dimmed), or leave them out again.
+    fn toggle_show_hidden(&mut self) {
+        // Keep the same thread selected in the catalog.
+        let keep = self.selected_index().filter(|_| self.view == View::Catalog);
+        self.show_hidden = !self.show_hidden;
+        self.remark_thread();
+        if let Some(i) = keep
+            && let Some(pos) = self.visible_catalog().iter().position(|&v| v == i)
+        {
+            self.catalog_list.state.select(Some(pos));
+        }
+        if let Some((p, len)) = self.picker() {
+            p.clamp(len);
+        }
+        let msg = if self.show_hidden { "Showing hidden threads and posts" } else { "Leaving out hidden threads and posts" };
+        self.status = Some((msg.into(), false));
     }
 
     // ----- watched threads and auto-refresh -----
@@ -1356,6 +1465,8 @@ impl App {
             Action::Remove => self.remove_entry(),
             Action::Goto => self.goto = Some(String::new()),
             Action::Links => self.open_links(),
+            Action::Hide => self.toggle_hidden(),
+            Action::ShowHidden => self.toggle_show_hidden(),
             Action::Copy => self.copy(false),
             Action::CopyLink => self.copy(true),
             Action::Sort => {
@@ -2271,6 +2382,53 @@ mod tests {
         app.thread = Some(ThreadView::new("x".into(), 1, vec![Post { no: 1, ..Default::default() }]));
         app.act(Action::Links);
         assert!(app.links.is_none() && app.status.as_ref().unwrap().0 == "Post has no links");
+    }
+
+    #[test]
+    fn filters_and_hiding() {
+        let mut app = local_app();
+        let cfg = "[[filter]]\npattern = \"(?i)spam\"\nlabel = \"spam\"\n[[filter]]\npattern = \"rust\"\naction = \"highlight\"";
+        #[derive(serde::Deserialize)]
+        struct C {
+            filter: Vec<crate::filter::FilterConfig>,
+        }
+        app.filters = Filters::new(&toml::from_str::<C>(cfg).unwrap().filter).unwrap();
+        app.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
+        app.catalog_board = "x".into();
+        let op = |no, subject: &str| Post { no, subject: Some(subject.into()), ..Default::default() };
+        app.catalog = vec![op(1, "SPAM here"), op(2, "rust thread"), op(3, "other")];
+        app.remark_catalog();
+        app.view = View::Catalog;
+        assert_eq!(app.visible_catalog(), [1, 2]);
+        assert_eq!(app.catalog_marks[1].highlight.as_deref(), Some("rust"));
+        // H hides by hand; the filter's own can't be unhidden by H.
+        app.catalog_list.state.select(Some(1));
+        app.act(Action::Hide);
+        assert_eq!(app.visible_catalog(), [1]);
+        assert!(app.store.is_hidden("a", "x", 3));
+        // Z shows them all, keeping the selection on the same thread.
+        app.act(Action::ShowHidden);
+        assert_eq!(app.visible_catalog(), [0, 1, 2]);
+        assert_eq!(app.selected_index(), Some(1));
+        app.catalog_list.state.select(Some(0));
+        app.act(Action::Hide);
+        assert!(app.status.as_ref().unwrap().0.contains("filter \"spam\""));
+        app.catalog_list.state.select(Some(2));
+        app.act(Action::Hide);
+        assert!(!app.store.is_hidden("a", "x", 3));
+        app.act(Action::ShowHidden);
+        // In a thread, hidden posts collapse (never the OP).
+        let mut reply = op(11, "");
+        reply.body = vec![Line::raw("buy spam")];
+        app.set_thread(vec![op(10, "spam OP"), reply, op(12, "")]);
+        app.view = View::Thread;
+        let t = app.thread.as_ref().unwrap();
+        assert!(!t.is_collapsed(0) && t.is_collapsed(1) && !t.is_collapsed(2));
+        app.thread.as_mut().unwrap().selected = 2;
+        app.act(Action::Hide);
+        assert!(app.thread.as_ref().unwrap().is_collapsed(2));
+        app.act(Action::ShowHidden);
+        assert!(!app.thread.as_ref().unwrap().is_collapsed(1));
     }
 
     #[test]

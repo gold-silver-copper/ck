@@ -89,6 +89,18 @@ fn bench_catalog() {
     let mut t = term();
     eprintln!("\n== catalog, 150 threads ==");
     time("frame with thumbnail placeholders", 200, || draw(&mut t, &mut a));
+
+    // Filters run once per load; frames only look the results up.
+    let toml_text: String = (0..20).map(|i| format!("[[filter]]\npattern = \"(?i)word{i}|other{i}\"\n")).collect();
+    #[derive(serde::Deserialize)]
+    struct C {
+        filter: Vec<crate::filter::FilterConfig>,
+    }
+    a.filters = crate::filter::Filters::new(&toml::from_str::<C>(&toml_text).unwrap().filter).unwrap();
+    a.catalog = scale(&a.catalog, 300);
+    eprintln!("\n== catalog, 300 threads, 20 filters ==");
+    time("filtering (once per load)", 50, || a.remark_catalog());
+    time("frame", 200, || draw(&mut t, &mut a));
 }
 
 fn picker(proto: ProtocolType) -> Picker {
@@ -106,6 +118,7 @@ fn file(url: &str) -> Attachment {
         width: None,
         height: None,
         size: None,
+        md5: None,
     }
 }
 
