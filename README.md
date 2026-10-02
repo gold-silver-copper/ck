@@ -288,13 +288,13 @@ yours (and watches the thread). Replies to it are counted in Watched ("1 reply t
 quotes of it read `>>123 (You)`, and they get their own notification.
 
 ck keeps its state as JSON in `$XDG_DATA_HOME/ck` (default `~/.local/share/ck`):
-`watched.json` and `history.json`, `recent_boards.json`, `board_prefs.json` (each board's
-sort and layout), `hidden.json` (what you hid with `H`), `seen.json`
-(catalog threads seen, for "new" and `+N`), and `session.json` (your tabs, for the next
-start). Board lists fetched from sites are saved there too (`boards/`), so a site's boards
-show up instantly next time; they're refreshed quietly in the background once a day, and
-`r` in the Boards view refreshes them now. Lists that come in several pages (LynxChan and jschan
-board lists, FoolFuuka catalogs) show each page as it arrives.
+`watched.json`, `history.json`, `recent_boards.json`, `board_prefs.json` (each board's
+sort and layout), `hidden.json` (what you hid with `H`), `seen.json` (catalog threads
+seen, for "new" and `+N`), and `session.json` (your tabs, for the next start). Board
+lists fetched from sites are saved there too (`boards/`), so a site's boards show up
+instantly next time; they're refreshed quietly in the background once a day, and `r` in
+the Boards view refreshes them now. Lists that come in several pages (LynxChan and
+jschan board lists, FoolFuuka catalogs) show each page as it arrives.
 
 ## Searching archives
 
@@ -403,8 +403,9 @@ All settings are optional; see `config.example.toml` for every option with comme
 - `refresh_thread_secs`, `refresh_watched_secs`
 - `catalog_layout = "cards" | "compact" | "grid"`: the default layout (also in Settings).
   `c` in a catalog and `s` set that board's own layout and sort, which are remembered in
-  the data directory (`board_prefs.json`). In the grid, `h`/`l` move between columns (`h` in the first
-  column goes back) and `j`/`k` between rows; without images it's shown as cards.
+  the data directory (`board_prefs.json`). In the grid, `h`/`l` move between columns
+  (`h` in the first column goes back) and `j`/`k` between rows; without images it's
+  shown as cards.
 - `download_dir = "~/stuff/{site}/{board}/{thread}"`
 - `restore_session = false` to start at the site list instead of where you left off (the
   view, thread and selected post, catalog sort and filter, saved in the data directory
