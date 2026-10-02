@@ -134,8 +134,9 @@ pub struct Store {
     pub recent_boards: Vec<String>,
     /// Catalog threads seen, by `site/board`.
     pub seen: std::collections::BTreeMap<String, std::collections::BTreeMap<u64, SeenThread>>,
-    /// `seen` changed since it was last written.
-    seen_dirty: std::cell::Cell<bool>,
+    /// A hash of each file's content as last read or written, so unchanged files aren't
+    /// written again.
+    written: std::cell::RefCell<std::collections::HashMap<&'static str, u64>>,
 }
 
 /// A site's fetched board list, saved so the next start can show it at once.
@@ -168,28 +169,36 @@ impl Store {
             store.recent_boards = load_file(&dir.join("recent_boards.json"), &mut warnings);
             store.board_prefs = load_file(&dir.join("board_prefs.json"), &mut warnings);
         }
+        // What was just read counts as written.
+        if let Ok(files) = store.files() {
+            store.written.replace(files.iter().map(|(name, bytes)| (*name, hash(bytes))).collect());
+        }
         (store, warnings)
     }
 
+    /// Every file with its content.
+    fn files(&self) -> Result<[(&'static str, Vec<u8>); 7]> {
+        Ok([
+            ("watched.json", serde_json::to_vec_pretty(&self.watched)?),
+            ("history.json", serde_json::to_vec_pretty(&self.history)?),
+            ("hidden.json", serde_json::to_vec(&self.hidden)?),
+            ("recent_boards.json", serde_json::to_vec_pretty(&self.recent_boards)?),
+            ("board_prefs.json", serde_json::to_vec_pretty(&self.board_prefs)?),
+            ("seen.json", serde_json::to_vec(&self.seen)?),
+            ("settings.json", serde_json::to_vec_pretty(&self.settings)?),
+        ])
+    }
+
+    /// Write the files whose content changed.
     pub fn save(&self) -> Result<()> {
         let Some(dir) = &self.dir else { return Ok(()) };
         std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
-        write_atomic(&dir.join("watched.json"), &serde_json::to_vec_pretty(&self.watched)?)?;
-        write_atomic(&dir.join("history.json"), &serde_json::to_vec_pretty(&self.history)?)?;
-        if !self.hidden.is_empty() || dir.join("hidden.json").exists() {
-            write_atomic(&dir.join("hidden.json"), &serde_json::to_vec(&self.hidden)?)?;
-        }
-        if !self.recent_boards.is_empty() || dir.join("recent_boards.json").exists() {
-            write_atomic(&dir.join("recent_boards.json"), &serde_json::to_vec_pretty(&self.recent_boards)?)?;
-        }
-        if !self.board_prefs.is_empty() || dir.join("board_prefs.json").exists() {
-            write_atomic(&dir.join("board_prefs.json"), &serde_json::to_vec_pretty(&self.board_prefs)?)?;
-        }
-        if self.seen_dirty.replace(false) {
-            write_atomic(&dir.join("seen.json"), &serde_json::to_vec(&self.seen)?)?;
-        }
-        if self.settings.compact_catalog.is_some() || self.settings.catalog_layout.is_some() {
-            write_atomic(&dir.join("settings.json"), &serde_json::to_vec_pretty(&self.settings)?)?;
+        for (name, bytes) in self.files()? {
+            let h = hash(&bytes);
+            if self.written.borrow().get(name) != Some(&h) {
+                write_atomic(&dir.join(name), &bytes)?;
+                self.written.borrow_mut().insert(name, h);
+            }
         }
         Ok(())
     }
@@ -225,7 +234,6 @@ impl Store {
             map.entry(no).or_default().last = now;
         }
         map.retain(|_, t| now - t.last <= SEEN_FOR);
-        self.seen_dirty.set(true);
         new
     }
 
@@ -241,8 +249,10 @@ impl Store {
     pub fn opened(&mut self, site: &str, board: &str, no: u64, replies: u32, now: i64) {
         let t = self.seen.entry(format!("{site}/{board}")).or_default().entry(no).or_default();
         t.replies = Some(replies);
-        t.last = t.last.max(now);
-        self.seen_dirty.set(true);
+        // A thread opened from elsewhere (not seen in a catalog) is kept a while too.
+        if t.last == 0 {
+            t.last = now;
+        }
     }
 
     /// Replies the thread had when it was last opened.
@@ -358,6 +368,13 @@ fn load_file<T: DeserializeOwned + Default>(path: &Path, warnings: &mut Vec<Stri
 }
 
 /// Write to a temp file in the same directory, then rename over the target.
+fn hash(bytes: &[u8]) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    bytes.hash(&mut h);
+    h.finish()
+}
+
 fn write_atomic(path: &Path, data: &[u8]) -> Result<()> {
     let tmp = path.with_extension("json.tmp");
     std::fs::write(&tmp, data).with_context(|| format!("writing {}", tmp.display()))?;
@@ -410,6 +427,29 @@ mod tests {
             s.toggle_hidden("4chan", "g", no);
         }
         assert!(!s.is_hidden("4chan", "g", 0) && !s.is_hidden("4chan", "g", 1) && s.is_hidden("4chan", "g", 2));
+    }
+
+    #[test]
+    fn only_changed_files_are_written() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut s, _) = Store::load(Some(dir.path().to_path_buf()));
+        // Nothing changed: nothing written (not even empty files).
+        s.save().unwrap();
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
+        s.toggle_watch(key(1), "x".into(), 1, 1);
+        s.save().unwrap();
+        assert!(dir.path().join("watched.json").exists() && !dir.path().join("history.json").exists());
+        // Written once; an unchanged store doesn't write it again.
+        std::fs::remove_file(dir.path().join("watched.json")).unwrap();
+        s.save().unwrap();
+        assert!(!dir.path().join("watched.json").exists());
+        // A store loaded from disk has nothing to write either.
+        s.board_opened("4chan", "g");
+        s.save().unwrap();
+        let (s, _) = Store::load(Some(dir.path().to_path_buf()));
+        let before = std::fs::metadata(dir.path().join("recent_boards.json")).unwrap().modified().unwrap();
+        s.save().unwrap();
+        assert_eq!(std::fs::metadata(dir.path().join("recent_boards.json")).unwrap().modified().unwrap(), before);
     }
 
     #[test]

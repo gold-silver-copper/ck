@@ -55,6 +55,9 @@ pub enum View {
 /// Saved board lists older than this (seconds) are refreshed in the background.
 const BOARDS_MAX_AGE: i64 = 24 * 3600;
 
+/// Background changes to the data directory are written at most this often.
+const SAVE_EVERY: Duration = Duration::from_secs(2);
+
 /// Watched-thread refreshes running at once.
 const MAX_REFRESHING: usize = 2;
 
@@ -607,6 +610,9 @@ pub struct App {
     pub gallery: Option<Gallery>,
     /// Save where you are and start there next time.
     pub restore_session: bool,
+    /// The data directory has changes to write, and when it was last written.
+    save_pending: bool,
+    saved_at: Instant,
     /// The session as last saved, and when that was checked.
     session_saved: (Option<crate::store::Session>, Instant),
     /// Thread to select in the catalog once it loads (restoring a session).
@@ -762,6 +768,8 @@ impl App {
             image_search_panel: None,
             gallery: None,
             restore_session: cfg.restore_session,
+            save_pending: false,
+            saved_at: Instant::now(),
             session_saved: (None, Instant::now()),
             pending_catalog: None,
             restoring: false,
@@ -918,6 +926,9 @@ impl App {
         self.background();
         self.flush_notes(Instant::now());
         self.save_session(Some(Instant::now()));
+        if self.save_pending && self.saved_at.elapsed() >= SAVE_EVERY {
+            self.save_now();
+        }
         self.expire_status(Instant::now());
     }
 
@@ -976,6 +987,9 @@ impl App {
         let mut at = |t: Instant| wake = wake.min(t.saturating_duration_since(now));
         if let Some(since) = self.notes_since {
             at(since + Duration::from_secs(3));
+        }
+        if self.save_pending {
+            at(self.saved_at + SAVE_EVERY);
         }
         // An animated GIF in the viewer: its next frame.
         if let Some(t) = self.images.next_frame() {
@@ -1240,7 +1254,16 @@ impl App {
         ThreadKey { site: self.current_site().cfg.name.clone(), board: board.to_string(), no }
     }
 
+    /// Save soon: background changes (refreshes, visits) are written together, every few
+    /// seconds and on quit.
     fn save(&mut self) {
+        self.save_pending = true;
+    }
+
+    /// Save now (what the user just did).
+    pub fn save_now(&mut self) {
+        self.save_pending = false;
+        self.saved_at = Instant::now();
         if let Err(e) = self.store.save() {
             self.status = Some((format!("Couldn't save watched threads: {e:#}"), true));
         }
@@ -1251,9 +1274,12 @@ impl App {
         let no = posts.first().map(|p| p.no).unwrap_or(0);
         let key = self.key(&board, no);
         let mut tv = ThreadView::new(board, no, posts);
+        // On a refresh, the newest post already shown.
+        let mut shown_max = None;
         match self.thread.take().filter(|t| t.no == no && t.board == tv.board) {
             // On refresh, keep the selected post and what's at the top of the view.
             Some(old) => {
+                shown_max = old.posts.iter().map(|p| p.no).max();
                 tv.selected = tv.index.get(&old.posts[old.selected].no).copied().unwrap_or(0);
                 // Expanded replies, the selected entry and the one at the top stay put.
                 tv.expanded = old.expanded.clone();
@@ -1282,7 +1308,10 @@ impl App {
         }
         let max_no = tv.posts.iter().map(|p| p.no).max().unwrap_or(0);
         let subject = thread_subject(&tv.posts);
-        self.store.visit(&key, &subject, tv.posts.len(), max_no, self.clock.now());
+        // A visit is an open, or a refresh that brought new posts.
+        if shown_max.is_none_or(|m| max_no > m) {
+            self.store.visit(&key, &subject, tv.posts.len(), max_no, self.clock.now());
+        }
         self.store.opened(&key.site, &key.board, key.no, tv.posts.len().saturating_sub(1) as u32, self.clock.now());
         if let Some(w) = self.store.watched_mut(&key) {
             generals::note_limit(w, &tv.posts);
@@ -1365,7 +1394,7 @@ impl App {
         }
         let site = self.current_site().cfg.name.clone();
         let hidden = self.store.toggle_hidden(&site, &board, no);
-        self.save();
+        self.save_now();
         let show = self.keys.key(Action::ShowHidden);
         self.status = Some((
             if hidden { format!("Hid {what} {no} ({show} shows hidden ones)") } else { format!("Unhid {what} {no}") },
@@ -1600,7 +1629,7 @@ impl App {
         let layout = self.layout().next();
         let key = self.board_key();
         self.store.board_prefs.entry(key).or_default().layout = Some(layout);
-        self.save();
+        self.save_now();
         let board = self.board.as_ref().map_or(String::new(), |b| format!(" for /{}/", b.uri));
         self.status = Some((format!("Layout{board}: {} (the default is in Settings)", layout.as_str()), false));
     }
@@ -1631,7 +1660,7 @@ impl App {
             Err(e) => {
                 self.store.settings.compact_catalog = None;
                 self.store.settings.catalog_layout = Some(self.default_layout);
-                self.save();
+                self.save_now();
                 self.status = Some((format!("Default catalog layout: {name} (kept in the data directory: {e:#})"), false));
             }
         }
@@ -1770,7 +1799,7 @@ impl App {
         let watching = self.store.toggle_watch(key.clone(), subject, posts, last_seen);
         self.watched_checked.remove(&key);
         self.status = Some((if watching { format!("Watching thread {no}") } else { format!("Stopped watching thread {no}") }, false));
-        self.save();
+        self.save_now();
     }
 
     /// `m`: mark the selected post as yours (or not), to hear about replies to it. The
@@ -1798,7 +1827,7 @@ impl App {
             if mine { format!("Marked No.{no} as yours; replies to it will be counted and notified") } else { format!("No.{no} isn't marked as yours any more") },
             false,
         ));
-        self.save();
+        self.save_now();
         self.remark_thread();
     }
 
@@ -2011,7 +2040,7 @@ impl App {
                 // Remembered for this board.
                 let key = self.board_key();
                 self.store.board_prefs.entry(key).or_default().sort = (self.catalog_sort != Sort::Bump).then(|| self.catalog_sort.label().to_string());
-                self.save();
+                self.save_now();
                 self.status = Some((format!("Sorted by {}", self.catalog_sort.label()), false));
             }
             Action::Compact => self.cycle_layout(),
@@ -2384,7 +2413,7 @@ impl App {
                 }
                 Some(SiteRow::Recent(i)) => {
                     self.store.recent_boards.remove(i);
-                    self.save();
+                    self.save_now();
                     let len = self.visible_sites().len();
                     self.site_list.clamp(len);
                 }
@@ -2404,7 +2433,7 @@ impl App {
             }
             _ => return,
         }
-        self.save();
+        self.save_now();
         if let Some((p, len)) = self.picker() {
             p.clamp(len);
         }
@@ -3575,6 +3604,33 @@ mod tests {
         app.watched_list.state.select(Some(i));
         app.act(Action::Follow);
         assert_eq!(app.store.watched(&key(20)).unwrap().general, None);
+    }
+
+    #[test]
+    fn background_changes_are_saved_together() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = local_app();
+        app.store = Store::load(Some(dir.path().to_path_buf())).0;
+        app.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
+        app.clock = Clock { fixed: Some(1000) };
+        let posts = |n: u64| (1..=n).map(|no| Post { no, ..Default::default() }).collect::<Vec<_>>();
+        app.set_thread(posts(2));
+        // Opening a thread is a visit, written a little later rather than at once.
+        assert!(!dir.path().join("history.json").exists());
+        app.saved_at -= SAVE_EVERY;
+        app.poll();
+        assert!(dir.path().join("history.json").exists());
+        // A refresh without new posts isn't a new visit; one with new posts is.
+        app.clock = Clock { fixed: Some(2000) };
+        app.set_thread(posts(2));
+        assert_eq!(app.store.history[0].opened, 1000);
+        app.set_thread(posts(3));
+        assert_eq!((app.store.history[0].opened, app.store.history[0].last_seen), (2000, 3));
+        // What the user does is saved at once.
+        app.view = View::Thread;
+        app.act(Action::Watch);
+        let watched = std::fs::read_to_string(dir.path().join("watched.json")).unwrap();
+        assert!(watched.contains("\"no\": 1"), "{watched}");
     }
 
     #[test]

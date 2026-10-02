@@ -81,6 +81,7 @@ fn main() -> Result<()> {
     }
     let result = run(&mut terminal, &mut app);
     app.save_session(None);
+    app.save_now();
     let _ = execute!(stdout(), DisableMouseCapture, DisableBracketedPaste);
     ratatui::restore();
     result
