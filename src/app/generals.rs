@@ -156,8 +156,7 @@ mod tests {
         assert!(is_general("/lmg/", &op("/LMG/ - Local Models General")));
         assert!(!is_general("/lmg/", &op("/ldg/ - Local Diffusion General")));
         // A real catalog: the /vcg/ general is found by its tag, and nothing else matches.
-        let path = format!("{}/tests/fixtures/4chan_catalog.json", env!("CARGO_MANIFEST_DIR"));
-        let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let v = crate::backend::fixture("4chan_catalog.json");
         let catalog = crate::backend::futaba::Futaba::fourchan(None).parse_catalog("g", &v);
         let pattern = general_pattern("/vcg/ — Vibe-coding General").unwrap();
         let found: Vec<&Post> = catalog.iter().filter(|p| is_general(&pattern, p)).collect();

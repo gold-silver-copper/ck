@@ -97,10 +97,7 @@ impl Lynxchan {
                 url: format!("{}{path}", self.base),
                 thumb: thumb.map(|t| format!("{}{t}", self.base)),
                 spoiler,
-                width: None,
-                height: None,
-                size: None,
-                md5: None,
+                ..Default::default()
             });
         }
         Post {
@@ -214,28 +211,20 @@ impl Backend for Lynxchan {
 
 #[cfg(test)]
 mod tests {
+    use crate::backend::fixture;
     use serde_json::Value;
 
     use super::Lynxchan;
 
-    fn json(name: &str) -> Value {
-        let path = format!("{}/tests/fixtures/{name}", env!("CARGO_MANIFEST_DIR"));
-        serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
-    }
-
-    fn fixture(name: &str) -> Vec<Value> {
-        serde_json::from_value(json(name)).unwrap()
-    }
-
     #[test]
     fn boards_plain_and_wrapped() {
         // endchan: plain JSON.
-        let (boards, pages) = super::parse_boards(&super::unwrap(json("lynxchan_boards.json")));
+        let (boards, pages) = super::parse_boards(&super::unwrap(fixture("lynxchan_boards.json")));
         assert_eq!(boards.len(), 4);
         assert_eq!(boards[0].uri, "polru");
         assert!(pages > 1);
         // kohlchan: {"status": "ok", "data": {...}}.
-        let (boards, pages) = super::parse_boards(&super::unwrap(json("lynxchan_boards_wrapped.json")));
+        let (boards, pages) = super::parse_boards(&super::unwrap(fixture("lynxchan_boards_wrapped.json")));
         assert_eq!((boards[0].uri.as_str(), boards[0].title.as_str()), ("int", "International"));
         assert_eq!(pages, 1);
     }
@@ -243,16 +232,16 @@ mod tests {
     #[test]
     fn overboards() {
         // Named in the board list...
-        let names = |f| super::parse_overboards(&super::unwrap(json(f))).into_iter().map(|b| b.uri).collect::<Vec<_>>();
+        let names = |f| super::parse_overboards(&super::unwrap(fixture(f))).into_iter().map(|b| b.uri).collect::<Vec<_>>();
         assert_eq!(names("lynxchan_boards.json"), ["overboard", "overboard_sfw"]);
         assert_eq!(names("lynxchan_boards_wrapped.json"), ["alle", "nvip"]);
         // ...and served as index pages, threads from many boards.
         let end = Lynxchan::new("https://endchan.net".into(), None);
-        let posts = end.parse_index(&json("lynxchan_overboard.json"));
+        let posts = end.parse_index(&fixture("lynxchan_overboard.json"));
         let boards: Vec<_> = posts.iter().map(|p| p.board.as_deref().unwrap()).collect();
         assert_eq!(boards, ["terrachan", "derman", "polru", "dota"]);
         let kohl = Lynxchan::new("https://kohlchan.net".into(), None);
-        let posts = kohl.parse_index(&json("kohlchan_overboard.json"));
+        let posts = kohl.parse_index(&fixture("kohlchan_overboard.json"));
         assert_eq!(posts[0].board.as_deref(), Some("int"));
         assert_eq!(posts[0].replies, Some(47 + 2));
     }
@@ -260,10 +249,10 @@ mod tests {
     #[test]
     fn catalog_and_thread() {
         let end = Lynxchan::new("https://endchan.net".into(), None);
-        let cat = end.parse_catalog(&json("lynxchan_catalog.json"));
+        let cat = end.parse_catalog(&fixture("lynxchan_catalog.json"));
         assert_eq!(cat[0].no, 908495);
         assert!(cat[0].sticky);
-        let posts = end.parse_thread(&json("lynxchan_thread.json"));
+        let posts = end.parse_thread(&fixture("lynxchan_thread.json"));
         assert_eq!(posts[0].no, 867082);
         // The OP links the previous thread through its rendered markdown.
         assert!(posts[0].links.iter().any(|l| l.thread == Some(782482)));
@@ -271,12 +260,12 @@ mod tests {
         let urls: Vec<&str> = posts.iter().flat_map(|p| &p.urls).map(String::as_str).collect();
         assert!(urls.contains(&"https://Paha-Ne-Vydast.me/astrapress/89410)"), "{urls:?}");
         let kohl = Lynxchan::new("https://kohlchan.net".into(), None);
-        let posts = kohl.parse_thread(&json("kohlchan_thread.json"));
+        let posts = kohl.parse_thread(&fixture("kohlchan_thread.json"));
         assert!(posts.len() > 1 && posts.iter().all(|p| p.no > 0));
     }
 
-    fn find(v: &[Value], no: u64) -> &Value {
-        v.iter().find(|t| t["threadId"].as_u64() == Some(no)).unwrap()
+    fn find(v: &Value, no: u64) -> &Value {
+        v.as_array().unwrap().iter().find(|t| t["threadId"].as_u64() == Some(no)).unwrap()
     }
 
     #[test]

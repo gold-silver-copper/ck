@@ -22,19 +22,14 @@ fn app(images: bool) -> App {
     let mut store = Store::default();
     let key = |board: &str, no| ThreadKey { site: "4chan".into(), board: board.into(), no };
     store.watched = vec![
-        Watched { key: key("g", 1000), subject: "Snapshot thread".into(), posts: 5, last_seen: 1002, unread: 2, dead: false, mine: Vec::new(), replies: 0, general: None, at_limit: false },
-        Watched { key: key("g", 900), subject: "Old thread".into(), posts: 300, last_seen: 1199, unread: 0, dead: true, mine: Vec::new(), replies: 0, general: None, at_limit: false },
+        Watched { key: key("g", 1000), subject: "Snapshot thread".into(), posts: 5, last_seen: 1002, unread: 2, ..Default::default() },
+        Watched { key: key("g", 900), subject: "Old thread".into(), posts: 300, last_seen: 1199, dead: true, ..Default::default() },
         Watched {
             key: ThreadKey { site: "lainchan".into(), board: "λ".into(), no: 42 },
             subject: "Programming Employment".into(),
             posts: 92,
             last_seen: 77,
-            unread: 0,
-            dead: false,
-            mine: Vec::new(),
-            replies: 0,
-            general: None,
-            at_limit: false,
+            ..Default::default()
         },
     ];
     store.history = vec![
@@ -77,11 +72,10 @@ fn file(name: &str) -> Attachment {
         filename: name.into(),
         url: format!("https://i.example/{name}"),
         thumb: Some(format!("https://i.example/thumb/{name}")),
-        spoiler: false,
         width: Some(800),
         height: Some(600),
         size: Some(123_456),
-        md5: None,
+        ..Default::default()
     }
 }
 
@@ -448,8 +442,7 @@ fn gallery() {
 #[test]
 fn archive_search_results() {
     let mut a = app(false);
-    let path = format!("{}/tests/fixtures/foolfuuka_search.json", env!("CARGO_MANIFEST_DIR"));
-    let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    let v = crate::backend::fixture("foolfuuka_search.json");
     a.tab.site = a.sites.iter().position(|s| s.cfg.name == "desuarchive").unwrap();
     a.search_input = Some("borrow".into());
     a.tab.view = View::Catalog;

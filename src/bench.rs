@@ -9,14 +9,10 @@ use ratatui::backend::TestBackend;
 use ratatui_image::picker::{Picker, ProtocolType};
 
 use crate::app::{App, ThreadView, View, Viewer};
+use crate::backend::fixture;
 use crate::backend::futaba::Futaba;
 use crate::images::Images;
 use crate::model::{Attachment, Board, Post};
-
-fn fixture(name: &str) -> serde_json::Value {
-    let path = format!("{}/tests/fixtures/{name}", env!("CARGO_MANIFEST_DIR"));
-    serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
-}
 
 fn report(label: &str, per: Duration) {
     eprintln!("{label:<60} {per:>10.2?}");
@@ -124,16 +120,7 @@ fn picker(proto: ProtocolType) -> Picker {
 }
 
 fn file(url: &str) -> Attachment {
-    Attachment {
-        filename: "x.png".into(),
-        url: url.into(),
-        thumb: Some(format!("{url}.thumb")),
-        spoiler: false,
-        width: None,
-        height: None,
-        size: None,
-        md5: None,
-    }
+    Attachment { filename: "x.png".into(), url: url.into(), thumb: Some(format!("{url}.thumb")), ..Default::default() }
 }
 
 #[test]

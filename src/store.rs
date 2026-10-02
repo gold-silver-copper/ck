@@ -14,14 +14,14 @@ const RECENT_BOARDS: usize = 20;
 const HIDDEN_PER_BOARD: usize = 3000;
 
 /// Identifies a thread across sites.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ThreadKey {
     pub site: String,
     pub board: String,
     pub no: u64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Watched {
     #[serde(flatten)]
     pub key: ThreadKey,
@@ -303,18 +303,7 @@ impl Store {
             self.watched.remove(i);
             return false;
         }
-        self.watched.push(Watched {
-            key,
-            subject,
-            posts,
-            last_seen,
-            unread: 0,
-            dead: false,
-            mine: Vec::new(),
-            replies: 0,
-            general: None,
-            at_limit: false,
-        });
+        self.watched.push(Watched { key, subject, posts, last_seen, ..Default::default() });
         true
     }
 

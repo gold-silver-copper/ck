@@ -124,8 +124,6 @@ fn post(v: &Value) -> Option<Post> {
         links: parsed.links,
         urls: parsed.urls,
         files: attachment(&v["media"]).into_iter().collect(),
-        replies: None,
-        images: None,
         sticky: as_bool(&v["sticky"]),
         board: as_str(&v["board"]["shortname"]),
         locked: as_bool(&v["locked"]),
@@ -215,12 +213,7 @@ impl Backend for Foolfuuka {
 
 #[cfg(test)]
 mod tests {
-    use serde_json::Value;
-
-    fn fixture(name: &str) -> Value {
-        let path = format!("{}/tests/fixtures/{name}", env!("CARGO_MANIFEST_DIR"));
-        serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
-    }
+    use crate::backend::fixture;
 
     #[test]
     fn archives() {

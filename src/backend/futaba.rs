@@ -233,14 +233,10 @@ impl Backend for Futaba {
 
 #[cfg(test)]
 mod tests {
+    use crate::backend::fixture;
     use serde_json::Value;
 
     use super::Futaba;
-
-    fn fixture(name: &str) -> Value {
-        let path = format!("{}/tests/fixtures/{name}", env!("CARGO_MANIFEST_DIR"));
-        serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
-    }
 
     fn catalog_thread(v: &Value, no: u64) -> Value {
         let threads = v[0]["threads"].as_array().unwrap();

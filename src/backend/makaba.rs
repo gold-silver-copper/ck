@@ -159,6 +159,8 @@ fn hex_to_base64(hex: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    use crate::backend::fixture;
+
     #[test]
     fn md5_in_base64() {
         assert_eq!(super::hex_to_base64("c578d37450280436da83c3cf3b022fd5").as_deref(), Some("xXjTdFAoBDbag8PPOwIv1Q=="));
@@ -167,15 +169,8 @@ mod tests {
         assert_eq!(super::hex_to_base64("zz"), None);
     }
 
-    use serde_json::Value;
-
     use super::Makaba;
     use crate::markup::{is_quote_link, is_spoiler};
-
-    fn fixture(name: &str) -> Value {
-        let path = format!("{}/tests/fixtures/{name}", env!("CARGO_MANIFEST_DIR"));
-        serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
-    }
 
     fn dvach() -> Makaba {
         Makaba::new("https://2ch.hk".into(), Some("https://2ch.su".into()), None)

@@ -68,6 +68,13 @@ pub fn to_board(b: &BoardConfig) -> Board {
     }
 }
 
+/// A JSON file from `tests/fixtures`.
+#[cfg(test)]
+pub fn fixture(name: &str) -> serde_json::Value {
+    let path = format!("{}/tests/fixtures/{name}", env!("CARGO_MANIFEST_DIR"));
+    serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
+}
+
 #[cfg(test)]
 mod tests {
     use crate::config::Config;

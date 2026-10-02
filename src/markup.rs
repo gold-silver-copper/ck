@@ -545,9 +545,7 @@ mod tests {
     }
 
     fn sample(name: &str) -> String {
-        let path = format!("{}/tests/fixtures/markup_samples.json", env!("CARGO_MANIFEST_DIR"));
-        let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
-        v[name].as_str().unwrap().to_string()
+        crate::backend::fixture("markup_samples.json")[name].as_str().unwrap().to_string()
     }
 
     fn code_lines(p: &Parsed) -> Vec<String> {

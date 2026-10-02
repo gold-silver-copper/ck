@@ -74,16 +74,7 @@ mod tests {
 
     #[test]
     fn unique_names() {
-        let file = |name: &str| Attachment {
-            filename: name.into(),
-            url: format!("https://x/{name}"),
-            thumb: None,
-            spoiler: false,
-            width: None,
-            height: None,
-            size: None,
-            md5: None,
-        };
+        let file = |name: &str| Attachment { filename: name.into(), url: format!("https://x/{name}"), ..Default::default() };
         let a = Post { no: 1, files: vec![file("a.png"), file("a.png"), file("b.png")], ..Default::default() };
         let b = Post { no: 2, files: vec![file("a.png")], ..Default::default() };
         let names: Vec<_> = jobs(&[&a, &b], Path::new("/d"))

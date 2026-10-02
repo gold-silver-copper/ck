@@ -95,18 +95,8 @@ fn sleeps_until_the_next_thing_to_do() {
     app.status = None;
     app.status_since = None;
     // A watched thread that was never refreshed is due now.
-    app.store.watched.push(crate::store::Watched {
-        key: ThreadKey { site: "4chan".into(), board: "g".into(), no: 1 },
-        subject: String::new(),
-        posts: 1,
-        last_seen: 1,
-        unread: 0,
-        dead: false,
-        mine: Vec::new(),
-        replies: 0,
-        general: None,
-        at_limit: false,
-    });
+    let key = ThreadKey { site: "4chan".into(), board: "g".into(), no: 1 };
+    app.store.watched.push(crate::store::Watched { key, posts: 1, last_seen: 1, ..Default::default() });
     assert_eq!(app.next_wake(now), Duration::ZERO);
     // But while the maximum number of refreshes is running, due ones don't spin the loop.
     for no in [2, 3] {
@@ -591,8 +581,7 @@ fn archive_search_and_back() {
     }
     app.on_key(KeyEvent::from(KeyCode::Enter));
     assert_eq!((app.tab.view, app.tab.site), (View::Search, 1));
-    let path = format!("{}/tests/fixtures/foolfuuka_search.json", env!("CARGO_MANIFEST_DIR"));
-    let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    let v = crate::backend::fixture("foolfuuka_search.json");
     app.handle(Msg::Search(app.tab.req, 1, crate::backend::foolfuuka::parse_search(&v)));
     assert_eq!(app.tab.search.as_ref().unwrap().hits.len(), 4);
     // Going down to the end asks for the next page.

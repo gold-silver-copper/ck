@@ -153,14 +153,9 @@ impl Backend for Jschan {
 
 #[cfg(test)]
 mod tests {
-    use serde_json::Value;
+    use crate::backend::fixture;
 
     const BASE: &str = "https://zzzchan.xyz";
-
-    fn fixture(name: &str) -> Value {
-        let path = format!("{}/tests/fixtures/{name}", env!("CARGO_MANIFEST_DIR"));
-        serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
-    }
 
     #[test]
     fn boards_skip_webring() {
