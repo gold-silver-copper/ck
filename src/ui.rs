@@ -13,7 +13,7 @@ use ratatui_image::Image;
 use unicode_width::UnicodeWidthStr;
 
 use crate::app::{
-    App, Clock, Hit, SETTING_SECTIONS, SettingsPopup, SiteRow, Sort, ThreadLayout, ThreadView, View, key_rows,
+    App, Clock, Hit, LinkItem, SETTING_SECTIONS, SettingsPopup, SiteRow, Sort, ThreadLayout, ThreadView, View, key_rows,
     setting_rows,
 };
 use crate::http;
@@ -108,6 +108,9 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         draw_footer(f, app, footer);
         if app.preview.is_some() {
             draw_preview(f, app);
+        }
+        if app.links.is_some() {
+            draw_links(f, app);
         }
         if app.settings.popup.is_some() {
             draw_settings_popup(f, app);
@@ -916,6 +919,46 @@ fn draw_preview(f: &mut Frame, app: &App) {
     }
 }
 
+/// The selected post's links: quotes leading elsewhere, web links, files.
+fn draw_links(f: &mut Frame, app: &mut App) {
+    let t = theme();
+    let Some(p) = &mut app.links else { return };
+    let w = f.area().width.saturating_sub(8).clamp(20, 110);
+    let inner = panel(f, w, p.items.len() as u16 + 3, "Links", "enter open · y copy · esc close");
+    let rows = inner.height as usize;
+    let sel = p.list.selected().unwrap_or(0);
+    let off = p.list.offset().min(sel).max((sel + 1).saturating_sub(rows));
+    *p.list.offset_mut() = off;
+    p.area = inner;
+    for (k, item) in p.items.iter().enumerate().skip(off).take(rows) {
+        let y = inner.y + (k - off) as u16;
+        if k == sel {
+            fill(f, Rect::new(inner.x - 2, y, inner.width + 4, 1), t.selection);
+            fill(f, Rect::new(inner.x - 2, y, 1, 1), t.primary);
+        }
+        let (kind, text, extra) = match item {
+            LinkItem::Quote(_, label) => ("quote", label.clone(), String::new()),
+            LinkItem::Url(u) => ("web", u.clone(), String::new()),
+            LinkItem::File(file) => ("file", file.filename.clone(), format!("  {}", file.url)),
+        };
+        let room = (inner.width as usize).saturating_sub(9);
+        let text = truncate(&text, room);
+        let extra = truncate(&extra, room.saturating_sub(text.width()));
+        put(
+            f,
+            inner.x,
+            y,
+            inner.width,
+            Line::from(vec![
+                chip(format!("{kind:<5}"), t.text_dim, t.surface_high),
+                Span::raw("  "),
+                Span::styled(text, Style::new().fg(if kind == "file" { t.text } else { t.quotelink })),
+                Span::styled(extra, dim()),
+            ]),
+        );
+    }
+}
+
 /// Key help, by section, with the configured keys. Keep in sync with the README.
 fn help_sections(keys: &KeyMap) -> Vec<(&'static str, Vec<(String, &'static str)>)> {
     let k = |a| keys.label(a);
@@ -942,6 +985,7 @@ fn help_sections(keys: &KeyMap) -> Vec<(&'static str, Vec<(String, &'static str)
             "Catalog",
             vec![
                 (k(Action::View), "view the OP's images"),
+                (k(Action::Links), "the OP's links and files"),
                 (k(Action::Watch), "watch / unwatch the thread"),
                 (k(Action::Sort), "cycle sort order"),
                 (k(Action::Compact), "compact layout on / off"),
@@ -962,6 +1006,7 @@ fn help_sections(keys: &KeyMap) -> Vec<(&'static str, Vec<(String, &'static str)
                 (pair(Action::Spoiler, Action::AllSpoilers), "show spoilers: post / all"),
                 (k(Action::OpenFile), "open file (videos in mpv)"),
                 (k(Action::View), "view the post's images"),
+                (k(Action::Links), "the post's links and files"),
                 (pair(Action::Download, Action::DownloadThread), "save files: post / thread"),
                 (k(Action::Watch), "watch / unwatch the thread"),
                 (k(Action::Unread), "jump to the first unread post"),

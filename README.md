@@ -70,6 +70,7 @@ is in brackets):
 | `i`  | thread                | open the post's file (videos in mpv if it's installed) [`open_file`] |
 | `d`/`D` | thread             | save the post's / whole thread's files [`download`, `download_thread`] |
 | `a`  | thread                | after a 404: open the thread in the site's archive [`archive`] |
+| `O`  | catalog, thread       | the post's links: quotes of other threads, web links, files; `enter` opens, `y` copies [`links`] |
 | `x`  | Watched, History      | remove the entry [`remove`]                                |
 | `y`  | catalog, thread, Watched, History, viewer | copy the post's text (catalog: the OP's; Watched/History: subject and link; viewer: the file's URL) [`copy`] |
 | `Y`  | catalog, thread, Watched, History, viewer | copy the link to the post or thread [`copy_link`] |

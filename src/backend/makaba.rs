@@ -64,6 +64,7 @@ impl Makaba {
             body: parsed.lines,
             quotes: parsed.quotes,
             links: parsed.links,
+            urls: parsed.urls,
             files: v["files"].as_array().into_iter().flatten().filter_map(|f| self.attachment(f)).collect(),
             sticky: as_bool(&v["sticky"]),
             board: as_str(&v["board"]),

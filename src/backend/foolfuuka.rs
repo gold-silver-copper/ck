@@ -104,6 +104,7 @@ fn post(v: &Value) -> Option<Post> {
         body: parsed.lines,
         quotes: parsed.quotes,
         links: parsed.links,
+        urls: parsed.urls,
         files: attachment(&v["media"]).into_iter().collect(),
         replies: None,
         images: None,
@@ -226,6 +227,8 @@ mod tests {
         // Quotes of the OP carry the thread in their href.
         let reply = posts.iter().find(|p| p.quotes.contains(&109959723)).unwrap();
         assert!(reply.links.iter().any(|l| l.thread == Some(109959723)));
+        // Backlinks to the archive's own pages are quote links, not web links.
+        assert!(posts.iter().flat_map(|p| &p.urls).all(|u| !u.contains("desuarchive.org/g/thread/109959723")));
         assert_eq!(crate::http::as_u64(&fixture("foolfuuka_post.json")["thread_num"]), Some(109959723));
     }
 }

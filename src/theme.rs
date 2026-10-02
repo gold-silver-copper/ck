@@ -423,6 +423,8 @@ pub mod mark {
     pub const SPOILER: Color = Color::Rgb(1, 2, 6);
     /// Text of a revealed spoiler.
     pub const REVEALED: Color = Color::Rgb(1, 2, 7);
+    /// A web link in a post.
+    pub const LINK: Color = Color::Rgb(1, 2, 8);
 }
 
 fn paint_color(c: Option<Color>, t: &Theme) -> Option<Color> {
@@ -434,6 +436,7 @@ fn paint_color(c: Option<Color>, t: &Theme) -> Option<Color> {
         mark::CODE => t.code,
         mark::SPOILER => t.spoiler,
         mark::REVEALED => t.text,
+        mark::LINK => t.quotelink,
         other => other,
     })
 }

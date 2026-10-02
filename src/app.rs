@@ -23,7 +23,9 @@ use crate::store::{Store, ThreadKey};
 use crate::theme::{self, ThemeDef, ThemeSetting};
 
 mod goto;
+mod links;
 mod settings;
+pub use links::{LinkItem, LinksPanel};
 pub use settings::{Popup as SettingsPopup, SECTIONS as SETTING_SECTIONS, key_rows, rows as setting_rows, tilde};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -401,6 +403,7 @@ pub struct App {
     pub images: Images,
     pub viewer: Option<Viewer>,
     pub preview: Option<Preview>,
+    pub links: Option<LinksPanel>,
     /// True while typing a thread search.
     pub searching: bool,
     /// What's typed after `:`, while it's being typed.
@@ -419,8 +422,9 @@ pub struct App {
     /// After a thread 404'd: the same thread on the site's configured archive.
     archive_offer: Option<ThreadKey>,
     pub keys: KeyMap,
-    /// The last text copied to the clipboard.
+    /// The last text copied to the clipboard, and the last URL opened.
     pub copied: Option<String>,
+    pub opened: Option<String>,
     /// The config file that settings are saved to (tests point it elsewhere).
     pub config_path: Option<std::path::PathBuf>,
     pub clock: Clock,
@@ -510,6 +514,7 @@ impl App {
             }, DiskCache::default_dir().map(|d| DiskCache::new(d, crate::disk_cache::BUDGET))),
             viewer: None,
             preview: None,
+            links: None,
             searching: false,
             goto: None,
             trail: Vec::new(),
@@ -520,6 +525,7 @@ impl App {
             archive_offer: None,
             keys,
             copied: None,
+            opened: None,
             config_path: Config::path(),
             clock: Clock::default(),
             downloads: Downloads::default(),
@@ -1093,7 +1099,7 @@ impl App {
         let down = matches!(ev.kind, MouseEventKind::ScrollDown);
         if matches!(ev.kind, MouseEventKind::ScrollDown | MouseEventKind::ScrollUp) {
             let key = |c| KeyEvent::from(if c { KeyCode::Down } else { KeyCode::Up });
-            if self.show_help || self.viewer.is_some() || self.preview.is_some() {
+            if self.show_help || self.viewer.is_some() || self.preview.is_some() || self.links.is_some() {
                 self.on_key(key(down));
             } else if self.view == View::Thread {
                 if let Some(t) = &mut self.thread {
@@ -1105,6 +1111,10 @@ impl App {
             return;
         }
         if ev.kind != MouseEventKind::Down(MouseButton::Left) {
+            return;
+        }
+        if self.links.is_some() {
+            self.on_links_click(ev.column, ev.row, now);
             return;
         }
         if self.show_help || self.preview.is_some() {
@@ -1260,6 +1270,10 @@ impl App {
             self.on_preview_key(key.code);
             return;
         }
+        if self.links.is_some() {
+            self.on_links_key(key.code);
+            return;
+        }
         if self.goto.is_some() {
             self.on_goto_key(key);
             return;
@@ -1341,6 +1355,7 @@ impl App {
             Action::Watch => self.toggle_watch(),
             Action::Remove => self.remove_entry(),
             Action::Goto => self.goto = Some(String::new()),
+            Action::Links => self.open_links(),
             Action::Copy => self.copy(false),
             Action::CopyLink => self.copy(true),
             Action::Sort => {
@@ -1546,7 +1561,7 @@ impl App {
     /// Follow the selected post's first link that leads out of this thread, preferring links
     /// to posts over links to boards.
     fn follow_link(&mut self) {
-        let (Some(t), Some(board)) = (&self.thread, self.board.clone()) else { return };
+        let (Some(t), Some(board)) = (&self.thread, &self.board) else { return };
         let here = |l: &Link| l.board.as_ref().is_none_or(|b| *b == board.uri);
         let leaves = |l: &&Link| {
             let in_thread = here(l)
@@ -1555,18 +1570,25 @@ impl App {
         };
         let links = &t.posts[t.selected].links;
         let out = links.iter().filter(leaves).find(|l| l.post.is_some()).or_else(|| links.iter().find(leaves));
-        let Some(link) = out.cloned() else {
-            self.status = Some(("Post quotes nothing in this thread".into(), false));
-            return;
-        };
+        match out.cloned() {
+            Some(link) => self.follow(link),
+            None => self.status = Some(("Post quotes nothing in this thread".into(), false)),
+        }
+    }
+
+    /// Go where a quote link leads: a thread (remembered for `u`), a board, or a post whose
+    /// thread the engine is asked for.
+    fn follow(&mut self, link: Link) {
+        let Some(board) = self.board.clone() else { return };
         let target = match &link.board {
             Some(uri) if *uri != board.uri => self.find_board(uri),
             _ => board.clone(),
         };
         match (link.thread, link.post) {
             (Some(no), post) => {
-                let from = (self.site, board, t.no, t.posts[t.selected].no);
-                self.trail.push(from);
+                if let Some(t) = self.thread.as_ref().filter(|_| self.view == View::Thread) {
+                    self.trail.push((self.site, board, t.no, t.posts[t.selected].no));
+                }
                 self.open_thread_at(target, no, post, true);
             }
             (None, None) => {
@@ -1644,7 +1666,7 @@ impl App {
     }
 
     /// Open a file externally: videos in mpv when it's installed, everything else in the default opener.
-    fn open_file(&mut self, f: &Attachment) {
+    pub fn open_file(&mut self, f: &Attachment) {
         if f.is_video() && on_path("mpv") {
             let mut cmd = std::process::Command::new("mpv");
             cmd.arg(&f.url)
@@ -1825,6 +1847,10 @@ impl App {
             self.status = Some(("Nothing to copy: the post has no text".into(), false));
             return;
         }
+        self.copy_text(what, text);
+    }
+
+    pub fn copy_text(&mut self, what: &str, text: String) {
         self.status = Some(match crate::clipboard::copy(&text) {
             Ok(()) if what == "text" => (format!("Copied {} characters", text.chars().count()), false),
             Ok(()) => (format!("Copied {what}: {text}"), false),
@@ -1864,7 +1890,11 @@ impl App {
         }
     }
 
-    fn open_url(&mut self, url: &str) {
+    pub fn open_url(&mut self, url: &str) {
+        self.opened = Some(url.to_string());
+        if cfg!(test) {
+            return;
+        }
         self.status = Some(match open::that_detached(url) {
             Ok(()) => (format!("Opened {url}"), false),
             Err(e) => (format!("Couldn't open {url}: {e}"), true),
@@ -2204,6 +2234,43 @@ mod tests {
         // A paste with nothing being typed starts the input.
         app.paste("http://localhost:3/y/res/1.html\n");
         assert_eq!(app.goto.as_deref(), Some("http://localhost:3/y/res/1.html"));
+    }
+
+    #[test]
+    fn links_panel_lists_and_opens() {
+        let mut app = local_app();
+        app.switch_site(0);
+        app.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
+        let html = r#"<a href="/x/res/1.html#1" class="quotelink">&gt;&gt;1</a> <a href="/xy/res/9.html#10">&gt;&gt;&gt;/xy/10</a> see https://example.com/a"#;
+        let parsed = crate::markup::parse_html(html, crate::markup::Flavor::Vichan);
+        let reply = Post { no: 2, body: parsed.lines, quotes: parsed.quotes, links: parsed.links, urls: parsed.urls, files: vec![Attachment { filename: "a.png".into(), url: "http://127.0.0.1:3/x/src/a.png".into(), ..Default::default() }], ..Default::default() };
+        app.thread = Some(ThreadView::new("x".into(), 1, vec![Post { no: 1, ..Default::default() }, reply]));
+        app.thread.as_mut().unwrap().selected = 1;
+        app.view = View::Thread;
+        app.act(Action::Links);
+        // The quote of a post in this thread isn't listed; the other board's is.
+        let kinds: Vec<String> = app.links.as_ref().unwrap().items.iter().map(|i| match i {
+            LinkItem::Quote(_, label) => label.clone(),
+            LinkItem::Url(u) => u.clone(),
+            LinkItem::File(f) => f.filename.clone(),
+        }).collect();
+        assert_eq!(kinds, [">>>/xy/10  (thread 9)", "https://example.com/a", "a.png"]);
+        // y copies the selected link; enter on a web link opens it.
+        app.on_key(KeyEvent::from(KeyCode::Down));
+        app.on_key(KeyEvent::from(KeyCode::Char('y')));
+        assert_eq!(app.copied.as_deref(), Some("https://example.com/a"));
+        app.on_key(KeyEvent::from(KeyCode::Enter));
+        assert!(app.links.is_none());
+        assert_eq!(app.opened.as_deref(), Some("https://example.com/a"));
+        // Enter on the quote opens its thread, and `u` will come back.
+        app.act(Action::Links);
+        app.on_key(KeyEvent::from(KeyCode::Enter));
+        assert_eq!((app.board.as_ref().unwrap().uri.as_str(), app.pending_thread, app.pending_post), ("xy", 9, Some(10)));
+        assert_eq!(app.trail.len(), 1);
+        // A post without links says so.
+        app.thread = Some(ThreadView::new("x".into(), 1, vec![Post { no: 1, ..Default::default() }]));
+        app.act(Action::Links);
+        assert!(app.links.is_none() && app.status.as_ref().unwrap().0 == "Post has no links");
     }
 
     #[test]

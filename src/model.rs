@@ -66,6 +66,8 @@ pub struct Post {
     pub quotes: Vec<u64>,
     /// All quote links, including ones to other threads and boards.
     pub links: Vec<Link>,
+    /// Web links in the comment.
+    pub urls: Vec<String>,
     pub files: Vec<Attachment>,
     // Catalog-only fields.
     pub replies: Option<u32>,

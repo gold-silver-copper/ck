@@ -140,6 +140,7 @@ impl Futaba {
             body: parsed.lines,
             quotes: parsed.quotes,
             links: parsed.links,
+            urls: parsed.urls,
             files,
             replies: as_u64(&v["replies"]).map(|n| n as u32),
             images: as_u64(&v["images"]).map(|n| n as u32),
@@ -273,6 +274,7 @@ mod tests {
         // vichan marks deleted files with ext "deleted"; they're dropped.
         assert!(posts.iter().flat_map(|p| &p.files).all(|f| !f.url.ends_with("deleted")));
         assert!(posts.iter().any(|p| p.links.iter().any(|l| l.thread == Some(30364))));
+        assert!(posts.iter().any(|p| p.urls == ["https://youtu.be/nUsDk8wjRPs"]));
     }
 
     #[test]
@@ -289,6 +291,8 @@ mod tests {
         assert_eq!((f.filename.as_str(), f.width, f.size), ("842251815915.jpg", Some(1080), Some(178528)));
         let cat = b.parse_catalog("leftypol", &fixture("leftypol_catalog.json"));
         assert!(cat.iter().any(|p| !p.files.is_empty()));
+        let urls: Vec<&String> = posts.iter().flat_map(|p| &p.urls).collect();
+        assert!(urls.iter().any(|u| *u == "https://jacobin.com/2026/09/economic-democracy-is-at-the-heart-of-socialism"));
     }
 
     #[test]

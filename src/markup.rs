@@ -19,6 +19,11 @@ pub fn quotelink() -> Style {
     Style::new().fg(mark::QUOTELINK).add_modifier(Modifier::UNDERLINED)
 }
 
+/// A web link (not a quote link).
+pub fn link() -> Style {
+    Style::new().fg(mark::LINK).add_modifier(Modifier::UNDERLINED)
+}
+
 pub fn heading() -> Style {
     Style::new().fg(mark::HEADING).add_modifier(Modifier::BOLD)
 }
@@ -37,6 +42,8 @@ pub struct Parsed {
     pub quotes: Vec<u64>,
     /// Every quote link with as much of its target as the markup gives.
     pub links: Vec<Link>,
+    /// Web links: link targets and bare `http(s)://` URLs in the text.
+    pub urls: Vec<String>,
 }
 
 /// The HTML dialects differ in a few ways.
@@ -122,8 +129,20 @@ pub fn parse_html(html: &str, flavor: Flavor) -> Parsed {
                 let class = attr(tag_body, "class").unwrap_or_default().to_ascii_lowercase();
                 let block = name == "pre" || (name == "div" && class.contains("hljs"));
                 let base = stack.last().map(|o| o.style).unwrap_or_default();
+                let href = if name == "a" { attr(tag_body, "href").map(|h| decode(&h)) } else { None };
+                // Links to other sites, as opposed to quote links (which have a class saying so).
+                let web = href.as_deref().filter(|h| {
+                    (h.starts_with("http://") || h.starts_with("https://"))
+                        && !["quote", "backlink", "reply"].iter().any(|c| class.contains(c))
+                });
+                if let Some(h) = web
+                    && !b.urls.iter().any(|u| u == h)
+                {
+                    b.urls.push(h.to_string());
+                }
                 let style = match name.as_str() {
                     _ if block => base.patch(code()),
+                    "a" if web.is_some() => base.patch(link()),
                     "a" => base.patch(quotelink()),
                     "b" | "strong" => base.add_modifier(Modifier::BOLD),
                     "i" | "em" => base.add_modifier(Modifier::ITALIC),
@@ -149,7 +168,6 @@ pub fn parse_html(html: &str, flavor: Flavor) -> Parsed {
                 if block {
                     b.end_line();
                 }
-                let href = if name == "a" { attr(tag_body, "href") } else { None };
                 stack.push(Open { name, style, href, code: block });
             }
         }
@@ -189,6 +207,7 @@ struct Builder {
     sealed: bool,
     quotes: Vec<u64>,
     links: Vec<Link>,
+    urls: Vec<String>,
 }
 
 impl Builder {
@@ -273,8 +292,71 @@ impl Builder {
         while self.lines.last().is_some_and(|l| l.width() == 0) {
             self.lines.pop();
         }
-        Parsed { lines: self.lines, quotes: self.quotes, links: self.links }
+        // Bare URLs: found per line, after <wbr> and the like have been joined up.
+        for line in self.lines.iter_mut().filter(|l| l.style != CODE_LINE) {
+            let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+            let ranges = find_urls(&text);
+            for &(a, b) in &ranges {
+                if !self.urls.iter().any(|u| *u == text[a..b]) {
+                    self.urls.push(text[a..b].to_string());
+                }
+            }
+            if !ranges.is_empty() {
+                line.spans = style_ranges(std::mem::take(&mut line.spans), &ranges);
+            }
+        }
+        Parsed { lines: self.lines, quotes: self.quotes, links: self.links, urls: self.urls }
     }
+}
+
+/// Byte ranges of `http(s)://` URLs in text. Trailing punctuation is left out, and so is a
+/// closing bracket that has no opening one in the URL.
+fn find_urls(s: &str) -> Vec<(usize, usize)> {
+    let mut out = Vec::new();
+    let mut from = 0;
+    while let Some(i) = [s[from..].find("http://"), s[from..].find("https://")].into_iter().flatten().min() {
+        let start = from + i;
+        let end = s[start..].find(|c: char| c.is_whitespace() || matches!(c, '<' | '>' | '"' | '`')).map_or(s.len(), |e| start + e);
+        let mut url = &s[start..end];
+        loop {
+            let unbalanced = |open, close| url.ends_with(close) && url.matches(open).count() < url.matches(close).count();
+            if url.ends_with(['.', ',', ';', ':', '!', '?', '\'', '*']) || unbalanced('(', ')') || unbalanced('[', ']') {
+                url = &url[..url.len() - 1];
+            } else {
+                break;
+            }
+        }
+        let host = url.split_once("://").map_or("", |(_, h)| h);
+        if !host.is_empty() && !host.starts_with('/') {
+            out.push((start, start + url.len()));
+        }
+        from = end.max(start + 1);
+    }
+    out
+}
+
+/// Give the parts of `spans` inside `ranges` (byte offsets into their joined text) the link
+/// style, splitting spans as needed. Spoilers and quote links keep their style.
+fn style_ranges(spans: Vec<Span<'static>>, ranges: &[(usize, usize)]) -> Vec<Span<'static>> {
+    let mut out = Vec::new();
+    let mut off = 0;
+    for s in spans {
+        let len = s.content.len();
+        let keep = is_spoiler(s.style) || is_quote_link(s.style) || s.style.fg == Some(mark::LINK);
+        let mut cuts: Vec<usize> = ranges.iter().flat_map(|&(a, b)| [a, b]).filter(|&c| c > off && c < off + len).map(|c| c - off).collect();
+        cuts.sort_unstable();
+        cuts.dedup();
+        let mut at = 0;
+        for end in cuts.into_iter().chain([len]) {
+            let piece = &s.content[at..end];
+            let inside = ranges.iter().any(|&(a, b)| off + at >= a && off + at < b);
+            let style = if inside && !keep { s.style.patch(link()) } else { s.style };
+            out.push(Span::styled(piece.to_string(), style));
+            at = end;
+        }
+        off += len;
+    }
+    out
 }
 
 /// A quote link at the start of `s` (which starts with `>>`): its length and target.
@@ -528,6 +610,47 @@ mod tests {
         assert_eq!(p.quotes, [123]);
         assert_eq!(p.links, [link(None, None, Some(123))]);
         assert_eq!(p.lines[1].spans[0].style, greentext());
+    }
+
+    #[test]
+    fn web_links() {
+        let spans = |p: &Parsed| -> Vec<(String, bool)> {
+            p.lines[0].spans.iter().map(|s| (s.content.to_string(), s.style.fg == Some(mark::LINK))).collect()
+        };
+        // 4chan doesn't linkify, and splits long words with <wbr>; trailing punctuation and
+        // unmatched brackets stay out of the URL.
+        let p = parse_html(
+            "see https://example.com/a<wbr>bc/def. and (https://en.wikipedia.org/wiki/Rust_(lang)), <s>https://secret.example/x</s>",
+            Flavor::Fourchan,
+        );
+        assert_eq!(p.urls, ["https://example.com/abc/def", "https://en.wikipedia.org/wiki/Rust_(lang)", "https://secret.example/x"]);
+        let s = spans(&p);
+        assert_eq!(s[0], ("see ".into(), false));
+        assert_eq!(s[1], ("https://example.com/abc/def".into(), true));
+        assert_eq!(s[2], (". and (".into(), false));
+        // A spoilered URL is collected but stays hidden.
+        assert!(is_spoiler(p.lines[0].spans.last().unwrap().style));
+        // jschan and makaba wrap URLs in links (entities in the href are decoded).
+        let p = parse_html(
+            r#"<a rel="nofollow" referrerpolicy="same-origin" target="_blank" href="https://z.io/x?a=1&amp;b=2">https://z.io/x?a=1&amp;b=2</a>"#,
+            Flavor::Jschan,
+        );
+        assert_eq!((p.urls.as_slice(), p.links.len()), (&["https://z.io/x?a=1&b=2".to_string()][..], 0));
+        assert_eq!(spans(&p), [("https://z.io/x?a=1&b=2".into(), true)]);
+        let p = parse_html(r#"<a href="https://youtu.be/abc" target="_blank" rel="nofollow noopener noreferrer">https://youtu.be/abc</a>"#, Flavor::Makaba);
+        assert_eq!(p.urls, ["https://youtu.be/abc"]);
+        // Quote links, even with absolute hrefs, aren't web links.
+        for (html, flavor) in [
+            (r#"<a href="//boards.4chan.org/g/thread/1#p2" class="quotelink">&gt;&gt;&gt;/g/2</a>"#, Flavor::Fourchan),
+            (r#"<a class="quoteLink" href="https://endchan.net/b/res/1.html#2">&gt;&gt;2</a>"#, Flavor::Lynxchan),
+            (r#"<a class="quote" href="https://zzzchan.xyz/b/thread/1.html#2">&gt;&gt;2</a>"#, Flavor::Jschan),
+            (r#"<a href="https://2ch.hk/b/res/1.html#2" class="post-reply-link" data-thread="1" data-num="2">&gt;&gt;2</a>"#, Flavor::Makaba),
+        ] {
+            let p = parse_html(html, flavor);
+            assert!(p.urls.is_empty() && p.links.len() == 1, "{html}");
+        }
+        // No URLs from code blocks or bare schemes.
+        assert!(parse_html("<pre>curl https://x.example/</pre> https:// http:///", Flavor::Fourchan).urls.is_empty());
     }
 
     #[test]

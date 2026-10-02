@@ -20,13 +20,13 @@ expression: snapshot(&mut a)
       w               watch            watch / unwatch the thread           catalog, thread
       s               sort             cycle the sort order                 catalog
       c               compact          compact layout on / off              catalog
+      O               links            the post's links and files           catalog, thread
       y               copy             copy the text (viewer: file URL)     catalog, thread, wa…
       Y               copy_link        copy the link                        catalog, thread, wa…
 
     Thread
       i               open_file        open the file (videos in mpv)        thread
       b               replies          jump to the first reply              thread
-      u               jump_back        jump back (also to the last thread)  thread
 
     Changed keys are saved in [keys]; navigation keys are fixed.
 

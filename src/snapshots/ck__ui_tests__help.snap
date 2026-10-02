@@ -21,14 +21,14 @@ expression: snapshot(&mut a)
        sushigirl
        leftypol        Catalog
        8kun              v                   view the OP's images
-       alogs             w                   watch / unwatch the thread
-       trashchan         s                   cycle sort order
-       ptchan            c                   compact layout on / off
-       erischan          y / Y               copy the OP's text / link
-       junkuchan
-       nukechan        Thread
-       palanq            j / k               next / previous post
-       b4k               J / K, space        scroll by line / page
-                         enter, l            follow quote (any thread)
+       alogs             O                   the OP's links and files
+       trashchan         w                   watch / unwatch the thread
+       ptchan            s                   cycle sort order
+       erischan          c                   compact layout on / off
+       junkuchan         y / Y               copy the OP's text / link
+       nukechan
+       palanq          Thread
+       b4k               j / k               next / previous post
+                         J / K, space        scroll by line / page
 
  enter open   / filter   o browser   r reload   , settings   ? help

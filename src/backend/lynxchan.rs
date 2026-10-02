@@ -109,6 +109,7 @@ impl Lynxchan {
             body: parsed.lines,
             quotes: parsed.quotes,
             links: parsed.links,
+            urls: parsed.urls,
             files,
             // postCount excludes the OP, like 4chan's `replies`.
             replies: as_u64(&v["postCount"]).map(|n| n as u32),
@@ -264,6 +265,9 @@ mod tests {
         assert_eq!(posts[0].no, 867082);
         // The OP links the previous thread through its rendered markdown.
         assert!(posts[0].links.iter().any(|l| l.thread == Some(782482)));
+        // Web links are collected as the site linked them (LynxChan keeps a trailing paren).
+        let urls: Vec<&str> = posts.iter().flat_map(|p| &p.urls).map(String::as_str).collect();
+        assert!(urls.contains(&"https://Paha-Ne-Vydast.me/astrapress/89410)"), "{urls:?}");
         let kohl = Lynxchan::new("https://kohlchan.net".into(), None);
         let posts = kohl.parse_thread(&json("kohlchan_thread.json"));
         assert!(posts.len() > 1 && posts.iter().all(|p| p.no > 0));

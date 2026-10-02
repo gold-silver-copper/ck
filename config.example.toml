@@ -273,8 +273,8 @@ url = "https://arch.b4k.dev"
 # Actions and their defaults:
 #   everywhere: quit = "q", help = "?", search = "/", reload = "r", browser = "o", settings = ",",
 #               goto = ":"
-#   catalog:    view = "v", watch = "w", sort = "s", compact = "c"
-#   thread:     view, watch, open_file = "i", replies = "b", jump_back = "u", unread = "U",
+#   catalog:    view = "v", watch = "w", sort = "s", compact = "c", links = "O"
+#   thread:     view, watch, links, open_file = "i", replies = "b", jump_back = "u", unread = "U",
 #               preview = "p", next_match = "n", prev_match = "N", spoiler = "s",
 #               all_spoilers = "S", download = "d", download_thread = "D", archive = "a"
 #   Watched/History: remove = "x"

@@ -325,3 +325,16 @@ fn key_editor() {
     a.on_key(ratatui::crossterm::event::KeyEvent::from(ratatui::crossterm::event::KeyCode::Enter));
     insta::assert_snapshot!("key_editor_capturing", snapshot(&mut a));
 }
+
+#[test]
+fn links_panel() {
+    let mut a = app(false);
+    a.view = View::Thread;
+    let mut t = thread();
+    t.selected = 4;
+    t.posts[4].urls = vec!["https://example.com/a-long-path?with=query".into()];
+    t.posts[4].files = vec![file("notes.pdf")];
+    a.thread = Some(t);
+    a.open_links();
+    insta::assert_snapshot!(snapshot(&mut a));
+}
