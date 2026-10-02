@@ -139,6 +139,41 @@ impl Drop for Tmux {
     }
 }
 
+/// The first row where the screen and ck's last frame differ, when neither is changing
+/// (a frame drawn but not yet written out isn't a difference): it must hold three times.
+fn mismatch(t: &Tmux, frame: &Path) -> Option<(usize, String, String)> {
+    let read = || std::fs::read_to_string(frame).unwrap_or_default();
+    let rows = |s: &str| s.lines().map(|l| l.trim_end().to_string()).collect::<Vec<_>>();
+    let mut found = None;
+    for _ in 0..3 {
+        let (mut screen, mut meant) = (t.screen(), read());
+        for _ in 0..20 {
+            std::thread::sleep(Duration::from_millis(150));
+            let (s, m) = (t.screen(), read());
+            if s == screen && m == meant {
+                break;
+            }
+            (screen, meant) = (s, m);
+        }
+        let (shown, meant) = (rows(&screen), rows(&meant));
+        found = shown.iter().zip(&meant).enumerate().find(|(_, (a, b))| a != b).map(|(i, (a, b))| (i, a.clone(), b.clone()));
+        found.as_ref()?;
+    }
+    found
+}
+
+/// The screen once ck has exited (it saves first), or after three seconds.
+fn exited(t: &Tmux) -> String {
+    for _ in 0..30 {
+        std::thread::sleep(Duration::from_millis(100));
+        let s = t.screen();
+        if s.contains("CK_EXIT=") {
+            return s;
+        }
+    }
+    t.screen()
+}
+
 fn rss_kb(pid: u32) -> Option<u64> {
     let out = Command::new("ps").args(["-o", "rss=", "-p", &pid.to_string()]).output().ok()?;
     String::from_utf8_lossy(&out.stdout).trim().parse().ok()
@@ -212,6 +247,7 @@ fn e2e_soak() {
         .iter()
         .map(|(k, d)| (k.to_string(), dir.path().join(d).display().to_string()))
         .chain([("CK_NO_EXTERNAL".into(), "1".into()), ("COLORTERM".into(), "truecolor".into())])
+        .chain([("CK_FRAME_DUMP".into(), dir.path().join("frame.txt").display().to_string())])
         .collect();
     let tmux = Tmux { socket: format!("ck-e2e-{}", std::process::id()) };
     tmux.start(&ck, &env, (110, 32));
@@ -240,8 +276,7 @@ fn e2e_soak() {
                 // Quit and start again: it must exit cleanly and restore where it was.
                 tmux.keys(&["Escape", "Escape", "Escape"]);
                 tmux.keys(&["C-c"]);
-                std::thread::sleep(Duration::from_millis(800));
-                let s = tmux.screen();
+                let s = exited(&tmux);
                 assert!(s.contains("CK_EXIT=0"), "ck didn't quit cleanly (seed {seed}):\n{s}");
                 tmux.start(&ck, &env, (110, 32));
                 ready(&tmux);
@@ -256,6 +291,10 @@ fn e2e_soak() {
             let s = tmux.screen();
             assert!(!s.contains("CK_EXIT="), "ck exited (seed {seed}, after {sent} steps):\n{s}");
             assert!(!s.contains("panicked"), "ck panicked (seed {seed}):\n{s}");
+            // The screen is what ck drew: nothing left over, nothing out of place.
+            if let Some((row, shown, meant)) = mismatch(&tmux, &dir.path().join("frame.txt")) {
+                panic!("row {row} on screen isn't what ck drew (seed {seed}, step {sent}):\n  screen: {shown:?}\n  frame:  {meant:?}");
+            }
             if std::env::var_os("E2E_SHOW").is_some() {
                 eprintln!("--- step {sent}:\n{s}");
             }
@@ -272,8 +311,7 @@ fn e2e_soak() {
         }
     }
     tmux.keys(&["Escape", "Escape", "C-c"]);
-    std::thread::sleep(Duration::from_millis(1000));
-    let s = tmux.screen();
+    let s = exited(&tmux);
     assert!(s.contains("CK_EXIT=0"), "ck didn't quit cleanly at the end (seed {seed}):\n{s}");
     let (_, warnings) = crate::store::Store::load(Some(dir.path().join("data/ck")));
     assert!(warnings.is_empty(), "the data doesn't load cleanly: {warnings:?}");

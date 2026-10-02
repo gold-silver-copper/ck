@@ -800,6 +800,11 @@ impl App {
         v
     }
 
+    /// What's on screen, broadly: when it changes, the screen is painted whole.
+    pub fn screen(&self) -> (View, usize, bool, bool) {
+        (self.tab.view, self.active, self.tab.viewer.is_some(), self.tab.gallery.is_some())
+    }
+
     /// Keep the current list's selection on a row that exists.
     fn clamp_list(&mut self) {
         if let Some((p, len)) = self.picker() {

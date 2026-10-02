@@ -56,9 +56,15 @@ fn fill(f: &mut Frame, area: Rect, bg: Color) {
 }
 
 /// Draw a line at `(x, y)`, at most `w` wide, over whatever background is there.
-fn put(f: &mut Frame, x: u16, y: u16, w: u16, line: Line) {
+/// Draw a line (text every terminal measures alike, see `markup::for_terminal`).
+fn put(f: &mut Frame, x: u16, y: u16, w: u16, mut line: Line) {
     let r = Rect::new(x, y, w, 1).intersection(f.area());
     if !r.is_empty() {
+        for s in &mut line.spans {
+            if let std::borrow::Cow::Owned(safe) = markup::for_terminal(&s.content) {
+                s.content = safe.into();
+            }
+        }
         f.render_widget(line, r);
     }
 }

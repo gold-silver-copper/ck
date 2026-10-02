@@ -255,6 +255,8 @@ impl Builder {
     }
 
     fn push(&mut self, text: &str, style: Style) {
+        // Measured the same by every terminal, from here on (wrapping, links, drawing).
+        let text = &*for_terminal(text);
         if text.is_empty() {
             return;
         }
@@ -359,6 +361,35 @@ fn style_ranges(spans: Vec<Span<'static>>, ranges: &[(usize, usize)]) -> Vec<Spa
         off += len;
     }
     out
+}
+
+/// Text as every terminal agrees on its width. Emoji sequences built from several code
+/// points (joined with U+200D, with a skin tone, variation selector, keycap or tags, and
+/// flags) are one glyph in some terminals and several in others. Where a terminal and the
+/// layout disagree, the rest of the line lands in the wrong cells and what was drawn there
+/// before shows through. So: a joined sequence's first emoji, no skin tones or selectors,
+/// a flag as its two letters. Never wider than the original.
+pub fn for_terminal(s: &str) -> std::borrow::Cow<'_, str> {
+    let odd = |c: char| {
+        matches!(c, '\u{200d}' | '\u{fe0e}' | '\u{fe0f}' | '\u{20e3}' | '\u{1f3fb}'..='\u{1f3ff}' | '\u{1f1e6}'..='\u{1f1ff}' | '\u{e0020}'..='\u{e007f}')
+    };
+    if !s.chars().any(odd) {
+        return std::borrow::Cow::Borrowed(s);
+    }
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars();
+    while let Some(c) = chars.next() {
+        match c {
+            // What a joiner joins goes with it.
+            '\u{200d}' => {
+                chars.next();
+            }
+            '\u{1f1e6}'..='\u{1f1ff}' => out.push(char::from(b'A' + (c as u32 - 0x1f1e6) as u8)),
+            c if odd(c) => {}
+            c => out.push(c),
+        }
+    }
+    std::borrow::Cow::Owned(out)
 }
 
 /// A quote link at the start of `s` (which starts with `>>`): its length and target.
@@ -717,6 +748,26 @@ mod tests {
         assert_eq!(w, ["aaa bbb", "ccc"]);
         let w: Vec<_> = wrap(&Line::from("abcdefghij"), 4).iter().map(text).collect();
         assert_eq!(w, ["abcd", "efgh", "ij"]);
+    }
+
+    #[test]
+    fn text_every_terminal_measures_alike() {
+        use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+        for (raw, safe) in [
+            ("family 👨\u{200d}👩\u{200d}👧 here", "family 👨 here"),
+            ("ok 👍🏽", "ok 👍"),
+            ("love ❤\u{fe0f}", "love ❤"),
+            ("🇯🇵 and 🇺🇸", "JP and US"),
+            ("1\u{fe0f}\u{20e3}", "1"),
+            ("plain text, 日本語, é", "plain text, 日本語, é"),
+        ] {
+            let got = for_terminal(raw);
+            assert_eq!(got, safe);
+            // Measured whole or a character at a time, the same: never wider than before.
+            let by_char: usize = got.chars().map(|c| c.width().unwrap_or(0)).sum();
+            assert_eq!(got.width(), by_char, "{got:?}");
+            assert!(got.width() <= raw.width(), "{raw:?}");
+        }
     }
 
     #[test]

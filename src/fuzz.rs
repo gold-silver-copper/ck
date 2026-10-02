@@ -117,6 +117,7 @@ const HTML: &[&str] = &[
     "https://example.com/{n}", "http://x.y/(a)", "www.example.org", "\n", "\r\n", "  ", " ", "\t", "word", "words and more",
     "supercalifragilisticexpialidocious_without_any_space_to_break_at", "日本語のテキスト", "e\u{301}", "👍🏽", "🇯🇵",
     "\u{200b}", "\u{0}", "\u{1b}[31m", "\u{7f}", "<", ">", "\"", "'", "<!-- a comment -->", "<script>x()</script>",
+    "👨\u{200d}👩\u{200d}👧", "❤\u{fe0f}", "1\u{fe0f}\u{20e3}", "🏴\u{e0067}\u{e0062}\u{e0073}\u{e0063}\u{e0074}\u{e007f}", "e\u{301}\u{301}",
     "<img src=\"x.png\">", "<span", "</", "<<", ">>", "#", "%", "(OP)", " (OP)", " (You)", "*", "**bold**", "==red==",
     "''", "[spoiler]", "[/spoiler]", "```", "→", "\u{feff}", "\u{2028}",
 ];
@@ -161,6 +162,17 @@ fn markup_once(seed: u64) {
                 let kept = |s: &str| s.chars().filter(|c| !c.is_whitespace()).collect::<String>();
                 let joined: String = wrapped.iter().map(text).collect();
                 assert_eq!(kept(&joined), kept(&text(line)), "wrapping lost or added text ({})", ctx());
+            }
+        }
+        // What's drawn is measured alike whole or a character at a time (as a terminal
+        // without grapheme clustering does), so nothing lands in the wrong cell.
+        for w in markup::wrap(line, 40) {
+            for s in &w.spans {
+                use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+                let safe = markup::for_terminal(&s.content);
+                let shown: String = safe.chars().filter(|c| !c.is_control()).collect();
+                let by_char: usize = shown.chars().map(|c| c.width().unwrap_or(0)).sum();
+                assert_eq!(shown.width(), by_char, "measured differently: {shown:?} ({})", ctx());
             }
         }
         let lit = markup::highlight(line, &needle, ratatui::style::Style::new());

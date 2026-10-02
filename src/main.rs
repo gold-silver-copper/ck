@@ -106,12 +106,49 @@ fn detect_images() -> Picker {
 fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
     app.listen_for_input();
     app.poll();
+    // Debugging: each frame as ck means it to look, to compare with what's on screen.
+    let dump = std::env::var_os("CK_FRAME_DUMP").map(std::path::PathBuf::from);
+    let mut screen = None;
     while !app.quit {
-        terminal.draw(|f| ui::draw(f, app))?;
+        // Another screen: paint it whole, so nothing of the last one can stay behind (an
+        // image, or text a terminal placed differently than measured). Not with `clear()`:
+        // that asks the terminal where the cursor is, and the answer would go to the input
+        // thread instead (and ck would stop with "the cursor position could not be read").
+        let now = Some(app.screen());
+        if screen != now {
+            if screen.is_some() {
+                let size = terminal.size()?;
+                terminal.resize(ratatui::layout::Rect::new(0, 0, size.width, size.height))?;
+            }
+            screen = now;
+        }
+        let frame = terminal.draw(|f| ui::draw(f, app))?;
+        if let Some(path) = &dump {
+            let _ = std::fs::write(path, frame_text(frame.buffer));
+        }
         let timeout = app.next_wake(Instant::now());
         if !app.wait(timeout) {
             app.tick = app.tick.wrapping_add(1);
         }
     }
     Ok(())
+}
+
+/// A frame's text, row by row (a wide character once, as a terminal shows it, measured as
+/// ratatui places it).
+fn frame_text(buf: &ratatui::buffer::Buffer) -> String {
+    use ratatui::buffer::CellWidth;
+    let mut out = String::new();
+    for y in 0..buf.area.height {
+        let mut row = String::new();
+        let mut x = 0;
+        while x < buf.area.width {
+            let symbol = buf.cell((x, y)).map_or(" ", |c| c.symbol());
+            row.push_str(symbol);
+            x += symbol.cell_width().max(1);
+        }
+        out.push_str(row.trim_end());
+        out.push('\n');
+    }
+    out
 }
