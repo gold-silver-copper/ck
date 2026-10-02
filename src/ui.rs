@@ -1455,14 +1455,14 @@ fn draw_settings(f: &mut Frame, app: &mut App, area: Rect) {
         match r {
             Err(title) => put(f, area.x, y, area.width, Line::styled(title.to_string(), bold(t.primary))),
             Ok(i) => {
-                let item = items[i];
+                let (item, label, hint) = items[i];
                 paint_row(f, Rect::new(area.x, y, area.width, 1), None, i == selected, false);
                 let value = app.setting_value(item);
                 let hint_w = (area.width as usize).saturating_sub(PAD as usize + 1 + 18 + 34);
                 let line = Line::from(vec![
-                    Span::styled(format!("{:<18}", item.label()), Style::new().fg(t.text)),
+                    Span::styled(format!("{label:<18}"), Style::new().fg(t.text)),
                     Span::styled(format!("{:<34}", truncate(&value, 32)), bold(t.text)),
-                    Span::styled(if hint_w >= 16 { truncate(item.hint(), hint_w) } else { String::new() }, dim()),
+                    Span::styled(if hint_w >= 16 { truncate(hint, hint_w) } else { String::new() }, dim()),
                 ]);
                 put(f, area.x + PAD, y, area.width.saturating_sub(PAD + 1), line);
             }

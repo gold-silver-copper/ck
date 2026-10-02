@@ -27,21 +27,36 @@ pub enum Item {
     Keys,
 }
 
+/// A setting with its label and hint.
+pub type Row = (Item, &'static str, &'static str);
+
 /// The settings, by section, in display order.
-pub const SECTIONS: &[(&str, &[Item])] = &[
-    ("Appearance", &[Item::Theme, Item::Colors, Item::ColorDepth]),
-    ("Catalog", &[Item::Compact, Item::Images, Item::Filters]),
-    ("Background refresh", &[Item::RefreshThread, Item::RefreshWatched, Item::Notify]),
-    ("Downloads", &[Item::DownloadDir]),
-    ("Startup", &[Item::Restore]),
-    ("Keys", &[Item::Keys]),
+pub const SECTIONS: &[(&str, &[Row])] = &[
+    ("Appearance", &[
+        (Item::Theme, "Theme", "Live preview while choosing"),
+        (Item::Colors, "Colors", "Change any color of the current theme"),
+        (Item::ColorDepth, "Color depth", "24-bit color, or the nearest of 256"),
+    ]),
+    ("Catalog", &[
+        (Item::Compact, "Default layout", "c in a catalog sets a board's own"),
+        (Item::Images, "Images", "Thumbnails and the image viewer (after a restart)"),
+        (Item::Filters, "Filters", "[[filter]] in the config; H hides by hand, Z shows hidden"),
+    ]),
+    ("Background refresh", &[
+        (Item::RefreshThread, "Open thread", "How often the open thread updates"),
+        (Item::RefreshWatched, "Watched threads", "How often each watched thread updates"),
+        (Item::Notify, "Notifications", "New posts in watched threads, replies to yours (m)"),
+    ]),
+    ("Downloads", &[(Item::DownloadDir, "Folder", "Where d / D save files")]),
+    ("Startup", &[(Item::Restore, "Last place", "Start where you left off (ck URL starts elsewhere)")]),
+    ("Keys", &[(Item::Keys, "Key bindings", "Rebind any command")]),
 ];
 
 const REFRESH_THREAD: &[u64] = &[10, 15, 30, 60, 120];
 const REFRESH_WATCHED: &[u64] = &[60, 120, 300, 600, 1800];
 
 pub fn items() -> Vec<Item> {
-    SECTIONS.iter().flat_map(|(_, items)| items.iter().copied()).collect()
+    SECTIONS.iter().flat_map(|(_, items)| items.iter().map(|&(item, ..)| item)).collect()
 }
 
 /// The screen's rows, top to bottom: `Err(section title)` for headers, `Ok(index)` for
@@ -60,42 +75,6 @@ pub fn rows() -> Vec<Result<usize, &'static str>> {
         }
     }
     out
-}
-
-impl Item {
-    pub fn label(self) -> &'static str {
-        match self {
-            Item::Theme => "Theme",
-            Item::Colors => "Colors",
-            Item::ColorDepth => "Color depth",
-            Item::Compact => "Default layout",
-            Item::Images => "Images",
-            Item::Filters => "Filters",
-            Item::RefreshThread => "Open thread",
-            Item::RefreshWatched => "Watched threads",
-            Item::Notify => "Notifications",
-            Item::DownloadDir => "Folder",
-            Item::Restore => "Last place",
-            Item::Keys => "Key bindings",
-        }
-    }
-
-    pub fn hint(self) -> &'static str {
-        match self {
-            Item::Theme => "Live preview while choosing",
-            Item::Colors => "Change any color of the current theme",
-            Item::ColorDepth => "24-bit color, or the nearest of 256",
-            Item::Compact => "c in a catalog sets a board's own",
-            Item::Images => "Thumbnails and the image viewer (after a restart)",
-            Item::Filters => "[[filter]] in the config; H hides by hand, Z shows hidden",
-            Item::RefreshThread => "How often the open thread updates",
-            Item::RefreshWatched => "How often each watched thread updates",
-            Item::Notify => "New posts in watched threads, replies to yours (m)",
-            Item::DownloadDir => "Where d / D save files",
-            Item::Restore => "Start where you left off (ck URL starts elsewhere)",
-            Item::Keys => "Rebind any command",
-        }
-    }
 }
 
 pub enum Popup {
