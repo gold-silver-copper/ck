@@ -425,3 +425,15 @@ fn catalog_grid() {
     let text = snapshot(&mut b);
     assert!(text.contains("312 replies") && b.grid_cols == 0, "{text}");
 }
+
+#[test]
+fn gallery() {
+    let mut a = app(true);
+    a.view = View::Thread;
+    let mut t = thread();
+    t.posts[2].files = vec![file("code.png"), file("clip.webm")];
+    a.thread = Some(t);
+    a.open_gallery();
+    a.on_key(ratatui::crossterm::event::KeyEvent::from(ratatui::crossterm::event::KeyCode::Char('l')));
+    insta::assert_snapshot!(snapshot(&mut a));
+}

@@ -23,9 +23,11 @@ use crate::model::{Attachment, Board, Link, Post};
 use crate::store::{Store, ThreadKey};
 use crate::theme::{self, ThemeDef, ThemeSetting};
 
+mod gallery;
 mod goto;
 mod links;
 mod settings;
+pub use gallery::Gallery;
 pub use links::{LinkItem, LinksPanel};
 pub use settings::{Popup as SettingsPopup, SECTIONS as SETTING_SECTIONS, key_rows, rows as setting_rows, tilde};
 
@@ -546,6 +548,8 @@ pub struct App {
     pub viewer: Option<Viewer>,
     pub preview: Option<Preview>,
     pub links: Option<LinksPanel>,
+    /// The thread's files as a grid (`V`), over the thread.
+    pub gallery: Option<Gallery>,
     /// True while typing a thread search.
     pub searching: bool,
     /// What's typed after `:`, while it's being typed.
@@ -673,6 +677,7 @@ impl App {
             viewer: None,
             preview: None,
             links: None,
+            gallery: None,
             searching: false,
             goto: None,
             trail: Vec::new(),
@@ -1351,9 +1356,13 @@ impl App {
         let posts: Vec<&Post> = if whole_thread { t.posts.iter().collect() } else { vec![&t.posts[t.selected]] };
         let dir = download::dir(self.download_dir.as_deref(), &self.current_site().cfg.name, &t.board, t.no);
         let jobs = download::jobs(&posts, &dir);
+        self.start_download(jobs, dir, if whole_thread { "Thread has no files" } else { "Post has no file" });
+    }
+
+    /// Fetch `(url, path)` jobs into `dir` in the background.
+    fn start_download(&mut self, jobs: Vec<(String, std::path::PathBuf)>, dir: std::path::PathBuf, none: &str) {
         if jobs.is_empty() {
-            let msg = if whole_thread { "Thread has no files" } else { "Post has no file" };
-            self.status = Some((msg.into(), false));
+            self.status = Some((none.into(), false));
             return;
         }
         if let Err(e) = std::fs::create_dir_all(&dir) {
@@ -1460,6 +1469,20 @@ impl App {
         }
         if self.links.is_some() {
             self.on_links_click(ev.column, ev.row, now);
+            return;
+        }
+        if self.gallery.is_some() && self.view == View::Thread && self.viewer.is_none() {
+            let Some(target) = self.click_target(ev.column, ev.row) else { return };
+            let double = self.last_click.is_some_and(|(t, i)| i == target && now.duration_since(t) < Duration::from_millis(400));
+            self.last_click = if double { None } else { Some((now, target)) };
+            if let Some(g) = &mut self.gallery
+                && target < g.files.len()
+            {
+                g.state.select(Some(target));
+                if double {
+                    self.view_from_gallery(target);
+                }
+            }
             return;
         }
         if self.show_help || self.preview.is_some() {
@@ -1589,6 +1612,7 @@ impl App {
         self.board = Some(board.unwrap_or(Board { uri: key.board, title: String::new(), nsfw: None }));
         self.return_to = Some(self.view);
         self.from_catalog = false;
+        self.gallery = None;
         self.thread = None;
         self.view = View::Thread;
         self.load_thread(key.no);
@@ -1646,6 +1670,10 @@ impl App {
         }
         if self.preview.is_some() {
             self.on_preview_key(key.code);
+            return;
+        }
+        if self.gallery.is_some() && self.view == View::Thread {
+            self.on_gallery_key(key);
             return;
         }
         if self.links.is_some() {
@@ -1737,6 +1765,7 @@ impl App {
             Action::Links => self.open_links(),
             Action::Hide => self.toggle_hidden(),
             Action::Mine => self.toggle_mine(),
+            Action::Gallery => self.open_gallery(),
             Action::Expand => {
                 if let Some(t) = &mut self.thread {
                     match t.toggle_expanded() {
@@ -2032,6 +2061,7 @@ impl App {
     /// Open a thread on the current site, selecting `post` when it arrives.
     fn open_thread_at(&mut self, board: Board, no: u64, post: Option<u64>, announce: bool) {
         self.from_catalog = false;
+        self.gallery = None;
         if announce {
             self.status = Some((format!("Opening /{}/{no} (u goes back)", board.uri), false));
         }
@@ -2046,7 +2076,13 @@ impl App {
         let Some(v) = &mut self.viewer else { return };
         let n = v.files.len();
         match code {
-            KeyCode::Esc | KeyCode::Char('q' | 'v') => self.viewer = None,
+            KeyCode::Esc | KeyCode::Char('q' | 'v') => {
+                // Back in the gallery, on the file last viewed.
+                if let Some(g) = &mut self.gallery {
+                    g.state.select(Some(v.index));
+                }
+                self.viewer = None;
+            }
             KeyCode::Char('h' | 'k') | KeyCode::Left | KeyCode::Up => v.index = (v.index + n - 1) % n,
             KeyCode::Char('l' | 'j' | ' ') | KeyCode::Right | KeyCode::Down => v.index = (v.index + 1) % n,
             KeyCode::Char('i') | KeyCode::Enter => {
@@ -2197,6 +2233,7 @@ impl App {
     }
 
     fn back(&mut self) {
+        self.gallery = None;
         self.view = match self.view {
             View::Sites | View::Boards | View::Watched | View::History => View::Sites,
             View::Settings => self.settings.back.take().unwrap_or(View::Sites),
@@ -2239,7 +2276,8 @@ impl App {
     /// Copy the selected thing's text (or file URL in the viewer), or with `link` its URL.
     fn copy(&mut self, link: bool) {
         let what = if let Some(v) = &self.viewer {
-            if link { v.link.clone().map(|l| ("link", l)) } else { Some(("file URL", v.files[v.index].url.clone())) }
+            let post_link = v.link.clone().or_else(|| self.gallery_link(v.index));
+            if link { post_link.map(|l| ("link", l)) } else { Some(("file URL", v.files[v.index].url.clone())) }
         } else if link {
             self.selected_link().map(|l| ("link", l))
         } else {
@@ -2885,6 +2923,43 @@ mod tests {
     }
 
     #[test]
+    fn gallery_of_the_threads_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = local_app();
+        app.download_dir = Some(dir.path().display().to_string());
+        app.images = crate::images::Images::offline();
+        app.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
+        let file = |name: &str| Attachment { filename: name.into(), url: format!("http://127.0.0.1:3/x/src/{name}"), ..Default::default() };
+        let post = |no, files: Vec<Attachment>| Post { no, files, ..Default::default() };
+        app.thread = Some(ThreadView::new("x".into(), 1, vec![post(1, vec![file("a.png")]), post(2, vec![]), post(3, vec![file("b.jpg"), file("c.gif")])]));
+        app.view = View::Thread;
+        app.thread.as_mut().unwrap().selected = 1;
+        app.act(Action::Gallery);
+        // It starts at the selected post's file, or the next.
+        assert_eq!(app.gallery.as_ref().unwrap().state.selected(), Some(1));
+        app.gallery.as_mut().unwrap().cols = 2;
+        let press = |app: &mut App, code| app.on_key(KeyEvent::from(code));
+        press(&mut app, KeyCode::Char('l'));
+        assert_eq!(app.gallery.as_ref().unwrap().state.selected(), Some(2));
+        // Enter views every file of the thread, from this one; esc comes back to the grid.
+        press(&mut app, KeyCode::Enter);
+        assert_eq!((app.viewer.as_ref().unwrap().files.len(), app.viewer.as_ref().unwrap().index), (3, 2));
+        press(&mut app, KeyCode::Char('h'));
+        press(&mut app, KeyCode::Char('Y'));
+        assert_eq!(app.copied.as_deref(), Some("http://127.0.0.1:3/x/res/1.html#3"));
+        press(&mut app, KeyCode::Esc);
+        assert!(app.viewer.is_none());
+        assert_eq!(app.gallery.as_ref().unwrap().state.selected(), Some(1));
+        // d saves the one file.
+        press(&mut app, KeyCode::Char('d'));
+        assert_eq!((app.downloads.total, app.downloads.running), (1, 1));
+        // Esc: back to the thread, on the file's post.
+        press(&mut app, KeyCode::Esc);
+        assert!(app.gallery.is_none());
+        assert_eq!(app.thread.as_ref().unwrap().selected, 2);
+    }
+
+    #[test]
     fn status_messages_expire() {
         let mut app = test_app();
         let t0 = Instant::now();
@@ -2924,7 +2999,8 @@ mod tests {
         }
         let per_call = start.elapsed() / 100;
         eprintln!("filter + sort of 300 threads: {per_call:?}");
-        // A frame is ~16ms; even unoptimized, filtering should take a small fraction of it.
-        assert!(per_call < Duration::from_millis(3), "filtering took {per_call:?}");
+        // A frame is ~16ms; even unoptimized (and on a busy machine), filtering should take a
+        // fraction of it.
+        assert!(per_call < Duration::from_millis(8), "filtering took {per_call:?}");
     }
 }

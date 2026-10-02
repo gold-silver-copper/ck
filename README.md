@@ -73,6 +73,7 @@ is in brackets):
 | `O`  | catalog, thread       | the post's links: quotes of other threads, web links, files; `enter` opens, `y` copies [`links`] |
 | `H`  | catalog, thread       | hide / unhide the thread or post [`hide`]                  |
 | `Z`  | catalog, thread       | show hidden threads and posts, dimmed [`show_hidden`]      |
+| `V`  | thread                | gallery: every file of the thread as a grid; `enter` views (h/l go through all of them), `d` saves one, `esc` returns to its post [`gallery`] |
 | `e`  | thread                | show / hide the post's replies under it, indented; again on a reply goes a level deeper (up to 4) [`expand`] |
 | `m`  | thread                | mark the post as yours, to be told about replies [`mine`]  |
 | `x`  | Watched, History      | remove the entry [`remove`]                                |

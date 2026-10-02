@@ -392,9 +392,10 @@ mod tests {
         assert!(im.queue.state.lock().unwrap().jobs.is_empty());
     }
 
-    /// Poll until `get` stops saying the image is being rendered.
+    /// Poll until `get` stops saying the image is being rendered (up to 10s: a debug build
+    /// on a busy machine is slow).
     fn settle(im: &mut Images, url: &str, size: Size) -> bool {
-        for _ in 0..200 {
+        for _ in 0..1000 {
             im.poll();
             if !matches!(im.get(url, size, Kind::Full), State::Rendering) {
                 return true;

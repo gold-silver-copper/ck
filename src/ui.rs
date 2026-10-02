@@ -104,6 +104,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             View::Sites => draw_sites(f, app, content),
             View::Boards => draw_boards(f, app, content),
             View::Catalog => draw_catalog(f, app, content),
+            View::Thread if app.gallery.is_some() => draw_gallery(f, app, content),
             View::Thread => draw_thread(f, app, content),
             View::Watched => draw_watched(f, app, content),
             View::History => draw_history(f, app, content),
@@ -197,7 +198,12 @@ fn location(app: &App) -> (Vec<String>, Vec<Span<'static>>) {
                 }
             }
             let uri = app.board.as_ref().map(|b| format!("/{}/", b.uri)).unwrap_or_default();
-            vec![site(), uri, truncate(&subject, 48)]
+            if let Some(g) = &app.gallery {
+                meta.insert(0, plural(g.files.len(), "file"));
+                vec![site(), uri, truncate(&subject, 40), "Files".into()]
+            } else {
+                vec![site(), uri, truncate(&subject, 48)]
+            }
         }
         View::Watched => {
             let unread: usize = app.store.watched.iter().map(|w| w.unread).sum();
@@ -299,6 +305,13 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
 fn footer_hints(app: &App) -> Vec<(String, &'static str)> {
     let k = |a| app.keys.key(a).to_string();
     let mut hints: Vec<(String, &'static str)> = match app.view {
+        View::Thread if app.gallery.is_some() => vec![
+            ("h/j/k/l".into(), "move"),
+            ("enter".into(), "view"),
+            (k(Action::Download), "save"),
+            (k(Action::Copy), "copy URL"),
+            ("esc".into(), "back to the post"),
+        ],
         View::Thread => vec![
             ("j/k".into(), "post"),
             ("enter".into(), "quote"),
@@ -689,6 +702,50 @@ fn draw_catalog(f: &mut Frame, app: &mut App, area: Rect) {
 /// A hidden item's chip: by which filter, or by hand.
 fn hidden_label(filter: &str) -> String {
     if filter.is_empty() { "hidden".into() } else { format!("hidden: {filter}") }
+}
+
+/// The thread's files (`V`): thumbnails with their post number and type.
+fn draw_gallery(f: &mut Frame, app: &mut App, area: Rect) {
+    let t = theme();
+    let Some(g) = &mut app.gallery else { return };
+    let (card_w, card_h) = (THUMB.width + 4, THUMB.height + 1);
+    let (cell_w, cell_h) = (card_w + 2, card_h + 1);
+    let cols = ((area.width + 2) / cell_w).max(1) as usize;
+    let rows = ((area.height + 1) / cell_h).max(1) as usize;
+    g.cols = cols;
+    let n = g.files.len();
+    let sel = g.state.selected().unwrap_or(0).min(n - 1);
+    let mut top = g.state.offset() / cols;
+    if sel / cols < top {
+        top = sel / cols;
+    } else if sel / cols >= top + rows {
+        top = sel / cols + 1 - rows;
+    }
+    *g.state.offset_mut() = top * cols;
+    let posts = app.thread.as_ref().map(|t| &t.posts);
+    for (k, (post, file)) in g.files.iter().enumerate().skip(top * cols).take((rows + 1) * cols) {
+        let (r, c) = (k / cols - top, k % cols);
+        let (x, y) = (area.x + c as u16 * cell_w, area.y + r as u16 * cell_h);
+        let card = Rect::new(x, y, card_w, card_h).intersection(area);
+        if card.is_empty() {
+            if let Some(url) = file.thumb.as_ref().filter(|u| http::is_media_host(u)) {
+                app.images.want(url, Kind::Thumb);
+            }
+            continue;
+        }
+        fill(f, card, if k == sel { t.selection } else { t.surface });
+        if k == sel {
+            fill(f, Rect::new(x, card.y, 1, card.height), t.primary);
+        }
+        draw_tile(f, &mut app.images, file, 1, Rect::new(x + PAD, y, THUMB.width, THUMB.height), area);
+        let no = posts.and_then(|p| p.get(*post)).map_or(0, |p| p.no);
+        let kind = file.ext().to_uppercase();
+        let label = Line::from(vec![Span::styled(format!("No.{no}"), Style::new().fg(t.text)), Span::styled(format!("  {kind}"), dim())]);
+        if y + THUMB.height < area.bottom() {
+            put(f, x + PAD, y + THUMB.height, card_w - PAD - 1, label);
+        }
+    }
+    app.hit = Some(Hit::Grid { area, offset: top * cols, cols, cell: (cell_w, cell_h) });
 }
 
 /// Grid cards: a thumbnail over three lines of text.
@@ -1212,6 +1269,7 @@ fn help_sections(keys: &KeyMap) -> Vec<(&'static str, Vec<(String, &'static str)
                 (pair(Action::Spoiler, Action::AllSpoilers), "show spoilers: post / all"),
                 (k(Action::OpenFile), "open file (videos in mpv)"),
                 (k(Action::View), "view the post's images"),
+                (k(Action::Gallery), "all the thread's files, as a grid"),
                 (k(Action::Links), "the post's links and files"),
                 (pair(Action::Hide, Action::ShowHidden), "hide the post / show hidden"),
                 (k(Action::Expand), "show / hide replies under the post"),
