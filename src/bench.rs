@@ -88,6 +88,28 @@ fn bench_thread() {
 
 #[test]
 #[ignore]
+fn bench_saved() {
+    let posts = Futaba::fourchan(None).parse_thread("g", &fixture("4chan_thread.json"));
+    let posts = scale(&posts, 1000);
+    let dir = tempfile::tempdir().unwrap();
+    let (mut store, _) = crate::store::Store::load(Some(dir.path().to_path_buf()));
+    let key = crate::store::ThreadKey { site: "4chan".into(), board: "g".into(), no: posts[0].no };
+    eprintln!("\n== saved threads, {} posts ==", posts.len());
+    // New posts each time: converted, hashed and written.
+    let mut n = 0;
+    time("saving a watched thread as posts arrive", 20, || {
+        n += 1;
+        store.keep_thread(&key, "s", "u", &posts[..posts.len() - n % 2], 0).unwrap()
+    });
+    time("a refresh with nothing new (not written)", 20, || store.keep_thread(&key, "s", "u", &posts[..posts.len() - n % 2], 0).unwrap());
+    time("opening a saved copy", 20, || {
+        let t = store.load_saved(&key).unwrap();
+        t.posts.into_iter().map(Post::from).collect::<Vec<_>>()
+    });
+}
+
+#[test]
+#[ignore]
 fn bench_catalog() {
     let v = fixture("4chan_catalog.json");
     let cat = scale(&Futaba::fourchan(None).parse_catalog("g", &v), 150);

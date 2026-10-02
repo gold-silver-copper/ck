@@ -12,6 +12,18 @@ impl App {
 
     /// Go where `input` leads, or say why it can't.
     pub fn goto_str(&mut self, input: &str) {
+        // The lists by name (before boards that happen to be called that).
+        let view = match input.trim().to_lowercase().as_str() {
+            "watched" => Some(View::Watched),
+            "history" => Some(View::History),
+            "saved" => Some(View::Saved),
+            _ => None,
+        };
+        if let Some(view) = view {
+            self.tab.gallery = None;
+            self.tab.view = view;
+            return;
+        }
         let board = self.tab.board.as_ref().map(|b| b.uri.clone());
         match route::resolve(input, &self.site_infos(), (self.tab.site, board.as_deref())) {
             Ok(target) => self.go(target),
@@ -103,7 +115,10 @@ impl App {
         let boards = |site: usize| -> Vec<String> { self.known_boards(site).unwrap_or_default().into_iter().map(|b| b.uri).collect() };
         let candidates: Vec<String> = match site {
             Some(site) => boards(site),
-            None => self.sites.iter().map(|s| s.cfg.name.clone()).chain(boards(self.tab.site)).collect(),
+            None => {
+                let lists = ["saved", "watched", "history"].map(String::from);
+                self.sites.iter().map(|s| s.cfg.name.clone()).chain(boards(self.tab.site)).chain(lists).collect()
+            }
         };
         let lower = partial.to_lowercase();
         let matches: Vec<&String> = candidates.iter().filter(|c| c.to_lowercase().starts_with(&lower)).collect();

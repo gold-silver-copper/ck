@@ -44,6 +44,11 @@ color = "auto"
 refresh_thread_secs = 10
 refresh_watched_secs = 60
 
+# Watched threads are saved as they refresh, and kept when they die; E (export) saves one
+# too. They open from the Saved row on the home screen, offline. Past this many megabytes,
+# the oldest copies of dead threads you no longer watch are removed (0 keeps everything).
+saved_max_mb = 500
+
 # Favorite boards, shown at the top of the home screen (1-9 open them). * on a board adds
 # or removes one, and saves the list here.
 favorites = []

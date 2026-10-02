@@ -50,6 +50,7 @@ pub mod markup;
 pub mod model;
 pub mod notify;
 pub mod route;
+pub mod saved;
 pub mod store;
 pub mod theme;
 pub mod ui;

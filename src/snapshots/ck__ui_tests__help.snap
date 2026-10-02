@@ -6,29 +6,29 @@ expression: snapshot(&mut a)
                          Keys                       images: off · esc close
     ◉  Watched
     ◷  History           Everywhere
-       4chan               j k g G ^d ^u      move, top/bottom, page
-       lainchan            enter l / esc h    open / back
-       wizchan             /                  filter (thread: search)
-       uboachan            r / o              reload / open in browser
-       endchan             :                  go to a URL or site/board
-       kohlchan            ,                  settings: theme, keys, …
-       desuarchive         ] / ctrl-w         next tab / close tab
-       zzzchan             q, ctrl-c          quit (mouse works too)
-       2ch
-       smuglo.li         Home screen
-       kissu               1-9 / *            open / favorite a board
-       tvch                x                  unfavorite, hide a site
-       sushigirl
-       leftypol          Watched, History
-       8kun                x                  remove the entry
-       alogs               T / F              new tab / follow general
-       trashchan           y / Y              copy subject+link / link
-       ptchan
-       erischan          Image viewer
-       junkuchan           h / l, ← / →       previous / next file
-       nukechan            space              pause an animated GIF
-       palanq              i                  open externally
-       b4k                 y / Y              copy file URL / post link
-                           R                  reverse image search
+    ▤  Saved               j k g G ^d ^u      move, top/bottom, page
+       4chan               enter l / esc h    open / back
+       lainchan            /                  filter (thread: search)
+       wizchan             r / o              reload / open in browser
+       uboachan            :                  go to a URL or site/board
+       endchan             ,                  settings: theme, keys, …
+       kohlchan            ] / ctrl-w         next tab / close tab
+       desuarchive         q, ctrl-c          quit (mouse works too)
+       zzzchan
+       2ch               Home screen
+       smuglo.li           1-9 / *            open / favorite a board
+       kissu               x                  unfavorite, hide a site
+       tvch
+       sushigirl         Watched, History, Saved
+       leftypol            x                  remove the entry (Saved: asks
+       8kun                T / F              new tab / follow general
+       alogs               y / Y              copy subject+link / link
+       trashchan
+       ptchan            Image viewer
+       erischan            h / l, ← / →       previous / next file
+       junkuchan           space              pause an animated GIF
+       nukechan            i                  open externally
+       palanq              y / Y              copy file URL / post link
+       b4k                 R                  reverse image search
 
  enter open   . more   / filter   o browser   r reload   , settings   ? help

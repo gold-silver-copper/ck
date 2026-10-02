@@ -105,6 +105,28 @@ pub fn fixture(name: &str) -> serde_json::Value {
     serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
 }
 
+/// Every fixture thread, parsed by its backend.
+#[cfg(test)]
+pub fn fixture_threads() -> Vec<(&'static str, Vec<Post>)> {
+    use futaba::Futaba;
+    let fourchan = Futaba::fourchan(None);
+    let lain = Futaba::vichan("https://lainchan.org".into(), Some("png".into()), None, None);
+    let leftypol = Futaba::vichan("https://leftypol.org".into(), None, None, None);
+    let end = lynxchan::Lynxchan::new("https://endchan.net".into(), None);
+    let kohl = lynxchan::Lynxchan::new("https://kohlchan.net".into(), None);
+    let dvach = makaba::Makaba::new("https://2ch.hk".into(), Some("https://2ch.su".into()), None);
+    vec![
+        ("4chan", fourchan.parse_thread("g", &fixture("4chan_thread.json"))),
+        ("vichan", lain.parse_thread("λ", &fixture("vichan_thread.json"))),
+        ("leftypol", leftypol.parse_thread("leftypol", &fixture("leftypol_thread.json"))),
+        ("lynxchan", end.parse_thread(&fixture("lynxchan_thread.json"))),
+        ("kohlchan", kohl.parse_thread(&fixture("kohlchan_thread.json"))),
+        ("makaba", dvach.parse_thread(&fixture("makaba_thread.json"))),
+        ("jschan", jschan::parse_thread("https://zzzchan.xyz", &fixture("jschan_thread.json"))),
+        ("foolfuuka", foolfuuka::parse_thread(&fixture("foolfuuka_thread.json"))),
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use crate::config::Config;

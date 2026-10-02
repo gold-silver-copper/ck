@@ -32,6 +32,7 @@ mod generals;
 mod goto;
 mod home;
 mod links;
+mod saved;
 mod search;
 mod session;
 mod tabs;
@@ -41,7 +42,7 @@ pub use gallery::Gallery;
 pub use home::BoardRef;
 pub use links::{ImageSearchPanel, LinkItem, LinksPanel};
 pub use search::Search;
-pub use tabs::{MAX_TABS, Tab};
+pub use tabs::{MAX_TABS, Offline, Tab};
 pub use settings::{Popup as SettingsPopup, SECTIONS as SETTING_SECTIONS, key_rows, rows as setting_rows, tilde};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -52,6 +53,8 @@ pub enum View {
     Thread,
     Watched,
     History,
+    /// Saved copies of threads (watched and exported ones), readable offline.
+    Saved,
     Settings,
     /// Archive search results.
     Search,
@@ -72,6 +75,7 @@ const MAX_REFRESHING: usize = 2;
 pub enum SiteRow {
     Watched,
     History,
+    Saved,
     Favorite(usize),
     /// An index into `store.recent_boards`.
     Recent(usize),
@@ -649,6 +653,9 @@ pub struct App {
     pub images_mode: ImagesMode,
     pub watched_list: Picker,
     pub history_list: Picker,
+    pub saved_list: Picker,
+    /// The saved copy `x` was pressed on once: a second `x` removes it.
+    pub saved_confirm: Option<ThreadKey>,
     pub store: Store,
     refresh_thread: Duration,
     refresh_watched: Duration,
@@ -752,6 +759,8 @@ impl App {
         let layout = cfg.layout();
         let refresh_thread = Duration::from_secs(cfg.refresh_thread_secs.max(10));
         let refresh_watched = Duration::from_secs(cfg.refresh_watched_secs.max(60));
+        let mut store = store;
+        store.saved_max = cfg.saved_max_mb.saturating_mul(1024 * 1024);
         let sites = cfg
             .sites
             .into_iter()
@@ -782,6 +791,8 @@ impl App {
             images_mode: cfg.images,
             watched_list: Picker::top(),
             history_list: Picker::top(),
+            saved_list: Picker::top(),
+            saved_confirm: None,
             store,
             refresh_thread,
             refresh_watched,
@@ -846,7 +857,7 @@ impl App {
     // ----- visible (filtered) items -----
 
     pub fn visible_sites(&self) -> Vec<SiteRow> {
-        let rows: Vec<SiteRow> = [SiteRow::Watched, SiteRow::History]
+        let rows: Vec<SiteRow> = [SiteRow::Watched, SiteRow::History, SiteRow::Saved]
             .into_iter()
             .chain((0..self.favorites.len()).map(SiteRow::Favorite))
             .chain(self.recent_rows().into_iter().map(SiteRow::Recent))
@@ -856,6 +867,7 @@ impl App {
         let name = |k: usize| match &rows[k] {
             SiteRow::Watched => "Watched".to_string(),
             SiteRow::History => "History".to_string(),
+            SiteRow::Saved => "Saved".to_string(),
             SiteRow::Favorite(i) => {
                 let f = &self.favorites[*i];
                 format!("{} /{}/ {}", f.site, f.board, self.board_title(f))
@@ -873,6 +885,11 @@ impl App {
     pub fn visible_watched(&self) -> Vec<usize> {
         let w = &self.store.watched;
         filtered(&self.watched_list.filter, w.len(), |i| format!("{} {} {} {}", w[i].key.site, w[i].key.board, w[i].key.no, w[i].subject))
+    }
+
+    pub fn visible_saved(&self) -> Vec<usize> {
+        let s = &self.store.saved;
+        filtered(&self.saved_list.filter, s.len(), |i| format!("{} {} {} {}", s[i].key.site, s[i].key.board, s[i].key.no, s[i].subject))
     }
 
     pub fn visible_history(&self) -> Vec<usize> {
@@ -923,6 +940,7 @@ impl App {
             View::Catalog => (self.visible_catalog().len(), &mut self.tab.catalog_list),
             View::Watched => (self.visible_watched().len(), &mut self.watched_list),
             View::History => (self.visible_history().len(), &mut self.history_list),
+            View::Saved => (self.visible_saved().len(), &mut self.saved_list),
             View::Settings => (settings::items().len(), &mut self.settings_list),
             View::Search => (self.tab.search.as_ref().map_or(0, |s| s.hits.len()), &mut self.tab.search_list),
             View::Thread => return None,
@@ -1026,7 +1044,7 @@ impl App {
         if let (Some(s), Some((_, since))) = (&self.status, &self.status_since) {
             at(*since + s.ttl());
         }
-        if self.tab.view == View::Thread && self.tab.thread.is_some() && self.tab.loading.is_none() {
+        if self.tab.view == View::Thread && self.tab.thread.is_some() && self.tab.loading.is_none() && self.tab.offline.is_none() {
             at(self.tab.thread_checked + self.refresh_thread);
         }
         // At capacity, a finished refresh wakes the loop anyway (and due ones mustn't spin it).
@@ -1158,11 +1176,12 @@ impl App {
                         let Some(key) = self.tab.board.as_ref().map(|b| self.key(&b.uri, self.tab.pending_thread)) else {
                             return;
                         };
-                        self.thread_gone(&key);
                         if let Some(w) = self.store.watched_mut(&key) {
                             w.dead = true;
                             self.save();
                         }
+                        self.store.saved_dead(&key);
+                        self.thread_gone(&key);
                     }
                     Err(e) => self.error(e),
                 }
@@ -1289,6 +1308,8 @@ impl App {
         let Some(board) = self.tab.board.clone() else { return };
         self.tab.pending_thread = no;
         self.tab.archive_offer = None;
+        self.tab.saved_offer = None;
+        self.tab.offline = None;
         self.tab.thread_checked = self.clock.instant();
         self.spawn(format!("Loading thread {no}"), move |b, _, _| b.thread(&board.uri, no), Msg::Thread);
     }
@@ -1356,21 +1377,30 @@ impl App {
                 }
             }
         }
-        // Just fetched: a watched thread's next background refresh counts from now.
-        self.watched_checked.insert(key.clone(), self.clock.instant());
-        let max_no = tv.posts.iter().map(|p| p.no).max().unwrap_or(0);
-        let subject = thread_subject(&tv.posts);
-        // A visit is an open, or a refresh that brought new posts.
-        if shown_max.is_none_or(|m| max_no > m) {
-            self.store.visit(&key, &subject, tv.posts.len(), max_no, self.clock.now());
+        // A saved copy isn't a visit, and isn't saved again.
+        if self.tab.offline.is_none() {
+            self.fetched_thread(&key, &tv.posts, shown_max);
         }
-        self.store.opened(&key.site, &key.board, key.no, tv.posts.len().saturating_sub(1) as u32, self.clock.now());
-        if let Some(w) = self.store.watched_mut(&key) {
-            generals::note_limit(w, &tv.posts);
-        }
-        self.save();
         self.tab.thread = Some(tv);
         self.remark_thread();
+    }
+
+    /// A thread's posts arrived: note the visit, and keep a copy if it's watched.
+    fn fetched_thread(&mut self, key: &ThreadKey, posts: &[Post], shown_max: Option<u64>) {
+        // Just fetched: a watched thread's next background refresh counts from now.
+        self.watched_checked.insert(key.clone(), self.clock.instant());
+        let max_no = posts.iter().map(|p| p.no).max().unwrap_or(0);
+        let subject = thread_subject(posts);
+        // A visit is an open, or a refresh that brought new posts.
+        if shown_max.is_none_or(|m| max_no > m) {
+            self.store.visit(key, &subject, posts.len(), max_no, self.clock.now());
+        }
+        self.store.opened(&key.site, &key.board, key.no, posts.len().saturating_sub(1) as u32, self.clock.now());
+        if let Some(w) = self.store.watched_mut(key) {
+            generals::note_limit(w, posts);
+        }
+        self.keep_copy(key, posts, false);
+        self.save();
     }
 
     // ----- filters and hiding -----
@@ -1485,7 +1515,8 @@ impl App {
     /// Start background refreshes that are due: the open thread every `refresh_thread`, and
     /// each watched thread every `refresh_watched`, a couple at a time.
     fn background(&mut self) {
-        let open = self.tab.thread.as_ref().filter(|_| self.tab.view == View::Thread).map(|t| self.key(&t.board, t.no));
+        // A saved copy open isn't refreshed (a watched thread still is, below, unless it's dead).
+        let open = self.tab.thread.as_ref().filter(|_| self.tab.view == View::Thread && self.tab.offline.is_none()).map(|t| self.key(&t.board, t.no));
         let now = self.clock.instant();
         // Fetched for any tab (or as a watched thread) counts too.
         let fetched_since = |key: &ThreadKey, every: Duration| {
@@ -1532,6 +1563,7 @@ impl App {
     fn refreshed(&mut self, key: ThreadKey, res: Result<Vec<Post>>) {
         self.refreshing.remove(&key);
         let is_open = self.tab.view == View::Thread
+            && self.tab.offline.is_none()
             && self.tab.thread.as_ref().is_some_and(|t| self.key(&t.board, t.no) == key)
             && self.current_site().cfg.name == key.site;
         if is_open {
@@ -1568,6 +1600,7 @@ impl App {
                 if w.subject.is_empty() {
                     w.subject = subject;
                 }
+                self.keep_copy(&key, &posts, false);
                 self.notified_max.insert(key, max_no);
                 if note.new > 0 {
                     self.notes_since.get_or_insert_with(Instant::now);
@@ -1580,6 +1613,7 @@ impl App {
                     w.dead = true;
                     self.save();
                 }
+                self.store.saved_dead(&key);
                 if is_open {
                     self.thread_gone(&key);
                 }
@@ -1608,8 +1642,15 @@ impl App {
         let dir = download::dir(self.download_dir.as_deref(), &site.cfg.name, &t.board, t.no);
         let url = site.backend.thread_url(&b.uri, t.no);
         let about = crate::export::About { site: &site.cfg.name, board: &t.board, thread: t.no, url: &url, saved: self.clock.now() };
-        match crate::export::save(&t.posts, &about, &theme::theme(), &dir) {
-            Ok(()) => self.info(format!("Saved thread.html and thread.json in {}", tilde(&dir.display().to_string()))),
+        let key = self.key(&t.board, t.no);
+        let posts = t.posts.clone();
+        match crate::export::save(&posts, &about, &theme::theme(), &dir) {
+            Ok(()) => {
+                // Also kept as a saved copy, to read in ck (the Saved view).
+                self.keep_copy(&key, &posts, true);
+                self.save_now();
+                self.info(format!("Saved thread.html and thread.json in {} (and in Saved)", tilde(&dir.display().to_string())));
+            }
             Err(e) => self.error(format!("Couldn't save the thread: {e:#}")),
         }
     }
@@ -1726,15 +1767,28 @@ impl App {
     }
 
     /// A thread 404'd: say so, and offer the site's archive if it has one.
-    fn thread_gone(&mut self, key: &ThreadKey) {
+    ///
+    /// With a saved copy, that comes first: a thread still on screen becomes its saved copy,
+    /// and otherwise `enter` opens it.
+    pub(crate) fn thread_gone(&mut self, key: &ThreadKey) {
         let archive = self.sites.iter().find(|s| s.cfg.name == key.site).and_then(|s| s.cfg.archive.clone());
-        match archive.filter(|a| self.sites.iter().any(|s| s.cfg.name == *a)) {
-            Some(a) => {
-                self.error(format!("Thread was deleted or archived. Press a to open it in {a}"));
-                self.tab.archive_offer = Some(ThreadKey { site: a, board: key.board.clone(), no: key.no });
+        self.tab.archive_offer = archive.filter(|a| self.sites.iter().any(|s| s.cfg.name == *a)).map(|a| ThreadKey { site: a, board: key.board.clone(), no: key.no });
+        let in_archive = self.tab.archive_offer.as_ref().map(|a| format!("{} opens it in {}", self.keys.key(Action::Archive), a.site));
+        let saved = self.store.saved(key).map(|m| m.saved);
+        let shown = self.tab.thread.as_ref().is_some_and(|t| t.no == key.no && t.board == key.board);
+        let text = match saved {
+            Some(at) if shown => {
+                self.tab.offline = Some(tabs::Offline { saved: at, dead: true });
+                format!("Thread was deleted or archived: this is its saved copy{}", in_archive.map(|a| format!(" ({a})")).unwrap_or_default())
             }
-            None => self.error("Thread was deleted or archived"),
-        }
+            Some(at) => {
+                self.tab.saved_offer = Some(key.clone());
+                let ago = crate::ui::ago(at, self.clock);
+                format!("Thread was deleted or archived. A saved copy from {ago}: enter opens it{}", in_archive.map(|a| format!(", {a}")).unwrap_or_default())
+            }
+            None => format!("Thread was deleted or archived{}", in_archive.map(|a| format!(". Press {a}")).unwrap_or_default()),
+        };
+        self.error(text);
     }
 
     fn toggle_watch(&mut self) {
@@ -1756,6 +1810,9 @@ impl App {
         };
         let key = self.key(&board, no);
         let watching = self.store.toggle_watch(key.clone(), subject, posts, last_seen);
+        if watching {
+            self.keep_open_thread(&key);
+        }
         // Refreshed soon, to learn where it's at, unless it was just fetched.
         let now = self.clock.instant();
         if self.watched_checked.get(&key).is_none_or(|t| now.saturating_duration_since(*t) >= http::MIN_REFETCH) {
@@ -1763,6 +1820,35 @@ impl App {
         }
         self.info(if watching { format!("Watching thread {no}") } else { format!("Stopped watching thread {no}") });
         self.save_now();
+    }
+
+    /// Keep a copy of a thread's posts in the data directory (a watched thread's, or with
+    /// `always`, any). Unchanged posts aren't written again.
+    fn keep_copy(&mut self, key: &ThreadKey, posts: &[Post], always: bool) {
+        if !always && self.store.watched(key).is_none() {
+            return;
+        }
+        let url = self.thread_link(key, None).unwrap_or_default();
+        match self.store.keep_thread(key, &thread_subject(posts), &url, posts, self.clock.now()) {
+            Ok(true) => self.save(),
+            Ok(false) => {}
+            Err(e) => self.error(format!("Couldn't save a copy of thread {}: {e:#}", key.no)),
+        }
+    }
+
+    /// A thread just watched: if it's the one open (and loaded), it's saved at once. A saved
+    /// copy open is kept as it is (a copy saved under another number, when the site answered
+    /// with another thread, is kept under this one too).
+    fn keep_open_thread(&mut self, key: &ThreadKey) {
+        if self.tab.view != View::Thread || (self.tab.offline.is_some() && self.store.saved(key).is_some()) {
+            return;
+        }
+        let Some(t) = self.tab.thread.as_ref().filter(|t| self.key(&t.board, t.no) == *key) else { return };
+        let posts = t.posts.clone();
+        self.keep_copy(key, &posts, false);
+        if self.tab.offline.is_some_and(|o| o.dead) {
+            self.store.saved_dead(key);
+        }
     }
 
     /// `m`: mark the selected post as yours (or not), to hear about replies to it. The
@@ -1774,6 +1860,7 @@ impl App {
         if self.store.watched(&key).is_none() {
             let max_no = t.posts.iter().map(|p| p.no).max().unwrap_or(0);
             self.store.toggle_watch(key.clone(), thread_subject(&t.posts), t.posts.len(), max_no);
+            self.keep_open_thread(&key);
         }
         let Some(w) = self.store.watched_mut(&key) else { return };
         let mine = !w.mine.contains(&no);
@@ -1965,6 +2052,18 @@ impl App {
             View::History => {
                 self.store.history.remove(i);
             }
+            View::Saved => {
+                let key = self.store.saved[i].key.clone();
+                // Asked first: a copy can't be fetched again once the thread is gone.
+                if self.saved_confirm.take().as_ref() != Some(&key) {
+                    let x = self.keys.key(Action::Remove);
+                    self.info(format!("Press {x} again to remove the saved copy of thread {}", key.no));
+                    self.saved_confirm = Some(key);
+                    return;
+                }
+                self.store.forget_saved(&key);
+                self.info(format!("Removed the saved copy of thread {}", key.no));
+            }
             _ => return,
         }
         self.save_now();
@@ -1979,6 +2078,7 @@ impl App {
             View::Catalog => self.tab.catalog_list.state.selected().and_then(|i| self.visible_catalog().get(i).copied()),
             View::Watched => self.watched_list.state.selected().and_then(|i| self.visible_watched().get(i).copied()),
             View::History => self.history_list.state.selected().and_then(|i| self.visible_history().get(i).copied()),
+            View::Saved => self.saved_list.state.selected().and_then(|i| self.visible_saved().get(i).copied()),
         }
     }
 
@@ -1989,6 +2089,7 @@ impl App {
             (View::Sites, _) => match self.selected_site_row() {
                 Some(SiteRow::Watched) => self.tab.view = View::Watched,
                 Some(SiteRow::History) => self.tab.view = View::History,
+                Some(SiteRow::Saved) => self.tab.view = View::Saved,
                 Some(SiteRow::Favorite(i)) => self.open_favorite(i),
                 Some(SiteRow::Recent(i)) => {
                     if let Some(b) = self.recent_board(i) {
@@ -2004,6 +2105,7 @@ impl App {
             },
             (View::Watched, Some(i)) => self.open_key(self.store.watched[i].key.clone()),
             (View::History, Some(i)) => self.open_key(self.store.history[i].key.clone()),
+            (View::Saved, Some(i)) => self.open_saved(self.store.saved[i].key.clone()),
             (View::Boards, Some(i)) => self.open_catalog(self.boards()[i].clone()),
             (View::Catalog, Some(i)) => {
                 let no = self.tab.catalog[i].no;
@@ -2060,7 +2162,7 @@ impl App {
     fn back(&mut self) {
         self.tab.gallery = None;
         self.tab.view = match self.tab.view {
-            View::Sites | View::Boards | View::Watched | View::History => View::Sites,
+            View::Sites | View::Boards | View::Watched | View::History | View::Saved => View::Sites,
             View::Settings => self.tab.settings_back.take().unwrap_or(View::Sites),
             View::Search => self.close_search(),
             View::Catalog => View::Boards,
@@ -2087,7 +2189,7 @@ impl App {
 
     fn refresh(&mut self) {
         match self.tab.view {
-            View::Sites | View::Watched | View::History | View::Settings => {}
+            View::Sites | View::Watched | View::History | View::Saved | View::Settings => {}
             View::Search => {
                 if let Some(s) = &mut self.tab.search {
                     s.hits.clear();
@@ -2097,6 +2199,7 @@ impl App {
             }
             View::Boards => self.load_boards(),
             View::Catalog => self.load_catalog(),
+            View::Thread if self.tab.offline.is_some() => self.refresh_saved(),
             View::Thread => {
                 if let Some(no) = self.tab.thread.as_ref().map(|t| t.no) {
                     self.load_thread(no);
@@ -2122,6 +2225,7 @@ impl App {
                 View::Catalog => self.selected_post().map(|p| ("text", copy_text(p, true))),
                 View::Watched => self.selected_index().map(|i| ("text", saved(&self.store.watched[i].key, &self.store.watched[i].subject))),
                 View::History => self.selected_index().map(|i| ("text", saved(&self.store.history[i].key, &self.store.history[i].subject))),
+                View::Saved => self.selected_index().map(|i| ("text", saved(&self.store.saved[i].key, &self.store.saved[i].subject))),
                 _ => None,
             }
         };
@@ -2157,6 +2261,7 @@ impl App {
         match (self.tab.view, &self.tab.board) {
             (View::Watched, _) => self.selected_index().and_then(|i| self.thread_link(&self.store.watched[i].key, None)),
             (View::History, _) => self.selected_index().and_then(|i| self.thread_link(&self.store.history[i].key, None)),
+            (View::Saved, _) => self.selected_index().and_then(|i| self.thread_link(&self.store.saved[i].key, None)),
             (View::Boards, _) => self.selected_index().map(|i| backend.board_url(&self.boards()[i].uri)),
             (View::Catalog, Some(b)) => self.selected_index().map(|i| {
                 let p = &self.tab.catalog[i];

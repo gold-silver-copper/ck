@@ -90,6 +90,8 @@ fn empty(f: &mut Frame, area: Rect, msg: &str) {
 pub fn draw(f: &mut Frame, app: &mut App) {
     let t = theme();
     let all = f.area();
+    // A saved copy is read offline: its images only come from disk.
+    app.images.offline = app.tab.view == View::Thread && app.tab.offline.is_some();
     f.buffer_mut().set_style(all, Style::new().fg(t.text).bg(t.background));
     if app.tab.viewer.is_some() {
         draw_viewer(f, app);
@@ -111,6 +113,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             }
             View::Watched => draw_watched(f, app, content),
             View::History => draw_history(f, app, content),
+            View::Saved => draw_saved(f, app, content),
             View::Settings => draw_settings(f, app, content),
             View::Search => draw_search(f, app, content),
         }
@@ -265,6 +268,11 @@ fn location(app: &App) -> (Vec<String>, Vec<Span<'static>>) {
             meta.push(plural(app.store.history.len(), "thread"));
             vec!["History".into()]
         }
+        View::Saved => {
+            meta.push(plural(app.store.saved.len(), "thread"));
+            meta.push(human_size(app.store.saved.iter().map(|m| m.bytes).sum()));
+            vec!["Saved".into()]
+        }
         View::Settings => vec!["Settings".into()],
         View::Search => {
             let Some(s) = &app.tab.search else { return (vec!["Search".into()], Vec::new()) };
@@ -286,6 +294,14 @@ fn location(app: &App) -> (Vec<String>, Vec<Span<'static>>) {
     };
     if let Some(q) = query {
         spans.extend([chip(q, t.on_primary_container, t.primary_container), Span::raw("  ")]);
+    }
+    // A saved copy, read offline.
+    if let Some(off) = app.tab.offline.filter(|_| app.tab.view == View::Thread) {
+        spans.extend([chip(format!("saved {}", ago(off.saved, app.clock)), t.on_primary_container, t.primary_container), Span::raw(" ")]);
+        if off.dead {
+            spans.push(chip("dead", t.background, t.error));
+        }
+        spans.push(Span::raw("  "));
     }
     spans.extend([Span::styled(meta.join("  ·  "), dim()), Span::raw(" ")]);
     (crumbs, spans)
@@ -429,6 +445,12 @@ fn footer_hints(app: &App) -> Vec<(String, &'static str)> {
             (k(Action::Search), "filter"),
             (k(Action::Browser), "browser"),
         ],
+        View::Saved => vec![
+            ("enter".into(), "read"),
+            (k(Action::Menu), "more"),
+            (k(Action::Remove), "remove"),
+            (k(Action::Search), "filter"),
+        ],
         View::Settings => vec![("enter".into(), "change"), ("esc".into(), "back")],
         View::Search => vec![("enter".into(), "open the thread"), (k(Action::NextMatch), "more results"), ("esc".into(), "back")],
         _ => vec![
@@ -439,6 +461,10 @@ fn footer_hints(app: &App) -> Vec<(String, &'static str)> {
             (k(Action::Reload), "reload"),
         ],
     };
+    // A saved copy of a thread that's still up: the live one is a key away.
+    if app.tab.view == View::Thread && app.tab.gallery.is_none() && app.focused().is_none() && app.tab.offline.is_some_and(|o| !o.dead) {
+        hints.insert(0, (k(Action::Reload), "live thread"));
+    }
     hints.push((k(Action::Settings), "settings"));
     hints.push((k(Action::Help), "help"));
     hints
@@ -451,6 +477,7 @@ fn current_filter(app: &App) -> &str {
         View::Catalog => &app.tab.catalog_list.filter,
         View::Watched => &app.watched_list.filter,
         View::History => &app.history_list.filter,
+        View::Saved => &app.saved_list.filter,
         View::Thread | View::Settings | View::Search => "",
     }
 }
@@ -549,6 +576,18 @@ fn draw_sites(f: &mut Frame, app: &mut App, area: Rect) {
                 Span::styled(format!("{:<16}", "History"), bold(t.text)),
                 Span::styled(format!("{} recent", plural(app.store.history.len(), "thread")), dim()),
             ])],
+            SiteRow::Saved => {
+                let dead = app.store.saved.iter().filter(|m| m.dead).count();
+                let mut spans = vec![
+                    Span::styled("▤  ", Style::new().fg(t.primary)),
+                    Span::styled(format!("{:<16}", "Saved"), bold(t.text)),
+                    Span::styled(plural(app.store.saved.len(), "thread"), dim()),
+                ];
+                if dead > 0 {
+                    spans.push(Span::styled(format!(", {dead} gone from the site"), dim()));
+                }
+                vec![Line::from(spans)]
+            }
             SiteRow::Favorite(i) => {
                 let b = &app.favorites[i];
                 let left = vec![
@@ -653,6 +692,35 @@ fn draw_history(f: &mut Frame, app: &mut App, area: Rect) {
     app.history_list.state = state;
     if app.hit.is_none() {
         empty(f, area, "No history yet");
+    }
+}
+
+fn draw_saved(f: &mut Frame, app: &mut App, area: Rect) {
+    let t = theme();
+    let width = area.width.saturating_sub(PAD + 1) as usize;
+    let rows = app.visible_saved();
+    let mut state = app.saved_list.state;
+    app.hit = draw_rows(f, area, rows.len(), &mut state, (1, 0), None, &|_| false, &mut |k| {
+        let m = &app.store.saved[rows[k]];
+        let mut right = Vec::new();
+        if m.dead {
+            right.extend([chip("dead", t.background, t.error), Span::raw(" ")]);
+        } else if app.store.watched(&m.key).is_some() {
+            right.extend([chip("watching", t.on_primary_container, t.primary_container), Span::raw(" ")]);
+        }
+        right.push(Span::styled(format!(" {}  ·  {}", plural(m.posts, "post"), ago(m.saved, app.clock)), dim()));
+        let mut left = thread_row(&m.key, &m.subject);
+        left.push(Span::styled(format!("  No.{}", m.key.no), dim()));
+        vec![spread(left, right, width)]
+    });
+    app.saved_list.state = state;
+    if app.hit.is_none() {
+        let msg = format!(
+            "No saved threads. Watched threads are saved as they refresh ({} watches one), and {} saves one.",
+            app.keys.key(Action::Watch),
+            app.keys.key(Action::Export)
+        );
+        empty(f, area, &msg);
     }
 }
 
@@ -1000,6 +1068,8 @@ fn draw_tile(f: &mut Frame, images: &mut Images, file: &Attachment, count: usize
         }
         State::Loading | State::Rendering => label(f, "…".into(), dim()),
         State::Failed => label(f, "✗".into(), Style::new().fg(t.error)),
+        // Offline, not cached: what kind of file it is.
+        State::Unavailable => label(f, kind, dim()),
     }
 }
 
@@ -1007,8 +1077,12 @@ fn draw_tile(f: &mut Frame, images: &mut Images, file: &Attachment, count: usize
 
 fn draw_thread(f: &mut Frame, app: &mut App, area: Rect) {
     let Some(t) = &mut app.tab.thread else {
-        if app.tab.loading.is_none() {
-            empty(f, area, "Thread not loaded");
+        if app.tab.loading.is_some() {
+            return;
+        }
+        match app.tab.saved_offer.as_ref().and_then(|k| app.store.saved(k)) {
+            Some(m) => empty(f, area, &format!("The thread is gone. enter opens its saved copy from {}.", ago(m.saved, app.clock))),
+            None => empty(f, area, "Thread not loaded"),
         }
         return;
     };
@@ -1527,9 +1601,9 @@ fn help_sections(keys: &KeyMap) -> Vec<(&'static str, Vec<(String, &'static str)
             ],
         ),
         (
-            "Watched, History",
+            "Watched, History, Saved",
             vec![
-                (k(Action::Remove), "remove the entry"),
+                (k(Action::Remove), "remove the entry (Saved: asks first)"),
                 (pair(Action::NewTab, Action::Follow), "new tab / follow general"),
                 (pair(Action::Copy, Action::CopyLink), "copy subject+link / link"),
             ],
@@ -1814,11 +1888,14 @@ fn draw_viewer(f: &mut Frame, app: &mut App) {
     }
     put(f, bottom.x, bottom.y, bottom.width, Line::from(hints));
     let area = middle.inner(Margin::new(MARGIN, 0));
-    // Non-images (videos, pdfs, ...) show their thumbnail, if any, with a hint.
-    let url = if file.is_image() { Some(&file.url) } else { file.thumb.as_ref() };
+    // Non-images (videos, pdfs, ...) show their thumbnail, if any, with a hint; so do images
+    // of a saved copy that weren't downloaded.
+    let source = app.viewer_source(file);
     let mut inner = area;
-    if !file.is_image() {
+    let thumb_only = source.as_ref().is_some_and(|(_, k)| *k == Kind::Thumb);
+    if !file.is_image() || thumb_only {
         let hint = match file.ext().to_uppercase() {
+            _ if file.is_image() => format!("Not downloaded: showing the saved thumbnail ({} downloads it).", app.keys.key(Action::Download)),
             e if e.is_empty() => "Showing the thumbnail. Press i to open the file externally.".to_string(),
             e => format!("{e} files can't be shown here; showing the thumbnail. Press i to open it externally."),
         };
@@ -1829,10 +1906,9 @@ fn draw_viewer(f: &mut Frame, app: &mut App) {
         put(f, inner.x, inner.y + inner.height / 2, inner.width, Line::styled(s, style).centered());
     };
     // Terminal graphics would cover a panel on top.
-    let Some(url) = url.filter(|_| app.image_search_panel.is_none()) else { return };
+    let Some((url, kind)) = source.filter(|_| app.image_search_panel.is_none()) else { return };
     let spinner = SPINNER[app.tick % SPINNER.len()];
-    let kind = if file.is_image() { Kind::Full } else { Kind::Thumb };
-    match app.images.get(url, Size::new(inner.width, inner.height), kind) {
+    match app.images.get(&url, Size::new(inner.width, inner.height), kind) {
         State::Ready(p) => {
             let s = p.size();
             let r = Rect::new(
@@ -1846,6 +1922,7 @@ fn draw_viewer(f: &mut Frame, app: &mut App) {
         State::Loading => msg(f, format!("{spinner} Loading…"), Style::new().fg(t.primary)),
         State::Rendering => msg(f, format!("{spinner} Rendering…"), Style::new().fg(t.primary)),
         State::Failed => msg(f, "Couldn't load this image".into(), Style::new().fg(t.error)),
+        State::Unavailable => msg(f, format!("Not saved: the image wasn't downloaded or cached ({} downloads it)", app.keys.key(Action::Download)), dim()),
     }
 }
 
@@ -1878,7 +1955,7 @@ fn fmt_time(ts: i64, clock: Clock) -> String {
     date.map(|d| format!("{d} · {}", ago(ts, clock))).unwrap_or_default()
 }
 
-fn ago(ts: i64, clock: Clock) -> String {
+pub fn ago(ts: i64, clock: Clock) -> String {
     if ts == 0 {
         return String::new();
     }

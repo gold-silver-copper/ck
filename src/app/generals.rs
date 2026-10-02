@@ -67,6 +67,7 @@ impl App {
         };
         if self.store.watched(&key).is_none() {
             self.store.toggle_watch(key.clone(), subject, posts, max_no);
+            self.keep_open_thread(&key);
         }
         if let Some(w) = self.store.watched_mut(&key) {
             w.general = Some(pattern.clone());

@@ -20,6 +20,10 @@ pub struct Config {
     /// Seconds between background refreshes of each watched thread (at least 60).
     #[serde(default = "default_refresh_watched")]
     pub refresh_watched_secs: u64,
+    /// Saved copies of threads (see the Saved view) are kept to this many megabytes: past it,
+    /// the oldest dead, unwatched ones go. 0 keeps everything.
+    #[serde(default = "default_saved_max_mb")]
+    pub saved_max_mb: u64,
     /// Sites left off the home screen (by name).
     #[serde(default)]
     pub hidden_sites: Vec<String>,
@@ -75,6 +79,10 @@ fn default_refresh_thread() -> u64 {
 
 fn default_refresh_watched() -> u64 {
     60
+}
+
+fn default_saved_max_mb() -> u64 {
+    500
 }
 
 /// Catalog sort orders, cycled with `s`. Saved under their labels.

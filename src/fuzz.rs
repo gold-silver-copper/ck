@@ -636,15 +636,26 @@ fn data_dir_once(seed: u64) {
         store.visit(&key, "subject", 10, 109, START + i as i64);
         store.toggle_hidden(&key.site, "g", 200 + i);
         store.opened(&key.site, "g", key.no, 9, START);
+        // A saved copy, some of them of dead threads.
+        let html = format!("<span class=\"quote\">&gt;{i}</span><br><a href=\"#p{}\" class=\"quotelink\">&gt;&gt;{}</a> <s>spoiler</s>", key.no, key.no);
+        let parsed = crate::markup::parse_html(&html, crate::markup::Flavor::Fourchan);
+        let posts: Vec<crate::model::Post> = (0..3).map(|k| crate::model::Post { no: key.no + k, body: parsed.lines.clone(), anchors: parsed.anchors.clone(), ..Default::default() }).collect();
+        store.keep_thread(&key, &format!("thread {i}"), "u", &posts, START + i as i64).unwrap();
+        if rng.chance(50) {
+            store.saved_dead(&key);
+        }
     }
     store.recent_boards = vec!["4chan/g".into(), "lainchan/λ".into(), "x".into()];
     store.save().unwrap();
     let place = |view: &str| Place { view: view.into(), site: "4chan".into(), board: Some("g".into()), thread: Some(100), ..Default::default() };
-    store.save_session(&Session { tabs: vec![place("thread"), place("catalog"), place("watched")], active: rng.below(4) }).unwrap();
+    store.save_session(&Session { tabs: vec![place("thread"), place("catalog"), place("watched"), place("saved")], active: rng.below(5) }).unwrap();
     store.save_boards("4chan", &[crate::model::Board { uri: "g".into(), title: "Technology".into(), nsfw: Some(false) }], START).unwrap();
     // Then break some of it.
     let mut files: Vec<std::path::PathBuf> = std::fs::read_dir(&data).unwrap().filter_map(|e| Some(e.ok()?.path())).filter(|p| p.is_file()).collect();
     files.push(data.join("boards").join("4chan.json"));
+    // Saved copies: threads/<site>/<board>/<no>.json.
+    let copies: Vec<ThreadKey> = store.saved.iter().map(|m| m.key.clone()).collect();
+    files.extend(copies.iter().map(|k| crate::saved::path(&data, k)));
     files.sort();
     let mut broken: HashMap<std::path::PathBuf, Vec<u8>> = HashMap::new();
     for path in &files {
@@ -654,7 +665,13 @@ fn data_dir_once(seed: u64) {
             broken.insert(path.clone(), bytes);
         }
     }
-    let (store, warnings) = Store::load(Some(data.clone()));
+    let (mut store, warnings) = Store::load(Some(data.clone()));
+    // Every copy is read (as opening it from the Saved view would).
+    for key in &copies {
+        if let Ok(t) = store.load_saved(key) {
+            let _: Vec<crate::model::Post> = t.posts.into_iter().map(Into::into).collect();
+        }
+    }
     // Nothing the user had is destroyed: a file that wouldn't load is kept beside.
     for (path, bytes) in &broken {
         if !path.exists() {
@@ -668,6 +685,13 @@ fn data_dir_once(seed: u64) {
     app = crate::app::App::new(cfg, app.keys.clone(), None, store);
     app.config_path = None;
     app.restore_session();
+    // The Saved view, and each copy in it.
+    app.goto_str("saved");
+    for key in copies {
+        app.open_saved(key);
+        let mut term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(60, 20)).unwrap();
+        term.draw(|f| crate::ui::draw(f, &mut app)).unwrap();
+    }
     for (w, h) in [(110, 32), (20, 5)] {
         let mut term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(w, h)).unwrap();
         term.draw(|f| crate::ui::draw(f, &mut app)).unwrap();

@@ -13,6 +13,13 @@ use crate::store::ThreadKey;
 pub const MAX_TABS: usize = 9;
 
 /// One tab's place: the active one is `App::tab`.
+/// A saved copy being read: when it was saved, and whether the thread is gone.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Offline {
+    pub saved: i64,
+    pub dead: bool,
+}
+
 pub struct Tab {
     pub view: View,
     /// Where esc goes back to from Settings.
@@ -51,6 +58,10 @@ pub struct Tab {
     pub from_catalog: bool,
     /// After a thread 404'd: the same thread on the site's configured archive.
     pub archive_offer: Option<ThreadKey>,
+    /// After a thread 404'd: its saved copy (`enter` opens it).
+    pub saved_offer: Option<ThreadKey>,
+    /// The open thread is a saved copy, read offline.
+    pub offline: Option<Offline>,
     /// The tab's request in flight (0: none).
     pub req: u64,
     /// The thread number of the last thread load, for 404 handling.
@@ -91,6 +102,8 @@ impl Tab {
             catalog_of: None,
             from_catalog: false,
             archive_offer: None,
+            saved_offer: None,
+            offline: None,
             req: 0,
             pending_thread: 0,
             pending_catalog: None,
@@ -140,6 +153,7 @@ impl App {
 enum Open {
     Thread(Board, u64),
     Key(ThreadKey),
+    Saved(ThreadKey),
     Link(crate::model::Link),
 }
 
@@ -158,6 +172,7 @@ impl App {
             }),
             View::Watched => self.selected_index().map(|i| Open::Key(self.store.watched[i].key.clone())),
             View::History => self.selected_index().map(|i| Open::Key(self.store.history[i].key.clone())),
+            View::Saved => self.selected_index().map(|i| Open::Saved(self.store.saved[i].key.clone())),
             View::Thread => match self.outgoing_link() {
                 Some(link) => Some(Open::Link(link)),
                 None => {
@@ -176,6 +191,7 @@ impl App {
         match open {
             Open::Thread(board, no) => self.open_thread_at(board, no, None),
             Open::Key(key) => self.open_key(key),
+            Open::Saved(key) => self.open_saved(key),
             Open::Link(link) => self.follow(link),
         }
     }
@@ -233,6 +249,7 @@ impl App {
             View::Sites => "Sites".into(),
             View::Watched => "Watched".into(),
             View::History => "History".into(),
+            View::Saved => "Saved".into(),
             View::Settings => "Settings".into(),
         }
     }
