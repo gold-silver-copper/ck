@@ -97,8 +97,7 @@ impl App {
         let Some(site) = self.sites.iter().position(|s| s.cfg.name == p.site) else { return };
         self.switch_site(site);
         self.tab.catalog_sort = p.sort.unwrap_or_default();
-        self.tab.catalog_list = Picker { filter: p.filter.clone(), ..Default::default() };
-        self.tab.catalog_list.state.select(Some(0));
+        self.tab.catalog_list = Picker { filter: p.filter.clone(), ..Picker::top() };
         let board = p.board.as_ref().map(|b| self.find_board(b));
         match (p.view.as_str(), board, p.thread) {
             ("watched", ..) => self.tab.view = View::Watched,

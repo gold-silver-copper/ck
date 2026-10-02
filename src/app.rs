@@ -93,6 +93,11 @@ pub struct Picker {
 }
 
 impl Picker {
+    /// An empty filter, with the first row selected.
+    fn top() -> Self {
+        Self { state: ListState::default().with_selected(Some(0)), filter: String::new() }
+    }
+
     fn move_by(&mut self, delta: isize, len: usize) {
         if len == 0 {
             self.state.select(None);
@@ -637,7 +642,7 @@ impl App {
         let (tx, rx) = channel();
         let mut app = Self {
             sites,
-            site_list: Picker::default(),
+            site_list: Picker::top(),
             favorites: cfg.favorites.iter().filter_map(|f| BoardRef::parse(f)).collect(),
             home_titles: HashMap::new(),
             hidden_sites: cfg.hidden_sites.iter().cloned().collect(),
@@ -649,14 +654,14 @@ impl App {
                 None => layout,
             }),
             settings: settings::Settings::default(),
-            settings_list: Picker::default(),
+            settings_list: Picker::top(),
             theme_name,
             themes,
             color_mode: cfg.color,
             truecolor: cfg.color.truecolor(),
             images_mode: cfg.images,
-            watched_list: Picker::default(),
-            history_list: Picker::default(),
+            watched_list: Picker::top(),
+            history_list: Picker::top(),
             store,
             refresh_thread,
             refresh_watched,
@@ -712,11 +717,7 @@ impl App {
             tx,
             rx,
         };
-        app.site_list.state.select(Some(0));
         app.load_home_titles();
-        app.watched_list.state.select(Some(0));
-        app.history_list.state.select(Some(0));
-        app.settings_list.state.select(Some(0));
         app
     }
 
@@ -779,6 +780,13 @@ impl App {
             Sort::Oldest => v.sort_by_key(|&i| (c[i].time, c[i].no)),
         }
         v
+    }
+
+    /// Keep the current list's selection on a row that exists.
+    fn clamp_list(&mut self) {
+        if let Some((p, len)) = self.picker() {
+            p.clamp(len);
+        }
     }
 
     fn picker(&mut self) -> Option<(&mut Picker, usize)> {
@@ -1317,9 +1325,7 @@ impl App {
         self.info(if hidden { format!("Hid {what} {no} ({show} shows hidden ones)") } else { format!("Unhid {what} {no}") });
         self.remark_catalog();
         self.remark_thread();
-        if let Some((p, len)) = self.picker() {
-            p.clamp(len);
-        }
+        self.clamp_list();
     }
 
     /// `Z`: show hidden threads and posts (dimmed), or leave them out again.
@@ -1333,9 +1339,7 @@ impl App {
         {
             self.tab.catalog_list.state.select(Some(pos));
         }
-        if let Some((p, len)) = self.picker() {
-            p.clamp(len);
-        }
+        self.clamp_list();
         let msg = if self.show_hidden { "Showing hidden threads and posts" } else { "Leaving out hidden threads and posts" };
         self.info(msg);
     }
@@ -1658,8 +1662,7 @@ impl App {
         if site == self.tab.site {
             return;
         }
-        self.tab.board_list = Picker::default();
-        self.tab.board_list.state.select(Some(0));
+        self.tab.board_list = Picker::top();
         self.tab.site = site;
         if self.sites[site].boards.is_none() {
             let cfg = &self.sites[site].cfg;
@@ -1713,13 +1716,8 @@ impl App {
             }
             (None, None) => {
                 // A board link: open its catalog.
-                self.tab.board = Some(target);
-                self.tab.catalog.clear();
-                self.tab.catalog_list = Picker::default();
-                self.tab.catalog_list.state.select(Some(0));
                 self.tab.return_to = None;
-                self.tab.view = View::Catalog;
-                self.load_catalog();
+                self.open_catalog(target);
             }
             (None, Some(post)) => {
                 // Ask the engine which thread the post is in (only some can).
@@ -1800,8 +1798,7 @@ impl App {
                 Some(SiteRow::Recent(i)) => {
                     self.store.recent_boards.remove(i);
                     self.save_now();
-                    let len = self.visible_sites().len();
-                    self.site_list.clamp(len);
+                    self.clamp_home();
                 }
                 Some(SiteRow::Site(i)) => self.toggle_site_hidden(i),
                 _ => {}
@@ -1820,9 +1817,7 @@ impl App {
             _ => return,
         }
         self.save_now();
-        if let Some((p, len)) = self.picker() {
-            p.clamp(len);
-        }
+        self.clamp_list();
     }
 
     /// Index of the selected item in the current list's underlying data (not for Sites).
@@ -1837,16 +1832,10 @@ impl App {
     }
 
     fn enter(&mut self) {
-        if self.tab.view == View::Settings {
-            self.activate_setting();
-            return;
-        }
-        if self.tab.view == View::Search {
-            self.open_search_hit();
-            return;
-        }
-        if self.tab.view == View::Sites {
-            match self.site_list.state.selected().and_then(|i| self.visible_sites().get(i).copied()) {
+        match (self.tab.view, self.selected_index()) {
+            (View::Settings, _) => self.activate_setting(),
+            (View::Search, _) => self.open_search_hit(),
+            (View::Sites, _) => match self.selected_site_row() {
                 Some(SiteRow::Watched) => self.tab.view = View::Watched,
                 Some(SiteRow::History) => self.tab.view = View::History,
                 Some(SiteRow::Favorite(i)) => self.open_favorite(i),
@@ -1858,28 +1847,14 @@ impl App {
                 Some(SiteRow::Site(i)) => self.enter_site(i),
                 Some(SiteRow::HiddenSites) => {
                     self.show_hidden_sites = !self.show_hidden_sites;
-                    let len = self.visible_sites().len();
-                    self.site_list.clamp(len);
+                    self.clamp_home();
                 }
                 None => {}
-            }
-            return;
-        }
-        let Some(i) = self.selected_index() else { return };
-        match self.tab.view {
-            View::Sites | View::Thread | View::Settings | View::Search => {}
-            View::Watched => self.open_key(self.store.watched[i].key.clone()),
-            View::History => self.open_key(self.store.history[i].key.clone()),
-            View::Boards => {
-                let board = self.boards()[i].clone();
-                self.tab.catalog.clear();
-                self.tab.catalog_list = Picker::default();
-                self.tab.catalog_list.state.select(Some(0));
-                self.tab.board = Some(board);
-                self.tab.view = View::Catalog;
-                self.load_catalog();
-            }
-            View::Catalog => {
+            },
+            (View::Watched, Some(i)) => self.open_key(self.store.watched[i].key.clone()),
+            (View::History, Some(i)) => self.open_key(self.store.history[i].key.clone()),
+            (View::Boards, Some(i)) => self.open_catalog(self.boards()[i].clone()),
+            (View::Catalog, Some(i)) => {
                 let no = self.tab.catalog[i].no;
                 // On an overboard the thread lives on its own board.
                 if let Some(uri) = self.tab.catalog[i].board.clone().filter(|b| *b != self.tab.catalog_board) {
@@ -1891,7 +1866,17 @@ impl App {
                 self.tab.view = View::Thread;
                 self.load_thread(no);
             }
+            _ => {}
         }
+    }
+
+    /// Show `board`'s catalog from the top, and load it.
+    fn open_catalog(&mut self, board: Board) {
+        self.tab.board = Some(board);
+        self.tab.catalog.clear();
+        self.tab.catalog_list = Picker::top();
+        self.tab.view = View::Catalog;
+        self.load_catalog();
     }
 
     fn enter_site(&mut self, i: usize) {
@@ -1936,11 +1921,10 @@ impl App {
             self.tab.board = self.tab.catalog_of.clone();
         }
         // After following links to another board, the loaded catalog is for the old one.
-        if self.tab.view == View::Catalog && self.tab.board.as_ref().is_some_and(|b| b.uri != self.tab.catalog_board) {
-            self.tab.catalog.clear();
-            self.tab.catalog_list = Picker::default();
-            self.tab.catalog_list.state.select(Some(0));
-            self.load_catalog();
+        if self.tab.view == View::Catalog
+            && let Some(board) = self.tab.board.clone().filter(|b| b.uri != self.tab.catalog_board)
+        {
+            self.open_catalog(board);
             return;
         }
         // Navigating away cancels any in-flight request (its response will be ignored).

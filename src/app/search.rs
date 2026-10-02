@@ -69,8 +69,7 @@ impl App {
         };
         self.switch_site(archive);
         self.tab.search = Some(Search { board, query, hits: Vec::new(), total: None, pages: 0, back });
-        self.tab.search_list = Picker::default();
-        self.tab.search_list.state.select(Some(0));
+        self.tab.search_list = Picker::top();
         self.tab.view = View::Search;
         self.load_search_page();
     }

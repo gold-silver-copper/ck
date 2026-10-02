@@ -307,9 +307,7 @@ impl App {
         if matches!(key.code, KeyCode::Esc | KeyCode::Enter) {
             self.filtering = false;
         }
-        if let Some((p, len)) = self.picker() {
-            p.clamp(len);
-        }
+        self.clamp_list();
     }
 
     /// Moving in the catalog grid: j/k by rows, h/l by columns (h in the first column goes

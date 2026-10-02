@@ -66,12 +66,10 @@ pub struct Tab {
 
 impl Tab {
     pub fn new(site: usize) -> Self {
-        let mut board_list = Picker::default();
-        board_list.state.select(Some(0));
         Self {
             view: View::Sites,
             settings_back: None,
-            board_list,
+            board_list: Picker::top(),
             catalog_list: Picker::default(),
             catalog_sort: Sort::default(),
             return_to: None,

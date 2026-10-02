@@ -2,7 +2,7 @@
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 
-use super::{App, Msg, Picker, View};
+use super::{App, Msg, View};
 use crate::model::Board;
 use crate::route::{self, SiteInfo, Target};
 
@@ -50,13 +50,8 @@ impl App {
                 self.spawn(label, move |b, _, _| b.find_thread(&job_board, post), move |id, r| Msg::Found(id, board, post, r));
             }
             (None, None) => {
-                self.tab.board = Some(board);
-                self.tab.catalog.clear();
-                self.tab.catalog_list = Picker::default();
-                self.tab.catalog_list.state.select(Some(0));
                 self.tab.return_to = None;
-                self.tab.view = View::Catalog;
-                self.load_catalog();
+                self.open_catalog(board);
             }
         }
     }

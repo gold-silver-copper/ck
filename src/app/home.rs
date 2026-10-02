@@ -153,7 +153,7 @@ impl App {
         self.clamp_home();
     }
 
-    fn clamp_home(&mut self) {
+    pub(super) fn clamp_home(&mut self) {
         let len = self.visible_sites().len();
         self.site_list.clamp(len);
     }
