@@ -3,7 +3,7 @@
 use anyhow::Result;
 use serde_json::Value;
 
-use super::Backend;
+use super::{Backend, Partial};
 use crate::http::{as_bool, as_i64, as_str, as_u64, encode_segment as enc, get_json};
 use crate::markup::{self, Flavor};
 use crate::model::{Attachment, Board, Post};
@@ -102,7 +102,7 @@ fn attachment(base: &str, f: &Value) -> Option<Attachment> {
 }
 
 impl Backend for Jschan {
-    fn boards(&self) -> Result<Vec<Board>> {
+    fn boards(&self, partial: Partial<Board>) -> Result<Vec<Board>> {
         if let Some(b) = &self.boards {
             return Ok(b.clone());
         }
@@ -114,11 +114,12 @@ impl Backend for Jschan {
             if done || page >= as_u64(&v["maxPage"]).unwrap_or(1) {
                 break;
             }
+            partial(&out);
         }
         Ok(out)
     }
 
-    fn catalog(&self, board: &str) -> Result<Vec<Post>> {
+    fn catalog(&self, board: &str, _partial: Partial<Post>) -> Result<Vec<Post>> {
         let v = get_json(&format!("{}/{}/catalog.json", self.base, enc(board)))?;
         Ok(v.as_array().into_iter().flatten().map(|t| post(&self.base, t)).collect())
     }

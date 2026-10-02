@@ -12,10 +12,14 @@ use anyhow::Result;
 use crate::config::{BoardConfig, SiteConfig, SiteKind};
 use crate::model::{Board, Post};
 
+/// Receives the results so far while a multi-page load continues.
+pub type Partial<'a, T> = &'a dyn Fn(&[T]);
+
 pub trait Backend: Send + Sync {
-    fn boards(&self) -> Result<Vec<Board>>;
-    /// Thread OPs on a board, in catalog order.
-    fn catalog(&self, board: &str) -> Result<Vec<Post>>;
+    /// All boards. Multi-page lists report each page through `partial` as it arrives.
+    fn boards(&self, partial: Partial<Board>) -> Result<Vec<Board>>;
+    /// Thread OPs on a board, in catalog order, reporting pages through `partial`.
+    fn catalog(&self, board: &str, partial: Partial<Post>) -> Result<Vec<Post>>;
     /// All posts of a thread, OP first.
     fn thread(&self, board: &str, no: u64) -> Result<Vec<Post>>;
     /// The thread a post is in, for engines that can look it up.
@@ -58,9 +62,10 @@ mod tests {
         for site in &cfg.sites {
             let b = super::build(site);
             let result = (|| -> anyhow::Result<String> {
-                let boards = b.boards()?;
+                let pages = std::cell::Cell::new(0);
+                let boards = b.boards(&|_| pages.set(pages.get() + 1))?;
                 let board = &boards.first().ok_or_else(|| anyhow::anyhow!("no boards"))?.uri;
-                let cat = b.catalog(board)?;
+                let cat = b.catalog(board, &|_| pages.set(pages.get() + 1))?;
                 let op = cat.iter().find(|p| !p.sticky).or(cat.first()).ok_or_else(|| anyhow::anyhow!("empty catalog"))?;
                 let posts = b.thread(board, op.no)?;
                 anyhow::ensure!(!posts.is_empty() && posts[0].no == op.no, "thread mismatch");
@@ -77,9 +82,10 @@ mod tests {
                     image::load_from_memory(&bytes).map_err(|e| anyhow::anyhow!("thumbnail {url}: {e}"))?;
                 }
                 Ok(format!(
-                    "{} boards, /{board}/ {} threads, thread {} has {} posts / {files} files; first thumb: {:?}",
+                    "{} boards, /{board}/ {} threads, {} partial pages, thread {} has {} posts / {files} files; first thumb: {:?}",
                     boards.len(),
                     cat.len(),
+                    pages.get(),
                     op.no,
                     posts.len(),
                     thumb

@@ -30,6 +30,9 @@ pub enum View {
     History,
 }
 
+/// Saved board lists older than this (seconds) are refreshed in the background.
+const BOARDS_MAX_AGE: i64 = 24 * 3600;
+
 /// Watched-thread refreshes running at once.
 const MAX_REFRESHING: usize = 2;
 
@@ -324,7 +327,12 @@ enum Msg {
     /// The request was answered from the cache without hitting the network.
     Cached(u64, Duration),
     Boards(u64, usize, Result<Vec<Board>>),
+    /// The pages of a board list loaded so far; more are coming.
+    BoardsPartial(u64, usize, Vec<Board>),
+    /// A saved board list refreshed in the background.
+    BoardsRefreshed(usize, Result<Vec<Board>>),
     Catalog(u64, Result<Vec<Post>>),
+    CatalogPartial(u64, Vec<Post>),
     Thread(u64, Result<Vec<Post>>),
     /// A background refresh of a watched or open thread.
     Refreshed(ThreadKey, Result<Vec<Post>>),
@@ -355,6 +363,8 @@ pub struct App {
     watched_checked: HashMap<ThreadKey, Instant>,
     /// Background refreshes in flight.
     pub refreshing: HashSet<ThreadKey>,
+    /// Sites whose saved board list is being refreshed in the background.
+    boards_refreshing: HashSet<usize>,
     pub site: usize,
     pub board: Option<Board>,
     pub catalog: Vec<Post>,
@@ -425,6 +435,7 @@ impl App {
             thread_checked: Instant::now(),
             watched_checked: HashMap::new(),
             refreshing: HashSet::new(),
+            boards_refreshing: HashSet::new(),
             site: 0,
             board: None,
             catalog: Vec::new(),
@@ -635,15 +646,22 @@ impl App {
                         self.loading = None;
                     }
                     match res {
-                        Ok(b) => {
-                            self.sites[site].boards = Some(b);
-                            if site == self.site {
-                                let len = self.visible_boards().len();
-                                self.board_list.clamp(len);
-                            }
-                        }
+                        Ok(b) => self.set_boards(site, b, true),
                         Err(e) => self.error(e),
                     }
+                }
+                Msg::BoardsPartial(id, site, b) if id == self.req => self.set_boards(site, b, false),
+                Msg::BoardsRefreshed(site, res) => {
+                    self.boards_refreshing.remove(&site);
+                    // A failed background refresh keeps the saved list; there's nothing to say.
+                    if let Ok(b) = res {
+                        self.set_boards(site, b, true);
+                    }
+                }
+                Msg::CatalogPartial(id, posts) if id == self.req => {
+                    self.catalog = posts;
+                    let len = self.visible_catalog().len();
+                    self.catalog_list.clamp(len);
                 }
                 Msg::Catalog(id, res) if id == self.req => {
                     self.loading = None;
@@ -702,10 +720,12 @@ impl App {
         self.status = Some((format!("{e:#}"), true));
     }
 
+    /// Run `job` on a thread, as the current request (shown as `label`). The job gets the
+    /// request id and a sender for partial results.
     fn spawn<T: Send + 'static>(
         &mut self,
         label: String,
-        job: impl FnOnce(&dyn Backend) -> Result<T> + Send + 'static,
+        job: impl FnOnce(&dyn Backend, u64, &Sender<Msg>) -> Result<T> + Send + 'static,
         wrap: impl FnOnce(u64, Result<T>) -> Msg + Send + 'static,
     ) {
         self.req += 1;
@@ -715,7 +735,7 @@ impl App {
         self.loading = Some(label);
         self.status = None;
         std::thread::spawn(move || {
-            let res = job(&*backend);
+            let res = job(&*backend, id, &tx);
             let cached = http::take_cached_age();
             let _ = tx.send(wrap(id, res));
             if let Some(age) = cached {
@@ -724,16 +744,57 @@ impl App {
         });
     }
 
+    /// Show a site's boards; a complete list is also saved for next time.
+    fn set_boards(&mut self, site: usize, boards: Vec<Board>, complete: bool) {
+        if complete && self.sites[site].cfg.boards.is_none() {
+            let name = self.sites[site].cfg.name.clone();
+            if let Err(e) = self.store.save_boards(&name, &boards, self.clock.now()) {
+                self.status = Some((format!("Couldn't save the board list: {e:#}"), true));
+            }
+        }
+        self.sites[site].boards = Some(boards);
+        if site == self.site {
+            let len = self.visible_boards().len();
+            self.board_list.clamp(len);
+        }
+    }
+
+    /// Refresh a saved board list at background priority, without a spinner.
+    fn refresh_boards_in_background(&mut self, site: usize) {
+        if !self.boards_refreshing.insert(site) {
+            return;
+        }
+        let backend = self.sites[site].backend.clone();
+        let tx = self.tx.clone();
+        std::thread::spawn(move || {
+            let res = http::background(|| backend.boards(&|_| {}));
+            let _ = tx.send(Msg::BoardsRefreshed(site, res));
+        });
+    }
+
     fn load_boards(&mut self) {
         let site = self.site;
         let label = format!("Loading boards for {}", self.current_site().cfg.name);
-        self.spawn(label, |b| b.boards(), move |id, r| Msg::Boards(id, site, r));
+        self.spawn(
+            label,
+            move |b, id, tx| {
+                b.boards(&|so_far| {
+                    let _ = tx.send(Msg::BoardsPartial(id, site, so_far.to_vec()));
+                })
+            },
+            move |id, r| Msg::Boards(id, site, r),
+        );
     }
 
     fn load_catalog(&mut self) {
         let Some(board) = self.board.clone() else { return };
         self.catalog_board = board.uri.clone();
-        self.spawn(format!("Loading /{}/", board.uri), move |b| b.catalog(&board.uri), Msg::Catalog);
+        let job = move |b: &dyn Backend, id, tx: &Sender<Msg>| {
+            b.catalog(&board.uri, &|so_far| {
+                let _ = tx.send(Msg::CatalogPartial(id, so_far.to_vec()));
+            })
+        };
+        self.spawn(format!("Loading /{}/", self.catalog_board), job, Msg::Catalog);
     }
 
     fn load_thread(&mut self, no: u64) {
@@ -741,7 +802,7 @@ impl App {
         self.pending_thread = no;
         self.archive_offer = None;
         self.thread_checked = Instant::now();
-        self.spawn(format!("Loading thread {no}"), move |b| b.thread(&board.uri, no), Msg::Thread);
+        self.spawn(format!("Loading thread {no}"), move |b, _, _| b.thread(&board.uri, no), Msg::Thread);
     }
 
     fn key(&self, board: &str, no: u64) -> ThreadKey {
@@ -1423,7 +1484,7 @@ impl App {
                 // Ask the engine which thread the post is in (only some can).
                 let uri = target.uri.clone();
                 let label = format!("Looking up post {post}");
-                self.spawn(label, move |b| b.find_thread(&uri, post), move |id, r| Msg::Found(id, target, post, r));
+                self.spawn(label, move |b, _, _| b.find_thread(&uri, post), move |id, r| Msg::Found(id, target, post, r));
             }
         }
     }
@@ -1572,8 +1633,21 @@ impl App {
         if self.board_list.state.selected().is_none() {
             self.board_list.state.select(Some(0));
         }
-        if self.current_site().boards.is_none() {
-            self.load_boards();
+        if self.current_site().boards.is_some() {
+            return;
+        }
+        // Board lists from the config need no request; fetched ones are saved, shown at
+        // once next time, and refreshed in the background once a day.
+        let cfg = &self.current_site().cfg;
+        let saved = if cfg.boards.is_none() { self.store.load_boards(&cfg.name) } else { None };
+        match saved {
+            Some((boards, fetched)) => {
+                self.sites[i].boards = Some(boards);
+                if self.clock.now() - fetched > BOARDS_MAX_AGE {
+                    self.refresh_boards_in_background(i);
+                }
+            }
+            None => self.load_boards(),
         }
     }
 
@@ -1778,6 +1852,28 @@ mod tests {
         assert!(start.elapsed() < Duration::from_millis(500), "{:?}", start.elapsed());
         // With nothing to wait for, it times out.
         assert!(!app.wait(Duration::from_millis(10)));
+    }
+
+    #[test]
+    fn partial_pages_show_while_loading_continues() {
+        let mut app = test_app();
+        let board = |uri: &str| Board { uri: uri.into(), title: String::new(), nsfw: None };
+        app.req = 7;
+        app.loading = Some("Loading boards".into());
+        app.handle(Msg::BoardsPartial(7, 0, vec![board("a")]));
+        assert_eq!(app.sites[0].boards.as_ref().unwrap().len(), 1);
+        assert!(app.loading.is_some());
+        // A stale request's pages are ignored.
+        app.handle(Msg::BoardsPartial(6, 0, vec![board("x"), board("y"), board("z")]));
+        assert_eq!(app.sites[0].boards.as_ref().unwrap().len(), 1);
+        app.handle(Msg::Boards(7, 0, Ok(vec![board("a"), board("b")])));
+        assert_eq!(app.sites[0].boards.as_ref().unwrap().len(), 2);
+        assert!(app.loading.is_none());
+
+        app.req = 8;
+        app.loading = Some("Loading /a/".into());
+        app.handle(Msg::CatalogPartial(8, vec![Post { no: 1, ..Default::default() }]));
+        assert_eq!((app.catalog.len(), app.loading.is_some()), (1, true));
     }
 
     #[test]

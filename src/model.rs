@@ -4,7 +4,7 @@ use std::sync::OnceLock;
 
 use ratatui::text::Line;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Board {
     /// URI segment, e.g. `g` or `λ`.
     pub uri: String,

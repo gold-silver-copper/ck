@@ -3,7 +3,7 @@
 use anyhow::Result;
 use serde_json::Value;
 
-use super::Backend;
+use super::{Backend, Partial};
 use crate::http::{as_bool, as_i64, as_str, as_u64, encode_segment as enc, get_json, register_media_host};
 use crate::markup::{self, Flavor};
 use crate::model::{Attachment, Board, Post};
@@ -137,16 +137,19 @@ fn attachment(m: &Value) -> Option<Attachment> {
 }
 
 impl Backend for Foolfuuka {
-    fn boards(&self) -> Result<Vec<Board>> {
+    fn boards(&self, _partial: Partial<Board>) -> Result<Vec<Board>> {
         if let Some(b) = &self.boards {
             return Ok(b.clone());
         }
         Ok(parse_archives(&self.api("archives/")?))
     }
 
-    fn catalog(&self, board: &str) -> Result<Vec<Post>> {
+    fn catalog(&self, board: &str, partial: Partial<Post>) -> Result<Vec<Post>> {
         let mut out: Vec<Post> = Vec::new();
         for page in 1..=INDEX_PAGES {
+            if page > 1 {
+                partial(&out);
+            }
             let v = self.api(&format!("index/?board={}&page={page}", enc(board)));
             // A later page failing (or running out) still leaves the earlier ones.
             let v = match v {

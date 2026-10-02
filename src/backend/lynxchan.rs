@@ -3,7 +3,7 @@
 use anyhow::Result;
 use serde_json::Value;
 
-use super::Backend;
+use super::{Backend, Partial};
 use crate::http::{as_bool, as_str, as_u64, encode_segment as enc, get_json};
 use crate::markup;
 use crate::model::{Attachment, Board, Post};
@@ -139,7 +139,7 @@ fn parse_time(v: &Value) -> Option<i64> {
 }
 
 impl Backend for Lynxchan {
-    fn boards(&self) -> Result<Vec<Board>> {
+    fn boards(&self, partial: Partial<Board>) -> Result<Vec<Board>> {
         if let Some(b) = &self.boards {
             return Ok(b.clone());
         }
@@ -151,12 +151,13 @@ impl Backend for Lynxchan {
             if page >= pages || page >= MAX_BOARD_PAGES {
                 break;
             }
+            partial(&out);
             page += 1;
         }
         Ok(out)
     }
 
-    fn catalog(&self, board: &str) -> Result<Vec<Post>> {
+    fn catalog(&self, board: &str, _partial: Partial<Post>) -> Result<Vec<Post>> {
         Ok(self.parse_catalog(&self.get(&format!("/{}/catalog.json", enc(board)))?))
     }
 

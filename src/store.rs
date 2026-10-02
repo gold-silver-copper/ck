@@ -5,6 +5,8 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
+use crate::model::Board;
+
 const HISTORY_LEN: usize = 100;
 
 /// Identifies a thread across sites.
@@ -55,6 +57,14 @@ pub struct Store {
     pub settings: Settings,
 }
 
+/// A site's fetched board list, saved so the next start can show it at once.
+#[derive(Serialize, Deserialize)]
+struct SavedBoards {
+    /// Unix time it was fetched.
+    fetched: i64,
+    boards: Vec<Board>,
+}
+
 impl Store {
     pub fn dir() -> Option<PathBuf> {
         let base = std::env::var_os("XDG_DATA_HOME")
@@ -85,6 +95,26 @@ impl Store {
             write_atomic(&dir.join("settings.json"), &serde_json::to_vec_pretty(&self.settings)?)?;
         }
         Ok(())
+    }
+
+    fn boards_path(&self, site: &str) -> Option<PathBuf> {
+        Some(self.dir.as_ref()?.join("boards").join(format!("{}.json", crate::download::sanitize(site))))
+    }
+
+    /// A saved board list and when it was fetched. Unreadable or corrupt files count as none.
+    pub fn load_boards(&self, site: &str) -> Option<(Vec<Board>, i64)> {
+        let text = std::fs::read_to_string(self.boards_path(site)?).ok()?;
+        let saved: SavedBoards = serde_json::from_str(&text).ok()?;
+        Some((saved.boards, saved.fetched))
+    }
+
+    pub fn save_boards(&self, site: &str, boards: &[Board], now: i64) -> Result<()> {
+        let Some(path) = self.boards_path(site) else { return Ok(()) };
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
+        }
+        let saved = SavedBoards { fetched: now, boards: boards.to_vec() };
+        write_atomic(&path, &serde_json::to_vec(&saved)?)
     }
 
     pub fn watched(&self, key: &ThreadKey) -> Option<&Watched> {
@@ -184,6 +214,22 @@ mod tests {
         assert_eq!(warnings.len(), 1);
         assert!(s3.history.is_empty() && s3.watched.len() == 1);
         assert!(dir.path().join("history.json.corrupt").exists());
+    }
+
+    #[test]
+    fn saved_board_lists() {
+        let dir = tempfile::tempdir().unwrap();
+        let (s, _) = Store::load(Some(dir.path().to_path_buf()));
+        assert!(s.load_boards("endchan").is_none());
+        let boards = vec![Board { uri: "b".into(), title: "Random".into(), nsfw: Some(true) }];
+        s.save_boards("endchan", &boards, 1234).unwrap();
+        let (got, fetched) = s.load_boards("endchan").unwrap();
+        assert_eq!((got[0].uri.as_str(), got[0].nsfw, fetched), ("b", Some(true), 1234));
+        // Odd site names stay inside the boards directory; corrupt files count as none.
+        s.save_boards("../x", &boards, 1).unwrap();
+        assert!(dir.path().join("boards").join("_x.json").exists());
+        std::fs::write(dir.path().join("boards").join("endchan.json"), "{nope").unwrap();
+        assert!(s.load_boards("endchan").is_none());
     }
 
     #[test]

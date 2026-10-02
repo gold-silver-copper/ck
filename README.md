@@ -75,7 +75,11 @@ The open thread refreshes in the background every 10 seconds and watched threads
 minimums). Posts that arrived since your last visit are marked "● new"; `U` jumps to the
 first one.
 
-Both lists are stored as JSON in `$XDG_DATA_HOME/ck` (default `~/.local/share/ck`).
+Both lists are stored as JSON in `$XDG_DATA_HOME/ck` (default `~/.local/share/ck`). Board
+lists fetched from sites are saved there too (`boards/`), so a site's boards show up
+instantly next time; they're refreshed quietly in the background once a day, and `r` in
+the Boards view refreshes them now. Lists that come in several pages (LynxChan and jschan
+board lists, FoolFuuka catalogs) show each page as it arrives.
 
 ## Images
 
