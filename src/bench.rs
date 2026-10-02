@@ -10,11 +10,8 @@ use ratatui_image::picker::{Picker, ProtocolType};
 
 use crate::app::{App, ThreadView, View, Viewer};
 use crate::backend::futaba::Futaba;
-use crate::config::Config;
 use crate::images::Images;
-use crate::keys::KeyMap;
 use crate::model::{Attachment, Board, Post};
-use crate::store::Store;
 
 fn fixture(name: &str) -> serde_json::Value {
     let path = format!("{}/tests/fixtures/{name}", env!("CARGO_MANIFEST_DIR"));
@@ -38,9 +35,7 @@ fn time<T>(label: &str, n: u32, mut f: impl FnMut() -> T) -> Duration {
 }
 
 fn app() -> App {
-    let cfg: Config = toml::from_str(crate::config::DEFAULT_CONFIG).unwrap();
-    let mut app = App::new(cfg, KeyMap::default(), None, Store::default());
-    app.config_path = None;
+    let mut app = crate::app::tests::test_app();
     app.tab.board = Some(Board { uri: "g".into(), title: "Technology".into(), nsfw: Some(false) });
     app
 }
