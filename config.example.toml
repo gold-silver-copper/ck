@@ -104,6 +104,115 @@ name = "zzzchan"
 kind = "jschan"
 url = "https://zzzchan.xyz"
 
+[[site]]
+name = "smuglo.li"
+kind = "vichan"
+url = "https://smuglo.li"
+boards = [
+  { uri = "a", title = "Anime & Manga" },
+  { uri = "tech", title = "Techloligy" },
+  { uri = "tg", title = "Traditional Games" },
+  { uri = "yuri", title = "Yuri" },
+  { uri = "fanfic", title = "Fanfic" },
+  { uri = "vg", title = "Video Games" },
+  { uri = "monster", title = "Monster Girls" },
+  { uri = "wooo", title = "King of Shitposting" },
+  { uri = "cute", title = "Cute/2D" },
+  { uri = "kohi", title = "Kohi" },
+]
+
+[[site]]
+name = "kissu"
+kind = "vichan"
+url = "https://kissu.moe"
+boards = [
+  { uri = "qa", title = "Questions & Answers" },
+  { uri = "jp", title = "2D/Random" },
+  { uri = "ec", title = "Ecchi & Cute" },
+  { uri = "amv", title = "Anime, Manga, Vidya" },
+  { uri = "poll", title = "Polling and Honesty" },
+  { uri = "spg", title = "Spring Activities" },
+  { uri = "chat", title = "Chatrooms" },
+  { uri = "b", title = "Site Meta" },
+]
+
+[[site]]
+name = "tvch"
+kind = "vichan"
+url = "https://tvch.moe"
+boards = [
+  { uri = "tv", title = "Movies and Television" },
+  { uri = "art", title = "Drawing, Photography, Painting" },
+  { uri = "wooo", title = "Pro Wrestling" },
+  { uri = "ost", title = "Music, Composing" },
+  { uri = "lit", title = "Literature and Writing" },
+  { uri = "bane", title = "Big Guys (4U)" },
+  { uri = "dup", title = "btfo" },
+  { uri = "oven", title = "Cooking and Baking" },
+  { uri = "dunk", title = "Off topic" },
+  { uri = "truth", title = "Paranomal" },
+  { uri = "top", title = "Board and Card games" },
+  { uri = "ch3", title = "Video Games" },
+]
+
+[[site]]
+name = "sushigirl"
+kind = "vichan"
+url = "https://sushigirl.cafe"
+thumb_ext = "png"
+boards = [
+  { uri = "lounge", title = "sushi social" },
+  { uri = "arcade", title = "vidya gaems and other gaems too" },
+  { uri = "kawaii", title = "cute things" },
+  { uri = "kitchen", title = "tasty morsels & delights" },
+  { uri = "tunes", title = "enjoyable sounds" },
+  { uri = "culture", title = "arts & literature" },
+  { uri = "silicon", title = "technology" },
+  { uri = "otaku", title = "Japan / Otaku / Anime" },
+  { uri = "yakuza", title = "site meta-discussion" },
+  { uri = "hell", title = "internet death cult" },
+]
+
+[[site]]
+name = "alogs"
+kind = "lynxchan"
+url = "https://alogs.space"
+
+[[site]]
+name = "trashchan"
+kind = "jschan"
+url = "https://trashchan.xyz"
+
+[[site]]
+name = "ptchan"
+kind = "jschan"
+url = "https://ptch.net"
+
+[[site]]
+name = "erischan"
+kind = "jschan"
+url = "https://erischan.org"
+
+[[site]]
+name = "junkuchan"
+kind = "jschan"
+url = "https://junkuchan.org"
+
+[[site]]
+name = "nukechan"
+kind = "jschan"
+url = "https://nukechan.net"
+
+[[site]]
+name = "palanq"
+kind = "foolfuuka"
+url = "https://archive.palanq.win"
+
+[[site]]
+name = "b4k"
+kind = "foolfuuka"
+url = "https://arch.b4k.dev"
+
 # Remap single-key commands: action = "key". Navigation keys (j/k/g/G/h/l/J/K, arrows,
 # enter, esc, space) are fixed. Actions and their defaults:
 #   everywhere: quit = "q", help = "?", search = "/", reload = "r", browser = "o"

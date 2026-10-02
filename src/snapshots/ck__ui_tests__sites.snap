@@ -1,5 +1,6 @@
 ---
 source: src/ui_tests.rs
+assertion_line: 139
 expression: snapshot(&mut a)
 ---
  ck
@@ -14,18 +15,18 @@ expression: snapshot(&mut a)
 │  kohlchan        lynxchan  https://kohlchan.net                                                  │
 │  desuarchive     foolfuuka https://desuarchive.org                                               │
 │  zzzchan         jschan    https://zzzchan.xyz                                                   │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
+│  smuglo.li       vichan    https://smuglo.li                                                     │
+│  kissu           vichan    https://kissu.moe                                                     │
+│  tvch            vichan    https://tvch.moe                                                      │
+│  sushigirl       vichan    https://sushigirl.cafe                                                │
+│  alogs           lynxchan  https://alogs.space                                                   │
+│  trashchan       jschan    https://trashchan.xyz                                                 │
+│  ptchan          jschan    https://ptch.net                                                      │
+│  erischan        jschan    https://erischan.org                                                  │
+│  junkuchan       jschan    https://junkuchan.org                                                 │
+│  nukechan        jschan    https://nukechan.net                                                  │
+│  palanq          foolfuuka https://archive.palanq.win                                            │
+│  b4k             foolfuuka https://arch.b4k.dev                                                  │
 │                                                                                                  │
 │                                                                                                  │
 │                                                                                                  │

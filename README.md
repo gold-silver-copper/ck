@@ -5,10 +5,12 @@ A terminal imageboard browser built with [ratatui](https://ratatui.rs). One inte
 | kind       | engines                                  | examples                         |
 |------------|------------------------------------------|----------------------------------|
 | `4chan`    | the official 4chan API                   | 4chan                            |
-| `vichan`   | vichan, tinyboard, infinity (4chan-style JSON) | lainchan, wizchan, uboachan |
-| `lynxchan` | LynxChan                                 | endchan, kohlchan                |
-| `foolfuuka`| FoolFuuka 4chan archives                 | desuarchive, b4k                 |
-| `jschan`   | jschan                                   | zzzchan                          |
+| `vichan`   | vichan, tinyboard, infinity (4chan-style JSON) | lainchan, wizchan, uboachan, smuglo.li, kissu, tvch, sushigirl |
+| `lynxchan` | LynxChan                                 | endchan, kohlchan, alogs         |
+| `foolfuuka`| FoolFuuka 4chan archives                 | desuarchive, palanq, b4k         |
+| `jschan`   | jschan                                   | zzzchan, trashchan, ptchan, erischan, junkuchan, nukechan |
+
+All of the examples are in the default config, so they show up without any setup.
 
 Read-only: browse boards, catalogs, and threads. Files open in your default viewer/browser.
 
