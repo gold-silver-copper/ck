@@ -28,10 +28,12 @@ mod goto;
 mod links;
 mod search;
 mod session;
+mod tabs;
 mod settings;
 pub use gallery::Gallery;
 pub use links::{ImageSearchPanel, LinkItem, LinksPanel};
 pub use search::Search;
+pub use tabs::Tab;
 pub use settings::{Popup as SettingsPopup, SECTIONS as SETTING_SECTIONS, key_rows, rows as setting_rows, tilde};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -489,6 +491,23 @@ enum Msg {
     Wake,
 }
 
+impl Msg {
+    /// The request a response is for.
+    fn id(&self) -> Option<u64> {
+        match self {
+            Msg::Cached(id, _)
+            | Msg::Boards(id, ..)
+            | Msg::BoardsPartial(id, ..)
+            | Msg::Catalog(id, _)
+            | Msg::CatalogPartial(id, _)
+            | Msg::Thread(id, _)
+            | Msg::Search(id, ..)
+            | Msg::Found(id, ..) => Some(*id),
+            _ => None,
+        }
+    }
+}
+
 pub struct App {
     pub sites: Vec<Site>,
     pub view: View,
@@ -604,6 +623,12 @@ pub struct App {
     last_click: Option<(Instant, usize)>,
     pub tick: usize,
     pub quit: bool,
+    /// The other tabs (the active one's slot holds nothing useful), and which is active.
+    pub tabs: Vec<Tab>,
+    pub active: usize,
+    /// The last request id given out (ids are unique across tabs).
+    next_id: u64,
+    /// The active tab's request in flight (0: none).
     req: u64,
     /// The thread number of the last thread load, for 404 handling.
     pending_thread: u64,
@@ -728,6 +753,9 @@ impl App {
             last_click: None,
             tick: 0,
             quit: false,
+            tabs: vec![Tab::new(0)],
+            active: 0,
+            next_id: 0,
             req: 0,
             pending_thread: 0,
             tx,
@@ -931,6 +959,11 @@ impl App {
     }
 
     fn handle(&mut self, msg: Msg) {
+        // A response for another tab is handled there.
+        if let Some(i) = msg.id().filter(|&id| id != self.req).and_then(|id| self.tab_of(id)) {
+            self.handle_in_tab(i, msg);
+            return;
+        }
         {
             match msg {
                 Msg::Wake => {}
@@ -1065,7 +1098,8 @@ impl App {
         job: impl FnOnce(&dyn Backend, u64, &Sender<Msg>) -> Result<T> + Send + 'static,
         wrap: impl FnOnce(u64, Result<T>) -> Msg + Send + 'static,
     ) {
-        self.req += 1;
+        self.next_id += 1;
+        self.req = self.next_id;
         let id = self.req;
         let backend = self.current_site().backend.clone();
         let tx = self.tx.clone();
@@ -2347,7 +2381,7 @@ impl App {
         }
         // Navigating away cancels any in-flight request (its response will be ignored).
         if self.loading.is_some() {
-            self.req += 1;
+            self.req = 0;
             self.loading = None;
         }
     }
@@ -3172,6 +3206,33 @@ mod tests {
         third.go_to_place(&place);
         third.handle(Msg::Catalog(third.req, Ok((1..4).map(|no| Post { no, time: no as i64, ..Default::default() }).collect())));
         assert_eq!(third.selected_index().map(|i| third.catalog[i].no), Some(1));
+    }
+
+    #[test]
+    fn tabs_keep_their_own_place_and_responses() {
+        let mut app = local_app();
+        // Tab 0 loads a catalog on site a.
+        app.goto_str("a/x");
+        let first_req = app.req;
+        // Tab 1 opens a thread on site b while that's still loading.
+        app.tabs.push(Tab::new(0));
+        app.switch_tab(1);
+        assert_eq!((app.view, app.thread.is_none()), (View::Sites, true));
+        app.goto_str("b/y/5");
+        assert_eq!((app.site, app.view, app.pending_thread), (1, View::Thread, 5));
+        // Tab 0's catalog arrives: it goes to tab 0, not here.
+        app.handle(Msg::Catalog(first_req, Ok(vec![Post { no: 1, ..Default::default() }])));
+        assert!(app.catalog.is_empty());
+        app.handle(Msg::Thread(app.req, Ok(vec![Post { no: 5, ..Default::default() }])));
+        assert_eq!(app.thread.as_ref().unwrap().no, 5);
+        app.switch_tab(0);
+        assert_eq!((app.site, app.view, app.catalog.len(), app.loading.is_none()), (0, View::Catalog, 1, true));
+        assert!(app.thread.is_none());
+        // A response for a tab that's gone is dropped.
+        let stale = app.tabs[1].req_for_tests();
+        app.tabs.truncate(1);
+        app.handle(Msg::Thread(stale, Ok(vec![Post { no: 9, ..Default::default() }])));
+        assert!(app.thread.is_none());
     }
 
     #[test]
