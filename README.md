@@ -73,6 +73,7 @@ is in brackets):
 | `O`  | catalog, thread       | the post's links: quotes of other threads, web links, files; `enter` opens, `y` copies [`links`] |
 | `H`  | catalog, thread       | hide / unhide the thread or post [`hide`]                  |
 | `Z`  | catalog, thread       | show hidden threads and posts, dimmed [`show_hidden`]      |
+| `m`  | thread                | mark the post as yours, to be told about replies [`mine`]  |
 | `x`  | Watched, History      | remove the entry [`remove`]                                |
 | `y`  | catalog, thread, Watched, History, viewer | copy the post's text (catalog: the OP's; Watched/History: subject and link; viewer: the file's URL) [`copy`] |
 | `Y`  | catalog, thread, Watched, History, viewer | copy the link to the post or thread [`copy_link`] |
@@ -162,6 +163,24 @@ The open thread refreshes in the background every 10 seconds and watched threads
 60 seconds (change with `refresh_thread_secs` / `refresh_watched_secs`; those are also the
 minimums). Posts that arrived since your last visit are marked "new"; `U` jumps to the
 first one.
+
+### Notifications
+
+When a background refresh finds new posts in a watched thread (other than the one on
+screen), ck tells you: with a desktop notification in terminals that show them (iTerm2,
+kitty, WezTerm, Ghostty, Windows Terminal via OSC 9; foot and urxvt via OSC 777), and
+with the terminal bell elsewhere, including inside tmux and screen. News from several
+threads at once makes one notification. `notify = "bell"` always rings the bell,
+`notify = "off"` stays quiet (also in Settings), and `notify_command` runs a program
+instead (no shell; `{title}` and `{body}` are filled in):
+
+```toml
+notify_command = ["notify-send", "{title}", "{body}"]
+```
+
+ck never posts, so it can't know which posts are yours: `m` marks the selected post as
+yours (and watches the thread). Replies to it are counted in Watched ("1 reply to you"),
+quotes of it read `>>123 (You)`, and they get their own notification.
 
 Both lists are stored as JSON in `$XDG_DATA_HOME/ck` (default `~/.local/share/ck`). Board
 lists fetched from sites are saved there too (`boards/`), so a site's boards show up

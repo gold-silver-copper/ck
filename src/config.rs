@@ -38,6 +38,12 @@ pub struct Config {
     pub themes: BTreeMap<String, ThemeDef>,
     #[serde(default)]
     pub color: ColorMode,
+    /// Tell about new posts in watched threads: a desktop notification, the bell, or nothing.
+    #[serde(default)]
+    pub notify: crate::notify::NotifyMode,
+    /// A command to notify with instead, `{title}` and `{body}` filled in.
+    #[serde(default)]
+    pub notify_command: Option<Vec<String>>,
     /// `[[filter]]`: hide or highlight threads and posts.
     #[serde(default, rename = "filter")]
     pub filters: Vec<crate::filter::FilterConfig>,

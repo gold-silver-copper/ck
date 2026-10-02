@@ -12,6 +12,7 @@ mod images;
 mod keys;
 mod markup;
 mod model;
+mod notify;
 mod route;
 mod store;
 mod theme;

@@ -22,8 +22,8 @@ fn app(images: bool) -> App {
     let mut store = Store::default();
     let key = |board: &str, no| ThreadKey { site: "4chan".into(), board: board.into(), no };
     store.watched = vec![
-        Watched { key: key("g", 1000), subject: "Snapshot thread".into(), posts: 5, last_seen: 1002, unread: 2, dead: false },
-        Watched { key: key("g", 900), subject: "Old thread".into(), posts: 300, last_seen: 1199, unread: 0, dead: true },
+        Watched { key: key("g", 1000), subject: "Snapshot thread".into(), posts: 5, last_seen: 1002, unread: 2, dead: false, mine: Vec::new(), replies: 0 },
+        Watched { key: key("g", 900), subject: "Old thread".into(), posts: 300, last_seen: 1199, unread: 0, dead: true, mine: Vec::new(), replies: 0 },
         Watched {
             key: ThreadKey { site: "lainchan".into(), board: "λ".into(), no: 42 },
             subject: "Programming Employment".into(),
@@ -31,6 +31,8 @@ fn app(images: bool) -> App {
             last_seen: 77,
             unread: 0,
             dead: false,
+            mine: Vec::new(),
+            replies: 0,
         },
     ];
     store.history = vec![
@@ -368,4 +370,16 @@ fn filtered_catalog_and_thread() {
     a.thread = Some(thread());
     a.remark_thread();
     insta::assert_snapshot!("filtered_thread", snapshot(&mut a));
+}
+
+#[test]
+fn your_posts_and_replies() {
+    let mut a = app(false);
+    a.view = View::Thread;
+    a.thread = Some(thread());
+    a.thread.as_mut().unwrap().mine.insert(1001);
+    a.store.watched[0].replies = 1;
+    insta::assert_snapshot!(snapshot(&mut a));
+    a.view = View::Watched;
+    insta::assert_snapshot!("watched_with_replies", snapshot(&mut a));
 }

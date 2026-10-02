@@ -40,6 +40,7 @@ pub enum Action {
     Links,
     Hide,
     ShowHidden,
+    Mine,
 }
 
 /// Where a key applies. Global keys work in every view but the image viewer.
@@ -99,6 +100,7 @@ pub const ACTIONS: &[(Action, &str, &str, &[Scope], &str)] = &[
     (Action::Links, "links", "O", &[Scope::Catalog, Scope::Thread], "the post's links and files"),
     (Action::Hide, "hide", "H", &[Scope::Catalog, Scope::Thread], "hide / unhide the thread or post"),
     (Action::ShowHidden, "show_hidden", "Z", &[Scope::Catalog, Scope::Thread], "show hidden threads and posts"),
+    (Action::Mine, "mine", "m", &[Scope::Thread], "mark the post as yours (notified of replies)"),
     (Action::Remove, "remove", "x", &[Scope::Saved], "remove the entry"),
     (Action::Copy, "copy", "y", &[Scope::Catalog, Scope::Thread, Scope::Saved, Scope::Viewer], "copy the text (viewer: file URL)"),
     (Action::CopyLink, "copy_link", "Y", &[Scope::Catalog, Scope::Thread, Scope::Saved, Scope::Viewer], "copy the link"),

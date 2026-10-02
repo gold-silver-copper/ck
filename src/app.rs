@@ -139,6 +139,8 @@ pub struct ThreadView {
     /// What filters and hiding say about each post, and whether hidden ones are shown.
     pub marks: Vec<Mark>,
     pub show_hidden: bool,
+    /// Posts marked as yours.
+    pub mine: HashSet<u64>,
 }
 
 pub struct ThreadLayout {
@@ -182,6 +184,7 @@ impl ThreadView {
             reveal_all: false,
             marks: Vec::new(),
             show_hidden: false,
+            mine: HashSet::new(),
         }
     }
 
@@ -330,6 +333,15 @@ pub enum Hit {
     Settings { area: Rect },
 }
 
+/// New posts in a watched thread, for a notification.
+struct Note {
+    key: ThreadKey,
+    subject: String,
+    new: usize,
+    /// Of those, replies to your posts.
+    replies: usize,
+}
+
 /// Popup with the posts the selected post quotes.
 pub struct Preview {
     /// Indices of quoted posts in this thread.
@@ -396,6 +408,16 @@ pub struct App {
     watched_checked: HashMap<ThreadKey, Instant>,
     /// Background refreshes in flight.
     pub refreshing: HashSet<ThreadKey>,
+    /// The newest post seen in each watched thread by a refresh this session; notifications
+    /// are for posts past it.
+    notified_max: HashMap<ThreadKey, u64>,
+    /// Notifications waiting to be sent together, and since when.
+    notes: Vec<Note>,
+    notes_since: Option<Instant>,
+    pub notify_mode: crate::notify::NotifyMode,
+    pub notify_command: Option<Vec<String>>,
+    /// Notifications sent (the last few), for the record.
+    pub notified: Vec<String>,
     /// Sites whose saved board list is being refreshed in the background.
     boards_refreshing: HashSet<usize>,
     pub site: usize,
@@ -511,6 +533,12 @@ impl App {
             thread_checked: Instant::now(),
             watched_checked: HashMap::new(),
             refreshing: HashSet::new(),
+            notified_max: HashMap::new(),
+            notes: Vec::new(),
+            notes_since: None,
+            notify_mode: cfg.notify,
+            notify_command: cfg.notify_command.clone(),
+            notified: Vec::new(),
             boards_refreshing: HashSet::new(),
             site: 0,
             board: None,
@@ -661,7 +689,52 @@ impl App {
             self.handle(msg);
         }
         self.background();
+        self.flush_notes(Instant::now());
         self.expire_status(Instant::now());
+    }
+
+    /// Send waiting notifications together: once no refresh is running, or 3s after the
+    /// first, so several threads' news makes one notification.
+    fn flush_notes(&mut self, now: Instant) {
+        let Some(since) = self.notes_since else { return };
+        if !self.refreshing.is_empty() && now.duration_since(since) < Duration::from_secs(3) {
+            return;
+        }
+        let notes = std::mem::take(&mut self.notes);
+        self.notes_since = None;
+        let method = crate::notify::method(self.notify_mode, self.notify_command.as_deref(), &|k| std::env::var(k).ok());
+        let place = |n: &Note| format!("/{}/ {}", n.key.board, n.subject.chars().take(60).collect::<String>());
+        let replies: Vec<&Note> = notes.iter().filter(|n| n.replies > 0).collect();
+        let mut messages = Vec::new();
+        match replies.as_slice() {
+            [] => {}
+            [n] if n.replies == 1 => messages.push(format!("New reply to your post in {}", place(n))),
+            [n] => messages.push(format!("{} new replies to your posts in {}", n.replies, place(n))),
+            many => {
+                let total: usize = many.iter().map(|n| n.replies).sum();
+                messages.push(format!("{total} new replies to your posts in {} threads", many.len()));
+            }
+        }
+        let others: Vec<&Note> = notes.iter().filter(|n| n.new > n.replies).collect();
+        match others.as_slice() {
+            [] => {}
+            [n] => {
+                let k = n.new - n.replies;
+                messages.push(format!("{k} new post{} in {}", if k == 1 { "" } else { "s" }, place(n)));
+            }
+            many => messages.push(format!("{} watched threads have new posts", many.len())),
+        }
+        for m in &messages {
+            if let Err(e) = crate::notify::send(&method, "ck", m) {
+                self.status = Some((format!("Couldn't notify: {e:#}"), true));
+            }
+        }
+        if let Some(m) = messages.first() {
+            self.status.get_or_insert_with(|| (m.clone(), false));
+        }
+        self.notified.extend(messages);
+        let len = self.notified.len();
+        self.notified.drain(..len.saturating_sub(20));
     }
 
     /// How long the main loop may sleep: until the next animation frame, status expiry or
@@ -673,6 +746,9 @@ impl App {
             wake = wake.min(Duration::from_millis(100));
         }
         let mut at = |t: Instant| wake = wake.min(t.saturating_duration_since(now));
+        if let Some(since) = self.notes_since {
+            at(since + Duration::from_secs(3));
+        }
         if let (Some((_, is_err)), Some((_, since))) = (&self.status, &self.status_since) {
             at(*since + Duration::from_secs(if *is_err { 5 } else { 2 }));
         }
@@ -969,9 +1045,11 @@ impl App {
     pub fn remark_thread(&mut self) {
         let Some(t) = &self.thread else { return };
         let marks = t.posts.iter().map(|p| self.mark(&t.board, p)).collect();
+        let mine = self.store.watched(&self.key(&t.board, t.no)).map(|w| w.mine.iter().copied().collect()).unwrap_or_default();
         let show = self.show_hidden;
         let t = self.thread.as_mut().expect("checked above");
         t.marks = marks;
+        t.mine = mine;
         t.show_hidden = show;
         t.layout = None;
     }
@@ -1082,16 +1160,35 @@ impl App {
             Ok(posts) if is_open => self.set_thread(posts),
             Ok(posts) => {
                 let subject = thread_subject(&posts);
+                let prev = self.notified_max.get(&key).copied();
                 let Some(w) = self.store.watched_mut(&key) else { return };
                 let max_no = posts.iter().map(|p| p.no).max().unwrap_or(0);
                 if w.last_seen == 0 {
                     w.last_seen = max_no;
                 }
-                w.unread = posts.iter().filter(|p| p.no > w.last_seen).count();
+                let mine = w.mine.clone();
+                let to_you = |p: &Post| p.quotes.iter().any(|q| mine.contains(q));
+                let unread: Vec<&Post> = posts.iter().filter(|p| p.no > w.last_seen).collect();
+                w.unread = unread.len();
+                w.replies = unread.iter().filter(|p| to_you(p)).count();
+                // Tell about posts newer than this session's last refresh (not on the first
+                // one, which may find posts from long ago).
+                let fresh: Vec<&&Post> = unread.iter().filter(|p| prev.is_some_and(|m| p.no > m)).collect();
+                let note = Note {
+                    key: key.clone(),
+                    subject: if w.subject.is_empty() { subject.clone() } else { w.subject.clone() },
+                    new: fresh.len(),
+                    replies: fresh.iter().filter(|p| to_you(p)).count(),
+                };
                 w.posts = posts.len();
                 w.dead = false;
                 if w.subject.is_empty() {
                     w.subject = subject;
+                }
+                self.notified_max.insert(key, max_no);
+                if note.new > 0 {
+                    self.notes_since.get_or_insert_with(Instant::now);
+                    self.notes.push(note);
                 }
                 self.save();
             }
@@ -1309,6 +1406,35 @@ impl App {
         self.save();
     }
 
+    /// `m`: mark the selected post as yours (or not), to hear about replies to it. The
+    /// thread is watched if it isn't.
+    fn toggle_mine(&mut self) {
+        let Some(t) = &self.thread else { return };
+        let key = self.key(&t.board, t.no);
+        let no = t.posts[t.selected].no;
+        if self.store.watched(&key).is_none() {
+            let max_no = t.posts.iter().map(|p| p.no).max().unwrap_or(0);
+            self.store.toggle_watch(key.clone(), thread_subject(&t.posts), t.posts.len(), max_no);
+        }
+        let Some(w) = self.store.watched_mut(&key) else { return };
+        let mine = match w.mine.iter().position(|&n| n == no) {
+            Some(i) => {
+                w.mine.remove(i);
+                false
+            }
+            None => {
+                w.mine.push(no);
+                true
+            }
+        };
+        self.status = Some((
+            if mine { format!("Marked No.{no} as yours; replies to it will be counted and notified") } else { format!("No.{no} isn't marked as yours any more") },
+            false,
+        ));
+        self.save();
+        self.remark_thread();
+    }
+
     /// Open a thread from Watched or History, switching site and board as needed.
     fn open_key(&mut self, key: ThreadKey) {
         let Some(site) = self.sites.iter().position(|s| s.cfg.name == key.site) else {
@@ -1466,6 +1592,7 @@ impl App {
             Action::Goto => self.goto = Some(String::new()),
             Action::Links => self.open_links(),
             Action::Hide => self.toggle_hidden(),
+            Action::Mine => self.toggle_mine(),
             Action::ShowHidden => self.toggle_show_hidden(),
             Action::Copy => self.copy(false),
             Action::CopyLink => self.copy(true),
@@ -2140,6 +2267,8 @@ mod tests {
             last_seen: 1,
             unread: 0,
             dead: false,
+            mine: Vec::new(),
+            replies: 0,
         });
         assert_eq!(app.next_wake(now), Duration::ZERO);
         // But while the maximum number of refreshes is running, due ones don't spin the loop.
@@ -2429,6 +2558,53 @@ mod tests {
         assert!(app.thread.as_ref().unwrap().is_collapsed(2));
         app.act(Action::ShowHidden);
         assert!(!app.thread.as_ref().unwrap().is_collapsed(1));
+    }
+
+    #[test]
+    fn notifies_about_new_posts_and_replies_to_yours() {
+        let mut app = local_app();
+        let key = |no| ThreadKey { site: "a".into(), board: "x".into(), no };
+        let post = |no, quotes: Vec<u64>| Post { no, quotes, ..Default::default() };
+        app.store.toggle_watch(key(1), "One".into(), 2, 5);
+        app.store.toggle_watch(key(2), "Two".into(), 1, 20);
+        app.store.watched_mut(&key(1)).unwrap().mine.push(5);
+        // The first refresh of the session tells nothing.
+        app.refreshed(key(1), Ok(vec![post(1, vec![]), post(5, vec![]), post(6, vec![5])]));
+        app.flush_notes(Instant::now());
+        assert!(app.notified.is_empty());
+        assert_eq!(app.store.watched(&key(1)).unwrap().replies, 1);
+        // Then: a reply to your post, and another post.
+        app.refreshed(key(1), Ok(vec![post(1, vec![]), post(5, vec![]), post(6, vec![5]), post(7, vec![5]), post(8, vec![1])]));
+        app.flush_notes(Instant::now());
+        assert_eq!(app.notified, ["New reply to your post in /x/ One", "1 new post in /x/ One"]);
+        assert_eq!(app.store.watched(&key(1)).unwrap().replies, 2);
+        // Several threads at once make one notification.
+        app.notified.clear();
+        app.refreshed(key(2), Ok(vec![post(20, vec![])]));
+        app.refreshed(key(1), Ok(vec![post(1, vec![]), post(9, vec![])]));
+        app.refreshed(key(2), Ok(vec![post(20, vec![]), post(21, vec![])]));
+        // ...once nothing is still refreshing.
+        app.refreshing.insert(key(3));
+        app.flush_notes(Instant::now());
+        assert!(app.notified.is_empty());
+        app.refreshing.clear();
+        app.flush_notes(Instant::now());
+        assert_eq!(app.notified, ["2 watched threads have new posts"]);
+    }
+
+    #[test]
+    fn marking_posts_as_yours_watches_the_thread() {
+        let mut app = local_app();
+        app.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
+        app.thread = Some(ThreadView::new("x".into(), 1, vec![Post { no: 1, ..Default::default() }, Post { no: 2, ..Default::default() }]));
+        app.thread.as_mut().unwrap().selected = 1;
+        app.view = View::Thread;
+        app.act(Action::Mine);
+        let key = ThreadKey { site: "a".into(), board: "x".into(), no: 1 };
+        assert_eq!(app.store.watched(&key).unwrap().mine, [2]);
+        assert!(app.thread.as_ref().unwrap().mine.contains(&2));
+        app.act(Action::Mine);
+        assert!(app.store.watched(&key).unwrap().mine.is_empty());
     }
 
     #[test]

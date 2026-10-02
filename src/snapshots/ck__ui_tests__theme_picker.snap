@@ -17,15 +17,15 @@ expression: snapshot(&mut a)
   Background refresh      material-light
     Open thread       ev  nord                                              hread updates
     Watched threads   ev  gruvbox                                           ed thread updates
-                          catppuccin
-  Downloads               tokyo-night
-    Folder            ~/  solarized-light                                   es
-                          terminal
+    Notifications     au  catppuccin                                         threads, replies to…
+                          tokyo-night
+  Downloads               solarized-light
+    Folder            ~/  terminal                                          es
+
   Keys
     Key bindings      defaults                          Rebind any command
 
   There's no config file to save to (no home directory); changes last until ck quits.
-
 
 
 

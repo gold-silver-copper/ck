@@ -30,6 +30,12 @@ images = "auto"
 # own background and 16 colors). Custom themes are [themes.NAME] tables, see the end.
 theme = "material"
 
+# New posts in watched threads, and replies to posts you marked as yours (m): "auto" (a
+# desktop notification in terminals known to show them, else the bell), "bell", or "off".
+notify = "auto"
+# Or run a command (no shell; {title} and {body} are filled in):
+# notify_command = ["notify-send", "{title}", "{body}"]
+
 # 24-bit color: "auto" (when the terminal sets COLORTERM=truecolor), "truecolor", or "256".
 color = "auto"
 
@@ -275,7 +281,8 @@ url = "https://arch.b4k.dev"
 #               goto = ":"
 #   catalog:    view = "v", watch = "w", sort = "s", compact = "c", links = "O", hide = "H",
 #               show_hidden = "Z"
-#   thread:     view, watch, links, hide, show_hidden, open_file = "i", replies = "b", jump_back = "u", unread = "U",
+#   thread:     view, watch, links, hide, show_hidden, mine = "m", open_file = "i",
+#               replies = "b", jump_back = "u", unread = "U",
 #               preview = "p", next_match = "n", prev_match = "N", spoiler = "s",
 #               all_spoilers = "S", download = "d", download_thread = "D", archive = "a"
 #   Watched/History: remove = "x"

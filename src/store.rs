@@ -31,6 +31,16 @@ pub struct Watched {
     /// The thread 404'd: archived or deleted. It's no longer refreshed.
     #[serde(default)]
     pub dead: bool,
+    /// Posts marked as yours (`m`); replies to them are counted and notified.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mine: Vec<u64>,
+    /// Unread replies to your posts.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub replies: usize,
+}
+
+fn is_zero(n: &usize) -> bool {
+    *n == 0
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -161,7 +171,7 @@ impl Store {
             self.watched.remove(i);
             return false;
         }
-        self.watched.push(Watched { key, subject, posts, last_seen, unread: 0, dead: false });
+        self.watched.push(Watched { key, subject, posts, last_seen, unread: 0, dead: false, mine: Vec::new(), replies: 0 });
         true
     }
 
@@ -183,6 +193,7 @@ impl Store {
             w.posts = posts;
             w.last_seen = w.last_seen.max(max_no);
             w.unread = 0;
+            w.replies = 0;
             w.dead = false;
         }
     }

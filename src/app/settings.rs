@@ -21,6 +21,7 @@ pub enum Item {
     Filters,
     RefreshThread,
     RefreshWatched,
+    Notify,
     DownloadDir,
     Keys,
 }
@@ -29,7 +30,7 @@ pub enum Item {
 pub const SECTIONS: &[(&str, &[Item])] = &[
     ("Appearance", &[Item::Theme, Item::Colors, Item::ColorDepth]),
     ("Catalog", &[Item::Compact, Item::Images, Item::Filters]),
-    ("Background refresh", &[Item::RefreshThread, Item::RefreshWatched]),
+    ("Background refresh", &[Item::RefreshThread, Item::RefreshWatched, Item::Notify]),
     ("Downloads", &[Item::DownloadDir]),
     ("Keys", &[Item::Keys]),
 ];
@@ -70,6 +71,7 @@ impl Item {
             Item::Filters => "Filters",
             Item::RefreshThread => "Open thread",
             Item::RefreshWatched => "Watched threads",
+            Item::Notify => "Notifications",
             Item::DownloadDir => "Folder",
             Item::Keys => "Key bindings",
         }
@@ -85,6 +87,7 @@ impl Item {
             Item::Filters => "[[filter]] in the config; H hides by hand, Z shows hidden",
             Item::RefreshThread => "How often the open thread updates",
             Item::RefreshWatched => "How often each watched thread updates",
+            Item::Notify => "New posts in watched threads, replies to yours (m)",
             Item::DownloadDir => "Where d / D save files",
             Item::Keys => "Rebind any command",
         }
@@ -172,6 +175,19 @@ impl App {
             }
             Item::RefreshThread => format!("every {}s", self.refresh_thread.as_secs()),
             Item::RefreshWatched => format!("every {}s", self.refresh_watched.as_secs()),
+            Item::Notify => {
+                let method = crate::notify::method(self.notify_mode, self.notify_command.as_deref(), &|k| std::env::var(k).ok());
+                let how = match method {
+                    crate::notify::Method::Osc9 | crate::notify::Method::Osc777 => "desktop notification",
+                    crate::notify::Method::Bell => "terminal bell",
+                    crate::notify::Method::Command(_) => "notify_command",
+                    crate::notify::Method::Off => "off",
+                };
+                match self.notify_mode {
+                    crate::notify::NotifyMode::Off => "off".into(),
+                    m => format!("{} ({how})", m.as_str()),
+                }
+            }
             Item::DownloadDir => self.download_dir.clone().unwrap_or_else(|| "~/Downloads/ck/{site}/{board}/{thread}".into()),
             Item::Keys => match ACTIONS.iter().filter(|e| !self.keys.is_default(e.0)).count() {
                 0 => "defaults".into(),
@@ -228,6 +244,11 @@ impl App {
                 let secs = next(REFRESH_WATCHED, self.refresh_watched.as_secs());
                 self.refresh_watched = Duration::from_secs(secs);
                 self.save_config(&format!("refresh every {secs}s"), |d| d["refresh_watched_secs"] = toml_edit::value(secs as i64));
+            }
+            Item::Notify => {
+                self.notify_mode = self.notify_mode.next();
+                let mode = self.notify_mode.as_str();
+                self.save_config(&format!("notifications {mode}"), |d| d["notify"] = toml_edit::value(mode));
             }
             Item::DownloadDir => {
                 self.settings.popup = Some(Popup::Folder { value: self.download_dir.clone().unwrap_or_default() });

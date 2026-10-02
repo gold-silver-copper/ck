@@ -492,6 +492,11 @@ fn draw_watched(f: &mut Frame, app: &mut App, area: Rect) {
             if app.refreshing.contains(&w.key) {
                 right.push(Span::styled("↻  ", Style::new().fg(t.primary)));
             }
+            if w.replies > 0 {
+                let n = w.replies;
+                right.push(chip(format!("{n} repl{} to you", if n == 1 { "y" } else { "ies" }), t.on_primary, t.primary));
+                right.push(Span::raw(" "));
+            }
             if w.dead {
                 right.push(chip("archived/deleted", t.background, t.error));
                 right.push(Span::raw("  "));
@@ -854,6 +859,8 @@ struct PostCtx<'a> {
     search: String,
     clock: Clock,
     mark: Option<&'a Mark>,
+    /// Posts marked as yours.
+    mine: &'a std::collections::HashSet<u64>,
 }
 
 fn post_ctx(t: &ThreadView, i: usize, clock: Clock) -> PostCtx<'_> {
@@ -866,6 +873,7 @@ fn post_ctx(t: &ThreadView, i: usize, clock: Clock) -> PostCtx<'_> {
         reveal: t.is_revealed(i),
         search: t.search.to_lowercase(),
         mark: t.marks.get(i),
+        mine: &t.mine,
     }
 }
 
@@ -883,6 +891,10 @@ fn post_lines(p: &Post, ctx: &PostCtx, width: usize) -> Vec<Line<'static>> {
     }
     if ctx.is_new {
         head.push(chip("new", t.background, t.new));
+        head.push(Span::raw(" "));
+    }
+    if ctx.mine.contains(&p.no) {
+        head.push(chip("you", t.on_primary, t.primary));
         head.push(Span::raw(" "));
     }
     if let Some(m) = ctx.mark {
@@ -922,8 +934,14 @@ fn post_lines(p: &Post, ctx: &PostCtx, width: usize) -> Vec<Line<'static>> {
         let mut line = if ctx.reveal { markup::reveal(line) } else { line.clone() };
         // Mark quotes of the OP like 4chan does. Quote links are always their own span.
         for s in &mut line.spans {
-            if markup::is_quote_link(s.style) && markup::quote_target(&s.content) == Some(ctx.op_no) {
-                s.content.to_mut().push_str(" (OP)");
+            if markup::is_quote_link(s.style) {
+                let target = markup::quote_target(&s.content);
+                if target == Some(ctx.op_no) {
+                    s.content.to_mut().push_str(" (OP)");
+                }
+                if target.is_some_and(|n| ctx.mine.contains(&n)) {
+                    s.content.to_mut().push_str(" (You)");
+                }
             }
         }
         if !ctx.search.is_empty() {
@@ -1077,6 +1095,7 @@ fn help_sections(keys: &KeyMap) -> Vec<(&'static str, Vec<(String, &'static str)
                 (k(Action::View), "view the post's images"),
                 (k(Action::Links), "the post's links and files"),
                 (pair(Action::Hide, Action::ShowHidden), "hide the post / show hidden"),
+                (k(Action::Mine), "mark as yours: notified of replies"),
                 (pair(Action::Download, Action::DownloadThread), "save files: post / thread"),
                 (k(Action::Watch), "watch / unwatch the thread"),
                 (k(Action::Unread), "jump to the first unread post"),
