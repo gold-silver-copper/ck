@@ -231,8 +231,14 @@ impl Images {
         }
         self.frame.push((url.to_string(), kind, Some(size)));
         self.tick += 1;
+        // Looked at before borrowing it to change (stable's borrow checker needs the order).
+        match self.slots.get(url) {
+            Some(Slot::Ready { .. }) => {}
+            Some(Slot::Failed) => return State::Failed,
+            _ => return State::Loading,
+        }
         let Some(Slot::Ready { img, protos, pending, asked, used, frames, animation, animating, .. }) = self.slots.get_mut(url) else {
-            return if matches!(self.slots.get(url), Some(Slot::Failed)) { State::Failed } else { State::Loading };
+            return State::Loading;
         };
         *used = self.tick;
         // Animated: the frame due now, once the frames are encoded for this size.

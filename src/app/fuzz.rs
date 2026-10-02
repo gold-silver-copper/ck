@@ -809,14 +809,16 @@ fn episode(seed: u64, steps: usize, shrinking: bool) {
 // ----- what must always hold -----
 
 fn check(app: &App) {
-    let fail = |what: String| -> ! { panic!("{what}") };
+    let fail = |what: String| panic!("{what}");
     if app.tabs.is_empty() || app.tabs.len() > MAX_TABS || app.active >= app.tabs.len() {
         fail(format!("tabs: {} open, active {}", app.tabs.len(), app.active));
     }
     let tabs = std::iter::once(&app.tab).chain(app.tabs.iter().enumerate().filter(|&(i, _)| i != app.active).map(|(_, t)| t));
     for (i, tab) in tabs.enumerate() {
-        if let Some(t) = &tab.thread {
-            check_thread(t, &|w| fail(format!("tab {i}: {w}")));
+        if let Some(t) = &tab.thread
+            && let Err(w) = check_thread(t)
+        {
+            fail(format!("tab {i}: {w}"));
         }
         if tab.loading.is_some() && tab.req == 0 {
             fail(format!("tab {i} is loading with no request"));
@@ -863,26 +865,26 @@ fn check(app: &App) {
     }
 }
 
-fn check_thread(t: &ThreadView, fail: &dyn Fn(String) -> !) {
+fn check_thread(t: &ThreadView) -> Result<(), String> {
     let n = t.posts.len();
     if t.index.len() != n || t.posts.iter().enumerate().any(|(i, p)| t.index.get(&p.no) != Some(&i)) {
-        fail(format!("the post index doesn't match the {n} posts"));
+        return Err(format!("the post index doesn't match the {n} posts"));
     }
     if t.backlinks.len() != n {
-        fail(format!("{} backlink lists for {n} posts", t.backlinks.len()));
+        return Err(format!("{} backlink lists for {n} posts", t.backlinks.len()));
     }
     if n == 0 {
-        fail("a thread without posts".into());
+        return Err("a thread without posts".into());
     }
     if t.selected >= n {
-        fail(format!("post {} selected of {n}", t.selected));
+        return Err(format!("post {} selected of {n}", t.selected));
     }
     // The cursor is a hint; `entry()` is the selected post's entry, whatever it says.
     if t.entries.get(t.entry()).is_none_or(|e| e.post != t.selected) {
-        fail(format!("entry {} of {} doesn't hold the selected post {}", t.entry(), t.entries.len(), t.selected));
+        return Err(format!("entry {} of {} doesn't hold the selected post {}", t.entry(), t.entries.len(), t.selected));
     }
     if t.entries.iter().any(|e| e.post >= n) || t.matches.iter().any(|&m| m >= n) || t.revealed.iter().any(|&m| m >= n) {
-        fail(format!("an entry, match or revealed post past the {n} posts"));
+        return Err(format!("an entry, match or revealed post past the {n} posts"));
     }
     if let Some(l) = &t.layout {
         let consistent = l.blocks.len() == t.entries.len()
@@ -890,9 +892,10 @@ fn check_thread(t: &ThreadView, fail: &dyn Fn(String) -> !) {
             && l.starts.first() == Some(&0)
             && l.blocks.iter().zip(l.starts.windows(2)).all(|(b, s)| s[1] - s[0] == b.len());
         if !consistent {
-            fail(format!("a layout of {} blocks for {} entries", l.blocks.len(), t.entries.len()));
+            return Err(format!("a layout of {} blocks for {} entries", l.blocks.len(), t.entries.len()));
         }
     }
+    Ok(())
 }
 
 /// With nothing in flight, nothing may still be loading or refreshing.
