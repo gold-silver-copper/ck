@@ -44,8 +44,9 @@ color = "auto"
 refresh_thread_secs = 10
 refresh_watched_secs = 60
 
-# One line per thread in catalogs, no thumbnails. `c` toggles it and saves it here.
-compact_catalog = false
+# Catalog layout: "cards" (a card per thread with a thumbnail), "compact" (a line per
+# thread) or "grid" (thumbnails in columns). `c` cycles it and saves it here.
+catalog_layout = "cards"
 
 # Where `d` / `D` save files. {site}, {board} and {thread} are filled in, and {downloads}
 # is your Downloads folder. "~/" works too.

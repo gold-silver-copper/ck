@@ -1,0 +1,34 @@
+---
+source: src/ui_tests.rs
+expression: bg_map(&mut a)
+---
+ppppbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+
+  sshhhhhhhhhhhhhhhhss  pShhhhhhhhhhhhhhhhSS  sshhhhhhhhhhhhhhhhss  sshhhhhhhhhhhhhhhhss
+  sshhhhhhhhhhhhhhhhss  pShhhhhhhhhhhhhhhhSS  sshhhhhhhhhhhhhhhhss  sshhhhhhhhhhhhhhhhss
+  sshhhhhhhhhhhhhhhhss  pShhhhhhhhhhhhhhhhSS  sshhhhhhhhhhhhhhhhss  sshhhhhhhhhhhhhhhhss
+  sshhhhhhhhhhhhhhhhss  pShhhhhhhhhhhhhhhhSS  sshhhhhhhhhhhhhhhhss  sshhhhhhhhhhhhhhhhss
+  sshhhhhhhhhhhhhhhhss  pShhhhhhhhhhhhhhhhSS  sshhhhhhhhhhhhhhhhss  sshhhhhhhhhhhhhhhhss
+  sshhhhhhhhhhhhhhhhss  pShhhhhhhhhhhhhhhhSS  sshhhhhhhhhhhhhhhhss  sshhhhhhhhhhhhhhhhss
+  sshhhhhhhhhhhhhhhhss  pShhhhhhhhhhhhhhhhSS  sshhhhhhhhhhhhhhhhss  sshhhhhhhhhhhhhhhhss
+  sshhhhhhhhhhhhhhhhss  pShhhhhhhhhhhhhhhhSS  sshhhhhhhhhhhhhhhhss  sshhhhhhhhhhhhhhhhss
+  ssssssssssssssssssss  pSSSSSSSSSSSSSSSSSSS  ssssssssssssssssssss  ssssssssssssssssssss
+  ssssssssssssssssssss  pSSSSSSSSSSSSSSSSSSS  ssssssssssssssssssss  ssssssssssssssssssss
+  ssssssssssssssssssss  pSSSSSSSSSSSSSSSSSSS  ssssssssssssssssssss  ssssssssssssssssssss
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb

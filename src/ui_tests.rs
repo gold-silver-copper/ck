@@ -203,7 +203,7 @@ fn catalog_with_thumbnail_placeholders() {
 fn catalog_compact() {
     let mut a = app(true);
     a.view = View::Catalog;
-    a.compact = true;
+    a.layout = crate::config::CatalogLayout::Compact;
     a.catalog = catalog();
     a.catalog_list.state.select(Some(0));
     insta::assert_snapshot!(snapshot(&mut a));
@@ -405,4 +405,23 @@ fn replies_inline() {
     a.on_key(ratatui::crossterm::event::KeyEvent::from(ratatui::crossterm::event::KeyCode::Char('e')));
     insta::assert_snapshot!(snapshot(&mut a));
     insta::assert_snapshot!("replies_inline_backgrounds", bg_map(&mut a));
+}
+
+#[test]
+fn catalog_grid() {
+    let mut a = app(true);
+    a.view = View::Catalog;
+    a.layout = crate::config::CatalogLayout::Grid;
+    a.catalog = catalog();
+    a.catalog_list.state.select(Some(1));
+    insta::assert_snapshot!(snapshot(&mut a));
+    insta::assert_snapshot!("catalog_grid_backgrounds", bg_map(&mut a));
+    assert_eq!(a.grid_cols, 4);
+    // Without images, the grid is drawn as cards.
+    let mut b = app(false);
+    b.view = View::Catalog;
+    b.layout = crate::config::CatalogLayout::Grid;
+    b.catalog = catalog();
+    let text = snapshot(&mut b);
+    assert!(text.contains("312 replies") && b.grid_cols == 0, "{text}");
 }

@@ -66,7 +66,7 @@ impl Item {
             Item::Theme => "Theme",
             Item::Colors => "Colors",
             Item::ColorDepth => "Color depth",
-            Item::Compact => "Compact layout",
+            Item::Compact => "Layout",
             Item::Images => "Images",
             Item::Filters => "Filters",
             Item::RefreshThread => "Open thread",
@@ -82,7 +82,7 @@ impl Item {
             Item::Theme => "Live preview while choosing",
             Item::Colors => "Change any color of the current theme",
             Item::ColorDepth => "24-bit color, or the nearest of 256",
-            Item::Compact => "One line per thread",
+            Item::Compact => "Cards, compact (a line each) or grid (c)",
             Item::Images => "Thumbnails and the image viewer (after a restart)",
             Item::Filters => "[[filter]] in the config; H hides by hand, Z shows hidden",
             Item::RefreshThread => "How often the open thread updates",
@@ -153,7 +153,6 @@ impl App {
 
     /// A setting's current value, as shown.
     pub fn setting_value(&self, item: Item) -> String {
-        let on = |b: bool| if b { "on" } else { "off" }.to_string();
         match item {
             Item::Theme => self.theme_name.clone(),
             Item::Colors => match self.themes.get(&self.theme_name) {
@@ -164,7 +163,7 @@ impl App {
                 ColorMode::Auto => format!("auto ({})", if self.truecolor { "24-bit" } else { "256" }),
                 m => m.as_str().into(),
             },
-            Item::Compact => on(self.compact),
+            Item::Compact => self.layout.as_str().into(),
             Item::Images => match self.images_mode {
                 ImagesMode::Auto => "on".into(),
                 ImagesMode::Off => "off".into(),
@@ -222,7 +221,7 @@ impl App {
                 let mode = self.color_mode.as_str();
                 self.save_config(&format!("color depth {mode}"), |d| d["color"] = toml_edit::value(mode));
             }
-            Item::Compact => self.toggle_compact(),
+            Item::Compact => self.cycle_layout(),
             Item::Images => {
                 self.images_mode = match self.images_mode {
                     ImagesMode::Auto => ImagesMode::Off,

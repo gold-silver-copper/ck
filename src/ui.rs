@@ -19,6 +19,7 @@ use crate::app::{
 use crate::http;
 use crate::images::{Images, Kind, State};
 use crate::keys::{self, Action, KeyMap};
+use crate::config::CatalogLayout;
 use crate::filter::Mark;
 use crate::markup;
 use crate::model::{Attachment, Post};
@@ -563,7 +564,15 @@ fn draw_boards(f: &mut Frame, app: &mut App, area: Rect) {
 
 fn draw_catalog(f: &mut Frame, app: &mut App, area: Rect) {
     let t = theme();
-    let thumbs = app.images.enabled() && area.width >= MIN_THUMB_WIDTH && !app.compact;
+    let images = app.images.enabled() && area.width >= MIN_THUMB_WIDTH;
+    // The grid needs thumbnails; without them it's cards.
+    if app.layout == CatalogLayout::Grid && images {
+        draw_grid(f, app, area);
+        return;
+    }
+    app.grid_cols = 0;
+    let compact = app.layout == CatalogLayout::Compact;
+    let thumbs = images && !compact;
     let width = area.width.saturating_sub(PAD + 2) as usize;
     let visible = app.visible_catalog();
     let mut state = std::mem::take(&mut app.catalog_list.state);
@@ -616,7 +625,7 @@ fn draw_catalog(f: &mut Frame, app: &mut App, area: Rect) {
             facts.push(ago(p.time, app.clock));
             meta.push(Span::styled(facts.join(" · "), dim()));
             let text_w = if thumbs { width.saturating_sub(CAT_THUMB.width as usize + 2) } else { width };
-            if app.compact {
+            if compact {
                 let used: usize = head.iter().chain(&meta).map(|s| s.width()).sum();
                 let room = text_w.saturating_sub(used + 4);
                 if room > 8 {
@@ -640,7 +649,7 @@ fn draw_catalog(f: &mut Frame, app: &mut App, area: Rect) {
             lines
         }
     };
-    let (height, gap, card) = if app.compact {
+    let (height, gap, card) = if compact {
         (1, 0, None)
     } else if thumbs {
         (CAT_THUMB.height, 1, Some(t.surface))
@@ -680,6 +689,94 @@ fn draw_catalog(f: &mut Frame, app: &mut App, area: Rect) {
 /// A hidden item's chip: by which filter, or by hand.
 fn hidden_label(filter: &str) -> String {
     if filter.is_empty() { "hidden".into() } else { format!("hidden: {filter}") }
+}
+
+/// Grid cards: a thumbnail over three lines of text.
+const GRID_CARD: Size = Size::new(20, 11);
+
+/// The catalog as a grid of thumbnails, as many columns as fit.
+fn draw_grid(f: &mut Frame, app: &mut App, area: Rect) {
+    let t = theme();
+    let visible = app.visible_catalog();
+    if visible.is_empty() {
+        app.hit = None;
+        if app.loading.is_none() {
+            empty(f, area, "No threads");
+        }
+        return;
+    }
+    let (cell_w, cell_h) = (GRID_CARD.width + 2, GRID_CARD.height + 1);
+    let cols = ((area.width + 2) / cell_w).max(1) as usize;
+    let rows = ((area.height + 1) / cell_h).max(1) as usize;
+    app.grid_cols = cols;
+    let state = &mut app.catalog_list.state;
+    let sel = state.selected().unwrap_or(0).min(visible.len() - 1);
+    let mut top = state.offset() / cols;
+    if sel / cols < top {
+        top = sel / cols;
+    } else if sel / cols >= top + rows {
+        top = sel / cols + 1 - rows;
+    }
+    *state.offset_mut() = top * cols;
+    for (k, &i) in visible.iter().enumerate().skip(top * cols).take((rows + 1) * cols) {
+        let (r, c) = (k / cols - top, k % cols);
+        let (x, y) = (area.x + c as u16 * cell_w, area.y + r as u16 * cell_h);
+        let card = Rect::new(x, y, GRID_CARD.width, GRID_CARD.height).intersection(area);
+        if card.is_empty() {
+            // Below the screen: prefetch from media hosts.
+            if let Some(url) = app.catalog[i].files.first().and_then(|f| f.thumb.as_ref()).filter(|u| http::is_media_host(u)) {
+                app.images.want(url, Kind::Thumb);
+            }
+            continue;
+        }
+        let p = &app.catalog[i];
+        let mark = app.catalog_marks.get(i).cloned().unwrap_or_default();
+        fill(f, card, if k == sel { t.selection } else { t.surface });
+        if k == sel || mark.highlight.is_some() {
+            fill(f, Rect::new(x, card.y, 1, card.height), t.primary);
+        }
+        let tile = Rect::new(x + PAD, y, THUMB.width, THUMB.height);
+        match p.files.first() {
+            Some(file) => draw_tile(f, &mut app.images, file, p.files.len(), tile, area),
+            None => {
+                fill(f, tile.intersection(area), t.surface_high);
+                put(f, tile.x, tile.y + tile.height / 2, tile.width, Line::styled("no file", dim()).centered());
+            }
+        }
+        let w = GRID_CARD.width - PAD - 1;
+        let mut head = Vec::new();
+        if app.catalog_new.contains(&p.no) {
+            head.push(chip("new", t.background, t.new));
+            head.push(Span::raw(" "));
+        }
+        if let Some(label) = &mark.hidden {
+            head.push(chip(hidden_label(label), t.text_dim, t.surface_high));
+            head.push(Span::raw(" "));
+        }
+        let (title, rest) = match &p.subject {
+            Some(s) => (s.clone(), p.plain_text().to_string()),
+            None => (p.plain_text().to_string(), String::new()),
+        };
+        let used: usize = head.iter().map(|s| s.width()).sum();
+        head.push(Span::styled(truncate(&title, (w as usize).saturating_sub(used)), if mark.hidden.is_some() { dim() } else { bold(t.text) }));
+        let mut facts = Vec::new();
+        if let Some(n) = app.new_replies(p) {
+            facts.push(Span::styled(format!("+{n} "), bold(t.new)));
+        }
+        let mut counts = Vec::new();
+        if let Some(r) = p.replies {
+            counts.push(format!("R{r} I{}", p.images.unwrap_or(0)));
+        }
+        counts.push(ago(p.time, app.clock).trim_end_matches(" ago").to_string());
+        facts.push(Span::styled(counts.join(" · "), dim()));
+        let text_y = y + THUMB.height;
+        for (row, line) in [Line::from(head), Line::styled(truncate(&rest, w as usize), dim()), Line::from(facts)].into_iter().enumerate() {
+            if text_y + (row as u16) < area.bottom() {
+                put(f, x + PAD, text_y + row as u16, w, line);
+            }
+        }
+    }
+    app.hit = Some(Hit::Grid { area, offset: top * cols, cols, cell: (cell_w, cell_h) });
 }
 
 fn line_text(l: &Line) -> String {

@@ -12,7 +12,7 @@ use ratatui::text::Line;
 use ratatui::widgets::ListState;
 
 use crate::backend::{self, Backend};
-use crate::config::{ColorMode, Config, ImagesMode, SiteConfig};
+use crate::config::{CatalogLayout, ColorMode, Config, ImagesMode, SiteConfig};
 use crate::disk_cache::DiskCache;
 use crate::download;
 use crate::filter::{Filters, Mark};
@@ -427,6 +427,8 @@ pub enum Hit {
     /// A list: its area, first visible item, and rows per item.
     List { area: Rect, offset: usize, item_height: u16 },
     Thread { area: Rect },
+    /// The catalog grid: its area, first visible item, columns, and cell size.
+    Grid { area: Rect, offset: usize, cols: usize, cell: (u16, u16) },
     /// The settings screen, laid out as `settings::rows()`.
     Settings { area: Rect },
 }
@@ -485,7 +487,9 @@ pub struct App {
     pub board_list: Picker,
     pub catalog_list: Picker,
     pub catalog_sort: Sort,
-    pub compact: bool,
+    pub layout: CatalogLayout,
+    /// Columns of the catalog grid as last drawn (0: not a grid).
+    pub grid_cols: usize,
     pub settings: settings::Settings,
     pub settings_list: Picker,
     /// The current theme's name, and the config's custom themes.
@@ -601,6 +605,7 @@ impl App {
                 "legacy".into()
             }
         };
+        let layout = cfg.layout();
         let refresh_thread = Duration::from_secs(cfg.refresh_thread_secs.max(10));
         let refresh_watched = Duration::from_secs(cfg.refresh_watched_secs.max(60));
         let sites = cfg
@@ -616,7 +621,12 @@ impl App {
             board_list: Picker::default(),
             catalog_list: Picker::default(),
             catalog_sort: Sort::default(),
-            compact: store.settings.compact_catalog.unwrap_or(cfg.compact_catalog),
+            grid_cols: 0,
+            layout: store.settings.catalog_layout.unwrap_or(match store.settings.compact_catalog {
+                Some(true) => CatalogLayout::Compact,
+                Some(false) => CatalogLayout::Cards,
+                None => layout,
+            }),
             settings: settings::Settings::default(),
             settings_list: Picker::default(),
             theme_name,
@@ -1402,23 +1412,26 @@ impl App {
         }
     }
 
-    /// Toggle the one-line catalog layout and remember it: in config.toml if there is one
-    /// (keeping its comments), else for the session; in the data directory if the config
-    /// can't be edited.
-    fn toggle_compact(&mut self) {
-        self.compact = !self.compact;
-        let state = if self.compact { "on" } else { "off" };
-        let value = self.compact;
-        match self.edit_config(|d| d["compact_catalog"] = toml_edit::value(value)) {
+    /// Cycle the catalog layout (cards, compact, grid) and remember it: in config.toml
+    /// (keeping its comments), or in the data directory if the config can't be edited.
+    fn cycle_layout(&mut self) {
+        self.layout = self.layout.next();
+        let name = self.layout.as_str();
+        match self.edit_config(|d| {
+            d["catalog_layout"] = toml_edit::value(name);
+            d.remove("compact_catalog");
+        }) {
             Ok(path) => {
                 self.store.settings.compact_catalog = None;
-                self.status = Some((format!("Compact catalog {state} (saved in {path})"), false));
+                self.store.settings.catalog_layout = None;
+                self.status = Some((format!("Catalog layout: {name} (saved in {path})"), false));
             }
             // The config can't be edited: keep the choice in the data directory instead.
             Err(e) => {
-                self.store.settings.compact_catalog = Some(value);
+                self.store.settings.compact_catalog = None;
+                self.store.settings.catalog_layout = Some(self.layout);
                 self.save();
-                self.status = Some((format!("Compact catalog {state} (kept in the data directory: {e:#})"), false));
+                self.status = Some((format!("Catalog layout: {name} (kept in the data directory: {e:#})"), false));
             }
         }
     }
@@ -1486,6 +1499,10 @@ impl App {
                 Some(offset + ((row - area.y) / item_height.max(1)) as usize)
             }
             Hit::Settings { area } if area.contains(pos) => settings::rows().get((row - area.y) as usize)?.ok(),
+            Hit::Grid { area, offset, cols, cell } if area.contains(pos) => {
+                let c = ((col - area.x) / cell.0) as usize;
+                (c < cols).then(|| offset + ((row - area.y) / cell.1) as usize * cols + c)
+            }
             Hit::Thread { area } if area.contains(pos) => {
                 let t = self.thread.as_ref()?;
                 let l = t.layout.as_ref()?;
@@ -1667,6 +1684,7 @@ impl App {
                     self.back();
                 }
             }
+            _ if self.view == View::Catalog && self.grid_cols > 0 && self.on_grid_key(key.code) => {}
             KeyCode::Char('h') | KeyCode::Left | KeyCode::Backspace => self.back(),
             _ if self.view == View::Thread => self.on_thread_key(key.code, ctrl),
             KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right => self.enter(),
@@ -1735,7 +1753,7 @@ impl App {
                 self.catalog_list.state.select(Some(0));
                 self.status = Some((format!("Sorted by {}", self.catalog_sort.label()), false));
             }
-            Action::Compact => self.toggle_compact(),
+            Action::Compact => self.cycle_layout(),
             Action::Download => self.download(false),
             Action::DownloadThread => self.download(true),
             Action::Archive => match self.archive_offer.take() {
@@ -1777,6 +1795,29 @@ impl App {
         if let Some((p, len)) = self.picker() {
             p.clamp(len);
         }
+    }
+
+    /// Moving in the catalog grid: j/k by rows, h/l by columns (h in the first column goes
+    /// back, as in lists). Returns whether the key was one of those.
+    fn on_grid_key(&mut self, code: KeyCode) -> bool {
+        let cols = self.grid_cols as isize;
+        let len = self.visible_catalog().len();
+        let cur = self.catalog_list.state.selected().unwrap_or(0) as isize;
+        let delta = match code {
+            KeyCode::Char('j') | KeyCode::Down => cols,
+            KeyCode::Char('k') | KeyCode::Up => -cols,
+            KeyCode::Char('l') | KeyCode::Right if (cur + 1) % cols != 0 => 1,
+            KeyCode::Char('l') | KeyCode::Right => 0,
+            KeyCode::Char('h') | KeyCode::Left if cur % cols != 0 => -1,
+            _ => return false,
+        };
+        // Down from the last full row goes to the last thread.
+        if delta == cols && cur + cols >= len as isize && cur / cols < (len as isize - 1) / cols {
+            self.catalog_list.state.select(Some(len - 1));
+        } else if (0..len as isize).contains(&(cur + delta)) {
+            self.catalog_list.state.select(Some((cur + delta) as usize));
+        }
+        true
     }
 
     fn on_thread_key(&mut self, code: KeyCode, ctrl: bool) {
@@ -2806,6 +2847,41 @@ mod tests {
         let t = app.thread.as_ref().unwrap();
         assert_eq!(t.entries.len(), 5);
         assert_eq!((t.entry(), t.entries[t.entry()].depth), (1, 1));
+    }
+
+    #[test]
+    fn grid_moves_in_two_dimensions() {
+        let mut app = test_app();
+        app.catalog = (1..=7).map(|no| Post { no, ..Default::default() }).collect();
+        app.view = View::Catalog;
+        app.layout = CatalogLayout::Grid;
+        app.grid_cols = 3;
+        app.catalog_list.state.select(Some(0));
+        let press = |app: &mut App, c| app.on_key(KeyEvent::from(KeyCode::Char(c)));
+        let at = |app: &App| app.catalog_list.state.selected().unwrap();
+        press(&mut app, 'j');
+        assert_eq!(at(&app), 3);
+        press(&mut app, 'l');
+        press(&mut app, 'l');
+        assert_eq!(at(&app), 5);
+        // The end of a row stops; down from the last full row goes to the last thread.
+        press(&mut app, 'l');
+        assert_eq!(at(&app), 5);
+        press(&mut app, 'j');
+        assert_eq!(at(&app), 6);
+        press(&mut app, 'k');
+        assert_eq!(at(&app), 3);
+        // h in the first column goes back, as in lists.
+        press(&mut app, 'h');
+        assert_eq!(app.view, View::Boards);
+        // Clicks hit the right card.
+        app.view = View::Catalog;
+        app.hit = Some(Hit::Grid { area: Rect::new(2, 2, 66, 24), offset: 0, cols: 3, cell: (22, 12) });
+        app.on_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 2 + 22 + 5, 2 + 12 + 3), Instant::now());
+        assert_eq!(at(&app), 4);
+        // c cycles the layout (the config can't be saved here; it's kept for the session).
+        app.act(Action::Compact);
+        assert_eq!(app.layout, CatalogLayout::Cards);
     }
 
     #[test]

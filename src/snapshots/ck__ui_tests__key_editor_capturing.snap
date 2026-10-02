@@ -19,7 +19,7 @@ expression: snapshot(&mut a)
       v               view             view the post's images               catalog, thread
       w               watch            watch / unwatch the thread           catalog, thread
       s               sort             cycle the sort order                 catalog
-      c               compact          compact layout on / off              catalog
+      c               compact          layout: cards, compact, grid         catalog
       O               links            the post's links and files           catalog, thread
       H               hide             hide / unhide the thread or post     catalog, thread
       Z               show_hidden      show hidden threads and posts        catalog, thread

@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 
 use anyhow::{Context, Result};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use toml_edit::{DocumentMut, Item, Table, value};
 
 use crate::keys::Binding;
@@ -21,7 +21,10 @@ pub struct Config {
     /// Seconds between background refreshes of each watched thread (at least 60).
     #[serde(default = "default_refresh_watched")]
     pub refresh_watched_secs: u64,
-    /// One line per thread in catalogs (toggled with `c`).
+    /// Catalog layout (cycled with `c`).
+    #[serde(default)]
+    pub catalog_layout: Option<CatalogLayout>,
+    /// ck 0.2: `true` for the compact layout.
     #[serde(default)]
     pub compact_catalog: bool,
     /// Where `d`/`D` save files; `{site}`, `{board}` and `{thread}` are filled in.
@@ -57,6 +60,43 @@ fn default_refresh_thread() -> u64 {
 
 fn default_refresh_watched() -> u64 {
     60
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum CatalogLayout {
+    /// A card per thread, with a thumbnail and the start of the OP.
+    #[default]
+    Cards,
+    /// A line per thread.
+    Compact,
+    /// Thumbnails in columns.
+    Grid,
+}
+
+impl CatalogLayout {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            CatalogLayout::Cards => "cards",
+            CatalogLayout::Compact => "compact",
+            CatalogLayout::Grid => "grid",
+        }
+    }
+
+    pub fn next(self) -> Self {
+        match self {
+            CatalogLayout::Cards => CatalogLayout::Compact,
+            CatalogLayout::Compact => CatalogLayout::Grid,
+            CatalogLayout::Grid => CatalogLayout::Cards,
+        }
+    }
+}
+
+impl Config {
+    /// The layout to start with: `catalog_layout`, or ck 0.2's `compact_catalog`.
+    pub fn layout(&self) -> CatalogLayout {
+        self.catalog_layout.unwrap_or(if self.compact_catalog { CatalogLayout::Compact } else { CatalogLayout::Cards })
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
@@ -251,7 +291,7 @@ mod tests {
         assert!(!c.compact_catalog && c.keys.is_empty());
     }
 
-    use super::{Config, edit_at, set_key, set_theme, set_theme_color};
+    use super::{CatalogLayout, Config, edit_at, set_key, set_theme, set_theme_color};
     use crate::keys::Binding;
 
     #[test]
@@ -284,7 +324,11 @@ mod tests {
         assert!(text.contains("# keep me") && text.contains("# and me"), "{text}");
         let c: Config = toml::from_str(&text).unwrap();
         assert!(c.compact_catalog);
+        assert_eq!(c.layout(), CatalogLayout::Compact);
         assert_eq!(c.sites.len(), 1);
+        edit_at(&path, |d| d["catalog_layout"] = toml_edit::value("grid")).unwrap();
+        let c: Config = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(c.layout(), CatalogLayout::Grid);
     }
 
     #[test]

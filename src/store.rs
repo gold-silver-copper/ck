@@ -70,6 +70,8 @@ const SEEN_FOR: i64 = 7 * 24 * 3600;
 pub struct Settings {
     #[serde(default)]
     pub compact_catalog: Option<bool>,
+    #[serde(default)]
+    pub catalog_layout: Option<crate::config::CatalogLayout>,
 }
 
 #[derive(Default)]
@@ -129,7 +131,7 @@ impl Store {
         if self.seen_dirty.replace(false) {
             write_atomic(&dir.join("seen.json"), &serde_json::to_vec(&self.seen)?)?;
         }
-        if self.settings.compact_catalog.is_some() {
+        if self.settings.compact_catalog.is_some() || self.settings.catalog_layout.is_some() {
             write_atomic(&dir.join("settings.json"), &serde_json::to_vec_pretty(&self.settings)?)?;
         }
         Ok(())

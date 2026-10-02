@@ -60,7 +60,7 @@ is in brackets):
 | `v`  | catalog, thread       | image viewer for the post's files (catalog: the OP's) [`view`] |
 | `w`  | catalog, thread       | watch / unwatch the thread [`watch`]                       |
 | `s`  | catalog               | cycle the sort: bump order, most replies, newest, oldest [`sort`] |
-| `c`  | catalog               | compact layout, one line per thread [`compact`]            |
+| `c`  | catalog               | layout: cards, compact (a line per thread), grid (thumbnails in columns) [`compact`] |
 | `p`  | thread                | preview the posts a post quotes [`preview`]                |
 | `b`  | thread                | jump to the first reply [`replies`]                        |
 | `u`  | thread                | jump back, also to the previous thread [`jump_back`]       |
@@ -237,7 +237,7 @@ and the file is created from the default if you don't have one yet:
 - **Colors**: every color the theme uses, with a swatch and what it's for. `enter` edits
   one (`#rrggbb`, a name, or a 256-color index), `x` resets it. Changing a built-in theme
   saves your changes as a copy, `[themes.NAME-custom]`.
-- Color depth, the compact catalog, images, the refresh intervals, the download folder,
+- Color depth, the catalog layout, images, the refresh intervals, the download folder,
   and key bindings (see [Remapping keys](#remapping-keys)).
 
 Custom themes go in the config as `[themes.NAME]` tables. Start from a built-in theme and
@@ -267,7 +267,9 @@ All settings are optional; see `config.example.toml` for every option with comme
 
 - `images = "auto" | "off"`
 - `refresh_thread_secs`, `refresh_watched_secs`
-- `compact_catalog = true` (also toggled with `c`, which saves it here, comments intact)
+- `catalog_layout = "cards" | "compact" | "grid"` (also cycled with `c`, which saves it
+  here, comments intact). In the grid, `h`/`l` move between columns (`h` in the first
+  column goes back) and `j`/`k` between rows; without images it's shown as cards.
 - `download_dir = "~/stuff/{site}/{board}/{thread}"`
 - `[[filter]]`: hide or highlight threads and posts, see [Filters](#filters-and-hiding).
 - `[keys]`: `action = "key"` or `action = ["key", ...]`, e.g. `watch = "W"`; see

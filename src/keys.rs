@@ -85,7 +85,7 @@ pub const ACTIONS: &[(Action, &str, &str, &[Scope], &str)] = &[
     (Action::View, "view", "v", &[Scope::Catalog, Scope::Thread], "view the post's images"),
     (Action::Watch, "watch", "w", &[Scope::Catalog, Scope::Thread], "watch / unwatch the thread"),
     (Action::Sort, "sort", "s", &[Scope::Catalog], "cycle the sort order"),
-    (Action::Compact, "compact", "c", &[Scope::Catalog], "compact layout on / off"),
+    (Action::Compact, "compact", "c", &[Scope::Catalog], "layout: cards, compact, grid"),
     (Action::OpenFile, "open_file", "i", &[Scope::Thread], "open the file (videos in mpv)"),
     (Action::Replies, "replies", "b", &[Scope::Thread], "jump to the first reply"),
     (Action::JumpBack, "jump_back", "u", &[Scope::Thread], "jump back (also to the last thread)"),
