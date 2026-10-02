@@ -13,6 +13,7 @@ use ratatui::text::Line;
 use ratatui::widgets::ListState;
 
 use crate::backend::{self, Backend};
+pub use crate::config::Sort;
 use crate::config::{CatalogLayout, ColorMode, Config, ImagesMode, SiteConfig};
 use crate::disk_cache::DiskCache;
 use crate::download;
@@ -62,36 +63,6 @@ const SAVE_EVERY: Duration = Duration::from_secs(2);
 /// Watched-thread refreshes running at once.
 const MAX_REFRESHING: usize = 2;
 
-/// Catalog sort orders, cycled with `s`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum Sort {
-    /// The site's order (by last bump).
-    #[default]
-    Bump,
-    Replies,
-    Newest,
-    Oldest,
-}
-
-impl Sort {
-    pub fn next(self) -> Self {
-        match self {
-            Sort::Bump => Sort::Replies,
-            Sort::Replies => Sort::Newest,
-            Sort::Newest => Sort::Oldest,
-            Sort::Oldest => Sort::Bump,
-        }
-    }
-
-    pub fn label(self) -> &'static str {
-        match self {
-            Sort::Bump => "bump order",
-            Sort::Replies => "most replies",
-            Sort::Newest => "newest",
-            Sort::Oldest => "oldest",
-        }
-    }
-}
 
 /// A row of the home screen (the Sites view): Watched and History, favorite boards, then
 /// the sites.
@@ -1666,11 +1637,7 @@ impl App {
 
     /// The board's own sort, when its catalog opens.
     fn apply_board_sort(&mut self) {
-        let sort = self.store.board_prefs.get(&self.board_key()).and_then(|p| p.sort.clone());
-        self.catalog_sort = [Sort::Bump, Sort::Replies, Sort::Newest, Sort::Oldest]
-            .into_iter()
-            .find(|s| Some(s.label()) == sort.as_deref())
-            .unwrap_or_default();
+        self.catalog_sort = self.store.board_prefs.get(&self.board_key()).and_then(|p| p.sort).unwrap_or_default();
     }
 
     /// The default catalog layout (Settings): saved in config.toml (keeping its comments), or
@@ -2069,7 +2036,7 @@ impl App {
                 self.catalog_list.state.select(Some(0));
                 // Remembered for this board.
                 let key = self.board_key();
-                self.store.board_prefs.entry(key).or_default().sort = (self.catalog_sort != Sort::Bump).then(|| self.catalog_sort.label().to_string());
+                self.store.board_prefs.entry(key).or_default().sort = (self.catalog_sort != Sort::Bump).then_some(self.catalog_sort);
                 self.save_now();
                 self.status = Some((format!("Sorted by {}", self.catalog_sort.label()), false));
             }
@@ -3393,7 +3360,7 @@ mod tests {
             board: Some("y".into()),
             thread: Some(5),
             selected: Some(6),
-            sort: Some("newest".into()),
+            sort: Some(Sort::Newest),
             filter: String::new(),
         });
         // The next run starts there.
@@ -3580,7 +3547,7 @@ mod tests {
         // Back on the first: its own again (also after a restart, from the data directory).
         app.goto_str("a/x");
         assert_eq!((app.catalog_sort, app.layout()), (Sort::Replies, CatalogLayout::Compact));
-        assert_eq!(app.store.board_prefs["a/x"], crate::store::BoardPrefs { sort: Some("most replies".into()), layout: Some(CatalogLayout::Compact) });
+        assert_eq!(app.store.board_prefs["a/x"], crate::store::BoardPrefs { sort: Some(Sort::Replies), layout: Some(CatalogLayout::Compact) });
         // The default (Settings) applies to boards without their own.
         app.default_layout = CatalogLayout::Grid;
         app.goto_str("a/xy");

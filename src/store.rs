@@ -75,7 +75,7 @@ pub struct SeenThread {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BoardPrefs {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub sort: Option<String>,
+    pub sort: Option<crate::config::Sort>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub layout: Option<crate::config::CatalogLayout>,
 }
@@ -105,7 +105,7 @@ pub struct Place {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub selected: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub sort: Option<String>,
+    pub sort: Option<crate::config::Sort>,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub filter: String,
 }
@@ -452,6 +452,13 @@ mod tests {
         let before = std::fs::metadata(dir.path().join("recent_boards.json")).unwrap().modified().unwrap();
         s.save().unwrap();
         assert_eq!(std::fs::metadata(dir.path().join("recent_boards.json")).unwrap().modified().unwrap(), before);
+    }
+
+    #[test]
+    fn sorts_are_saved_by_their_labels() {
+        let prefs: BoardPrefs = serde_json::from_str(r#"{"sort": "most replies"}"#).unwrap();
+        assert_eq!(prefs.sort, Some(crate::config::Sort::Replies));
+        assert_eq!(serde_json::to_string(&prefs).unwrap(), r#"{"sort":"most replies"}"#);
     }
 
     #[test]

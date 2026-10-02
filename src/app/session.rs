@@ -5,8 +5,6 @@ use std::time::{Duration, Instant};
 use super::{App, Picker, Sort, View};
 use crate::store::{Place, Session};
 
-const SORTS: [Sort; 4] = [Sort::Bump, Sort::Replies, Sort::Newest, Sort::Oldest];
-
 /// How often the session is saved while ck runs (if it changed).
 const SAVE_EVERY: Duration = Duration::from_secs(30);
 
@@ -36,7 +34,7 @@ impl App {
         match view {
             View::Catalog | View::Thread => {
                 place.board = self.board.as_ref().map(|b| b.uri.clone());
-                place.sort = (self.catalog_sort != Sort::Bump).then(|| self.catalog_sort.label().to_string());
+                place.sort = (self.catalog_sort != Sort::Bump).then_some(self.catalog_sort);
                 place.filter = self.catalog_list.filter.clone();
             }
             _ => {}
@@ -98,7 +96,7 @@ impl App {
     pub fn go_to_place(&mut self, p: &Place) {
         let Some(site) = self.sites.iter().position(|s| s.cfg.name == p.site) else { return };
         self.switch_site(site);
-        self.catalog_sort = SORTS.into_iter().find(|s| Some(s.label()) == p.sort.as_deref()).unwrap_or_default();
+        self.catalog_sort = p.sort.unwrap_or_default();
         self.catalog_list = Picker { filter: p.filter.clone(), ..Default::default() };
         self.catalog_list.state.select(Some(0));
         let board = p.board.as_ref().map(|b| self.find_board(b));

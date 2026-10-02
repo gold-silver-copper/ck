@@ -78,6 +78,41 @@ fn default_refresh_watched() -> u64 {
     60
 }
 
+/// Catalog sort orders, cycled with `s`. Saved under their labels.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum Sort {
+    /// The site's order (by last bump).
+    #[default]
+    #[serde(rename = "bump order")]
+    Bump,
+    #[serde(rename = "most replies")]
+    Replies,
+    #[serde(rename = "newest")]
+    Newest,
+    #[serde(rename = "oldest")]
+    Oldest,
+}
+
+impl Sort {
+    pub fn next(self) -> Self {
+        match self {
+            Sort::Bump => Sort::Replies,
+            Sort::Replies => Sort::Newest,
+            Sort::Newest => Sort::Oldest,
+            Sort::Oldest => Sort::Bump,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Sort::Bump => "bump order",
+            Sort::Replies => "most replies",
+            Sort::Newest => "newest",
+            Sort::Oldest => "oldest",
+        }
+    }
+}
+
 /// A reverse image search engine: `{url}` in `url` becomes the file's (encoded) URL.
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 pub struct ImageSearch {
