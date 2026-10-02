@@ -1,0 +1,3 @@
+#![no_main]
+
+libfuzzer_sys::fuzz_target!(|data: &[u8]| ck::fuzzing::data_file(data));

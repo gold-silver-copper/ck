@@ -103,6 +103,10 @@ impl Filters {
         self.0.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
     /// What the filters say about a post on `site`'s `board`.
     pub fn check(&self, site: &str, board: &str, p: &Post) -> Mark {
         let mut mark = Mark::default();

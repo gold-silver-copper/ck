@@ -177,6 +177,10 @@ impl ThreadLayout {
         self.starts.last().copied().unwrap_or(0)
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     /// Line `i`, and the entry it's in.
     pub fn line(&self, i: usize) -> Option<(usize, &Line<'static>)> {
         let e = self.starts.partition_point(|&s| s <= i).checked_sub(1)?;

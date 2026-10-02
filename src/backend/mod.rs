@@ -68,6 +68,36 @@ pub fn to_board(b: &BoardConfig) -> Board {
     }
 }
 
+/// Every engine's parsers on one JSON value, for fuzzing: none may panic, whatever it is.
+#[doc(hidden)]
+pub fn parse_everything(v: &serde_json::Value) -> Vec<Post> {
+    let base = "https://fuzz.invalid";
+    let (vichan, fourchan) = (futaba::Futaba::vichan(base.into(), None, None, None), futaba::Futaba::fourchan(None));
+    let lynx = lynxchan::Lynxchan::new(base.into(), None);
+    let mak = makaba::Makaba::new(base.into(), None, None);
+    let _ = (futaba::parse_boards(v), foolfuuka::parse_archives(v), jschan::parse_boards(v), lynxchan::parse_boards(v));
+    let _ = (lynxchan::parse_overboards(v), makaba::parse_boards(v));
+    let mut posts = Vec::new();
+    for b in [&vichan, &fourchan] {
+        posts.extend(b.parse_catalog("g", v));
+        posts.extend(b.parse_thread("g", v));
+    }
+    posts.extend(foolfuuka::parse_index(v));
+    posts.extend(foolfuuka::parse_thread(v));
+    posts.extend(foolfuuka::parse_search(v).map(|p| p.hits.into_iter().map(|(_, p)| p).collect::<Vec<_>>()).unwrap_or_default());
+    posts.extend(jschan::parse_overboard(base, v));
+    posts.extend(jschan::parse_thread(base, v));
+    posts.extend(lynx.parse_catalog(v));
+    posts.extend(lynx.parse_index(v));
+    posts.extend(lynx.parse_thread(v));
+    posts.extend(mak.parse_catalog(v));
+    posts.extend(mak.parse_thread(v));
+    for p in &posts {
+        let _ = (p.plain_text(), p.search_text());
+    }
+    posts
+}
+
 /// A JSON file from `tests/fixtures`.
 #[cfg(test)]
 pub fn fixture(name: &str) -> serde_json::Value {

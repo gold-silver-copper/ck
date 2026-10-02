@@ -1,0 +1,58 @@
+[package]
+name = "ck-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+ck = { path = ".." }
+
+[[bin]]
+name = "markup"
+path = "fuzz_targets/markup.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "route"
+path = "fuzz_targets/route.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "backend_json"
+path = "fuzz_targets/backend_json.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "config"
+path = "fuzz_targets/config.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "data_file"
+path = "fuzz_targets/data_file.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "image"
+path = "fuzz_targets/image.rs"
+test = false
+doc = false
+bench = false
+
+# Not part of ck's own build.
+[workspace]
+members = ["."]
