@@ -509,13 +509,20 @@ fn wrap_code(line: &Line<'static>, width: usize) -> Vec<Line<'static>> {
     let mut cur_w = 0;
     for span in &line.spans {
         for ch in span.content.chars() {
-            let cw = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
-            if cur_w + cw > width {
+            let mut buf = [0; 4];
+            let ch = &*ch.encode_utf8(&mut buf);
+            // Measured as a string, as it's drawn (a few characters are wider that way).
+            let cw = ch.width();
+            if cur_w > 0 && cur_w + cw > width {
                 out.push(Line::from(std::mem::take(&mut cur)).style(CODE_LINE));
-                cur.push(Span::styled(CONTINUATION, marker));
-                cur_w = 1;
+                // The marker only where the character still fits beside it (not at width 2).
+                cur_w = 0;
+                if cw < width {
+                    cur.push(Span::styled(CONTINUATION, marker));
+                    cur_w = 1;
+                }
             }
-            push_merged(&mut cur, ch.encode_utf8(&mut [0; 4]), span.style);
+            push_merged(&mut cur, ch, span.style);
             cur_w += cw;
         }
     }
@@ -718,6 +725,9 @@ mod tests {
         let w: Vec<_> = wrap(&l, 8).iter().map(text).collect();
         assert_eq!(w, ["    let ", "↪x = 1;"]);
         assert!(wrap(&l, 8).iter().all(|l| l.style == CODE_LINE));
+        // Too narrow for the marker and a wide character: no marker, nothing wider than 2.
+        let w: Vec<_> = wrap(&Line::from("😀😀").style(CODE_LINE), 2).iter().map(text).collect();
+        assert_eq!(w, ["😀", "😀"]);
     }
 
     #[test]

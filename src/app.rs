@@ -313,8 +313,8 @@ impl ThreadView {
 
     /// `e`: show or hide the selected entry's replies under it. Returns what happened.
     fn toggle_expanded(&mut self) -> Result<bool, &'static str> {
-        let e = &self.entries[self.entry()];
-        if self.backlinks[e.post].is_empty() {
+        let Some(e) = self.entries.get(self.entry()) else { return Err("No posts") };
+        if self.backlinks.get(e.post).is_none_or(Vec::is_empty) {
             return Err("No replies to this post");
         }
         if e.depth >= MAX_DEPTH {
@@ -351,8 +351,7 @@ impl ThreadView {
     /// Adjust scroll so the selected entry is visible (its top, if it's taller than the view).
     pub fn scroll_to_selected(&mut self) {
         let e = self.entry();
-        let Some(l) = &self.layout else { return };
-        let (start, end) = (l.starts[e], l.starts[e + 1]);
+        let Some((&start, &end)) = self.layout.as_ref().and_then(|l| l.starts.get(e).zip(l.starts.get(e + 1))) else { return };
         if start < self.scroll {
             self.scroll = start;
         } else if end > self.scroll + self.viewport {
@@ -951,7 +950,13 @@ impl App {
                         if let Some(t) = &self.tab.thread {
                             self.tab.trail.push((self.tab.site, self.tab.board.clone().unwrap_or(board.clone()), t.no, t.current().map_or(t.no, |p| p.no)));
                         }
+                        let in_settings = self.tab.view == View::Settings;
                         self.open_thread_at(board, no, Some(post));
+                        // Found while the settings were open: the thread is behind them.
+                        if in_settings {
+                            self.tab.settings_back = Some(View::Thread);
+                            self.tab.view = View::Settings;
+                        }
                     }
                     Ok(None) => {
                         self.error(format!("Post {post} isn't in this thread, and this site can't say which thread it's in"));
@@ -1177,6 +1182,10 @@ impl App {
 
     fn set_thread(&mut self, posts: Vec<Post>) {
         let Some(board) = self.tab.board.as_ref().map(|b| b.uri.clone()) else { return };
+        if posts.is_empty() {
+            self.error("The site sent the thread without any posts");
+            return;
+        }
         let no = posts.first().map(|p| p.no).unwrap_or(0);
         let key = self.key(&board, no);
         let mut tv = ThreadView::new(board, no, posts);

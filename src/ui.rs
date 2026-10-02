@@ -1027,7 +1027,7 @@ fn draw_thread(f: &mut Frame, app: &mut App, area: Rect) {
 
     // A scrollbar in the right margin.
     let total = l.len();
-    if total > view && area.right() < f.area().right() {
+    if view > 0 && total > view && area.right() < f.area().right() {
         let len = ((view * view) / total).max(1) as u16;
         let pos = (t.scroll * (view - len as usize) / (total - view).max(1)) as u16;
         fill(f, Rect::new(area.right() + 1, area.y + pos, 1, len), th.surface_high);

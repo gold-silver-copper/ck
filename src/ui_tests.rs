@@ -485,6 +485,10 @@ fn narrow_screens() {
     a.open_image_search();
     let (text, _) = render_at(&mut a, 40, 20);
     assert!(text.contains("Search for this image") && !text.contains("imageenter"), "{text}");
+    // A terminal too small for any of it still draws (the thread's scrollbar had no room).
+    for (w, h) in [(1, 1), (3, 2), (20, 3)] {
+        render_at(&mut a, w, h);
+    }
 }
 
 #[test]

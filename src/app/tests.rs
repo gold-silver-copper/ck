@@ -694,6 +694,27 @@ fn tabs_keep_their_own_place_and_responses() {
     app.switch_tab(0);
     assert_eq!((app.tab.site, app.tab.view, app.tab.catalog.len(), app.tab.loading.is_none()), (0, View::Catalog, 1, true));
     assert!(app.tab.thread.is_none());
+    // A thread with no posts at all is an error, and what was shown stays.
+    app.handle(Msg::Catalog(app.tab.req, Ok(vec![])));
+    app.goto_str("a/x/1");
+    app.handle(Msg::Thread(app.tab.req, Ok(vec![Post { no: 1, ..Default::default() }])));
+    app.act(Action::Reload);
+    app.handle(Msg::Thread(app.tab.req, Ok(vec![])));
+    assert!(app.tab.thread.as_ref().is_some_and(|t| t.posts.len() == 1) && app.status.as_ref().is_some_and(|s| s.error));
+    // A post's thread found while the settings are open opens behind them.
+    app.goto_str("a/x/1#77");
+    app.act(Action::Settings);
+    app.handle(Msg::Found(app.tab.req, Board { uri: "x".into(), title: String::new(), nsfw: None }, 77, Ok(Some(3))));
+    assert_eq!((app.tab.view, app.tab.settings_back, app.tab.pending_thread), (View::Settings, Some(View::Thread), 3));
+    // Tab chips don't switch tabs under a settings popup (it isn't the tab's).
+    app.tabs.push(Tab::new(0));
+    app.tab_chips = vec![(Rect::new(0, 0, 5, 1), 1)];
+    app.settings_popup = Some(SettingsPopup::Folder { value: String::new() });
+    app.on_mouse(MouseEvent { kind: MouseEventKind::Down(MouseButton::Left), column: 1, row: 0, modifiers: KeyModifiers::NONE }, Instant::now());
+    assert_eq!((app.active, app.tab.view), (0, View::Settings));
+    app.settings_popup = None;
+    app.tabs.pop();
+    app.tab.view = View::Catalog;
     // A response for a tab that's gone is dropped.
     let stale = app.tabs[1].req;
     app.tabs.truncate(1);

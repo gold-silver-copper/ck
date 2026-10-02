@@ -41,7 +41,12 @@ impl App {
             return;
         }
         let pos = ratatui::layout::Position::new(ev.column, ev.row);
-        if let Some(&(_, i)) = self.tab_chips.iter().find(|(r, _)| r.contains(pos)) {
+        // Popups and inputs that aren't the tab's own stay with it: no switching under them.
+        let app_wide = matches!(
+            self.modal(),
+            Some(Modal::Settings | Modal::Help | Modal::ImageSearch | Modal::Goto | Modal::SearchInput | Modal::Searching | Modal::Filtering)
+        );
+        if let Some(&(_, i)) = self.tab_chips.iter().find(|(r, _)| r.contains(pos)).filter(|_| !app_wide) {
             self.switch_tab(i);
             return;
         }
