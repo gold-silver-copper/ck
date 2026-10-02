@@ -4,6 +4,7 @@ mod foolfuuka;
 pub(crate) mod futaba;
 mod jschan;
 mod lynxchan;
+mod makaba;
 
 use std::sync::Arc;
 
@@ -39,6 +40,7 @@ pub fn build(cfg: &SiteConfig) -> Arc<dyn Backend> {
         SiteKind::Lynxchan => Arc::new(lynxchan::Lynxchan::new(url.unwrap_or_default(), boards)),
         SiteKind::Foolfuuka => Arc::new(foolfuuka::Foolfuuka::new(url.unwrap_or_default(), boards)),
         SiteKind::Jschan => Arc::new(jschan::Jschan::new(url.unwrap_or_default(), boards)),
+        SiteKind::Makaba => Arc::new(makaba::Makaba::new(url.unwrap_or_default(), cfg.media_url.clone(), boards)),
     }
 }
 

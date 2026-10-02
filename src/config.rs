@@ -63,6 +63,9 @@ pub struct SiteConfig {
     /// Name of another configured site (a FoolFuuka archive) to offer when a thread 404s.
     #[serde(default)]
     pub archive: Option<String>,
+    /// Base URL for files, when the site serves them from another host (makaba only).
+    #[serde(default)]
+    pub media_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
@@ -76,6 +79,8 @@ pub enum SiteKind {
     /// FoolFuuka 4chan archives (desuarchive, ...).
     Foolfuuka,
     Jschan,
+    /// 2ch.hk's engine.
+    Makaba,
 }
 
 #[derive(Debug, Clone, Deserialize)]

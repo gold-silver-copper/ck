@@ -8,6 +8,7 @@
 #                      fetched automatically unless `boards` is given.
 #   kind = "foolfuuka" FoolFuuka 4chan archives (desuarchive, b4k, ...).
 #   kind = "jschan"    jschan engines (zzzchan, ...).
+#   kind = "makaba"    2ch.hk. Files come from `media_url` when the site redirects them.
 #
 # `archive` names another site (a FoolFuuka archive) to offer when a thread 404s.
 #
@@ -103,6 +104,12 @@ url = "https://desuarchive.org"
 name = "zzzchan"
 kind = "jschan"
 url = "https://zzzchan.xyz"
+
+[[site]]
+name = "2ch"
+kind = "makaba"
+url = "https://2ch.hk"
+media_url = "https://2ch.su"
 
 [[site]]
 name = "smuglo.li"

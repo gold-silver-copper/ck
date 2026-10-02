@@ -9,6 +9,7 @@ A terminal imageboard browser built with [ratatui](https://ratatui.rs). One inte
 | `lynxchan` | LynxChan                                 | endchan, kohlchan, alogs         |
 | `foolfuuka`| FoolFuuka 4chan archives                 | desuarchive, palanq, b4k         |
 | `jschan`   | jschan                                   | zzzchan, trashchan, ptchan, erischan, junkuchan, nukechan |
+| `makaba`   | 2ch.hk's engine                          | 2ch                              |
 
 All of the examples are in the default config, so they show up without any setup.
 

@@ -49,6 +49,8 @@ pub enum Flavor {
     Lynxchan,
     /// jschan: raw newlines are line breaks, and `<small>(OP)</small>` annotations are dropped.
     Jschan,
+    /// 2ch.hk's makaba: quote links carry their own " (OP)", which is dropped.
+    Makaba,
 }
 
 /// An open tag while parsing.
@@ -82,6 +84,10 @@ pub fn parse_html(html: &str, flavor: Flavor) -> Parsed {
                     if i > 0 {
                         b.newline();
                     }
+                    let part = match (flavor, href) {
+                        (Flavor::Makaba, Some(_)) => part.strip_suffix(" (OP)").unwrap_or(part),
+                        _ => part,
+                    };
                     b.text(part, style, href);
                 }
             }
@@ -126,14 +132,14 @@ pub fn parse_html(html: &str, flavor: Flavor) -> Parsed {
                     "code" => base.patch(code()),
                     "span" | "div" | "p" => match class.as_str() {
                         c if c.contains("spoiler") => base.patch(SPOILER),
-                        c if c.contains("quote") || c.contains("greentext") => base.patch(greentext()),
+                        c if c.contains("quote") || c.contains("greentext") || c == "unkfunc" => base.patch(greentext()),
                         c if c.contains("heading") || c.contains("redtext") || c == "title" => base.patch(heading()),
                         c if c.contains("pinktext") || c.contains("orangetext") => base.patch(PINKTEXT),
                         // jschan's inline formatting.
                         "bold" => base.add_modifier(Modifier::BOLD),
                         "em" => base.add_modifier(Modifier::ITALIC),
-                        "underline" => base.add_modifier(Modifier::UNDERLINED),
-                        "strike" => base.add_modifier(Modifier::CROSSED_OUT),
+                        "underline" | "u" => base.add_modifier(Modifier::UNDERLINED),
+                        "strike" | "s" => base.add_modifier(Modifier::CROSSED_OUT),
                         "mono" => base.patch(code()),
                         _ => base,
                     },

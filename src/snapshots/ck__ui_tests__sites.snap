@@ -15,6 +15,7 @@ expression: snapshot(&mut a)
 │  kohlchan        lynxchan  https://kohlchan.net                                                  │
 │  desuarchive     foolfuuka https://desuarchive.org                                               │
 │  zzzchan         jschan    https://zzzchan.xyz                                                   │
+│  2ch             makaba    https://2ch.hk                                                        │
 │  smuglo.li       vichan    https://smuglo.li                                                     │
 │  kissu           vichan    https://kissu.moe                                                     │
 │  tvch            vichan    https://tvch.moe                                                      │
@@ -27,7 +28,6 @@ expression: snapshot(&mut a)
 │  nukechan        jschan    https://nukechan.net                                                  │
 │  palanq          foolfuuka https://archive.palanq.win                                            │
 │  b4k             foolfuuka https://arch.b4k.dev                                                  │
-│                                                                                                  │
 │                                                                                                  │
 │                                                                                                  │
 │                                                                                                  │

@@ -15,19 +15,19 @@ expression: snapshot(&mut a)
 │  kohlchan        lynx│  o                   open in browser               │                      │
 │  desuarchive     fool│  q, ctrl-c           quit                          │                      │
 │  zzzchan         jsch│  mouse               wheel scroll, click, dbl-click│                      │
-│  smuglo.li       vich│                                                    │                      │
-│  kissu           vich│Catalog                                             │                      │
-│  tvch            vich│  v                   view the OP's images          │                      │
-│  sushigirl       vich│  w                   watch / unwatch the thread    │                      │
-│  alogs           lynx│  s                   cycle sort order              │                      │
-│  trashchan       jsch│  c                   compact layout on / off       │                      │
-│  ptchan          jsch│                                                    │                      │
-│  erischan        jsch│Thread                                              │                      │
-│  junkuchan       jsch│  j / k               next / previous post          │                      │
-│  nukechan        jsch│  J / K, space        scroll by line / page         │                      │
-│  palanq          fool│  enter, l            follow quote (any thread)     │                      │
-│  b4k             fool│  p                   preview the quoted posts      │                      │
-│                      │  b                   jump to first reply           │                      │
+│  2ch             maka│                                                    │                      │
+│  smuglo.li       vich│Catalog                                             │                      │
+│  kissu           vich│  v                   view the OP's images          │                      │
+│  tvch            vich│  w                   watch / unwatch the thread    │                      │
+│  sushigirl       vich│  s                   cycle sort order              │                      │
+│  alogs           lynx│  c                   compact layout on / off       │                      │
+│  trashchan       jsch│                                                    │                      │
+│  ptchan          jsch│Thread                                              │                      │
+│  erischan        jsch│  j / k               next / previous post          │                      │
+│  junkuchan       jsch│  J / K, space        scroll by line / page         │                      │
+│  nukechan        jsch│  enter, l            follow quote (any thread)     │                      │
+│  palanq          fool│  p                   preview the quoted posts      │                      │
+│  b4k             fool│  b                   jump to first reply           │                      │
 │                      │  u                   back (also to last thread)    │                      │
 │                      │  /                   search the thread             │                      │
 │                      │  n / N               next / previous match         │                      │
