@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use html_escape::{encode_double_quoted_attribute as attr, encode_text as text};
 use ratatui::style::{Color, Modifier, Style};
 use serde_json::json;
@@ -10,6 +10,7 @@ use serde_json::json;
 use crate::download;
 use crate::markup;
 use crate::model::Post;
+use crate::store::write_atomic;
 use crate::theme::{Theme, mark};
 
 /// Where and what a thread is, for the saved copies.
@@ -23,15 +24,8 @@ pub struct About<'a> {
 
 /// Write thread.html and thread.json into `dir` (replacing earlier copies).
 pub fn save(posts: &[Post], about: &About, theme: &Theme, dir: &Path) -> Result<()> {
-    std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
-    write(&dir.join("thread.html"), html(posts, about, theme, dir).as_bytes())?;
-    write(&dir.join("thread.json"), &serde_json::to_vec_pretty(&data(posts, about, dir))?)
-}
-
-fn write(path: &Path, bytes: &[u8]) -> Result<()> {
-    let tmp = path.with_extension("tmp");
-    std::fs::write(&tmp, bytes).with_context(|| format!("writing {}", tmp.display()))?;
-    std::fs::rename(&tmp, path).with_context(|| format!("writing {}", path.display()))
+    write_atomic(&dir.join("thread.html"), html(posts, about, theme, dir).as_bytes())?;
+    write_atomic(&dir.join("thread.json"), &serde_json::to_vec_pretty(&data(posts, about, dir))?)
 }
 
 /// Each file of a post with the name it has (or would have) after `d`/`D`, and whether
@@ -299,6 +293,6 @@ mod tests {
         assert_eq!(v["posts"][1]["quotes"], json!([1]));
         assert_eq!(v["posts"][0]["files"][0]["saved_as"], "1_cat.png");
         assert_eq!(v["posts"][0]["text"], "Hello world & secret\n>green");
-        assert!(!dir.path().join("thread.tmp").exists());
+        assert!(!dir.path().join("thread.html.tmp").exists());
     }
 }

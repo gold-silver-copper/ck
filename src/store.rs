@@ -192,7 +192,6 @@ impl Store {
     /// Write the files whose content changed.
     pub fn save(&self) -> Result<()> {
         let Some(dir) = &self.dir else { return Ok(()) };
-        std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
         for (name, bytes) in self.files()? {
             let h = hash(&bytes);
             if self.written.borrow().get(name) != Some(&h) {
@@ -216,9 +215,6 @@ impl Store {
 
     pub fn save_boards(&self, site: &str, boards: &[Board], now: i64) -> Result<()> {
         let Some(path) = self.boards_path(site) else { return Ok(()) };
-        if let Some(dir) = path.parent() {
-            std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
-        }
         let saved = SavedBoards { fetched: now, boards: boards.to_vec() };
         write_atomic(&path, &serde_json::to_vec(&saved)?)
     }
@@ -267,7 +263,6 @@ impl Store {
 
     pub fn save_session(&self, session: &Session) -> Result<()> {
         let Some(dir) = &self.dir else { return Ok(()) };
-        std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
         write_atomic(&dir.join("session.json"), &serde_json::to_vec_pretty(session)?)
     }
 
@@ -376,10 +371,16 @@ fn hash(bytes: &[u8]) -> u64 {
     h.finish()
 }
 
-fn write_atomic(path: &Path, data: &[u8]) -> Result<()> {
-    let tmp = path.with_extension("json.tmp");
-    std::fs::write(&tmp, data).with_context(|| format!("writing {}", tmp.display()))?;
-    std::fs::rename(&tmp, path).with_context(|| format!("renaming {} to {}", tmp.display(), path.display()))
+/// Write a file whole or not at all: to `<path>.tmp`, then renamed into place (its folder
+/// is created if needed).
+pub fn write_atomic(path: &Path, data: &[u8]) -> Result<()> {
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
+    }
+    let mut tmp = path.as_os_str().to_owned();
+    tmp.push(".tmp");
+    std::fs::write(&tmp, data).with_context(|| format!("writing {}", path.display()))?;
+    std::fs::rename(&tmp, path).with_context(|| format!("writing {}", path.display()))
 }
 
 #[cfg(test)]

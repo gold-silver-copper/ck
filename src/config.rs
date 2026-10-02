@@ -238,12 +238,7 @@ pub fn edit_at(path: &Path, f: impl FnOnce(&mut DocumentMut)) -> Result<()> {
     // Don't write something ck itself couldn't read back.
     let out = doc.to_string();
     toml::from_str::<Config>(&out).with_context(|| format!("the edited {} wouldn't load", path.display()))?;
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
-    }
-    let tmp = path.with_extension("toml.tmp");
-    std::fs::write(&tmp, out).with_context(|| format!("writing {}", tmp.display()))?;
-    std::fs::rename(&tmp, path).with_context(|| format!("writing {}", path.display()))
+    crate::store::write_atomic(path, out.as_bytes())
 }
 
 /// Make `theme = name` the active theme. A ck 0.2 `[theme]` table is kept as

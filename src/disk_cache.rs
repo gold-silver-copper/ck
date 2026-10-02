@@ -3,7 +3,6 @@
 
 use crate::http::lock;
 use std::fs;
-use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::SystemTime;
@@ -58,12 +57,8 @@ impl DiskCache {
     }
 
     /// Store bytes (through a temp file renamed into place), then trim to the budget.
-    pub fn put(&self, url: &str, bytes: &[u8]) -> io::Result<()> {
-        fs::create_dir_all(&self.dir)?;
-        let path = self.path(url);
-        let tmp = path.with_extension("tmp");
-        fs::write(&tmp, bytes)?;
-        fs::rename(&tmp, &path)?;
+    pub fn put(&self, url: &str, bytes: &[u8]) -> anyhow::Result<()> {
+        crate::store::write_atomic(&self.path(url), bytes)?;
         let mut used = lock(&self.used);
         let total = match *used {
             Some(n) => n + bytes.len() as u64,
