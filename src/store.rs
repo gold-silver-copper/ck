@@ -64,6 +64,15 @@ pub struct SeenThread {
     pub replies: Option<u32>,
 }
 
+/// A board's own catalog sort and layout (set with `s` and `c` there).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BoardPrefs {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sort: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layout: Option<crate::config::CatalogLayout>,
+}
+
 /// Threads gone from the catalog this long are forgotten.
 const SEEN_FOR: i64 = 7 * 24 * 3600;
 
@@ -112,6 +121,8 @@ pub struct Store {
     pub settings: Settings,
     /// Thread and post numbers hidden by hand, by `site/board`, oldest first.
     pub hidden: std::collections::BTreeMap<String, Vec<u64>>,
+    /// Per-board catalog sort and layout, by `site/board`.
+    pub board_prefs: std::collections::BTreeMap<String, BoardPrefs>,
     /// Boards whose catalogs were opened, `site/board`, most recent first.
     pub recent_boards: Vec<String>,
     /// Catalog threads seen, by `site/board`.
@@ -148,6 +159,7 @@ impl Store {
             store.hidden = load_file(&dir.join("hidden.json"), &mut warnings);
             store.seen = load_file(&dir.join("seen.json"), &mut warnings);
             store.recent_boards = load_file(&dir.join("recent_boards.json"), &mut warnings);
+            store.board_prefs = load_file(&dir.join("board_prefs.json"), &mut warnings);
         }
         (store, warnings)
     }
@@ -162,6 +174,9 @@ impl Store {
         }
         if !self.recent_boards.is_empty() || dir.join("recent_boards.json").exists() {
             write_atomic(&dir.join("recent_boards.json"), &serde_json::to_vec_pretty(&self.recent_boards)?)?;
+        }
+        if !self.board_prefs.is_empty() || dir.join("board_prefs.json").exists() {
+            write_atomic(&dir.join("board_prefs.json"), &serde_json::to_vec_pretty(&self.board_prefs)?)?;
         }
         if self.seen_dirty.replace(false) {
             write_atomic(&dir.join("seen.json"), &serde_json::to_vec(&self.seen)?)?;

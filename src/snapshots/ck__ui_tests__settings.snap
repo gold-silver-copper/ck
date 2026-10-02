@@ -10,7 +10,7 @@ expression: snapshot(&mut a)
     Color depth       auto (24-bit)                     24-bit color, or the nearest of 256
 
   Catalog
-    Layout            cards                             Cards, compact (a line each) or grid (c)
+    Default layout    cards                             c in a catalog sets a board's own
     Images            on                                Thumbnails and the image viewer (after a…
     Filters           0 filters, 0 hidden by hand       [[filter]] in the config; H hides by han…
 

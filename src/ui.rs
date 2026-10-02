@@ -655,12 +655,13 @@ fn draw_catalog(f: &mut Frame, app: &mut App, area: Rect) {
     let t = theme();
     let images = app.images.enabled() && area.width >= MIN_THUMB_WIDTH;
     // The grid needs thumbnails; without them it's cards.
-    if app.layout == CatalogLayout::Grid && images {
+    let layout = app.layout();
+    if layout == CatalogLayout::Grid && images {
         draw_grid(f, app, area);
         return;
     }
     app.grid_cols = 0;
-    let compact = app.layout == CatalogLayout::Compact;
+    let compact = layout == CatalogLayout::Compact;
     let thumbs = images && !compact;
     let width = area.width.saturating_sub(PAD + 2) as usize;
     let visible = app.visible_catalog();

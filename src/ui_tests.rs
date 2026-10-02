@@ -208,7 +208,7 @@ fn catalog_with_thumbnail_placeholders() {
 fn catalog_compact() {
     let mut a = app(true);
     a.view = View::Catalog;
-    a.layout = crate::config::CatalogLayout::Compact;
+    a.default_layout = crate::config::CatalogLayout::Compact;
     a.catalog = catalog();
     a.catalog_list.state.select(Some(0));
     insta::assert_snapshot!(snapshot(&mut a));
@@ -416,7 +416,7 @@ fn replies_inline() {
 fn catalog_grid() {
     let mut a = app(true);
     a.view = View::Catalog;
-    a.layout = crate::config::CatalogLayout::Grid;
+    a.default_layout = crate::config::CatalogLayout::Grid;
     a.catalog = catalog();
     a.catalog_list.state.select(Some(1));
     insta::assert_snapshot!(snapshot(&mut a));
@@ -425,7 +425,7 @@ fn catalog_grid() {
     // Without images, the grid is drawn as cards.
     let mut b = app(false);
     b.view = View::Catalog;
-    b.layout = crate::config::CatalogLayout::Grid;
+    b.default_layout = crate::config::CatalogLayout::Grid;
     b.catalog = catalog();
     let text = snapshot(&mut b);
     assert!(text.contains("312 replies") && b.grid_cols == 0, "{text}");

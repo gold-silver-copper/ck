@@ -54,7 +54,8 @@ hidden_sites = []
 restore_session = true
 
 # Catalog layout: "cards" (a card per thread with a thumbnail), "compact" (a line per
-# thread) or "grid" (thumbnails in columns). `c` cycles it and saves it here.
+# thread) or "grid" (thumbnails in columns). This is the default; `c` in a catalog sets
+# that board's own (and `s` its sort), kept in the data directory.
 catalog_layout = "cards"
 
 # Where `d` / `D` save files. {site}, {board} and {thread} are filled in, and {downloads}

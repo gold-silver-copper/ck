@@ -529,7 +529,8 @@ pub struct App {
     pub board_list: Picker,
     pub catalog_list: Picker,
     pub catalog_sort: Sort,
-    pub layout: CatalogLayout,
+    /// The catalog layout for boards without their own (`catalog_layout` in the config).
+    pub default_layout: CatalogLayout,
     /// Columns of the catalog grid as last drawn (0: not a grid).
     pub grid_cols: usize,
     pub settings: settings::Settings,
@@ -693,7 +694,7 @@ impl App {
             catalog_list: Picker::default(),
             catalog_sort: Sort::default(),
             grid_cols: 0,
-            layout: store.settings.catalog_layout.unwrap_or(match store.settings.compact_catalog {
+            default_layout: store.settings.catalog_layout.unwrap_or(match store.settings.compact_catalog {
                 Some(true) => CatalogLayout::Compact,
                 Some(false) => CatalogLayout::Cards,
                 None => layout,
@@ -1204,6 +1205,7 @@ impl App {
         let Some(board) = self.board.clone() else { return };
         self.catalog_board = board.uri.clone();
         self.catalog_of = Some(board.clone());
+        self.apply_board_sort();
         let job = move |b: &dyn Backend, id, tx: &Sender<Msg>| {
             b.catalog(&board.uri, &|so_far| {
                 let _ = tx.send(Msg::CatalogPartial(id, so_far.to_vec()));
@@ -1562,11 +1564,41 @@ impl App {
         }
     }
 
-    /// Cycle the catalog layout (cards, compact, grid) and remember it: in config.toml
-    /// (keeping its comments), or in the data directory if the config can't be edited.
+    /// The open catalog's board, as `site/board` (for its own sort and layout).
+    fn board_key(&self) -> String {
+        let board = Some(self.catalog_board.clone()).filter(|b| !b.is_empty()).or_else(|| self.board.as_ref().map(|b| b.uri.clone()));
+        format!("{}/{}", self.current_site().cfg.name, board.unwrap_or_default())
+    }
+
+    /// The catalog layout here: the board's own, or the default.
+    pub fn layout(&self) -> CatalogLayout {
+        self.store.board_prefs.get(&self.board_key()).and_then(|p| p.layout).unwrap_or(self.default_layout)
+    }
+
+    /// `c` in a catalog: cycle this board's layout (cards, compact, grid), remembered for it.
     fn cycle_layout(&mut self) {
-        self.layout = self.layout.next();
-        let name = self.layout.as_str();
+        let layout = self.layout().next();
+        let key = self.board_key();
+        self.store.board_prefs.entry(key).or_default().layout = Some(layout);
+        self.save();
+        let board = self.board.as_ref().map_or(String::new(), |b| format!(" for /{}/", b.uri));
+        self.status = Some((format!("Layout{board}: {} (the default is in Settings)", layout.as_str()), false));
+    }
+
+    /// The board's own sort, when its catalog opens.
+    fn apply_board_sort(&mut self) {
+        let sort = self.store.board_prefs.get(&self.board_key()).and_then(|p| p.sort.clone());
+        self.catalog_sort = [Sort::Bump, Sort::Replies, Sort::Newest, Sort::Oldest]
+            .into_iter()
+            .find(|s| Some(s.label()) == sort.as_deref())
+            .unwrap_or_default();
+    }
+
+    /// The default catalog layout (Settings): saved in config.toml (keeping its comments), or
+    /// in the data directory if the config can't be edited.
+    pub fn cycle_default_layout(&mut self) {
+        self.default_layout = self.default_layout.next();
+        let name = self.default_layout.as_str();
         match self.edit_config(|d| {
             d["catalog_layout"] = toml_edit::value(name);
             d.remove("compact_catalog");
@@ -1574,14 +1606,13 @@ impl App {
             Ok(path) => {
                 self.store.settings.compact_catalog = None;
                 self.store.settings.catalog_layout = None;
-                self.status = Some((format!("Catalog layout: {name} (saved in {path})"), false));
+                self.status = Some((format!("Default catalog layout: {name} (saved in {path})"), false));
             }
-            // The config can't be edited: keep the choice in the data directory instead.
             Err(e) => {
                 self.store.settings.compact_catalog = None;
-                self.store.settings.catalog_layout = Some(self.layout);
+                self.store.settings.catalog_layout = Some(self.default_layout);
                 self.save();
-                self.status = Some((format!("Catalog layout: {name} (kept in the data directory: {e:#})"), false));
+                self.status = Some((format!("Default catalog layout: {name} (kept in the data directory: {e:#})"), false));
             }
         }
     }
@@ -1956,6 +1987,10 @@ impl App {
             Action::Sort => {
                 self.catalog_sort = self.catalog_sort.next();
                 self.catalog_list.state.select(Some(0));
+                // Remembered for this board.
+                let key = self.board_key();
+                self.store.board_prefs.entry(key).or_default().sort = (self.catalog_sort != Sort::Bump).then(|| self.catalog_sort.label().to_string());
+                self.save();
                 self.status = Some((format!("Sorted by {}", self.catalog_sort.label()), false));
             }
             Action::Compact => self.cycle_layout(),
@@ -3118,7 +3153,7 @@ mod tests {
         let mut app = test_app();
         app.catalog = (1..=7).map(|no| Post { no, ..Default::default() }).collect();
         app.view = View::Catalog;
-        app.layout = CatalogLayout::Grid;
+        app.default_layout = CatalogLayout::Grid;
         app.grid_cols = 3;
         app.catalog_list.state.select(Some(0));
         let press = |app: &mut App, c| app.on_key(KeyEvent::from(KeyCode::Char(c)));
@@ -3143,9 +3178,9 @@ mod tests {
         app.hit = Some(Hit::Grid { area: Rect::new(2, 2, 66, 24), offset: 0, cols: 3, cell: (22, 12) });
         app.on_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 2 + 22 + 5, 2 + 12 + 3), Instant::now());
         assert_eq!(at(&app), 4);
-        // c cycles the layout (the config can't be saved here; it's kept for the session).
+        // c cycles this board's layout.
         app.act(Action::Compact);
-        assert_eq!(app.layout, CatalogLayout::Cards);
+        assert_eq!(app.layout(), CatalogLayout::Cards);
     }
 
     #[test]
@@ -3292,13 +3327,13 @@ mod tests {
         next.handle(Msg::Catalog(next.req, Ok(vec![])));
         next.catalog = (1..4).map(|no| Post { no, ..Default::default() }).collect();
         next.catalog_list.state.select(Some(2));
+        // (The board has no sort of its own, so its catalog is in bump order: index 2 is thread 3.)
         let place = next.place();
-        assert_eq!((place.view.as_str(), place.selected), ("catalog", Some(1)));
-        // Newest first: index 2 is thread 1.
+        assert_eq!((place.view.as_str(), place.selected), ("catalog", Some(3)));
         let mut third = local_app();
         third.go_to_place(&place);
         third.handle(Msg::Catalog(third.req, Ok((1..4).map(|no| Post { no, time: no as i64, ..Default::default() }).collect())));
-        assert_eq!(third.selected_index().map(|i| third.catalog[i].no), Some(1));
+        assert_eq!(third.selected_index().map(|i| third.catalog[i].no), Some(3));
     }
 
     #[test]
@@ -3449,6 +3484,26 @@ mod tests {
         app.act(Action::Remove);
         assert_eq!(sites(&app), [SiteRow::Site(0), SiteRow::Site(1)]);
         assert!(app.hidden_sites.is_empty());
+    }
+
+    #[test]
+    fn boards_remember_their_sort_and_layout() {
+        let mut app = local_app();
+        app.goto_str("a/x");
+        app.act(Action::Sort);
+        app.act(Action::Compact);
+        assert_eq!((app.catalog_sort, app.layout()), (Sort::Replies, CatalogLayout::Compact));
+        // Another board: the defaults.
+        app.goto_str("a/xy");
+        assert_eq!((app.catalog_sort, app.layout()), (Sort::Bump, CatalogLayout::Cards));
+        // Back on the first: its own again (also after a restart, from the data directory).
+        app.goto_str("a/x");
+        assert_eq!((app.catalog_sort, app.layout()), (Sort::Replies, CatalogLayout::Compact));
+        assert_eq!(app.store.board_prefs["a/x"], crate::store::BoardPrefs { sort: Some("most replies".into()), layout: Some(CatalogLayout::Compact) });
+        // The default (Settings) applies to boards without their own.
+        app.default_layout = CatalogLayout::Grid;
+        app.goto_str("a/xy");
+        assert_eq!(app.layout(), CatalogLayout::Grid);
     }
 
     #[test]

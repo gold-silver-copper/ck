@@ -68,7 +68,7 @@ impl Item {
             Item::Theme => "Theme",
             Item::Colors => "Colors",
             Item::ColorDepth => "Color depth",
-            Item::Compact => "Layout",
+            Item::Compact => "Default layout",
             Item::Images => "Images",
             Item::Filters => "Filters",
             Item::RefreshThread => "Open thread",
@@ -85,7 +85,7 @@ impl Item {
             Item::Theme => "Live preview while choosing",
             Item::Colors => "Change any color of the current theme",
             Item::ColorDepth => "24-bit color, or the nearest of 256",
-            Item::Compact => "Cards, compact (a line each) or grid (c)",
+            Item::Compact => "c in a catalog sets a board's own",
             Item::Images => "Thumbnails and the image viewer (after a restart)",
             Item::Filters => "[[filter]] in the config; H hides by hand, Z shows hidden",
             Item::RefreshThread => "How often the open thread updates",
@@ -167,7 +167,7 @@ impl App {
                 ColorMode::Auto => format!("auto ({})", if self.truecolor { "24-bit" } else { "256" }),
                 m => m.as_str().into(),
             },
-            Item::Compact => self.layout.as_str().into(),
+            Item::Compact => self.default_layout.as_str().into(),
             Item::Images => match self.images_mode {
                 ImagesMode::Auto => "on".into(),
                 ImagesMode::Off => "off".into(),
@@ -226,7 +226,7 @@ impl App {
                 let mode = self.color_mode.as_str();
                 self.save_config(&format!("color depth {mode}"), |d| d["color"] = toml_edit::value(mode));
             }
-            Item::Compact => self.cycle_layout(),
+            Item::Compact => self.cycle_default_layout(),
             Item::Images => {
                 self.images_mode = match self.images_mode {
                     ImagesMode::Auto => ImagesMode::Off,

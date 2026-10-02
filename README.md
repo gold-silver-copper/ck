@@ -109,8 +109,8 @@ the action name is in brackets. The `?` help lists the same, with your keys.
 |------|--------|
 | `v`  | image viewer for the OP's files [`view`] |
 | `w` / `T` | watch / unwatch the thread; open it in a new tab [`watch`, `new_tab`] |
-| `s`  | cycle the sort: bump order, most replies, newest, oldest [`sort`] |
-| `c`  | cycle the layout: cards, compact (a line per thread), grid (thumbnails in columns) [`compact`] |
+| `s`  | cycle the sort: bump order, most replies, newest, oldest (remembered per board) [`sort`] |
+| `c`  | cycle the layout: cards, compact (a line per thread), grid (thumbnails in columns), remembered per board [`compact`] |
 | `O`  | the OP's links and files [`links`] |
 | `H` / `Z` | hide / unhide the thread; show hidden threads, dimmed [`hide`, `show_hidden`] |
 | `f`  | search the board's archive [`archive_search`] |
@@ -273,7 +273,8 @@ yours (and watches the thread). Replies to it are counted in Watched ("1 reply t
 quotes of it read `>>123 (You)`, and they get their own notification.
 
 ck keeps its state as JSON in `$XDG_DATA_HOME/ck` (default `~/.local/share/ck`):
-`watched.json` and `history.json`, `recent_boards.json`, `hidden.json` (what you hid with `H`), `seen.json`
+`watched.json` and `history.json`, `recent_boards.json`, `board_prefs.json` (each board's
+sort and layout), `hidden.json` (what you hid with `H`), `seen.json`
 (catalog threads seen, for "new" and `+N`), and `session.json` (your tabs, for the next
 start). Board lists fetched from sites are saved there too (`boards/`), so a site's boards
 show up instantly next time; they're refreshed quietly in the background once a day, and
@@ -385,8 +386,9 @@ All settings are optional; see `config.example.toml` for every option with comme
 
 - `images = "auto" | "off"`
 - `refresh_thread_secs`, `refresh_watched_secs`
-- `catalog_layout = "cards" | "compact" | "grid"` (also cycled with `c`, which saves it
-  here, comments intact). In the grid, `h`/`l` move between columns (`h` in the first
+- `catalog_layout = "cards" | "compact" | "grid"`: the default layout (also in Settings).
+  `c` in a catalog and `s` set that board's own layout and sort, which are remembered in
+  the data directory (`board_prefs.json`). In the grid, `h`/`l` move between columns (`h` in the first
   column goes back) and `j`/`k` between rows; without images it's shown as cards.
 - `download_dir = "~/stuff/{site}/{board}/{thread}"`
 - `restore_session = false` to start at the site list instead of where you left off (the
