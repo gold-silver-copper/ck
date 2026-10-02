@@ -254,20 +254,23 @@ impl App {
         (0..self.tabs.len()).map(|i| self.in_tab(i, |app| app.place())).collect()
     }
 
-    /// What a tab shows, in a few words.
-    pub fn tab_label(&mut self, i: usize) -> String {
-        self.in_tab(i, |app| match app.view {
-            View::Thread => match &app.thread {
-                Some(t) => thread_subject(&t.posts),
-                None => format!("/{}/{}", app.board.as_ref().map_or("", |b| b.uri.as_str()), app.pending_thread),
+    /// What a tab shows, in a few words (read from the stored tab: no swapping per frame).
+    pub fn tab_label(&self, i: usize) -> String {
+        let t = self.tabs.get(i).filter(|_| i != self.active);
+        let view = t.map_or(self.view, |t| t.view);
+        let board = t.map_or(self.board.as_ref(), |t| t.board.as_ref()).map_or("", |b| b.uri.as_str());
+        match view {
+            View::Thread => match t.map_or(self.thread.as_ref(), |t| t.thread.as_ref()) {
+                Some(th) => thread_subject(&th.posts),
+                None => format!("/{board}/{}", t.map_or(self.pending_thread, |t| t.pending_thread)),
             },
-            View::Catalog => format!("/{}/", app.board.as_ref().map_or("", |b| b.uri.as_str())),
-            View::Boards => app.current_site().cfg.name.clone(),
-            View::Search => app.search.as_ref().map_or("Search".into(), |s| format!("Search: {}", s.query)),
+            View::Catalog => format!("/{board}/"),
+            View::Boards => self.sites.get(t.map_or(self.site, |t| t.site)).map_or(String::new(), |s| s.cfg.name.clone()),
+            View::Search => t.map_or(self.search.as_ref(), |t| t.search.as_ref()).map_or("Search".into(), |s| format!("Search: {}", s.query)),
             View::Sites => "Sites".into(),
             View::Watched => "Watched".into(),
             View::History => "History".into(),
             View::Settings => "Settings".into(),
-        })
+        }
     }
 }
