@@ -825,7 +825,7 @@ impl App {
             rx,
         };
         app.site_list.state.select(Some(0));
-        app.refresh_home_titles();
+        app.load_home_titles();
         app.watched_list.state.select(Some(0));
         app.history_list.state.select(Some(0));
         app.settings_list.state.select(Some(0));
@@ -1219,7 +1219,7 @@ impl App {
             self.board_list.clamp(len);
         }
         if complete {
-            self.refresh_home_titles();
+            self.note_titles(site);
         }
     }
 
@@ -1361,6 +1361,7 @@ impl App {
         let board = self.catalog_board.clone();
         self.catalog_new = self.store.catalog_seen(&site, &board, &nos, self.clock.now());
         self.store.board_opened(&site, &board);
+        self.note_titles(self.site);
         self.save();
     }
 

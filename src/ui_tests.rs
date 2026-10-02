@@ -532,6 +532,8 @@ fn home_with_favorites() {
     a.home_titles.insert("4chan/g".into(), "Technology".into());
     a.home_titles.insert("4chan/a".into(), "Anime & Manga".into());
     a.store.recent_boards = vec!["4chan/g".into(), "4chan/a".into()];
+    // As at a start with these favorites and recent boards.
+    a.load_home_titles();
     for name in ["wizchan", "uboachan", "endchan", "kohlchan", "zzzchan", "2ch", "smuglo.li", "kissu", "tvch", "sushigirl"] {
         a.hidden_sites.insert(name.into());
     }

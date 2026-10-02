@@ -1,7 +1,5 @@
 //! The home screen (the Sites view): favorite boards at the top, opened with 1-9.
 
-use std::collections::HashMap;
-
 use super::{App, SiteRow, View};
 use crate::route::Target;
 
@@ -28,24 +26,27 @@ impl BoardRef {
 const RECENT_SHOWN: usize = 5;
 
 impl App {
-    /// Board titles for the home screen's rows, from loaded, configured or saved board lists.
-    pub fn refresh_home_titles(&mut self) {
-        let mut titles = HashMap::new();
-        for s in &self.sites {
-            let saved;
-            let boards = match (&s.boards, &s.cfg.boards) {
-                (Some(b), _) => b.clone(),
-                (None, Some(cfg)) => cfg.iter().map(crate::backend::to_board).collect(),
-                (None, None) => {
-                    saved = self.store.load_boards(&s.cfg.name).map(|(b, _)| b).unwrap_or_default();
-                    saved
-                }
-            };
-            for b in boards {
-                titles.insert(format!("{}/{}", s.cfg.name, b.uri), b.title);
+    /// Remember a site's board titles for the home screen, from its loaded, configured or
+    /// saved board list.
+    pub fn note_titles(&mut self, site: usize) {
+        let Some(s) = self.sites.get(site) else { return };
+        let boards = match (&s.boards, &s.cfg.boards) {
+            (Some(b), _) => b.clone(),
+            (None, Some(cfg)) => cfg.iter().map(crate::backend::to_board).collect(),
+            (None, None) => self.store.load_boards(&s.cfg.name).map(|(b, _)| b).unwrap_or_default(),
+        };
+        let name = s.cfg.name.clone();
+        self.home_titles.extend(boards.into_iter().map(|b| (format!("{name}/{}", b.uri), b.title)));
+    }
+
+    /// At the start: titles for the sites the favorites and recent boards are on.
+    pub fn load_home_titles(&mut self) {
+        let named: Vec<String> = self.favorites.iter().map(|f| f.site.clone()).chain(self.store.recent_boards.iter().filter_map(|r| BoardRef::parse(r).map(|b| b.site))).collect();
+        for i in 0..self.sites.len() {
+            if named.contains(&self.sites[i].cfg.name) {
+                self.note_titles(i);
             }
         }
-        self.home_titles = titles;
     }
 
     pub fn board_title(&self, b: &BoardRef) -> &str {
@@ -95,6 +96,7 @@ impl App {
     /// `*`: add the board to the favorites, or take it off. They're kept in the config.
     pub fn toggle_favorite(&mut self) {
         let Some(b) = self.current_board_ref() else { return };
+        self.note_titles(self.site);
         let added = match self.favorites.iter().position(|f| *f == b) {
             Some(i) => {
                 self.favorites.remove(i);
