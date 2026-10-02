@@ -89,7 +89,11 @@ half-blocks, which work everywhere. The detected protocol is shown at the bottom
 help. Thumbnails are skipped in terminals narrower than 60 columns.
 
 Images load in the background through the same rate limiter as everything else, only for
-what's on screen (or about to be), and are kept in a bounded in-memory cache.
+what's on screen (or about to be), and are kept in a bounded in-memory cache. Thumbnails
+are also cached on disk in `$XDG_CACHE_HOME/ck/thumbs` (default `~/.cache/ck/thumbs`, at
+most 200 MB, least recently used first out), so revisiting a catalog or thread shows them
+at once without any requests. On sites whose images share the page's rate limit, visible
+thumbnails load top to bottom and nothing is prefetched ahead of them.
 
 To turn images off entirely (no image requests at all), put `images = "off"` at the top of
 your config.

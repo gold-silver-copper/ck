@@ -13,6 +13,7 @@ use ratatui::widgets::ListState;
 
 use crate::backend::{self, Backend};
 use crate::config::{self, Config, SiteConfig};
+use crate::disk_cache::DiskCache;
 use crate::download;
 use crate::http;
 use crate::images::Images;
@@ -451,7 +452,7 @@ impl App {
                 Arc::new(move || {
                     let _ = tx.send(Msg::Wake);
                 })
-            }),
+            }, DiskCache::default_dir().map(|d| DiskCache::new(d, crate::disk_cache::BUDGET))),
             viewer: None,
             preview: None,
             searching: false,

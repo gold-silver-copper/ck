@@ -8,7 +8,8 @@ use ratatui_image::Image;
 use unicode_width::UnicodeWidthStr;
 
 use crate::app::{App, Clock, Hit, SiteRow, Sort, ThreadLayout, ThreadView, View};
-use crate::images::{Images, State};
+use crate::http;
+use crate::images::{Images, Kind, State};
 use crate::keys::{Action, KeyMap};
 use crate::markup;
 use crate::model::{Attachment, Post};
@@ -410,7 +411,8 @@ fn draw_catalog(f: &mut Frame, app: &mut App, area: Rect) {
     if !thumbs {
         return;
     }
-    // Draw thumbnails over the placeholders of fully visible entries; prefetch the next page.
+    // Draw thumbnails over the placeholders of fully visible entries, top to bottom; prefetch
+    // the next page from media hosts (on rate-limited hosts that would delay visible ones).
     let per = CAT_THUMB.height + 1;
     let on_screen = (area.height / per) as usize;
     let offset = app.catalog_list.state.offset();
@@ -419,8 +421,8 @@ fn draw_catalog(f: &mut Frame, app: &mut App, area: Rect) {
         let row = (k - offset) as u16 * per;
         if row + CAT_THUMB.height <= area.height {
             draw_thumb(f, &mut app.images, file, Rect::new(area.x + 2, area.y + row, CAT_THUMB.width, CAT_THUMB.height));
-        } else if let Some(url) = &file.thumb {
-            app.images.want(url);
+        } else if let Some(url) = file.thumb.as_ref().filter(|u| http::is_media_host(u)) {
+            app.images.want(url, Kind::Thumb);
         }
     }
 }
@@ -487,7 +489,7 @@ fn draw_thumb(f: &mut Frame, images: &mut Images, file: &Attachment, area: Rect)
         let r = Rect::new(area.x + 1, area.y + area.height / 2, area.width - 2, 1);
         f.render_widget(Line::styled(s.to_string(), style).centered(), r);
     };
-    match images.get(url, Size::new(area.width, area.height)) {
+    match images.get(url, Size::new(area.width, area.height), Kind::Thumb) {
         State::Ready(p) => {
             let s = p.size();
             f.render_widget(Clear, area);
@@ -557,17 +559,19 @@ fn draw_thread(f: &mut Frame, app: &mut App, area: Rect) {
     f.render_widget(Paragraph::new(lines), area);
 
     // Thumbnails go over their placeholders only when fully on screen, so they never draw
-    // outside the thread area; the ones within a screen of the view are prefetched.
+    // outside the thread area. Visible ones are asked for first, top to bottom; the ones
+    // within a screen of the view are prefetched from media hosts.
     let (top, h, view) = (t.scroll, THUMB.height as usize, area.height as usize);
     for &(line, i) in &l.thumbs {
-        let file = &t.posts[i].files[0];
         if line >= top && line + h <= top + view {
             let r = Rect::new(area.x + 2, area.y + (line - top) as u16, THUMB.width, THUMB.height);
-            draw_thumb(f, &mut app.images, file, r);
-        } else if line + h + view > top && line < top + 2 * view
-            && let Some(url) = &file.thumb
-        {
-            app.images.want(url);
+            draw_thumb(f, &mut app.images, &t.posts[i].files[0], r);
+        }
+    }
+    for &(line, i) in &l.thumbs {
+        let near = !(line >= top && line + h <= top + view) && line + h + view > top && line < top + 2 * view;
+        if let Some(url) = t.posts[i].files[0].thumb.as_ref().filter(|u| near && http::is_media_host(u)) {
+            app.images.want(url, Kind::Thumb);
         }
     }
 }
@@ -662,7 +666,8 @@ fn draw_viewer(f: &mut Frame, app: &mut App) {
     };
     let Some(url) = url else { return };
     let spinner = SPINNER[app.tick % SPINNER.len()];
-    match app.images.get(url, Size::new(inner.width, inner.height)) {
+    let kind = if file.is_image() { Kind::Full } else { Kind::Thumb };
+    match app.images.get(url, Size::new(inner.width, inner.height), kind) {
         State::Ready(p) => {
             let s = p.size();
             let r = Rect::new(

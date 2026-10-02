@@ -3,6 +3,7 @@ mod backend;
 #[cfg(test)]
 mod bench;
 mod config;
+mod disk_cache;
 mod download;
 mod http;
 mod images;

@@ -103,7 +103,11 @@ pub fn take_cached_age() -> Option<Duration> {
     CACHED_AGE.take()
 }
 
-fn host(url: &str) -> &str {
+pub fn is_media_host(url: &str) -> bool {
+    MEDIA_HOSTS.lock().unwrap().contains(host(url))
+}
+
+pub fn host(url: &str) -> &str {
     let rest = url.split_once("://").map_or(url, |(_, r)| r);
     rest.split(['/', '?', '#']).next().unwrap_or(rest)
 }
