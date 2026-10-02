@@ -36,7 +36,9 @@ pub fn build(cfg: &SiteConfig) -> Arc<dyn Backend> {
     let boards = cfg.boards.as_ref().map(|bs| bs.iter().map(to_board).collect());
     match cfg.kind {
         SiteKind::Fourchan => Arc::new(futaba::Futaba::fourchan(boards)),
-        SiteKind::Vichan => Arc::new(futaba::Futaba::vichan(url.unwrap_or_default(), cfg.thumb_ext.clone(), boards)),
+        SiteKind::Vichan => {
+            Arc::new(futaba::Futaba::vichan(url.unwrap_or_default(), cfg.thumb_ext.clone(), cfg.media_url.clone(), boards))
+        }
         SiteKind::Lynxchan => Arc::new(lynxchan::Lynxchan::new(url.unwrap_or_default(), boards)),
         SiteKind::Foolfuuka => Arc::new(foolfuuka::Foolfuuka::new(url.unwrap_or_default(), boards)),
         SiteKind::Jschan => Arc::new(jschan::Jschan::new(url.unwrap_or_default(), boards)),

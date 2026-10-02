@@ -11,7 +11,8 @@ use crate::model::{Attachment, Board, Post};
 pub struct Futaba {
     api: String,
     web: String,
-    /// `{media}/{board}/{tim}{ext}` for 4chan, `{media}/{board}/src/{tim}{ext}` for vichan.
+    /// `{media}/{board}/{tim}{ext}` for 4chan, `{media}/{board}/src/{tim}{ext}` for vichan, or
+    /// `{media}/file_store/{tim}{ext}` for posts marked `fpath: 1` (8kun).
     media: String,
     is_4chan: bool,
     /// vichan's `thumb_ext` setting: fixed thumbnail extension, or `None` for "same as the file".
@@ -32,14 +33,22 @@ impl Futaba {
         }
     }
 
-    pub fn vichan(base: String, thumb_ext: Option<String>, boards: Option<Vec<Board>>) -> Self {
+    /// `media` is where files are served from, if not the site itself (8kun).
+    pub fn vichan(base: String, thumb_ext: Option<String>, media: Option<String>, boards: Option<Vec<Board>>) -> Self {
         let thumb_ext = thumb_ext.map(|e| e.trim_start_matches('.').to_string());
-        Self { api: base.clone(), web: base.clone(), media: base, is_4chan: false, thumb_ext, boards }
+        let media = media.map(|m| m.trim_end_matches('/').to_string()).unwrap_or_else(|| base.clone());
+        if media != base {
+            crate::http::register_media_host(&media);
+        }
+        Self { api: base.clone(), web: base, media, is_4chan: false, thumb_ext, boards }
     }
 
-    fn file_url(&self, board: &str, tim: &str, ext: &str) -> String {
+    /// `flat`: the post's files are in one `file_store` directory, not per board.
+    fn file_url(&self, board: &str, tim: &str, ext: &str, flat: bool) -> String {
         if self.is_4chan {
             format!("{}/{}/{tim}{ext}", self.media, enc(board))
+        } else if flat {
+            format!("{}/file_store/{tim}{ext}", self.media)
         } else {
             format!("{}/{}/src/{tim}{ext}", self.media, enc(board))
         }
@@ -48,7 +57,7 @@ impl Futaba {
     /// 4chan: `{tim}s.jpg` on the media host. vichan: `/{board}/thumb/{tim}.{ext}`, where ext is
     /// the site's `thumb_ext`, else the file's own extension, for images, and always `jpg` for
     /// videos (checked on wizchan and tvch, whose thumb_ext is png).
-    fn thumb_url(&self, board: &str, tim: &str, ext: &str) -> Option<String> {
+    fn thumb_url(&self, board: &str, tim: &str, ext: &str, flat: bool) -> Option<String> {
         if self.is_4chan {
             return Some(format!("{}/{}/{tim}s.jpg", self.media, enc(board)));
         }
@@ -58,6 +67,9 @@ impl Futaba {
             "webm" | "mp4" => "jpg".into(),
             _ => return None, // generic file icon
         };
+        if flat {
+            return Some(format!("{}/file_store/thumb/{tim}.{thumb_ext}", self.media));
+        }
         Some(format!("{}/{}/thumb/{tim}.{thumb_ext}", self.media, enc(board)))
     }
 
@@ -86,10 +98,11 @@ impl Futaba {
         }
         let filename = as_str(&v["filename"]).map(|f| markup::decode(&f)).unwrap_or_else(|| tim.clone());
         let spoiler = as_bool(&v["spoiler"]);
+        let flat = as_u64(&v["fpath"]) == Some(1);
         Some(Attachment {
             filename: format!("{filename}{ext}"),
-            url: self.file_url(board, &tim, &ext),
-            thumb: if spoiler { None } else { self.thumb_url(board, &tim, &ext) },
+            url: self.file_url(board, &tim, &ext, flat),
+            thumb: if spoiler { None } else { self.thumb_url(board, &tim, &ext, flat) },
             spoiler,
             width: as_u64(&v["w"]).map(|n| n as u32),
             height: as_u64(&v["h"]).map(|n| n as u32),
@@ -138,15 +151,15 @@ impl Futaba {
     }
 }
 
-/// Boards from `boards.json`.
+/// Boards from `boards.json`: `{ "boards": [...] }` (4chan), or a bare list (8kun).
 pub fn parse_boards(v: &Value) -> Vec<Board> {
-    let list = v["boards"].as_array().cloned().unwrap_or_default();
+    let list = v["boards"].as_array().or(v.as_array()).cloned().unwrap_or_default();
     list.iter()
         .filter_map(|b| {
             Some(Board {
                 uri: as_str(&b["board"]).or_else(|| as_str(&b["uri"]))?,
-                title: as_str(&b["title"]).map(|t| markup::decode(&t)).unwrap_or_default(),
-                nsfw: b.get("ws_board").map(|w| !as_bool(w)),
+                title: as_str(&b["title"]).map(|t| markup::decode(t.trim())).unwrap_or_default(),
+                nsfw: b.get("ws_board").or(b.get("sfw")).map(|w| !as_bool(w)),
             })
         })
         .collect()
@@ -247,7 +260,7 @@ mod tests {
 
     #[test]
     fn vichan_catalog_thread() {
-        let b = Futaba::vichan("https://lainchan.org".into(), Some("png".into()), None);
+        let b = Futaba::vichan("https://lainchan.org".into(), Some("png".into()), None, None);
         let cat = b.parse_catalog("λ", &fixture("vichan_catalog.json"));
         assert_eq!(cat[0].subject.as_deref(), Some("Programming Employment"));
         let posts = b.parse_thread("λ", &fixture("vichan_thread.json"));
@@ -260,7 +273,7 @@ mod tests {
     #[test]
     fn files_with_paths() {
         // leftypol's vichan fork: a `files` list with explicit paths and webp thumbnails.
-        let b = Futaba::vichan("https://leftypol.org".into(), None, None);
+        let b = Futaba::vichan("https://leftypol.org".into(), None, None, None);
         let posts = b.parse_thread("leftypol", &fixture("leftypol_thread.json"));
         assert_eq!(posts[0].no, 2923329);
         let files: Vec<_> = posts.iter().flat_map(|p| &p.files).collect();
@@ -275,12 +288,28 @@ mod tests {
 
     #[test]
     fn overboard_threads_keep_their_board() {
-        let b = Futaba::vichan("https://leftypol.org".into(), None, None);
+        let b = Futaba::vichan("https://leftypol.org".into(), None, None, None);
         let cat = b.parse_catalog("overboard", &fixture("leftypol_overboard.json"));
         let boards: Vec<_> = cat.iter().map(|p| p.board.as_deref().unwrap()).collect();
         assert_eq!(boards, ["leftypol", "latam", "siberia", "tech", "games"]);
         // Files are under the thread's own board, not the overboard.
         assert!(cat.iter().flat_map(|p| &p.files).all(|f| !f.url.contains("/overboard/")));
+    }
+
+    #[test]
+    fn eightkun() {
+        let boards = super::parse_boards(&fixture("8kun_boards.json"));
+        assert!(boards.iter().any(|b| b.uri == "qresearch" && b.title == "Q Research"));
+        let b = Futaba::vichan("https://8kun.top".into(), None, Some("https://nerv.8kun.top".into()), None);
+        let cat = b.parse_catalog("v", &fixture("8kun_catalog.json"));
+        let f = |ext: &str| cat.iter().flat_map(|p| &p.files).find(|f| f.filename.ends_with(ext)).unwrap().clone();
+        let jpg = f(".jpg");
+        let tim = "888d8dada6c13986ebca008cfdf8eb67fbe39f21346ca1e5c6321171239238a9";
+        assert_eq!(jpg.url, format!("https://nerv.8kun.top/file_store/{tim}.jpg"));
+        assert_eq!(jpg.thumb, Some(format!("https://nerv.8kun.top/file_store/thumb/{tim}.jpg")));
+        // Videos get jpg thumbnails, images keep their extension (checked live).
+        assert!(f(".mp4").thumb.unwrap().ends_with(".jpg"));
+        assert!(f(".webp").thumb.unwrap().ends_with(".webp"));
     }
 
     #[test]
@@ -300,12 +329,12 @@ mod tests {
     #[test]
     fn vichan_thumbnails() {
         // lainchan renders every thumbnail as png.
-        let lain = Futaba::vichan("https://lainchan.org".into(), Some("png".into()), None);
+        let lain = Futaba::vichan("https://lainchan.org".into(), Some("png".into()), None, None);
         let p = lain.post("λ", &catalog_thread(&fixture("vichan_catalog.json"), 42742));
         assert_eq!(p.files[0].thumb.as_deref(), Some("https://lainchan.org/%CE%BB/thumb/1754702648060-0.png"));
 
         // wizchan keeps the file's extension, and uses jpg for videos.
-        let wiz = Futaba::vichan("https://wizchan.org".into(), None, None);
+        let wiz = Futaba::vichan("https://wizchan.org".into(), None, None, None);
         let cat = fixture("wizchan_catalog.json");
         let thumb = |no| wiz.post("wiz", &catalog_thread(&cat, no)).files.first().and_then(|f| f.thumb.clone());
         assert_eq!(thumb(230021).as_deref(), Some("https://wizchan.org/wiz/thumb/1790081744989.jpg"));

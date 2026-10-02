@@ -21,6 +21,7 @@ expression: snapshot(&mut a)
 │  tvch            vichan    https://tvch.moe                                                      │
 │  sushigirl       vichan    https://sushigirl.cafe                                                │
 │  leftypol        vichan    https://leftypol.org                                                  │
+│  8kun            vichan    https://8kun.top                                                      │
 │  alogs           lynxchan  https://alogs.space                                                   │
 │  trashchan       jschan    https://trashchan.xyz                                                 │
 │  ptchan          jschan    https://ptch.net                                                      │
@@ -29,7 +30,6 @@ expression: snapshot(&mut a)
 │  nukechan        jschan    https://nukechan.net                                                  │
 │  palanq          foolfuuka https://archive.palanq.win                                            │
 │  b4k             foolfuuka https://arch.b4k.dev                                                  │
-│                                                                                                  │
 │                                                                                                  │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
  j/k move · enter open · esc back · / filter · o browser · r reload · ? help · q quit

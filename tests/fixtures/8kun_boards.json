@@ -1,0 +1,79 @@
+[
+ {
+  "uri": "qresearch",
+  "title": " Q Research",
+  "subtitle": "Research and discussion about Q's crumbs",
+  "indexed": 1,
+  "sfw": 0,
+  "posts_total": "25096156",
+  "time": "2018-01-09",
+  "weight": 0,
+  "locale": "English",
+  "tags": [
+   "private"
+  ],
+  "max": "25096156",
+  "active": 715,
+  "pph": 239,
+  "ppd": 3047,
+  "pph_average": 147
+ },
+ {
+  "uri": "pol",
+  "title": "Politically Incorrect",
+  "subtitle": "Politics, news, happenings, current events",
+  "indexed": 1,
+  "sfw": 0,
+  "posts_total": "128301",
+  "time": null,
+  "weight": 0,
+  "locale": "English",
+  "tags": [
+   "politics"
+  ],
+  "max": "128301",
+  "active": 79,
+  "pph": 3,
+  "ppd": 107,
+  "pph_average": 3.4
+ },
+ {
+  "uri": "tech",
+  "title": "Technology",
+  "subtitle": "Freedom Isn't Free",
+  "indexed": 1,
+  "sfw": 1,
+  "posts_total": "1092257",
+  "time": null,
+  "weight": 0,
+  "locale": "English",
+  "tags": [],
+  "max": "1092257",
+  "active": 1,
+  "pph": 0,
+  "ppd": 0,
+  "pph_average": 0
+ },
+ {
+  "uri": "v",
+  "title": "Video Games",
+  "subtitle": "Vidya Gaems",
+  "indexed": 1,
+  "sfw": 1,
+  "posts_total": "16957182",
+  "time": null,
+  "weight": 0,
+  "locale": "English",
+  "tags": [
+   "video-games",
+   "visual-novels",
+   "vidya",
+   "8chan",
+   "game-development"
+  ],
+  "max": "16957182",
+  "active": 0,
+  "pph": 0,
+  "ppd": 0
+ }
+]

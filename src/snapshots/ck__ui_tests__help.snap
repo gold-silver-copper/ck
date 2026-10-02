@@ -21,15 +21,15 @@ expression: snapshot(&mut a)
 │  tvch            vich│  w                   watch / unwatch the thread    │                      │
 │  sushigirl       vich│  s                   cycle sort order              │                      │
 │  leftypol        vich│  c                   compact layout on / off       │                      │
-│  alogs           lynx│                                                    │                      │
-│  trashchan       jsch│Thread                                              │                      │
-│  ptchan          jsch│  j / k               next / previous post          │                      │
-│  erischan        jsch│  J / K, space        scroll by line / page         │                      │
-│  junkuchan       jsch│  enter, l            follow quote (any thread)     │                      │
-│  nukechan        jsch│  p                   preview the quoted posts      │                      │
-│  palanq          fool│  b                   jump to first reply           │                      │
-│  b4k             fool│  u                   back (also to last thread)    │                      │
-│                      │  /                   search the thread             │                      │
+│  8kun            vich│                                                    │                      │
+│  alogs           lynx│Thread                                              │                      │
+│  trashchan       jsch│  j / k               next / previous post          │                      │
+│  ptchan          jsch│  J / K, space        scroll by line / page         │                      │
+│  erischan        jsch│  enter, l            follow quote (any thread)     │                      │
+│  junkuchan       jsch│  p                   preview the quoted posts      │                      │
+│  nukechan        jsch│  b                   jump to first reply           │                      │
+│  palanq          fool│  u                   back (also to last thread)    │                      │
+│  b4k             fool│  /                   search the thread             │                      │
 │                      │  n / N               next / previous match         │                      │
 ╰──────────────────────│  s / S               show spoilers: post / all     │──────────────────────╯
  j/k move · enter open ╰ j/k scroll ─────────────────────────── images: off ╯· q quit
