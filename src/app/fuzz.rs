@@ -9,7 +9,7 @@
 //! --nocapture` a long one (`FUZZ_SEED`, `FUZZ_RUNS`, `FUZZ_STEPS`).
 
 use std::collections::{HashMap, HashSet};
-use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 
@@ -35,6 +35,10 @@ struct Gate {
 #[derive(Default)]
 struct GateState {
     next: u64,
+    /// Background calls so far: what was asked, and the (virtual) time it was asked.
+    background: Vec<(String, Instant)>,
+    /// The fuzzer's clock, for stamping calls.
+    now: Option<Instant>,
     /// Calls waiting to answer: (ticket, what was asked).
     waiting: Vec<(u64, String)>,
     released: HashSet<u64>,
@@ -59,6 +63,10 @@ impl Gate {
         let mut s = lock(&self.state);
         let ticket = s.next;
         s.next += 1;
+        if crate::http::is_background() {
+            let now = s.now.unwrap_or_else(Instant::now);
+            s.background.push((what.clone(), now));
+        }
         s.waiting.push((ticket, what));
         self.changed.notify_all();
         while !s.open && !s.released.contains(&ticket) {
@@ -95,6 +103,28 @@ impl Gate {
 
     fn calls(&self) -> u64 {
         lock(&self.state).next
+    }
+
+    fn set_now(&self, now: Instant) {
+        lock(&self.state).now = Some(now);
+    }
+
+    /// Wait until no new call has come in for a moment (spawned work has asked).
+    fn quiet(&self) {
+        let mut last = self.calls();
+        loop {
+            std::thread::sleep(Duration::from_millis(3));
+            let now = self.calls();
+            if now == last {
+                return;
+            }
+            last = now;
+        }
+    }
+
+    /// The background calls so far, forgetting them (a restarted app starts afresh).
+    fn take_background(&self) -> Vec<(String, Instant)> {
+        std::mem::take(&mut lock(&self.state).background)
     }
 }
 
@@ -281,75 +311,128 @@ impl Backend for Fake {
     }
 }
 
-// ----- one episode -----
+/// A real backend talking to a fake site that answers badly now and then, through the gate.
+struct Gated {
+    data: Arc<dyn Backend>,
+    urls: Arc<dyn Backend>,
+    site: String,
+    gate: Arc<Gate>,
+}
+
+impl Backend for Gated {
+    fn boards(&self, partial: Partial<Board>) -> Result<Vec<Board>> {
+        let _pass = self.gate.enter(format!("{} boards", self.site));
+        self.data.boards(partial)
+    }
+
+    fn catalog(&self, board: &str, partial: Partial<Post>) -> Result<Vec<Post>> {
+        let _pass = self.gate.enter(format!("{} catalog /{board}/", self.site));
+        self.data.catalog(board, partial)
+    }
+
+    fn thread(&self, board: &str, no: u64) -> Result<Vec<Post>> {
+        let _pass = self.gate.enter(format!("{} thread /{board}/{no}", self.site));
+        self.data.thread(board, no)
+    }
+
+    fn find_thread(&self, board: &str, post: u64) -> Result<Option<u64>> {
+        let _pass = self.gate.enter(format!("{} find /{board}/{post}", self.site));
+        self.data.find_thread(board, post)
+    }
+
+    fn search(&self, board: &str, query: &str, page: u32) -> Result<SearchPage> {
+        let _pass = self.gate.enter(format!("{} search /{board}/ {query:?} {page}", self.site));
+        self.data.search(board, query, page)
+    }
+
+    fn board_url(&self, board: &str) -> String {
+        self.urls.board_url(board)
+    }
+
+    fn thread_url(&self, board: &str, no: u64) -> String {
+        self.urls.thread_url(board, no)
+    }
+
+    fn post_url(&self, board: &str, thread: u64, post: u64) -> String {
+        self.urls.post_url(board, thread, post)
+    }
+}
+
+// ----- an episode: steps, the world they act on, and what must hold -----
 
 const FILTERS: &str = "[[filter]]\npattern = \"(?i)word\"\nlabel = \"word\"\n\
     [[filter]]\npattern = \"日本\"\naction = \"highlight\"\n\
     [[filter]]\npattern = \"(OP)\"\nfield = \"subject\"\naction = \"hide\"\n";
 
-/// A fresh app on fake sites, with its config and data in `dir`.
-fn app_in(dir: &std::path::Path, seed: u64, gate: &Arc<Gate>) -> App {
-    let mut rng = Rng::new(seed);
-    let mut doc: toml_edit::DocumentMut = crate::config::DEFAULT_CONFIG.parse().unwrap();
-    if rng.chance(50) {
-        doc["favorites"] = toml_edit::value(toml_edit::Array::from_iter(["4chan/g", "lainchan/λ", "nosuch/x", "4chan/b"]));
+/// The wall clock the fuzzer starts from.
+const START: i64 = 1_790_000_000;
+
+/// One step. Choices that depend on the app's state (which call to answer, which row) are
+/// raw numbers taken modulo what's there, so any subset of steps still replays.
+#[derive(Clone, Debug)]
+enum Act {
+    Key(KeyEvent),
+    Mouse(MouseEventKind, u16, u16, bool),
+    Paste(String),
+    Goto(String),
+    Resize(u16, u16),
+    Answer(usize),
+    AnswerAll,
+    Wait(Duration),
+    Restart(u64),
+    Pick(usize),
+}
+
+impl std::fmt::Display for Act {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            Act::Key(k) => write!(f, "key {}", crate::keys::Key::from_event(k)),
+            Act::Mouse(kind, x, y, double) => write!(f, "mouse {kind:?} at {x},{y}{}", if *double { " (double)" } else { "" }),
+            Act::Paste(t) => write!(f, "paste {t:?}"),
+            Act::Goto(t) => write!(f, "goto {t:?}"),
+            Act::Resize(w, h) => write!(f, "resize {w}x{h}"),
+            Act::Answer(k) => write!(f, "answer #{k}"),
+            Act::AnswerAll => write!(f, "answer everything"),
+            Act::Wait(d) => write!(f, "wait {d:?}"),
+            Act::Restart(_) => write!(f, "restart"),
+            Act::Pick(k) => write!(f, "pick row #{k} and enter"),
+        }
     }
-    if rng.chance(30) {
-        doc["hidden_sites"] = toml_edit::value(toml_edit::Array::from_iter(["kissu", "8kun"]));
-    }
-    let mut text = doc.to_string();
-    if rng.chance(50) {
-        text.push_str(FILTERS);
-    }
-    let cfg: Config = toml::from_str(&text).unwrap();
-    std::fs::write(dir.join("config.toml"), &text).unwrap();
-    let store = Store::load(Some(dir.join("data"))).0;
-    let mut app = App::new(cfg, KeyMap::default(), None, store);
-    app.config_path = Some(dir.join("config.toml"));
-    app.download_dir = Some(dir.join("downloads").display().to_string());
-    app.images = Images::offline();
-    app.clock = Clock { fixed: Some(1_790_000_000) };
-    for site in &mut app.sites {
-        let real = site.backend.clone();
-        let name = site.cfg.name.clone();
-        let calls = AtomicU64::new(0);
-        site.backend = Arc::new(Fake { real, site: name, seed, gate: gate.clone(), fetched: Mutex::default(), calls });
-    }
-    app
 }
 
 /// Keys that do something somewhere, so they come up often.
 fn hot_keys() -> Vec<KeyEvent> {
     let mut keys: Vec<KeyEvent> = crate::keys::ACTIONS.iter().map(|&(_, _, k, ..)| KeyEvent::new(k.code, k.mods)).collect();
-    for code in [
-        KeyCode::Char('j'),
-        KeyCode::Char('k'),
-        KeyCode::Char('h'),
-        KeyCode::Char('l'),
-        KeyCode::Char('g'),
-        KeyCode::Char('G'),
-        KeyCode::Char('J'),
-        KeyCode::Char('K'),
-        KeyCode::Char(' '),
-        KeyCode::Char('q'),
-        KeyCode::Enter,
-        KeyCode::Esc,
-        KeyCode::Tab,
-        KeyCode::BackTab,
-        KeyCode::Backspace,
-        KeyCode::Delete,
-        KeyCode::Up,
-        KeyCode::Down,
-        KeyCode::Left,
-        KeyCode::Right,
-        KeyCode::PageUp,
-        KeyCode::PageDown,
-        KeyCode::Home,
-        KeyCode::End,
-        KeyCode::F(5),
-    ] {
-        keys.push(KeyEvent::from(code));
-    }
+    keys.extend(
+        [
+            KeyCode::Char('j'),
+            KeyCode::Char('k'),
+            KeyCode::Char('h'),
+            KeyCode::Char('l'),
+            KeyCode::Char('g'),
+            KeyCode::Char('G'),
+            KeyCode::Char('J'),
+            KeyCode::Char('K'),
+            KeyCode::Char(' '),
+            KeyCode::Char('q'),
+            KeyCode::Enter,
+            KeyCode::Esc,
+            KeyCode::Tab,
+            KeyCode::BackTab,
+            KeyCode::Backspace,
+            KeyCode::Delete,
+            KeyCode::Up,
+            KeyCode::Down,
+            KeyCode::Left,
+            KeyCode::Right,
+            KeyCode::PageUp,
+            KeyCode::PageDown,
+            KeyCode::Home,
+            KeyCode::End,
+            KeyCode::F(5),
+        ]
+        .map(KeyEvent::from),
+    );
     keys
 }
 
@@ -368,6 +451,8 @@ fn place(rng: &mut Rng) -> String {
         "nosuch/x/1",
         "https://desuarchive.org/a/thread/{n}/#{m}",
         "2ch/b/{n}",
+        "endchan/b/{n}",
+        "zzzchan/b",
         "",
         "  ",
         "日本",
@@ -376,88 +461,18 @@ fn place(rng: &mut Rng) -> String {
     if rng.chance(15) { fuzz::html(rng, 3) } else { s }
 }
 
-fn episode(seed: u64, steps: usize) {
-    let dir = tempfile::tempdir().unwrap();
-    let gate = Arc::new(Gate::default());
-    let mut rng = Rng::new(seed);
-    let mut app = app_in(dir.path(), rng.next(), &gate);
-    let hot = hot_keys();
-    let (mut w, mut h) = (110, 32);
-    let mut log: Vec<String> = Vec::new();
-    let result = catch_unwind(AssertUnwindSafe(|| {
-        for step in 0..steps {
-            let calls_before = gate.calls();
-            let act = act(&mut rng, &mut app, &gate, &hot, &mut (w, h), dir.path());
-            (w, h) = act.1;
-            log.push(format!("{step}: {}", act.0));
-            app.poll();
-            app.quit = false;
-            draw(&mut app, w, h);
-            check(&app, &log);
-            // A step asks a handful of things at most (a few refreshes may fall due at once).
-            let asked = gate.calls() - calls_before;
-            assert!(asked <= 12, "{asked} requests from one step\n{}", tail(&log));
-        }
-        settle(&mut app, &gate);
-        draw(&mut app, w, h);
-        check(&app, &log);
-        check_idle(&app, &log);
-        // What was saved loads again, without complaint.
-        app.save_now();
-        let (_, warnings) = Store::load(Some(dir.path().join("data")));
-        assert!(warnings.is_empty(), "the saved data doesn't load cleanly: {warnings:?}\n{}", tail(&log));
-    }));
-    gate.open();
-    if let Err(panic) = result {
-        eprintln!("\nfuzz_app: the steps before the failure:\n{}", tail(&log));
-        resume_unwind(panic);
-    }
-}
-
-fn tail(log: &[String]) -> String {
-    log.iter().rev().take(40).rev().cloned().collect::<Vec<_>>().join("\n")
-}
-
-/// One random step; returns what it did and the terminal size after it.
-fn act(rng: &mut Rng, app: &mut App, gate: &Arc<Gate>, hot: &[KeyEvent], size: &mut (u16, u16), dir: &std::path::Path) -> (String, (u16, u16)) {
-    let (w, h) = *size;
-    let roll = rng.below(100);
-    let what = match roll {
-        // Keys: mostly ones that mean something, then anything.
-        0..40 => {
-            let key = *rng.pick(hot);
-            app.on_key(key);
-            format!("key {}", crate::keys::Key::from_event(&key))
-        }
-        40..48 => {
-            let c = char::from(32 + rng.below(95) as u8);
-            app.on_key(KeyEvent::from(KeyCode::Char(c)));
-            format!("key {c:?}")
-        }
+/// A random step (the same seed makes the same steps, whatever the app does).
+fn random_act(rng: &mut Rng, hot: &[KeyEvent]) -> Act {
+    match rng.below(100) {
+        0..40 => Act::Key(*rng.pick(hot)),
+        40..48 => Act::Key(KeyEvent::from(KeyCode::Char(char::from(32 + rng.below(95) as u8)))),
         48..50 => {
             let c = char::from_u32(rng.below(0x3000) as u32).unwrap_or('?');
-            let mods = *rng.pick(&[KeyModifiers::NONE, KeyModifiers::CONTROL, KeyModifiers::ALT, KeyModifiers::SHIFT]);
-            app.on_key(KeyEvent::new(KeyCode::Char(c), mods));
-            format!("key {c:?} {mods:?}")
+            Act::Key(KeyEvent::new(KeyCode::Char(c), *rng.pick(&[KeyModifiers::NONE, KeyModifiers::CONTROL, KeyModifiers::ALT])))
         }
-        // Answers: one waiting call, in whatever order.
-        50..68 => {
-            let waiting = gate.waiting();
-            if waiting.is_empty() {
-                return ("nothing to answer".into(), *size);
-            }
-            let (ticket, what) = rng.pick(&waiting).clone();
-            gate.release(ticket);
-            drain(app);
-            format!("answer {what}")
-        }
-        68..71 => {
-            settle(app, gate);
-            "answer everything".into()
-        }
-        // The mouse.
+        50..68 => Act::Answer(rng.below(1000)),
+        68..71 => Act::AnswerAll,
         71..79 => {
-            let (col, row) = (rng.below(w as usize) as u16, rng.below(h as usize) as u16);
             let kind = *rng.pick(&[
                 MouseEventKind::Down(MouseButton::Left),
                 MouseEventKind::Down(MouseButton::Left),
@@ -465,67 +480,172 @@ fn act(rng: &mut Rng, app: &mut App, gate: &Arc<Gate>, hot: &[KeyEvent], size: &
                 MouseEventKind::ScrollUp,
                 MouseEventKind::Down(MouseButton::Right),
             ]);
-            let now = Instant::now();
-            let ev = MouseEvent { kind, column: col, row, modifiers: KeyModifiers::NONE };
-            app.on_mouse(ev, now);
-            if rng.chance(30) {
-                app.on_mouse(ev, now);
-            }
-            format!("mouse {kind:?} at {col},{row}")
+            Act::Mouse(kind, rng.below(250) as u16, rng.below(80) as u16, rng.chance(30))
         }
-        // Going somewhere by hand.
-        79..83 => {
-            let text = place(rng);
-            if rng.chance(50) {
-                app.paste(&text);
-                format!("paste {text:?}")
+        79..81 => Act::Paste(place(rng)),
+        81..83 => Act::Goto(place(rng)),
+        83..87 => {
+            let (w, h) = if rng.chance(30) { (1 + rng.below(250) as u16, 1 + rng.below(80) as u16) } else { *rng.pick(SIZES) };
+            Act::Resize(w, h)
+        }
+        87..92 => Act::Wait(Duration::from_secs(*rng.pick(&[1, 3, 9, 11, 30, 61, 300, 3600]))),
+        92..93 => Act::Restart(rng.next()),
+        _ => Act::Pick(rng.below(1000)),
+    }
+}
+
+/// Everything an episode acts on.
+struct World {
+    dir: tempfile::TempDir,
+    gate: Arc<Gate>,
+    app: App,
+    size: (u16, u16),
+    /// The virtual clock: when the episode started, and how far it's got.
+    start: Instant,
+    elapsed: Duration,
+    /// Sites answer with real backends over mangled fixtures (else from generated data).
+    real: bool,
+    seed: u64,
+    hosts: Vec<String>,
+}
+
+impl World {
+    fn new(seed: u64) -> Self {
+        let mut rng = Rng::new(seed);
+        let real = rng.chance(50);
+        let mut w = World {
+            dir: tempfile::tempdir().unwrap(),
+            gate: Arc::new(Gate::default()),
+            app: super::tests::test_app(),
+            size: (110, 32),
+            start: Instant::now(),
+            elapsed: Duration::ZERO,
+            real,
+            seed,
+            hosts: Vec::new(),
+        };
+        w.app = w.boot(rng.next());
+        w
+    }
+
+    fn now(&self) -> Instant {
+        self.start + self.elapsed
+    }
+
+    /// An app on the fake sites, with its config and data in the world's directory.
+    fn boot(&mut self, seed: u64) -> App {
+        let mut rng = Rng::new(seed);
+        let dir = self.dir.path();
+        let mut doc: toml_edit::DocumentMut = crate::config::DEFAULT_CONFIG.parse().unwrap();
+        if rng.chance(50) {
+            doc["favorites"] = toml_edit::value(toml_edit::Array::from_iter(["4chan/g", "lainchan/λ", "nosuch/x", "4chan/b"]));
+        }
+        if rng.chance(30) {
+            doc["hidden_sites"] = toml_edit::value(toml_edit::Array::from_iter(["kissu", "8kun"]));
+        }
+        let mut text = doc.to_string();
+        if rng.chance(50) {
+            text.push_str(FILTERS);
+        }
+        let cfg: Config = toml::from_str(&text).unwrap();
+        std::fs::write(dir.join("config.toml"), &text).unwrap();
+        let store = Store::load(Some(dir.join("data"))).0;
+        let mut app = App::new(cfg, KeyMap::default(), None, store);
+        app.config_path = Some(dir.join("config.toml"));
+        app.download_dir = Some(dir.join("downloads").display().to_string());
+        app.images = Images::offline();
+        for site in &mut app.sites {
+            let urls = site.backend.clone();
+            let name = site.cfg.name.clone();
+            site.backend = if self.real {
+                let kind = match site.cfg.kind {
+                    crate::config::SiteKind::Fourchan => crate::config::SiteKind::Vichan,
+                    k => k,
+                };
+                let host = format!("{name}-{}.fuzz.invalid", self.seed).replace(['.', ' '], "-").replace("-fuzz-invalid", ".fuzz.invalid");
+                if !self.hosts.contains(&host) {
+                    crate::http::serve_test_host(&host, Some(fuzz::fake_site(kind, rng.next(), 30)));
+                    self.hosts.push(host.clone());
+                }
+                Arc::new(Gated { data: fuzz::backend_at(kind, &host), urls, site: name, gate: self.gate.clone() })
             } else {
+                Arc::new(Fake { real: urls, site: name, seed, gate: self.gate.clone(), fetched: Mutex::default(), calls: AtomicU64::new(0) })
+            };
+        }
+        app
+    }
+
+    fn tick(&mut self, by: Duration) {
+        self.elapsed += by;
+        let now = self.now();
+        self.app.clock = Clock { fixed: Some(START + self.elapsed.as_secs() as i64), instant: Some(now) };
+        self.gate.set_now(now);
+    }
+
+    fn apply(&mut self, act: &Act) {
+        let (w, h) = self.size;
+        let app = &mut self.app;
+        match act {
+            Act::Key(k) => app.on_key(*k),
+            Act::Mouse(kind, x, y, double) => {
+                let ev = MouseEvent { kind: *kind, column: x % w, row: y % h, modifiers: KeyModifiers::NONE };
+                let now = app.clock.instant();
+                app.on_mouse(ev, now);
+                if *double {
+                    app.on_mouse(ev, now);
+                }
+            }
+            Act::Paste(t) => app.paste(t),
+            Act::Goto(t) => {
                 app.on_key(KeyEvent::from(KeyCode::Char(':')));
                 if app.goto.is_some() {
-                    app.paste(&text);
+                    app.paste(t);
                     app.on_key(KeyEvent::from(KeyCode::Enter));
                 }
-                format!("goto {text:?}")
+            }
+            Act::Resize(nw, nh) => self.size = (*nw, *nh),
+            Act::Answer(k) => {
+                let waiting = self.gate.waiting();
+                if let Some((ticket, _)) = waiting.get(k % waiting.len().max(1)) {
+                    self.gate.release(*ticket);
+                    drain(&mut self.app);
+                }
+            }
+            Act::AnswerAll => settle(&mut self.app, &self.gate),
+            Act::Wait(d) => {
+                // Whatever was asked, was asked before the time passes.
+                self.gate.quiet();
+                self.tick(*d);
+            }
+            Act::Restart(seed) => {
+                settle(&mut self.app, &self.gate);
+                check_etiquette(&self.gate.take_background());
+                self.app.save_now();
+                // A gate of its own for the new app: anything the old one still asks just goes.
+                self.gate.open();
+                self.gate = Arc::new(Gate::default());
+                self.gate.set_now(self.now());
+                self.app = self.boot(*seed);
+                let now = self.now();
+                self.app.clock = Clock { fixed: Some(START + self.elapsed.as_secs() as i64), instant: Some(now) };
+            }
+            Act::Pick(k) => {
+                if let Some((p, len)) = app.picker() {
+                    p.state.select(Some(k % (len + 1)));
+                }
+                app.on_key(KeyEvent::from(KeyCode::Enter));
             }
         }
-        83..87 => {
-            *size = *rng.pick(SIZES);
-            if rng.chance(30) {
-                *size = (1 + rng.below(250) as u16, 1 + rng.below(80) as u16);
-            }
-            format!("resize {}x{}", size.0, size.1)
+    }
+}
+
+impl Drop for World {
+    fn drop(&mut self) {
+        self.gate.open();
+        for host in &self.hosts {
+            crate::http::serve_test_host(host, None);
         }
-        // Time passes: every refresh and save falls due.
-        87..92 => {
-            let ago = |t: Instant| t.checked_sub(Duration::from_secs(3600)).unwrap_or(t);
-            app.tab.thread_checked = ago(app.tab.thread_checked);
-            for t in app.watched_checked.values_mut().chain(app.generals_checked.values_mut()) {
-                *t = ago(*t);
-            }
-            app.saved_at = ago(app.saved_at);
-            if let Some((_, t)) = &mut app.status_since {
-                *t = ago(*t);
-            }
-            app.notes_since = app.notes_since.map(ago);
-            "an hour passes".into()
-        }
-        // Quit and start again, restoring the session.
-        92..94 => {
-            settle(app, gate);
-            app.save_now();
-            *app = app_in(dir, rng.next(), gate);
-            "restart".into()
-        }
-        // Selecting on purpose: something in the list, then enter.
-        _ => {
-            if let Some((p, len)) = app.picker() {
-                p.state.select(Some(rng.below(len + 1)));
-            }
-            app.on_key(KeyEvent::from(KeyCode::Enter));
-            "select and enter".into()
-        }
-    };
-    (what, *size)
+    }
 }
 
 /// Handle what's arrived, until a moment passes with nothing new.
@@ -537,6 +657,7 @@ fn drain(app: &mut App) {
 fn settle(app: &mut App, gate: &Gate) {
     for _ in 0..50 {
         drain(app);
+        gate.quiet();
         let waiting = gate.waiting();
         if waiting.is_empty() {
             drain(app);
@@ -555,12 +676,139 @@ fn settle(app: &mut App, gate: &Gate) {
 fn draw(app: &mut App, w: u16, h: u16) {
     let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
     term.draw(|f| crate::ui::draw(f, app)).unwrap();
+    // Nothing that reaches the terminal may be a control character.
+    let buf = term.backend().buffer();
+    if let Some(cell) = buf.content().iter().find(|c| c.symbol().chars().any(char::is_control)) {
+        panic!("a control character drawn: {:?}", cell.symbol());
+    }
+}
+
+// ----- panics anywhere, and where they happened -----
+
+static WORKER_PANICS: AtomicU64 = AtomicU64::new(0);
+
+thread_local! {
+    /// Where this thread last panicked, to tell one failure from another while shrinking.
+    static PANICKED_AT: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+    static QUIET: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Count panics on worker threads (unnamed: the app's and the fake sites'), note where test
+/// threads panic, and keep quiet while shrinking.
+fn watch_panics() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        let prev = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            if std::thread::current().name().is_none() {
+                WORKER_PANICS.fetch_add(1, Ordering::SeqCst);
+            }
+            let at = info.location().map(|l| format!("{}:{}", l.file(), l.line()));
+            PANICKED_AT.with(|p| *p.borrow_mut() = at);
+            if !QUIET.with(std::cell::Cell::get) {
+                prev(info);
+            }
+        }));
+    });
+}
+
+/// Run `acts` in a fresh world. `Err` holds where it failed and the message.
+fn replay(seed: u64, acts: &[Act]) -> Result<(), (String, String)> {
+    let mut world = World::new(seed);
+    let workers = WORKER_PANICS.load(Ordering::SeqCst);
+    let mut log: Vec<String> = Vec::new();
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        world.tick(Duration::ZERO);
+        for (step, act) in acts.iter().enumerate() {
+            let (gate, calls_before) = (world.gate.clone(), world.gate.calls());
+            log.push(format!("{step}: {act}"));
+            world.apply(act);
+            world.tick(Duration::from_millis(100));
+            world.app.poll();
+            world.app.quit = false;
+            let (w, h) = world.size;
+            draw(&mut world.app, w, h);
+            check(&world.app);
+            // A step asks a handful of things at most (a few refreshes may fall due at once).
+            let asked = world.gate.calls() - if Arc::ptr_eq(&gate, &world.gate) { calls_before } else { 0 };
+            assert!(asked <= 12, "{asked} requests from one step");
+            assert_eq!(WORKER_PANICS.load(Ordering::SeqCst), workers, "a worker thread panicked");
+        }
+        settle(&mut world.app, &world.gate);
+        let (w, h) = world.size;
+        draw(&mut world.app, w, h);
+        check(&world.app);
+        check_idle(&world.app);
+        check_etiquette(&world.gate.take_background());
+        assert_eq!(WORKER_PANICS.load(Ordering::SeqCst), workers, "a worker thread panicked");
+        // What was saved loads again, without complaint.
+        world.app.save_now();
+        let (_, warnings) = Store::load(Some(world.dir.path().join("data")));
+        assert!(warnings.is_empty(), "the saved data doesn't load cleanly: {warnings:?}");
+    }));
+    result.map_err(|panic| {
+        let msg = panic.downcast_ref::<String>().cloned().or_else(|| panic.downcast_ref::<&str>().map(|s| s.to_string())).unwrap_or_default();
+        let at = PANICKED_AT.with(|p| p.borrow().clone()).unwrap_or_default();
+        if !QUIET.with(std::cell::Cell::get) {
+            eprintln!("\nfuzz_app ({} sites): the steps before the failure:\n{}", if world.real { "real" } else { "generated" }, tail(&log));
+        }
+        (at, msg)
+    })
+}
+
+fn tail(log: &[String]) -> String {
+    log.iter().rev().take(40).rev().cloned().collect::<Vec<_>>().join("\n")
+}
+
+/// The fewest steps that still fail the same way (same place), within a time budget.
+fn shrink(seed: u64, acts: Vec<Act>, at: &str, budget: Duration) -> Vec<Act> {
+    let start = Instant::now();
+    let fails = |acts: &[Act]| matches!(replay(seed, acts), Err((a, _)) if a == at);
+    let mut acts = acts;
+    let mut chunk = acts.len() / 2;
+    while chunk >= 1 && start.elapsed() < budget {
+        let mut i = 0;
+        let mut removed = false;
+        while i < acts.len() && start.elapsed() < budget {
+            let end = (i + chunk).min(acts.len());
+            let candidate: Vec<Act> = acts[..i].iter().chain(&acts[end..]).cloned().collect();
+            if fails(&candidate) {
+                acts = candidate;
+                removed = true;
+            } else {
+                i += chunk;
+            }
+        }
+        if !removed {
+            chunk /= 2;
+        }
+    }
+    acts
+}
+
+fn episode(seed: u64, steps: usize, shrinking: bool) {
+    watch_panics();
+    let hot = hot_keys();
+    let mut rng = Rng::new(seed ^ 0x5eed);
+    let acts: Vec<Act> = (0..steps).map(|_| random_act(&mut rng, &hot)).collect();
+    let Err((at, msg)) = replay(seed, &acts) else { return };
+    if shrinking {
+        eprintln!("fuzz_app: failed at {at}; shrinking {} steps…", acts.len());
+        QUIET.with(|q| q.set(true));
+        let small = shrink(seed, acts, &at, Duration::from_secs(180));
+        QUIET.with(|q| q.set(false));
+        eprintln!("fuzz_app: {} steps still fail at {at}:", small.len());
+        for (i, a) in small.iter().enumerate() {
+            eprintln!("  {i}: {a}");
+        }
+    }
+    panic!("{msg}");
 }
 
 // ----- what must always hold -----
 
-fn check(app: &App, log: &[String]) {
-    let fail = |what: String| -> ! { panic!("{what}\n{}", tail(log)) };
+fn check(app: &App) {
+    let fail = |what: String| -> ! { panic!("{what}") };
     if app.tabs.is_empty() || app.tabs.len() > MAX_TABS || app.active >= app.tabs.len() {
         fail(format!("tabs: {} open, active {}", app.tabs.len(), app.active));
     }
@@ -647,25 +895,40 @@ fn check_thread(t: &ThreadView, fail: &dyn Fn(String) -> !) {
 }
 
 /// With nothing in flight, nothing may still be loading or refreshing.
-fn check_idle(app: &App, log: &[String]) {
+fn check_idle(app: &App) {
     let stuck: Vec<String> = std::iter::once(&app.tab)
         .chain(app.tabs.iter().enumerate().filter(|&(i, _)| i != app.active).map(|(_, t)| t))
         .filter_map(|t| t.loading.clone())
         .collect();
-    assert!(stuck.is_empty(), "still loading with nothing in flight: {stuck:?}\n{}", tail(log));
-    assert!(app.refreshing.is_empty(), "refreshes stuck: {:?}\n{}", app.refreshing, tail(log));
-    assert!(app.generals_searching.is_empty(), "general searches stuck\n{}", tail(log));
-    assert!(app.boards_refreshing.is_empty(), "board list refreshes stuck\n{}", tail(log));
+    assert!(stuck.is_empty(), "still loading with nothing in flight: {stuck:?}");
+    assert!(app.refreshing.is_empty(), "refreshes stuck: {:?}", app.refreshing);
+    assert!(app.generals_searching.is_empty(), "general searches stuck");
+    assert!(app.boards_refreshing.is_empty(), "board list refreshes stuck");
+}
+
+/// Background requests for the same thing are never closer together than the refetch floor
+/// (on the virtual clock), whatever the refresh settings were changed to meanwhile.
+fn check_etiquette(calls: &[(String, Instant)]) {
+    let min = crate::http::MIN_REFETCH;
+    let mut last: HashMap<&str, Instant> = HashMap::new();
+    for (what, at) in calls {
+        if let Some(prev) = last.insert(what, *at) {
+            let gap = at.saturating_duration_since(prev);
+            let all: Vec<String> = calls.iter().map(|(w, t)| format!("{w} at {:?}", t.saturating_duration_since(calls[0].1))).collect();
+            assert!(gap >= min, "{what} asked again in the background after {gap:?} (at least {min:?}); all: {all:?}");
+        }
+    }
 }
 
 #[test]
 fn fuzz_app() {
-    fuzz::run("fuzz_app", false, 1, 4, |seed| episode(seed, 250));
+    fuzz::run("fuzz_app", false, 1, 4, |seed| episode(seed, 250, false));
 }
 
 #[test]
 #[ignore]
 fn fuzz_app_long() {
     let steps = std::env::var("FUZZ_STEPS").ok().and_then(|v| v.parse().ok()).unwrap_or(2_000);
-    fuzz::run("fuzz_app", true, 0, 200, |seed| episode(seed, steps));
+    let shrinking = std::env::var("FUZZ_SHRINK").map_or(true, |v| v != "0");
+    fuzz::run("fuzz_app", true, 0, 200, |seed| episode(seed, steps, shrinking));
 }

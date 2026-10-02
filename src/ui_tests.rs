@@ -33,7 +33,7 @@ fn app(images: bool) -> App {
         Visit { key: key("g", 1000), subject: "Snapshot thread".into(), last_seen: 1004, opened: NOW - 120 },
         Visit { key: key("b", 5), subject: "Random thread".into(), last_seen: 9, opened: NOW - 30 * HOUR },
     ];
-    app.clock = Clock { fixed: Some(NOW) };
+    app.clock = Clock { fixed: Some(NOW), ..Default::default() };
     app.truecolor = true;
     if images {
         app.images = Images::offline();
@@ -544,7 +544,7 @@ fn thread_lines_are_cached_but_never_stale() {
     let (text, _) = render(&mut a);
     assert!(text.contains("secret and"), "{text}");
     // Times move on.
-    a.clock = Clock { fixed: Some(NOW + 3 * HOUR) };
+    a.clock = Clock { fixed: Some(NOW + 3 * HOUR), ..Default::default() };
     a.tab.thread.as_mut().unwrap().layout = None;
     let (text, _) = render(&mut a);
     assert!(text.contains("7h ago") && !text.contains("4h ago"), "{text}");

@@ -54,8 +54,9 @@ impl App {
             (KeyCode::Enter, _) | (_, Some(Action::View)) => self.view_from_gallery(cur),
             (_, Some(Action::Download | Action::DownloadThread)) => self.download_file(cur),
             (_, Some(Action::Copy)) => {
-                let url = g.files[cur].1.url.clone();
-                self.copy_text("file URL", url);
+                if let Some(url) = g.files.get(cur).map(|(_, f)| f.url.clone()) {
+                    self.copy_text("file URL", url);
+                }
             }
             (_, Some(Action::CopyLink)) => {
                 if let Some(link) = self.gallery_link(cur) {
@@ -81,7 +82,7 @@ impl App {
     pub fn view_from_gallery(&mut self, k: usize) {
         let Some(g) = &self.tab.gallery else { return };
         if !self.images.enabled() {
-            let f = g.files[k].1.clone();
+            let Some((_, f)) = g.files.get(k).cloned() else { return };
             self.open_file(&f);
             return;
         }
@@ -98,9 +99,10 @@ impl App {
 
     fn download_file(&mut self, k: usize) {
         let (Some(g), Some(t)) = (&self.tab.gallery, &self.tab.thread) else { return };
-        let (post, file) = &g.files[k];
+        // A refresh may have taken the post away since the gallery opened.
+        let Some(((_, file), p)) = g.files.get(k).and_then(|f| Some((f, t.posts.get(f.0)?))) else { return };
         let dir = download::dir(self.download_dir.as_deref(), &self.current_site().cfg.name, &t.board, t.no);
-        let jobs: Vec<_> = download::jobs(&[&t.posts[*post]], &dir).into_iter().filter(|(url, _)| *url == file.url).collect();
+        let jobs: Vec<_> = download::jobs(&[p], &dir).into_iter().filter(|(url, _)| *url == file.url).collect();
         self.start_download(jobs, dir, "No file to save");
     }
 }

@@ -87,15 +87,31 @@ impl App {
             .filter(|w| self.generals_checked.get(&w.key).is_none_or(|t| now.duration_since(*t) >= RECHECK))
             .map(|w| w.key.clone())
             .collect();
+        // One catalog per board, however many generals there are on it, and not again within
+        // the refetch window.
+        let mut boards: std::collections::BTreeMap<(String, String), Vec<ThreadKey>> = Default::default();
         for key in due {
-            let Some(site) = self.sites.iter().find(|s| s.cfg.name == key.site) else { continue };
-            let backend = site.backend.clone();
+            boards.entry((key.site.clone(), key.board.clone())).or_default().push(key);
+        }
+        for ((site, board), keys) in boards {
+            let fetched = self.general_boards.get(&(site.clone(), board.clone()));
+            if fetched.is_some_and(|t| now.saturating_duration_since(*t) < crate::http::MIN_REFETCH) {
+                continue;
+            }
+            let Some(s) = self.sites.iter().find(|s| s.cfg.name == site) else { continue };
+            let backend = s.backend.clone();
             let tx = self.tx.clone();
-            self.generals_checked.insert(key.clone(), now);
-            self.generals_searching.insert(key.clone());
+            self.general_boards.insert((site, board.clone()), now);
+            for key in &keys {
+                self.generals_checked.insert(key.clone(), now);
+                self.generals_searching.insert(key.clone());
+            }
             std::thread::spawn(move || {
-                let res = crate::http::background(|| backend.catalog(&key.board, &|_| {}));
-                let _ = tx.send(Msg::GeneralCatalog(key, res));
+                let res = crate::http::background(|| backend.catalog(&board, &|_| {}));
+                for key in keys {
+                    let res = res.as_ref().map(Vec::clone).map_err(|e| anyhow::anyhow!("{e:#}"));
+                    let _ = tx.send(Msg::GeneralCatalog(key, res));
+                }
             });
         }
     }

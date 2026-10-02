@@ -65,7 +65,7 @@ pub struct Tab {
 }
 
 impl Tab {
-    pub fn new(site: usize) -> Self {
+    pub fn new(site: usize, now: Instant) -> Self {
         Self {
             view: View::Sites,
             settings_back: None,
@@ -73,7 +73,7 @@ impl Tab {
             catalog_list: Picker::default(),
             catalog_sort: Sort::default(),
             return_to: None,
-            thread_checked: Instant::now(),
+            thread_checked: now,
             site,
             board: None,
             catalog: Vec::new(),
@@ -170,7 +170,7 @@ impl App {
         let Some(open) = open else { return };
         let (site, board) = (self.tab.site, self.tab.board.clone());
         let at = self.active + 1;
-        self.tabs.insert(at, Tab::new(site));
+        self.tabs.insert(at, Tab::new(site, self.clock.instant()));
         self.switch_tab(at);
         self.tab.board = board;
         match open {

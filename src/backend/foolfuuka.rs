@@ -56,8 +56,8 @@ pub fn parse_index(v: &Value) -> Vec<Post> {
             let last = t["posts"].as_array().map_or(&[][..], Vec::as_slice);
             let bumped = last.iter().filter_map(|p| as_i64(&p["timestamp"])).max().unwrap_or(op.time);
             let shown_images = last.iter().filter(|p| p["media"].is_object()).count() as u64;
-            op.replies = Some((as_u64(&t["omitted"]).unwrap_or(0) + last.len() as u64) as u32);
-            op.images = Some((as_u64(&t["images_omitted"]).unwrap_or(0) + shown_images) as u32);
+            op.replies = Some(as_u64(&t["omitted"]).unwrap_or(0).saturating_add(last.len() as u64) as u32);
+            op.images = Some(as_u64(&t["images_omitted"]).unwrap_or(0).saturating_add(shown_images) as u32);
             Some((bumped, op))
         })
         .collect();

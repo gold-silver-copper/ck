@@ -189,7 +189,10 @@ impl ThreadLayout {
 pub type LineCache = HashMap<(u64, u16, bool), (u64, Rc<[Line<'static>]>)>;
 
 impl ThreadView {
-    pub fn new(board: String, no: u64, posts: Vec<Post>) -> Self {
+    pub fn new(board: String, no: u64, mut posts: Vec<Post>) -> Self {
+        // A post number once: a site that repeats one (or a broken answer) keeps the first.
+        let mut seen = HashSet::new();
+        posts.retain(|p| seen.insert(p.no));
         let index: HashMap<u64, usize> = posts.iter().enumerate().map(|(i, p)| (p.no, i)).collect();
         let mut backlinks = vec![Vec::new(); posts.len()];
         for p in &posts {
@@ -382,16 +385,22 @@ impl ThreadView {
     }
 }
 
-/// Wall clock for timestamps and "3h ago". Tests fix it (and format in UTC) so snapshots
-/// don't depend on when or where they run.
+/// Wall clock for timestamps and "3h ago", and the monotonic clock for deadlines. Tests fix
+/// the first (and format in UTC) so snapshots don't depend on when or where they run; the
+/// fuzzer runs both on its own time.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Clock {
     pub fixed: Option<i64>,
+    pub instant: Option<Instant>,
 }
 
 impl Clock {
     pub fn now(&self) -> i64 {
         self.fixed.unwrap_or_else(|| chrono::Utc::now().timestamp())
+    }
+
+    pub fn instant(&self) -> Instant {
+        self.instant.unwrap_or_else(Instant::now)
     }
 }
 
@@ -546,6 +555,8 @@ pub struct App {
     /// Followed generals: when each one's board was last searched, and searches running.
     generals_checked: HashMap<ThreadKey, Instant>,
     generals_searching: HashSet<ThreadKey>,
+    /// When each (site, board) catalog was last fetched for them.
+    general_boards: HashMap<(String, String), Instant>,
     /// Notifications waiting to be sent together, and since when.
     notes: Vec<Note>,
     notes_since: Option<Instant>,
@@ -553,8 +564,10 @@ pub struct App {
     pub notify_command: Option<Vec<String>>,
     /// Notifications sent (the last few), for the record.
     pub notified: Vec<String>,
-    /// Sites whose saved board list is being refreshed in the background.
+    /// Sites whose saved board list is being refreshed in the background, and when each was
+    /// last tried (a failed one isn't retried within `MIN_REFETCH`).
     boards_refreshing: HashSet<usize>,
+    boards_tried: HashMap<usize, Instant>,
     pub filters: Filters,
     /// Show hidden threads and posts (dimmed) instead of leaving them out.
     pub show_hidden: bool,
@@ -669,12 +682,14 @@ impl App {
             notified_max: HashMap::new(),
             generals_checked: HashMap::new(),
             generals_searching: HashSet::new(),
+            general_boards: HashMap::new(),
             notes: Vec::new(),
             notes_since: None,
             notify_mode: cfg.notify,
             notify_command: cfg.notify_command.clone(),
             notified: Vec::new(),
             boards_refreshing: HashSet::new(),
+            boards_tried: HashMap::new(),
             filters: Filters::new(&cfg.filters).unwrap_or_default(),
             show_hidden: false,
             filtering: false,
@@ -709,8 +724,8 @@ impl App {
             last_click: None,
             tick: 0,
             quit: false,
-            tab: Tab::new(0),
-            tabs: vec![Tab::new(0)],
+            tab: Tab::new(0, Instant::now()),
+            tabs: vec![Tab::new(0, Instant::now())],
             active: 0,
             next_id: 0,
             tx,
@@ -824,12 +839,12 @@ impl App {
             self.handle(msg);
         }
         self.background();
-        self.flush_notes(Instant::now());
-        self.save_session(Some(Instant::now()));
-        if self.save_pending && self.saved_at.elapsed() >= SAVE_EVERY {
+        self.flush_notes(self.clock.instant());
+        self.save_session(Some(self.clock.instant()));
+        if self.save_pending && self.clock.instant().saturating_duration_since(self.saved_at) >= SAVE_EVERY {
             self.save_now();
         }
-        self.expire_status(Instant::now());
+        self.expire_status(self.clock.instant());
     }
 
     /// Send waiting notifications together: once no refresh is running, or 3s after the
@@ -937,7 +952,7 @@ impl App {
         match msg {
             Msg::Wake => {}
             Msg::Input(Event::Key(key)) if key.kind == KeyEventKind::Press => self.on_key(key),
-            Msg::Input(Event::Mouse(m)) => self.on_mouse(m, Instant::now()),
+            Msg::Input(Event::Mouse(m)) => self.on_mouse(m, self.clock.instant()),
             Msg::Input(Event::Paste(text)) => self.paste(&text),
             Msg::Input(_) => {}
             Msg::Refreshed(key, res) => self.refreshed(key, res),
@@ -1016,7 +1031,7 @@ impl App {
             }
             Msg::Thread(_, res) => {
                 self.tab.loading = None;
-                self.tab.thread_checked = Instant::now();
+                self.tab.thread_checked = self.clock.instant();
                 let restoring = std::mem::take(&mut self.tab.restoring);
                 match res {
                     Ok(posts) => self.set_thread(posts),
@@ -1115,9 +1130,13 @@ impl App {
 
     /// Refresh a saved board list at background priority, without a spinner.
     fn refresh_boards_in_background(&mut self, site: usize) {
-        if !self.boards_refreshing.insert(site) {
+        let now = self.clock.instant();
+        if self.boards_tried.get(&site).is_some_and(|t| now.saturating_duration_since(*t) < http::MIN_REFETCH)
+            || !self.boards_refreshing.insert(site)
+        {
             return;
         }
+        self.boards_tried.insert(site, now);
         let backend = self.sites[site].backend.clone();
         let tx = self.tx.clone();
         std::thread::spawn(move || {
@@ -1157,7 +1176,7 @@ impl App {
         let Some(board) = self.tab.board.clone() else { return };
         self.tab.pending_thread = no;
         self.tab.archive_offer = None;
-        self.tab.thread_checked = Instant::now();
+        self.tab.thread_checked = self.clock.instant();
         self.spawn(format!("Loading thread {no}"), move |b, _, _| b.thread(&board.uri, no), Msg::Thread);
     }
 
@@ -1174,7 +1193,7 @@ impl App {
     /// Save now (what the user just did).
     pub fn save_now(&mut self) {
         self.save_pending = false;
-        self.saved_at = Instant::now();
+        self.saved_at = self.clock.instant();
         if let Err(e) = self.store.save() {
             self.error(format!("Couldn't save watched threads: {e:#}"));
         }
@@ -1222,6 +1241,8 @@ impl App {
                 }
             }
         }
+        // Just fetched: a watched thread's next background refresh counts from now.
+        self.watched_checked.insert(key.clone(), self.clock.instant());
         let max_no = tv.posts.iter().map(|p| p.no).max().unwrap_or(0);
         let subject = thread_subject(&tv.posts);
         // A visit is an open, or a refresh that brought new posts.
@@ -1346,12 +1367,20 @@ impl App {
     /// each watched thread every `refresh_watched`, a couple at a time.
     fn background(&mut self) {
         let open = self.tab.thread.as_ref().filter(|_| self.tab.view == View::Thread).map(|t| self.key(&t.board, t.no));
+        let now = self.clock.instant();
+        // Fetched for any tab (or as a watched thread) counts too.
+        let fetched_since = |key: &ThreadKey, every: Duration| {
+            self.watched_checked.get(key).is_none_or(|t| now.saturating_duration_since(*t) >= every)
+        };
         if let Some(key) = &open
             && self.tab.loading.is_none()
-            && self.tab.thread_checked.elapsed() >= self.refresh_thread
+            && now.saturating_duration_since(self.tab.thread_checked) >= self.refresh_thread
+            && fetched_since(key, self.refresh_thread)
             && !self.refreshing.contains(key)
         {
-            self.tab.thread_checked = Instant::now();
+            self.tab.thread_checked = self.clock.instant();
+            // A watched thread refreshed as the open one needn't be again when it's left.
+            self.watched_checked.insert(key.clone(), self.tab.thread_checked);
             self.refresh_in_background(key.clone());
         }
         if self.refreshing.len() >= MAX_REFRESHING {
@@ -1361,13 +1390,13 @@ impl App {
             !w.dead
                 && Some(&w.key) != open.as_ref()
                 && !self.refreshing.contains(&w.key)
-                && self.watched_checked.get(&w.key).is_none_or(|t| t.elapsed() >= self.refresh_watched)
+                && self.watched_checked.get(&w.key).is_none_or(|t| now.saturating_duration_since(*t) >= self.refresh_watched)
         });
         if let Some(key) = due.map(|w| w.key.clone()) {
-            self.watched_checked.insert(key.clone(), Instant::now());
+            self.watched_checked.insert(key.clone(), self.clock.instant());
             self.refresh_in_background(key);
         }
-        self.check_generals(Instant::now());
+        self.check_generals(self.clock.instant());
     }
 
     fn refresh_in_background(&mut self, key: ThreadKey) {
@@ -1388,7 +1417,7 @@ impl App {
             && self.current_site().cfg.name == key.site;
         if is_open {
             // Count the interval from the response, so the next refresh is past the HTTP cache window.
-            self.tab.thread_checked = Instant::now();
+            self.tab.thread_checked = self.clock.instant();
         }
         match res {
             Ok(posts) if is_open => self.set_thread(posts),
@@ -1608,7 +1637,11 @@ impl App {
         };
         let key = self.key(&board, no);
         let watching = self.store.toggle_watch(key.clone(), subject, posts, last_seen);
-        self.watched_checked.remove(&key);
+        // Refreshed soon, to learn where it's at, unless it was just fetched.
+        let now = self.clock.instant();
+        if self.watched_checked.get(&key).is_none_or(|t| now.saturating_duration_since(*t) >= http::MIN_REFETCH) {
+            self.watched_checked.remove(&key);
+        }
         self.info(if watching { format!("Watching thread {no}") } else { format!("Stopped watching thread {no}") });
         self.save_now();
     }
@@ -1897,7 +1930,7 @@ impl App {
         match saved {
             Some((boards, fetched)) => {
                 self.sites[i].boards = Some(boards);
-                if self.clock.now() - fetched > BOARDS_MAX_AGE {
+                if self.clock.now().saturating_sub(fetched) > BOARDS_MAX_AGE {
                     self.refresh_boards_in_background(i);
                 }
             }

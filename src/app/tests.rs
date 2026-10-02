@@ -427,7 +427,7 @@ fn marking_posts_as_yours_watches_the_thread() {
 #[test]
 fn catalogs_mark_new_threads_and_replies() {
     let mut app = local_app();
-    app.clock = Clock { fixed: Some(1000) };
+    app.clock = Clock { fixed: Some(1000), ..Default::default() };
     app.tab.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
     let op = |no, replies| Post { no, replies: Some(replies), ..Default::default() };
     app.load_catalog();
@@ -441,6 +441,14 @@ fn catalogs_mark_new_threads_and_replies() {
     assert_eq!(app.new_replies(&app.tab.catalog[1]), Some(5));
     // Threads never opened don't count replies.
     assert_eq!(app.new_replies(&app.tab.catalog[2]), None);
+}
+
+#[test]
+fn repeated_post_numbers_keep_the_first() {
+    let post = |no, name: &str| Post { no, name: name.into(), ..Default::default() };
+    let t = ThreadView::new("x".into(), 1, vec![post(1, "op"), post(2, "a"), post(2, "b"), post(3, "c")]);
+    assert_eq!(t.posts.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(), ["op", "a", "c"]);
+    assert_eq!((t.index[&3], t.backlinks.len(), t.entries.len()), (2, 3, 3));
 }
 
 #[test]
@@ -681,7 +689,7 @@ fn tabs_keep_their_own_place_and_responses() {
     app.goto_str("a/x");
     let first_req = app.tab.req;
     // Tab 1 opens a thread on site b while that's still loading.
-    app.tabs.push(Tab::new(0));
+    app.tabs.push(Tab::new(0, Instant::now()));
     app.switch_tab(1);
     assert_eq!((app.tab.view, app.tab.thread.is_none()), (View::Sites, true));
     app.goto_str("b/y/5");
@@ -707,7 +715,7 @@ fn tabs_keep_their_own_place_and_responses() {
     app.handle(Msg::Found(app.tab.req, Board { uri: "x".into(), title: String::new(), nsfw: None }, 77, Ok(Some(3))));
     assert_eq!((app.tab.view, app.tab.settings_back, app.tab.pending_thread), (View::Settings, Some(View::Thread), 3));
     // Tab chips don't switch tabs under a settings popup (it isn't the tab's).
-    app.tabs.push(Tab::new(0));
+    app.tabs.push(Tab::new(0, Instant::now()));
     app.tab_chips = vec![(Rect::new(0, 0, 5, 1), 1)];
     app.settings_popup = Some(SettingsPopup::Folder { value: String::new() });
     app.on_mouse(MouseEvent { kind: MouseEventKind::Down(MouseButton::Left), column: 1, row: 0, modifiers: KeyModifiers::NONE }, Instant::now());
@@ -919,7 +927,7 @@ fn background_changes_are_saved_together() {
     let mut app = local_app();
     app.store = Store::load(Some(dir.path().to_path_buf())).0;
     app.tab.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
-    app.clock = Clock { fixed: Some(1000) };
+    app.clock = Clock { fixed: Some(1000), ..Default::default() };
     let posts = |n: u64| (1..=n).map(|no| Post { no, ..Default::default() }).collect::<Vec<_>>();
     app.set_thread(posts(2));
     // Opening a thread is a visit, written a little later rather than at once.
@@ -928,7 +936,7 @@ fn background_changes_are_saved_together() {
     app.poll();
     assert!(dir.path().join("history.json").exists());
     // A refresh without new posts isn't a new visit; one with new posts is.
-    app.clock = Clock { fixed: Some(2000) };
+    app.clock = Clock { fixed: Some(2000), ..Default::default() };
     app.set_thread(posts(2));
     assert_eq!(app.store.history[0].opened, 1000);
     app.set_thread(posts(3));
@@ -946,7 +954,7 @@ fn tab_switches_keep_layouts_and_theme_changes_redo_them_all() {
     let layout = || Some(ThreadLayout { width: 40, blocks: Vec::new(), starts: vec![0, 0], thumbs: Vec::new() });
     app.tab.thread = Some(ThreadView::new("x".into(), 1, vec![Post { no: 1, ..Default::default() }]));
     app.tab.thread.as_mut().unwrap().layout = layout();
-    app.tabs.push(Tab::new(0));
+    app.tabs.push(Tab::new(0, Instant::now()));
     app.switch_tab(1);
     app.tab.thread = Some(ThreadView::new("x".into(), 2, vec![Post { no: 2, ..Default::default() }]));
     app.tab.thread.as_mut().unwrap().layout = layout();

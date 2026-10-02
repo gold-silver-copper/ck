@@ -76,7 +76,7 @@ impl Makaba {
             spoiler: false,
             width: as_u64(&f["width"]).map(|n| n as u32),
             height: as_u64(&f["height"]).map(|n| n as u32),
-            size: as_u64(&f["size"]).map(|kb| kb * 1024),
+            size: as_u64(&f["size"]).map(|kb| kb.saturating_mul(1024)),
             md5: as_str(&f["md5"]).and_then(|h| hex_to_base64(&h)),
         })
     }

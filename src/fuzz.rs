@@ -13,10 +13,11 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use ratatui::text::Line;
-use serde_json::json;
+use serde_json::{Value, json};
 
 use crate::http::{self, Cache, Limiter, MIN_REFETCH, Priority, Raw};
 use crate::markup::{self, Flavor};
+use crate::config::{SiteConfig, SiteKind};
 use crate::route;
 
 /// splitmix64: small, fast, and good enough to drive a fuzzer.
@@ -353,4 +354,214 @@ fn fuzz_cache() {
 #[ignore]
 fn fuzz_cache_long() {
     run("fuzz_cache", true, 0, 50_000, cache_once);
+}
+
+// ----- sites answering badly: real fixtures, mangled, through the real backends -----
+
+/// The real responses each engine's answers are made from.
+fn fixtures_for(kind: SiteKind) -> &'static [&'static str] {
+    match kind {
+        SiteKind::Fourchan | SiteKind::Vichan => &[
+            "4chan_boards.json",
+            "8kun_boards.json",
+            "4chan_catalog.json",
+            "8kun_catalog.json",
+            "vichan_catalog.json",
+            "wizchan_catalog.json",
+            "leftypol_catalog.json",
+            "leftypol_overboard.json",
+            "4chan_thread.json",
+            "vichan_thread.json",
+            "leftypol_thread.json",
+            "4chan_spoiler_post.json",
+        ],
+        SiteKind::Lynxchan => &[
+            "lynxchan_boards.json",
+            "lynxchan_boards_wrapped.json",
+            "lynxchan_catalog.json",
+            "kohlchan_catalog.json",
+            "lynxchan_overboard.json",
+            "kohlchan_overboard.json",
+            "lynxchan_thread.json",
+            "kohlchan_thread.json",
+        ],
+        SiteKind::Foolfuuka => &[
+            "foolfuuka_archives.json",
+            "foolfuuka_index.json",
+            "foolfuuka_search.json",
+            "foolfuuka_thread.json",
+            "foolfuuka_post.json",
+        ],
+        SiteKind::Jschan => &["jschan_boards.json", "jschan_catalog.json", "jschan_overboard.json", "jschan_thread.json"],
+        SiteKind::Makaba => &["makaba_boards.json", "makaba_catalog.json", "makaba_thread.json", "makaba_post.json"],
+    }
+}
+
+/// Every engine but 4chan's (its hosts are fixed; vichan speaks the same JSON).
+pub const ENGINES: [SiteKind; 5] = [SiteKind::Vichan, SiteKind::Lynxchan, SiteKind::Foolfuuka, SiteKind::Jschan, SiteKind::Makaba];
+
+static FIXTURES: std::sync::LazyLock<HashMap<&'static str, Value>> = std::sync::LazyLock::new(|| {
+    ENGINES.iter().flat_map(|&k| fixtures_for(k)).map(|&name| (name, crate::backend::fixture(name))).collect()
+});
+
+/// Something odd in place of a JSON value.
+fn odd_value(rng: &mut Rng) -> Value {
+    match rng.below(14) {
+        0 => Value::Null,
+        1 => json!(true),
+        2 => json!(0),
+        3 => json!(-1),
+        4 => json!(u64::MAX),
+        5 => json!(i64::MIN),
+        6 => json!(1.5e300),
+        7 => json!(""),
+        8 => json!("x".repeat(rng.below(20_000))),
+        9 => json!(html(rng, 8)),
+        10 => json!("123"),
+        11 => json!([]),
+        12 => json!({}),
+        _ => (0..rng.below(300)).fold(json!(1), |v, _| json!([v])),
+    }
+}
+
+/// Change a few things somewhere in `v`: values swapped for odd ones, keys and items dropped,
+/// duplicated or reordered.
+pub fn mutate(rng: &mut Rng, v: &mut Value) {
+    // Somewhere down the tree, most of the time.
+    let descend = rng.chance(75);
+    match v {
+        Value::Object(m) if descend && !m.is_empty() => {
+            let k = m.keys().nth(rng.below(m.len())).cloned().unwrap_or_default();
+            if let Some(child) = m.get_mut(&k) {
+                return mutate(rng, child);
+            }
+        }
+        Value::Array(a) if descend && !a.is_empty() => {
+            let i = rng.below(a.len());
+            if let Some(child) = a.get_mut(i) {
+                return mutate(rng, child);
+            }
+        }
+        _ => {}
+    }
+    match v {
+        Value::Object(m) if rng.chance(50) && !m.is_empty() => {
+            let k = m.keys().nth(rng.below(m.len())).cloned().unwrap_or_default();
+            if rng.chance(50) {
+                m.remove(&k);
+            } else {
+                m.insert(k, odd_value(rng));
+            }
+        }
+        Value::Array(a) if rng.chance(50) && !a.is_empty() => match rng.below(4) {
+            0 => {
+                a.remove(rng.below(a.len()));
+            }
+            1 => {
+                let i = rng.below(a.len());
+                let dup = a[i].clone();
+                a.insert(i, dup);
+            }
+            2 => a.reverse(),
+            _ => a.truncate(rng.below(a.len())),
+        },
+        other => *other = odd_value(rng),
+    }
+}
+
+/// A fake site of `kind`: what its API answers (badly, `percent` of the time).
+pub fn fake_site(kind: SiteKind, seed: u64, percent: u64) -> http::TestHost {
+    let rng = Mutex::new(Rng::new(seed));
+    std::sync::Arc::new(move |url: &str| {
+        let mut rng = http::lock(&rng);
+        let names = fixtures_for(kind);
+        let wanted: Vec<&&str> = names
+            .iter()
+            .filter(|n| {
+                let want = |k: &str| n.contains(k);
+                if url.contains("boards") || url.contains("archives") {
+                    want("boards") || want("archives")
+                } else if url.contains("search") {
+                    want("search")
+                } else if url.contains("/post/") || url.contains("chan/post") {
+                    want("post")
+                } else if url.contains("catalog") || url.contains("index") || url.ends_with("/1.json") {
+                    want("catalog") || want("overboard") || want("index")
+                } else {
+                    want("thread")
+                }
+            })
+            .collect();
+        let name = if wanted.is_empty() || rng.chance(5) { *rng.pick(names) } else { **rng.pick(&wanted) };
+        let ok = |body: String| Raw { status: 200, last_modified: None, body };
+        let mut v = FIXTURES.get(name).cloned().unwrap_or_default();
+        if !rng.chance(percent) {
+            return ok(v.to_string());
+        }
+        match rng.below(100) {
+            0..6 => Raw { status: 404, last_modified: None, body: String::new() },
+            6..9 => Raw { status: 429, last_modified: None, body: String::new() },
+            9..12 => Raw { status: 503, last_modified: None, body: String::new() },
+            12..14 => Raw { status: 304, last_modified: None, body: String::new() },
+            14..17 => ok(String::new()),
+            17..20 => ok("<html><body>Cloudflare</body></html>".into()),
+            20..25 => {
+                let s = v.to_string();
+                let cut = rng.below(s.len());
+                ok(s.chars().take(cut).collect())
+            }
+            _ => {
+                for _ in 0..1 + rng.below(6) {
+                    mutate(&mut rng, &mut v);
+                }
+                ok(v.to_string())
+            }
+        }
+    })
+}
+
+/// A real backend of `kind`, talking to a fake site at `host`.
+pub fn backend_at(kind: SiteKind, host: &str) -> std::sync::Arc<dyn crate::backend::Backend> {
+    let kind = format!("{kind:?}").to_lowercase();
+    let cfg: SiteConfig = toml::from_str(&format!("name = \"{host}\"\nkind = \"{kind}\"\nurl = \"https://{host}\"")).unwrap();
+    crate::backend::build(&cfg)
+}
+
+fn backends_once(seed: u64) {
+    let mut rng = Rng::new(seed);
+    for kind in ENGINES {
+        let host = format!("{kind:?}-{seed}.fuzz.invalid").to_lowercase();
+        http::serve_test_host(&host, Some(fake_site(kind, rng.next(), 70)));
+        let b = backend_at(kind, &host);
+        let look = |posts: &[crate::model::Post]| {
+            for p in posts {
+                let _ = (p.plain_text(), p.search_text());
+            }
+        };
+        let boards = b.boards(&|_| {}).unwrap_or_default();
+        let board = boards.first().map_or("g".to_string(), |b| b.uri.clone());
+        if let Ok(cat) = b.catalog(&board, &|p| look(p)) {
+            look(&cat);
+            let no = cat.first().map_or(1, |p| p.no);
+            if let Ok(posts) = b.thread(&board, no) {
+                look(&posts);
+                let _ = b.find_thread(&board, posts.last().map_or(no, |p| p.no));
+            }
+        }
+        if let Ok(page) = b.search(&board, "a", 1 + rng.below(3) as u32) {
+            look(&page.hits.iter().map(|(_, p)| p.clone()).collect::<Vec<_>>());
+        }
+        http::serve_test_host(&host, None);
+    }
+}
+
+#[test]
+fn fuzz_backends() {
+    run("fuzz_backends", false, 1, 40, backends_once);
+}
+
+#[test]
+#[ignore]
+fn fuzz_backends_long() {
+    run("fuzz_backends", true, 0, 5_000, backends_once);
 }

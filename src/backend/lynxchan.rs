@@ -38,8 +38,8 @@ impl Lynxchan {
                 let mut p = self.post(t, "threadId");
                 let shown = t["posts"].as_array().map_or(0, |a| a.len()) as u64;
                 let shown_files: u64 = items(&t["posts"]).map(|r| r["files"].as_array().map_or(0, |f| f.len()) as u64).sum();
-                p.replies = Some((as_u64(&t["omittedPosts"]).unwrap_or(0) + shown) as u32);
-                p.images = Some((as_u64(&t["omittedFiles"]).unwrap_or(0) + shown_files) as u32);
+                p.replies = Some(as_u64(&t["omittedPosts"]).unwrap_or(0).saturating_add(shown) as u32);
+                p.images = Some(as_u64(&t["omittedFiles"]).unwrap_or(0).saturating_add(shown_files) as u32);
                 p
             })
             .collect()

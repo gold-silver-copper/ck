@@ -1693,7 +1693,7 @@ fn ago(ts: i64, clock: Clock) -> String {
     if ts == 0 {
         return String::new();
     }
-    match (clock.now() - ts).max(0) {
+    match clock.now().saturating_sub(ts).max(0) {
         s if s < 60 => format!("{s}s ago"),
         s if s < 3600 => format!("{}m ago", s / 60),
         s if s < 86400 => format!("{}h ago", s / 3600),

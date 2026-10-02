@@ -84,7 +84,7 @@ impl App {
         self.session_saved.0 = Some(session.clone());
         for (i, place) in session.tabs.iter().take(super::MAX_TABS).enumerate() {
             if i > 0 {
-                self.tabs.push(super::Tab::new(0));
+                self.tabs.push(super::Tab::new(0, self.clock.instant()));
                 self.switch_tab(i);
             }
             self.go_to_place(place);

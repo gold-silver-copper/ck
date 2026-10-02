@@ -55,6 +55,29 @@ pub enum Priority {
     Background,
 }
 
+/// What a test host answers (tests only).
+#[cfg(test)]
+pub type TestHost = std::sync::Arc<dyn Fn(&str) -> Raw + Send + Sync>;
+
+/// In tests, `*.invalid` hosts answer `get_json` from here instead of the network.
+#[cfg(test)]
+static TEST_HOSTS: LazyLock<Mutex<HashMap<String, TestHost>>> = LazyLock::new(Default::default);
+
+/// Serve a `*.invalid` host (tests only); `None` stops serving it.
+#[cfg(test)]
+pub fn serve_test_host(host: &str, answer: Option<TestHost>) {
+    match answer {
+        Some(a) => lock(&TEST_HOSTS).insert(host.to_string(), a),
+        None => lock(&TEST_HOSTS).remove(host),
+    };
+}
+
+/// Whether this thread's requests are at background priority (tests only).
+#[cfg(test)]
+pub fn is_background() -> bool {
+    PRIORITY.get() == Priority::Background
+}
+
 /// Run `f` with its `get_json` calls at background priority.
 pub fn background<T>(f: impl FnOnce() -> T) -> T {
     PRIORITY.set(Priority::Background);
@@ -281,6 +304,11 @@ pub fn cached_get(
 }
 
 fn transport(url: &str, since: Option<&str>) -> Result<Raw> {
+    #[cfg(test)]
+    if host(url).ends_with(".invalid") {
+        let answer = lock(&TEST_HOSTS).get(host(url)).cloned();
+        return answer.map(|a| a(url)).ok_or_else(|| anyhow::anyhow!("{url}: a test host, not fetched"));
+    }
     throttle(url, PRIORITY.get())?;
     let mut req = AGENT.get(url);
     if let Some(s) = since {
