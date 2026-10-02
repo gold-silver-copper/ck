@@ -588,6 +588,14 @@ fn draw_watched(f: &mut Frame, app: &mut App, area: Rect) {
             if app.refreshing.contains(&w.key) {
                 right.push(Span::styled("↻  ", Style::new().fg(t.primary)));
             }
+            if let Some(g) = &w.general {
+                right.push(chip(format!("follows {g}"), t.on_primary_container, t.primary_container));
+                right.push(Span::raw(" "));
+            }
+            if w.at_limit && !w.dead {
+                right.push(chip("bump limit", t.text_dim, t.surface_high));
+                right.push(Span::raw(" "));
+            }
             if w.replies > 0 {
                 let n = w.replies;
                 right.push(chip(format!("{n} repl{} to you", if n == 1 { "y" } else { "ies" }), t.on_primary, t.primary));

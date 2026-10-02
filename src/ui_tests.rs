@@ -22,8 +22,8 @@ fn app(images: bool) -> App {
     let mut store = Store::default();
     let key = |board: &str, no| ThreadKey { site: "4chan".into(), board: board.into(), no };
     store.watched = vec![
-        Watched { key: key("g", 1000), subject: "Snapshot thread".into(), posts: 5, last_seen: 1002, unread: 2, dead: false, mine: Vec::new(), replies: 0 },
-        Watched { key: key("g", 900), subject: "Old thread".into(), posts: 300, last_seen: 1199, unread: 0, dead: true, mine: Vec::new(), replies: 0 },
+        Watched { key: key("g", 1000), subject: "Snapshot thread".into(), posts: 5, last_seen: 1002, unread: 2, dead: false, mine: Vec::new(), replies: 0, general: None, at_limit: false },
+        Watched { key: key("g", 900), subject: "Old thread".into(), posts: 300, last_seen: 1199, unread: 0, dead: true, mine: Vec::new(), replies: 0, general: None, at_limit: false },
         Watched {
             key: ThreadKey { site: "lainchan".into(), board: "λ".into(), no: 42 },
             subject: "Programming Employment".into(),
@@ -33,6 +33,8 @@ fn app(images: bool) -> App {
             dead: false,
             mine: Vec::new(),
             replies: 0,
+            general: None,
+            at_limit: false,
         },
     ];
     store.history = vec![
@@ -538,4 +540,13 @@ fn home_with_favorites() {
     a.show_hidden_sites = true;
     a.site_list.state.select(Some(8));
     insta::assert_snapshot!("home_showing_hidden_sites", snapshot(&mut a));
+}
+
+#[test]
+fn watched_generals() {
+    let mut a = app(false);
+    a.view = View::Watched;
+    a.store.watched[0].general = Some("/lmg/".into());
+    a.store.watched[0].at_limit = true;
+    insta::assert_snapshot!(snapshot(&mut a));
 }

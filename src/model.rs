@@ -76,6 +76,8 @@ pub struct Post {
     pub images: Option<u32>,
     pub sticky: bool,
     pub locked: bool,
+    /// The thread has reached its bump limit (4chan says so on the OP).
+    pub bumplimit: bool,
     /// The board the thread is on, when the site says. Overboards mix threads from many
     /// boards, so it can differ from the board being browsed.
     pub board: Option<String>,

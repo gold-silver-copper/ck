@@ -149,6 +149,7 @@ impl Futaba {
             sticky: as_bool(&v["sticky"]),
             board: own_board,
             locked: as_bool(&v["closed"]) || as_bool(&v["locked"]),
+            bumplimit: as_bool(&v["bumplimit"]),
             ..Default::default()
         }
     }

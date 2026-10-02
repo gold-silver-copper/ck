@@ -51,6 +51,7 @@ pub enum Action {
     PrevTab,
     CloseTab,
     Favorite,
+    Follow,
 }
 
 /// Where a key applies. Global keys work in every view but the image viewer.
@@ -121,6 +122,7 @@ pub const ACTIONS: &[(Action, &str, &str, &[Scope], &str)] = &[
     (Action::Mine, "mine", "m", &[Scope::Thread], "mark the post as yours (notified of replies)"),
     (Action::NewTab, "new_tab", "T", &[Scope::Catalog, Scope::Thread, Scope::Saved], "open the thread (or link) in a new tab"),
     (Action::Favorite, "favorite", "*", &[Scope::Lists, Scope::Catalog], "favorite board: on / off"),
+    (Action::Follow, "follow", "F", &[Scope::Catalog, Scope::Thread, Scope::Saved], "follow as a general: watch its next thread"),
     (Action::Remove, "remove", "x", &[Scope::Saved, Scope::Lists], "remove the entry (home: a favorite)"),
     (Action::Copy, "copy", "y", &[Scope::Catalog, Scope::Thread, Scope::Saved, Scope::Viewer], "copy the text (viewer: file URL)"),
     (Action::CopyLink, "copy_link", "Y", &[Scope::Catalog, Scope::Thread, Scope::Saved, Scope::Viewer], "copy the link"),

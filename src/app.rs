@@ -24,6 +24,7 @@ use crate::store::{Store, ThreadKey};
 use crate::theme::{self, ThemeDef, ThemeSetting};
 
 mod gallery;
+mod generals;
 mod goto;
 mod home;
 mod links;
@@ -491,6 +492,8 @@ enum Msg {
     Refreshed(ThreadKey, Result<Vec<Post>>),
     /// A page of archive search results.
     Search(u64, u32, Result<crate::backend::SearchPage>),
+    /// The catalog of a followed general's board, to find its next thread.
+    GeneralCatalog(ThreadKey, Result<Vec<Post>>),
     /// The thread a quoted post is in: (board, post, thread).
     Found(u64, Board, u64, Result<Option<u64>>),
     Download(DlEvent),
@@ -556,6 +559,9 @@ pub struct App {
     /// The newest post seen in each watched thread by a refresh this session; notifications
     /// are for posts past it.
     notified_max: HashMap<ThreadKey, u64>,
+    /// Followed generals: when each one's board was last searched, and searches running.
+    generals_checked: HashMap<ThreadKey, Instant>,
+    generals_searching: HashSet<ThreadKey>,
     /// Notifications waiting to be sent together, and since when.
     notes: Vec<Note>,
     notes_since: Option<Instant>,
@@ -716,6 +722,8 @@ impl App {
             watched_checked: HashMap::new(),
             refreshing: HashSet::new(),
             notified_max: HashMap::new(),
+            generals_checked: HashMap::new(),
+            generals_searching: HashSet::new(),
             notes: Vec::new(),
             notes_since: None,
             notify_mode: cfg.notify,
@@ -1013,6 +1021,7 @@ impl App {
                 Msg::Input(Event::Paste(text)) => self.paste(&text),
                 Msg::Input(_) => {}
                 Msg::Refreshed(key, res) => self.refreshed(key, res),
+                Msg::GeneralCatalog(key, res) => self.general_catalog(key, res),
                 Msg::Download(ev) => self.download_event(ev),
                 Msg::Found(id, board, post, res) if id == self.req => {
                     self.loading = None;
@@ -1270,6 +1279,9 @@ impl App {
         let subject = thread_subject(&tv.posts);
         self.store.visit(&key, &subject, tv.posts.len(), max_no, self.clock.now());
         self.store.opened(&key.site, &key.board, key.no, tv.posts.len().saturating_sub(1) as u32, self.clock.now());
+        if let Some(w) = self.store.watched_mut(&key) {
+            generals::note_limit(w, &tv.posts);
+        }
         self.save();
         self.thread = Some(tv);
         self.remark_thread();
@@ -1405,6 +1417,7 @@ impl App {
             self.watched_checked.insert(key.clone(), Instant::now());
             self.refresh_in_background(key);
         }
+        self.check_generals(Instant::now());
     }
 
     fn refresh_in_background(&mut self, key: ThreadKey) {
@@ -1453,6 +1466,7 @@ impl App {
                 };
                 w.posts = posts.len();
                 w.dead = false;
+                generals::note_limit(w, &posts);
                 if w.subject.is_empty() {
                     w.subject = subject;
                 }
@@ -1970,6 +1984,7 @@ impl App {
             Action::ImageSearch => self.open_image_search(),
             Action::NewTab => self.new_tab(),
             Action::Favorite => self.toggle_favorite(),
+            Action::Follow => self.toggle_follow(),
             Action::NextTab => self.cycle_tab(true),
             Action::PrevTab => self.cycle_tab(false),
             Action::CloseTab => self.close_tab(),
@@ -2743,6 +2758,8 @@ mod tests {
             dead: false,
             mine: Vec::new(),
             replies: 0,
+            general: None,
+            at_limit: false,
         });
         assert_eq!(app.next_wake(now), Duration::ZERO);
         // But while the maximum number of refreshes is running, due ones don't spin the loop.
@@ -3504,6 +3521,54 @@ mod tests {
         app.default_layout = CatalogLayout::Grid;
         app.goto_str("a/xy");
         assert_eq!(app.layout(), CatalogLayout::Grid);
+    }
+
+    #[test]
+    fn following_a_general() {
+        let mut app = local_app();
+        app.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
+        let op = |no, subject: &str| Post { no, subject: Some(subject.into()), replies: Some(10), ..Default::default() };
+        app.set_thread(vec![op(10, "/lmg/ - Local Models General #5"), Post { no: 11, ..Default::default() }]);
+        app.view = View::Thread;
+        // F follows it (watching it too).
+        app.act(Action::Follow);
+        let key = |no| ThreadKey { site: "a".into(), board: "x".into(), no };
+        assert_eq!(app.store.watched(&key(10)).unwrap().general.as_deref(), Some("/lmg/"));
+        // Alive and not full: nothing to look for.
+        let now = Instant::now();
+        app.check_generals(now);
+        assert!(app.generals_searching.is_empty());
+        // At the bump limit (a refresh says so): its board is searched, once.
+        let mut full = op(10, "/lmg/ - Local Models General #5");
+        full.bumplimit = true;
+        app.view = View::Sites;
+        app.refreshed(key(10), Ok(vec![full, Post { no: 11, ..Default::default() }]));
+        assert!(app.store.watched(&key(10)).unwrap().at_limit);
+        app.check_generals(now);
+        app.check_generals(now);
+        assert_eq!(app.generals_searching.len(), 1);
+        // No new thread yet: tried again only after a while.
+        app.general_catalog(key(10), Ok(vec![op(10, "/lmg/ - Local Models General #5"), op(12, "/ldg/ - Local Diffusion")]));
+        app.check_generals(now + Duration::from_secs(60));
+        assert!(app.generals_searching.is_empty());
+        // The next one appears: it's watched and followed; the old one (still going) is kept.
+        app.check_generals(now + Duration::from_secs(601));
+        app.general_catalog(key(10), Ok(vec![op(9, "/lmg/ old"), op(13, "/lmg/ - Local Models General #6"), op(14, "/ldg/")]));
+        assert_eq!(app.store.watched(&key(13)).unwrap().general.as_deref(), Some("/lmg/"));
+        assert_eq!(app.store.watched(&key(10)).unwrap().general, None);
+        assert!(app.notified.last().unwrap().starts_with("New /lmg/ thread on /x/"));
+        // When the followed thread dies, it's replaced in Watched.
+        app.store.watched_mut(&key(13)).unwrap().dead = true;
+        app.check_generals(now + Duration::from_secs(1200));
+        app.general_catalog(key(13), Ok(vec![op(20, "/lmg/ - Local Models General #7")]));
+        assert!(app.store.watched(&key(13)).is_none());
+        assert!(app.store.watched(&key(20)).is_some());
+        // F again stops following.
+        app.view = View::Watched;
+        let i = app.store.watched.iter().position(|w| w.key == key(20)).unwrap();
+        app.watched_list.state.select(Some(i));
+        app.act(Action::Follow);
+        assert_eq!(app.store.watched(&key(20)).unwrap().general, None);
     }
 
     #[test]

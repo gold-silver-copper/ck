@@ -90,6 +90,7 @@ the action name is in brackets. The `?` help lists the same, with your keys.
 |------|--------|
 | `x`  | remove the entry [`remove`] |
 | `T`  | open the thread in a new tab [`new_tab`] |
+| `F`  | follow / stop following as a general [`follow`] |
 | `y` / `Y` | copy the subject and link / the link [`copy`, `copy_link`] |
 
 **Image viewer**
@@ -109,6 +110,7 @@ the action name is in brackets. The `?` help lists the same, with your keys.
 |------|--------|
 | `v`  | image viewer for the OP's files [`view`] |
 | `w` / `T` | watch / unwatch the thread; open it in a new tab [`watch`, `new_tab`] |
+| `F`  | follow the thread as a general [`follow`] |
 | `s`  | cycle the sort: bump order, most replies, newest, oldest (remembered per board) [`sort`] |
 | `c`  | cycle the layout: cards, compact (a line per thread), grid (thumbnails in columns), remembered per board [`compact`] |
 | `O`  | the OP's links and files [`links`] |
@@ -134,6 +136,7 @@ the action name is in brackets. The `?` help lists the same, with your keys.
 | `w` / `T` | watch / unwatch; follow the quote `enter` would follow in a new tab [`watch`, `new_tab`] |
 | `H` / `Z` | hide / unhide the post; show hidden posts [`hide`, `show_hidden`] |
 | `m`  | mark the post as yours, to be told about replies [`mine`] |
+| `F`  | follow the thread as a general: when it dies or fills up, the next one is watched [`follow`] |
 | `a`  | after a 404: open the thread in the site's archive [`archive`] |
 | `y` / `Y` | copy the post's text / its link [`copy`, `copy_link`] |
 
@@ -246,6 +249,17 @@ The open thread refreshes in the background every 10 seconds and watched threads
 60 seconds (change with `refresh_thread_secs` / `refresh_watched_secs`; those are also the
 minimums). Posts that arrived since your last visit are marked "new"; `U` jumps to the
 first one.
+
+### Following a general
+
+Generals are threads that start over when they fill up (/lmg/, /hsg/, …). `F` on one (in
+its thread, the catalog, or Watched) follows it: it's watched, and when it 404s or 4chan
+says it hit its bump limit, ck looks for the next thread whose subject has the same
+`/tag/` (or, without a tag, the same subject minus its number) in that board's catalog.
+The newest match is watched and followed instead, and you're notified. A thread that died
+is dropped from Watched; one that's only full stays until it dies. The search is one
+background catalog request, repeated at most every 10 minutes while nothing is found.
+Watched shows "follows /lmg/" on followed threads; `F` again stops following.
 
 ### What's new in a catalog
 

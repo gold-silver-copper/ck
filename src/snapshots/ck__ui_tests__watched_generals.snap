@@ -1,0 +1,34 @@
+---
+source: src/ui_tests.rs
+expression: snapshot(&mut a)
+---
+ ck  Watched                                                                    3 threads  ·  2 new
+
+    4chan      /g/       Snapshot thread             follows /lmg/   bump limit   2 new   5 posts
+    4chan      /g/       Old thread                                  archived/deleted   300 posts
+    lainchan   /λ/       Programming Employment                                          92 posts
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ enter open   x remove   / filter   o browser   , settings   ? help

@@ -39,6 +39,13 @@ pub struct Watched {
     /// Unread replies to your posts.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub replies: usize,
+    /// Followed as a general: when the thread dies or hits the bump limit, the next thread
+    /// whose subject matches this is watched instead.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub general: Option<String>,
+    /// The thread has reached its bump limit.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub at_limit: bool,
 }
 
 fn is_zero(n: &usize) -> bool {
@@ -290,7 +297,18 @@ impl Store {
             self.watched.remove(i);
             return false;
         }
-        self.watched.push(Watched { key, subject, posts, last_seen, unread: 0, dead: false, mine: Vec::new(), replies: 0 });
+        self.watched.push(Watched {
+            key,
+            subject,
+            posts,
+            last_seen,
+            unread: 0,
+            dead: false,
+            mine: Vec::new(),
+            replies: 0,
+            general: None,
+            at_limit: false,
+        });
         true
     }
 
