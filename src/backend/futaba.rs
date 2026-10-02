@@ -149,6 +149,16 @@ impl Futaba {
             ..Default::default()
         }
     }
+
+    /// Thread OPs from `catalog.json`: an array of pages with `threads`.
+    pub fn parse_catalog(&self, board: &str, v: &Value) -> Vec<Post> {
+        items(v).flat_map(|p| items(&p["threads"])).map(|t| self.post(board, t)).collect()
+    }
+
+    /// Posts from a thread's JSON: `{ "posts": [...] }`, OP first.
+    pub fn parse_thread(&self, board: &str, v: &Value) -> Vec<Post> {
+        items(&v["posts"]).map(|p| self.post(board, p)).collect()
+    }
 }
 
 /// Boards from `boards.json`: `{ "boards": [...] }` (4chan), or a bare list (8kun).
@@ -162,18 +172,6 @@ pub fn parse_boards(v: &Value) -> Vec<Board> {
         })
     })
     .collect()
-}
-
-impl Futaba {
-    /// Thread OPs from `catalog.json`: an array of pages with `threads`.
-    pub fn parse_catalog(&self, board: &str, v: &Value) -> Vec<Post> {
-        items(v).flat_map(|p| items(&p["threads"])).map(|t| self.post(board, t)).collect()
-    }
-
-    /// Posts from a thread's JSON: `{ "posts": [...] }`, OP first.
-    pub fn parse_thread(&self, board: &str, v: &Value) -> Vec<Post> {
-        items(&v["posts"]).map(|p| self.post(board, p)).collect()
-    }
 }
 
 impl Backend for Futaba {

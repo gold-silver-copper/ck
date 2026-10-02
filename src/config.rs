@@ -1,7 +1,6 @@
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
-
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use toml_edit::{DocumentMut, Item, Table, value};
@@ -169,13 +168,6 @@ impl CatalogLayout {
     }
 }
 
-impl Config {
-    /// The layout to start with: `catalog_layout`, or ck 0.2's `compact_catalog`.
-    pub fn layout(&self) -> CatalogLayout {
-        self.catalog_layout.unwrap_or(if self.compact_catalog { CatalogLayout::Compact } else { CatalogLayout::Cards })
-    }
-}
-
 #[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum ImagesMode {
@@ -332,6 +324,11 @@ fn themes_table(doc: &mut DocumentMut) -> Option<&mut Table> {
 }
 
 impl Config {
+    /// The layout to start with: `catalog_layout`, or ck 0.2's `compact_catalog`.
+    pub fn layout(&self) -> CatalogLayout {
+        self.catalog_layout.unwrap_or(if self.compact_catalog { CatalogLayout::Compact } else { CatalogLayout::Cards })
+    }
+
     pub fn path() -> Option<PathBuf> {
         let base = std::env::var_os("XDG_CONFIG_HOME")
             .map(PathBuf::from)
@@ -342,8 +339,7 @@ impl Config {
     /// Load the user config if it exists, otherwise the built-in defaults.
     pub fn load() -> Result<Self> {
         if let Some(path) = Self::path().filter(|p| p.exists()) {
-            let text = std::fs::read_to_string(&path)
-                .with_context(|| format!("reading {}", path.display()))?;
+            let text = std::fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
             return toml::from_str(&text).with_context(|| format!("parsing {}", path.display()));
         }
         toml::from_str(DEFAULT_CONFIG).context("parsing the built-in config")
@@ -352,15 +348,16 @@ impl Config {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use crate::keys::Binding;
+    use crate::theme::ThemeSetting;
+
     #[test]
     fn default_config_parses() {
-        let c: super::Config = toml::from_str(super::DEFAULT_CONFIG).unwrap();
+        let c: Config = toml::from_str(DEFAULT_CONFIG).unwrap();
         assert!(!c.sites.is_empty());
         assert!(!c.compact_catalog && c.keys.is_empty());
     }
-
-    use super::{CatalogLayout, Config, edit_at, set_key, set_theme, set_theme_color};
-    use crate::keys::Binding;
 
     #[test]
     fn key_edits() {
@@ -380,8 +377,6 @@ mod tests {
         assert_eq!(c.keys["watch"], Binding::Many(vec!["W".into(), "alt-w".into()]));
         assert!(crate::keys::KeyMap::new(&c.keys).is_ok());
     }
-    use crate::theme::ThemeSetting;
-
     #[test]
     fn edits_keep_comments_and_tables() {
         let dir = tempfile::tempdir().unwrap();

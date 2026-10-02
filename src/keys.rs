@@ -398,12 +398,8 @@ mod tests {
         KeyMap::new(&pairs.iter().map(|(a, b)| (a.to_string(), Binding::One(b.to_string()))).collect())
     }
 
-    fn ev(code: KeyCode, mods: KeyModifiers) -> KeyEvent {
-        KeyEvent::new(code, mods)
-    }
-
     fn ch(c: char) -> KeyEvent {
-        ev(KeyCode::Char(c), KeyModifiers::NONE)
+        KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE)
     }
 
     #[test]
@@ -416,7 +412,7 @@ mod tests {
         // Global keys don't apply in the image viewer, which has its own.
         assert_eq!(m.action(Scope::Viewer, &ch('q')), None);
         // Shift is part of the character.
-        assert_eq!(m.action(Scope::Thread, &ev(KeyCode::Char('U'), KeyModifiers::SHIFT)), Some(Action::Unread));
+        assert_eq!(m.action(Scope::Thread, &KeyEvent::new(KeyCode::Char('U'), KeyModifiers::SHIFT)), Some(Action::Unread));
     }
 
     #[test]
@@ -444,8 +440,8 @@ mod tests {
         assert_eq!(Key::parse("Tab").unwrap(), Key::code(KeyCode::Tab));
         assert!(Key::parse("f13").is_err() && Key::parse("").is_err() && Key::parse("ww").is_err());
         // Terminal events map onto the same keys.
-        assert_eq!(Key::from_event(&ev(KeyCode::Tab, KeyModifiers::SHIFT)), Key::parse("shift-tab").unwrap());
-        assert_eq!(Key::from_event(&ev(KeyCode::Char('w'), KeyModifiers::CONTROL)), Key::parse("ctrl-w").unwrap());
+        assert_eq!(Key::from_event(&KeyEvent::new(KeyCode::Tab, KeyModifiers::SHIFT)), Key::parse("shift-tab").unwrap());
+        assert_eq!(Key::from_event(&KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL)), Key::parse("ctrl-w").unwrap());
     }
 
     #[test]
@@ -453,7 +449,7 @@ mod tests {
         let overrides = HashMap::from([("watch".to_string(), Binding::Many(vec!["W".into(), "alt-w".into()]))]);
         let m = KeyMap::new(&overrides).unwrap();
         assert_eq!(m.action(Scope::Catalog, &ch('W')), Some(Action::Watch));
-        assert_eq!(m.action(Scope::Catalog, &ev(KeyCode::Char('w'), KeyModifiers::ALT)), Some(Action::Watch));
+        assert_eq!(m.action(Scope::Catalog, &KeyEvent::new(KeyCode::Char('w'), KeyModifiers::ALT)), Some(Action::Watch));
         assert_eq!(m.label(Action::Watch), "W, alt-w");
         assert_eq!(m.binding(Action::Watch), Some(Binding::Many(vec!["W".into(), "alt-w".into()])));
         assert_eq!(m.binding(Action::Sort), None);

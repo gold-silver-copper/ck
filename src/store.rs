@@ -352,7 +352,7 @@ fn load_file<T: DeserializeOwned + Default>(path: &Path, warnings: &mut Vec<Stri
     }
 }
 
-/// Write to a temp file in the same directory, then rename over the target.
+/// A content hash, to tell whether a file changed.
 fn hash(bytes: &[u8]) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut h = std::collections::hash_map::DefaultHasher::new();
