@@ -74,6 +74,16 @@ fn bench_thread() {
         draw(&mut t, &mut a)
     });
     time("search keystroke", 30, || a.thread.as_mut().unwrap().set_search("the".into()));
+    a.thread.as_mut().unwrap().set_search(String::new());
+    // `e` on the most-replied post, then the frame that lays the thread out again.
+    let th = a.thread.as_mut().unwrap();
+    let most = (0..th.posts.len()).max_by_key(|&i| th.backlinks[i].len()).unwrap();
+    eprintln!("(expanding {} replies)", th.backlinks[most].len());
+    th.selected = most;
+    time("expand / collapse replies inline, then a frame", 30, || {
+        a.on_key(ratatui::crossterm::event::KeyEvent::from(ratatui::crossterm::event::KeyCode::Char('e')));
+        draw(&mut t, &mut a)
+    });
 }
 
 #[test]

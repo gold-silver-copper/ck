@@ -113,6 +113,19 @@ impl Picker {
     }
 }
 
+/// One post as shown in a thread: at the top level, or inline under a post it replies to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Entry {
+    pub post: usize,
+    /// 0 at the top level; each `e` adds a level.
+    pub depth: u8,
+    /// Post numbers from the top-level post down to this one.
+    pub path: Vec<u64>,
+}
+
+/// How deep replies can be expanded inline.
+const MAX_DEPTH: u8 = 4;
+
 pub struct ThreadView {
     pub board: String,
     pub no: u64,
@@ -136,6 +149,12 @@ pub struct ThreadView {
     /// Posts whose spoilers are shown, or all of them.
     pub revealed: HashSet<usize>,
     pub reveal_all: bool,
+    /// The posts as shown, with replies expanded inline (`e`) where asked.
+    pub entries: Vec<Entry>,
+    /// Entries (by path) whose replies are expanded.
+    pub expanded: HashSet<Vec<u64>>,
+    /// The selected entry; `selected` is its post.
+    cursor: usize,
     /// What filters and hiding say about each post, and whether hidden ones are shown.
     pub marks: Vec<Mark>,
     pub show_hidden: bool,
@@ -146,9 +165,9 @@ pub struct ThreadView {
 pub struct ThreadLayout {
     pub width: u16,
     pub lines: Vec<Line<'static>>,
-    /// `starts[i]` is the first line of post `i`; has one extra entry for the end.
+    /// `starts[i]` is the first line of entry `i`; has one extra item for the end.
     pub starts: Vec<usize>,
-    /// `(line, post)` for each post drawn with a thumbnail in the left column.
+    /// `(line, entry)` for each entry drawn with a thumbnail in the left column.
     pub thumbs: Vec<(usize, usize)>,
 }
 
@@ -165,7 +184,11 @@ impl ThreadView {
                 }
             }
         }
+        let entries = (0..posts.len()).map(|i| Entry { post: i, depth: 0, path: vec![posts[i].no] }).collect();
         Self {
+            entries,
+            expanded: HashSet::new(),
+            cursor: 0,
             board,
             no,
             posts,
@@ -241,22 +264,96 @@ impl ThreadView {
         self.new_after > 0 && self.posts[i].no > self.new_after
     }
 
-    /// The post at the top of the view and how many of its lines are scrolled past.
+    /// The selected entry: the cursor if it's on the selected post, else the post's
+    /// top-level entry (code that sets `selected` directly lands there).
+    pub fn entry(&self) -> usize {
+        match self.entries.get(self.cursor) {
+            Some(e) if e.post == self.selected => self.cursor,
+            _ => self.entries.iter().position(|e| e.depth == 0 && e.post == self.selected).unwrap_or(0),
+        }
+    }
+
+    /// Select an entry (without scrolling).
+    pub fn set_cursor(&mut self, e: usize) {
+        if let Some(entry) = self.entries.get(e) {
+            self.cursor = e;
+            self.selected = entry.post;
+        }
+    }
+
+    /// Rebuild `entries` from `expanded`, keeping the cursor on the same path if it's still there.
+    fn rebuild_entries(&mut self) {
+        let path = self.entries.get(self.entry()).map(|e| e.path.clone());
+        let mut out = Vec::with_capacity(self.posts.len());
+        for i in 0..self.posts.len() {
+            let path = vec![self.posts[i].no];
+            out.push(Entry { post: i, depth: 0, path: path.clone() });
+            self.push_replies(&mut out, i, path, 1);
+        }
+        self.entries = out;
+        self.layout = None;
+        match path.and_then(|p| self.entries.iter().position(|e| e.path == p)) {
+            Some(e) => self.set_cursor(e),
+            None => self.cursor = 0,
+        }
+    }
+
+    fn push_replies(&self, out: &mut Vec<Entry>, post: usize, path: Vec<u64>, depth: u8) {
+        if depth > MAX_DEPTH || !self.expanded.contains(&path) {
+            return;
+        }
+        for no in &self.backlinks[post] {
+            // A post can't contain itself (quote loops).
+            let Some(&j) = self.index.get(no).filter(|_| !path.contains(no)) else { continue };
+            let mut p = path.clone();
+            p.push(*no);
+            out.push(Entry { post: j, depth, path: p.clone() });
+            self.push_replies(out, j, p, depth + 1);
+        }
+    }
+
+    /// `e`: show or hide the selected entry's replies under it. Returns what happened.
+    fn toggle_expanded(&mut self) -> Result<bool, &'static str> {
+        let e = &self.entries[self.entry()];
+        if self.backlinks[e.post].is_empty() {
+            return Err("No replies to this post");
+        }
+        if e.depth >= MAX_DEPTH {
+            return Err("Replies are expanded as deep as they go here");
+        }
+        let path = e.path.clone();
+        let open = !self.expanded.remove(&path);
+        if open {
+            self.expanded.insert(path);
+        }
+        self.rebuild_entries();
+        Ok(open)
+    }
+
+    /// The entry at the top of the view and how many of its lines are scrolled past.
     fn top_anchor(&self) -> Option<(usize, usize)> {
         let l = self.layout.as_ref()?;
         let top = l.starts.partition_point(|&s| s <= self.scroll).saturating_sub(1);
         Some((top, self.scroll - l.starts[top]))
     }
 
+    /// Select a post's top-level entry.
     fn select(&mut self, i: usize) {
-        self.selected = i.min(self.posts.len().saturating_sub(1));
+        let i = i.min(self.posts.len().saturating_sub(1));
+        let e = self.entries.iter().position(|e| e.depth == 0 && e.post == i).unwrap_or(0);
+        self.select_entry(e);
+    }
+
+    fn select_entry(&mut self, e: usize) {
+        self.set_cursor(e.min(self.entries.len().saturating_sub(1)));
         self.scroll_to_selected();
     }
 
-    /// Adjust scroll so the selected post is visible (its top, if it's taller than the view).
+    /// Adjust scroll so the selected entry is visible (its top, if it's taller than the view).
     pub fn scroll_to_selected(&mut self) {
+        let e = self.entry();
         let Some(l) = &self.layout else { return };
-        let (start, end) = (l.starts[self.selected], l.starts[self.selected + 1]);
+        let (start, end) = (l.starts[e], l.starts[e + 1]);
         if start < self.scroll {
             self.scroll = start;
         } else if end > self.scroll + self.viewport {
@@ -264,18 +361,19 @@ impl ThreadView {
         }
     }
 
-    /// Scroll by lines, then select the post at the top of the view.
+    /// Scroll by lines, then select the entry at the top of the view.
     fn scroll_lines(&mut self, delta: isize) {
         let Some(l) = &self.layout else { return };
         let max = l.lines.len().saturating_sub(self.viewport);
         self.scroll = (self.scroll as isize + delta).clamp(0, max as isize) as usize;
         let top = l.starts.partition_point(|&s| s <= self.scroll).saturating_sub(1);
-        // Prefer a post whose header is on screen.
-        self.selected = if l.starts[top] < self.scroll && top + 1 < self.posts.len() && l.starts[top + 1] < self.scroll + self.viewport {
+        // Prefer an entry whose header is on screen.
+        let e = if l.starts[top] < self.scroll && top + 1 < self.entries.len() && l.starts[top + 1] < self.scroll + self.viewport {
             top + 1
         } else {
             top
         };
+        self.set_cursor(e);
     }
 
     fn jump_to(&mut self, no: u64) -> bool {
@@ -999,7 +1097,15 @@ impl App {
             // On refresh, keep the selected post and what's at the top of the view.
             Some(old) => {
                 tv.selected = tv.index.get(&old.posts[old.selected].no).copied().unwrap_or(0);
-                tv.anchor = old.top_anchor().and_then(|(i, off)| Some((*tv.index.get(&old.posts[i].no)?, off)));
+                // Expanded replies, the selected entry and the one at the top stay put.
+                tv.expanded = old.expanded.clone();
+                let cursor_path = old.entries.get(old.entry()).map(|e| e.path.clone());
+                tv.rebuild_entries();
+                if let Some(e) = cursor_path.and_then(|p| tv.entries.iter().position(|e| e.path == p)) {
+                    tv.set_cursor(e);
+                }
+                let at = |p: &Vec<u64>| tv.entries.iter().position(|e| e.path == *p);
+                tv.anchor = old.top_anchor().and_then(|(i, off)| Some((at(&old.entries.get(i)?.path)?, off)));
                 tv.scroll = old.scroll;
                 tv.viewport = old.viewport;
                 tv.jumps = old.jumps;
@@ -1357,7 +1463,7 @@ impl App {
         self.last_click = if double { None } else { Some((now, target)) };
         if self.view == View::Thread {
             if let Some(t) = &mut self.thread {
-                t.selected = target;
+                t.set_cursor(target);
             }
             if double {
                 self.on_key(KeyEvent::from(KeyCode::Enter));
@@ -1613,6 +1719,14 @@ impl App {
             Action::Links => self.open_links(),
             Action::Hide => self.toggle_hidden(),
             Action::Mine => self.toggle_mine(),
+            Action::Expand => {
+                if let Some(t) = &mut self.thread {
+                    match t.toggle_expanded() {
+                        Ok(_) => {}
+                        Err(msg) => self.status = Some((msg.into(), false)),
+                    }
+                }
+            }
             Action::ShowHidden => self.toggle_show_hidden(),
             Action::Copy => self.copy(false),
             Action::CopyLink => self.copy(true),
@@ -1669,16 +1783,16 @@ impl App {
         let Some(t) = &mut self.thread else { return };
         let half = (t.viewport / 2).max(1) as isize;
         match code {
-            KeyCode::Char('j') | KeyCode::Down => t.select(t.selected + 1),
-            KeyCode::Char('k') | KeyCode::Up => t.select(t.selected.saturating_sub(1)),
+            KeyCode::Char('j') | KeyCode::Down => t.select_entry(t.entry() + 1),
+            KeyCode::Char('k') | KeyCode::Up => t.select_entry(t.entry().saturating_sub(1)),
             KeyCode::Char('J') => t.scroll_lines(1),
             KeyCode::Char('K') => t.scroll_lines(-1),
             KeyCode::Char('d') if ctrl => t.scroll_lines(half),
             KeyCode::Char('u') if ctrl => t.scroll_lines(-half),
             KeyCode::PageDown | KeyCode::Char(' ') => t.scroll_lines(half * 2 - 1),
             KeyCode::PageUp => t.scroll_lines(-(half * 2 - 1)),
-            KeyCode::Char('g') | KeyCode::Home => t.select(0),
-            KeyCode::Char('G') | KeyCode::End => t.select(usize::MAX),
+            KeyCode::Char('g') | KeyCode::Home => t.select_entry(0),
+            KeyCode::Char('G') | KeyCode::End => t.select_entry(usize::MAX),
             KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right => {
                 let quotes = t.posts[t.selected].quotes.clone();
                 if !quotes.into_iter().any(|q| t.jump_to(q)) {
@@ -2644,6 +2758,54 @@ mod tests {
         assert_eq!(app.new_replies(&app.catalog[1]), Some(5));
         // Threads never opened don't count replies.
         assert_eq!(app.new_replies(&app.catalog[2]), None);
+    }
+
+    #[test]
+    fn replies_expand_inline() {
+        // 1 <- 2 <- 3, and 3 also quotes 1; 4 quotes 2; 5 and 6 quote each other.
+        let post = |no, quotes: Vec<u64>| Post { no, quotes, ..Default::default() };
+        let mut t = ThreadView::new("x".into(), 1, vec![post(1, vec![]), post(2, vec![1]), post(3, vec![2, 1]), post(4, vec![2]), post(5, vec![6]), post(6, vec![5])]);
+        let shown = |t: &ThreadView| t.entries.iter().map(|e| (t.posts[e.post].no, e.depth)).collect::<Vec<_>>();
+        assert_eq!(t.toggle_expanded(), Ok(true));
+        assert_eq!(shown(&t)[..4], [(1, 0), (2, 1), (3, 1), (2, 0)]);
+        // Expand 2 inside 1: its replies come one level deeper; the cursor moves through them.
+        t.select_entry(1);
+        assert_eq!((t.selected, t.toggle_expanded()), (1, Ok(true)));
+        assert_eq!(shown(&t)[..6], [(1, 0), (2, 1), (3, 2), (4, 2), (3, 1), (2, 0)]);
+        t.select_entry(2);
+        assert_eq!((t.selected, t.entry()), (2, 2));
+        // A post with no replies says so.
+        assert_eq!(t.toggle_expanded(), Err("No replies to this post"));
+        // Collapsing the top one removes everything under it; the selection stays on it.
+        t.select_entry(0);
+        assert_eq!(t.toggle_expanded(), Ok(false));
+        assert_eq!(shown(&t), [(1, 0), (2, 0), (3, 0), (4, 0), (5, 0), (6, 0)]);
+        assert_eq!(t.entry(), 0);
+        // Quote loops stop: 5 under 6 under 5 isn't shown again.
+        t.select(4);
+        t.toggle_expanded().unwrap();
+        t.select_entry(5);
+        t.toggle_expanded().unwrap();
+        assert_eq!(shown(&t)[4..], [(5, 0), (6, 1), (6, 0)]);
+        // Setting `selected` directly lands on the post's top-level entry.
+        t.selected = 3;
+        assert_eq!(t.entry(), 3);
+    }
+
+    #[test]
+    fn expanded_replies_survive_a_refresh() {
+        let mut app = local_app();
+        app.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
+        let post = |no, quotes: Vec<u64>| Post { no, quotes, ..Default::default() };
+        app.set_thread(vec![post(1, vec![]), post(2, vec![1])]);
+        app.view = View::Thread;
+        app.act(Action::Expand);
+        app.on_key(KeyEvent::from(KeyCode::Down));
+        assert_eq!((app.thread.as_ref().unwrap().entry(), app.thread.as_ref().unwrap().selected), (1, 1));
+        app.set_thread(vec![post(1, vec![]), post(2, vec![1]), post(3, vec![1])]);
+        let t = app.thread.as_ref().unwrap();
+        assert_eq!(t.entries.len(), 5);
+        assert_eq!((t.entry(), t.entries[t.entry()].depth), (1, 1));
     }
 
     #[test]

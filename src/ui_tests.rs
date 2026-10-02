@@ -394,3 +394,15 @@ fn catalog_new_threads_and_replies() {
     a.catalog_list.state.select(Some(1));
     insta::assert_snapshot!(snapshot(&mut a));
 }
+
+#[test]
+fn replies_inline() {
+    let mut a = app(true);
+    a.view = View::Thread;
+    a.thread = Some(thread());
+    a.on_key(ratatui::crossterm::event::KeyEvent::from(ratatui::crossterm::event::KeyCode::Char('e')));
+    a.on_key(ratatui::crossterm::event::KeyEvent::from(ratatui::crossterm::event::KeyCode::Char('j')));
+    a.on_key(ratatui::crossterm::event::KeyEvent::from(ratatui::crossterm::event::KeyCode::Char('e')));
+    insta::assert_snapshot!(snapshot(&mut a));
+    insta::assert_snapshot!("replies_inline_backgrounds", bg_map(&mut a));
+}

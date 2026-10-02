@@ -34,6 +34,8 @@ const MIN_THUMB_WIDTH: u16 = 60;
 /// which holds the selection stripe).
 const MARGIN: u16 = 2;
 const PAD: u16 = 2;
+/// How far in each level of replies shown inline (`e`) sits.
+const INDENT: u16 = 4;
 
 // ----- small helpers -----
 
@@ -769,40 +771,45 @@ fn draw_thread(f: &mut Frame, app: &mut App, area: Rect) {
         t.scroll_to_selected();
     }
     let l = t.layout.as_ref().unwrap();
-    let text_w = area.width.saturating_sub(PAD + 2);
+    let cursor = t.entry();
     for row in 0..area.height {
         let i = t.scroll + row as usize;
         let Some(line) = l.lines.get(i) else { break };
-        let post = l.starts.partition_point(|&s| s <= i) - 1;
-        // Each post's last line is the gap before the next card.
-        if i + 1 == l.starts[post + 1] {
+        let e = l.starts.partition_point(|&s| s <= i) - 1;
+        // Each entry's last line is the gap before the next card.
+        if i + 1 == l.starts[e + 1] {
             continue;
         }
+        let entry = &t.entries[e];
+        // Replies shown inline sit further in, on another tone.
+        let x = area.x + INDENT * entry.depth as u16;
+        let width = area.right().saturating_sub(x);
         let y = area.y + row;
-        let selected = post == t.selected;
-        fill(f, Rect::new(area.x, y, area.width, 1), if selected { th.selection } else { th.surface });
-        if selected || t.marks.get(post).is_some_and(|m| m.highlight.is_some()) {
-            fill(f, Rect::new(area.x, y, 1, 1), th.primary);
+        let card = if entry.depth % 2 == 1 { th.surface_high } else { th.surface };
+        fill(f, Rect::new(x, y, width, 1), if e == cursor { th.selection } else { card });
+        if e == cursor || t.marks.get(entry.post).is_some_and(|m| m.highlight.is_some()) {
+            fill(f, Rect::new(x, y, 1, 1), th.primary);
         }
         if line.style == markup::CODE_LINE {
-            let code_x = area.x + PAD + if l.thumbs.iter().any(|&(_, p)| p == post) { THUMB.width + 2 } else { 0 };
+            let code_x = x + PAD + if l.thumbs.iter().any(|&(_, k)| k == e) { THUMB.width + 2 } else { 0 };
             fill(f, Rect::new(code_x, y, area.right().saturating_sub(code_x + 1), 1), th.code_bg);
         }
-        put(f, area.x + PAD, y, text_w, Line::from(line.spans.clone()));
+        put(f, x + PAD, y, width.saturating_sub(PAD + 2), Line::from(line.spans.clone()));
     }
 
     // Tiles: images only when fully on screen, so they never draw outside the thread area.
     // Visible ones are asked for first, top to bottom; those within a screen are prefetched
     // from media hosts.
     let (top, h, view) = (t.scroll, THUMB.height as usize, area.height as usize);
-    for &(line, i) in &l.thumbs {
+    for &(line, e) in &l.thumbs {
         if line + h > top && line < top + view {
             // A tile cut off at the top starts above the area; draw_tile clips it.
             let y = area.y as i32 + line as i32 - top as i32;
             let tile_top = y.max(area.y as i32) as u16;
-            let tile = Rect::new(area.x + PAD, tile_top, THUMB.width, (y + THUMB.height as i32 - tile_top as i32) as u16);
+            let x = area.x + INDENT * t.entries[e].depth as u16 + PAD;
+            let tile = Rect::new(x, tile_top, THUMB.width, (y + THUMB.height as i32 - tile_top as i32) as u16);
             let full = line >= top && line + h <= top + view;
-            let p = &t.posts[i];
+            let p = &t.posts[t.entries[e].post];
             if full {
                 draw_tile(f, &mut app.images, &p.files[0], p.files.len(), tile, area);
             } else {
@@ -810,9 +817,9 @@ fn draw_thread(f: &mut Frame, app: &mut App, area: Rect) {
             }
         }
     }
-    for &(line, i) in &l.thumbs {
+    for &(line, e) in &l.thumbs {
         let near = !(line >= top && line + h <= top + view) && line + h + view > top && line < top + 2 * view;
-        if let Some(url) = t.posts[i].files[0].thumb.as_ref().filter(|u| near && http::is_media_host(u)) {
+        if let Some(url) = t.posts[t.entries[e].post].files[0].thumb.as_ref().filter(|u| near && http::is_media_host(u)) {
             app.images.want(url, Kind::Thumb);
         }
     }
@@ -826,14 +833,16 @@ fn draw_thread(f: &mut Frame, app: &mut App, area: Rect) {
     }
 }
 
-/// Lay out every post as a card of wrapped lines: a padding line above and below the
-/// content, then a gap line. Posts with files get a thumbnail tile on the left.
+/// Lay out every entry (post, or reply shown inline) as a card of wrapped lines: a padding
+/// line above and below the content, then a gap line. Posts with files get a thumbnail
+/// tile on the left.
 fn layout_thread(t: &ThreadView, width: u16, thumbs: bool, clock: Clock) -> ThreadLayout {
-    let text_width = width.saturating_sub(PAD + 2).max(10) as usize;
     let mut lines = Vec::new();
-    let mut starts = Vec::with_capacity(t.posts.len() + 1);
+    let mut starts = Vec::with_capacity(t.entries.len() + 1);
     let mut thumb_at = Vec::new();
-    for (i, p) in t.posts.iter().enumerate() {
+    for (e, entry) in t.entries.iter().enumerate() {
+        let (i, p) = (entry.post, &t.posts[entry.post]);
+        let text_width = width.saturating_sub(PAD + 2 + INDENT * entry.depth as u16).max(10) as usize;
         starts.push(lines.len());
         // A hidden post is one line, so replies to it still make sense.
         if t.is_collapsed(i) {
@@ -844,9 +853,9 @@ fn layout_thread(t: &ThreadView, width: u16, thumbs: bool, clock: Clock) -> Thre
             continue;
         }
         lines.push(Line::raw(""));
-        match p.files.first().filter(|_| thumbs) {
+        match p.files.first().filter(|_| thumbs && text_width > THUMB.width as usize + 12) {
             Some(_) => {
-                thumb_at.push((lines.len(), i));
+                thumb_at.push((lines.len(), e));
                 let text = post_lines(p, &post_ctx(t, i, clock), text_width - THUMB.width as usize - 2);
                 let mut text = beside(Vec::new(), text, THUMB.width + 2);
                 text.resize(text.len().max(THUMB.height as usize), Line::raw(""));
@@ -1108,6 +1117,7 @@ fn help_sections(keys: &KeyMap) -> Vec<(&'static str, Vec<(String, &'static str)
                 (k(Action::View), "view the post's images"),
                 (k(Action::Links), "the post's links and files"),
                 (pair(Action::Hide, Action::ShowHidden), "hide the post / show hidden"),
+                (k(Action::Expand), "show / hide replies under the post"),
                 (k(Action::Mine), "mark as yours: notified of replies"),
                 (pair(Action::Download, Action::DownloadThread), "save files: post / thread"),
                 (k(Action::Watch), "watch / unwatch the thread"),
