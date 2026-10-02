@@ -277,6 +277,7 @@ url = "https://arch.b4k.dev"
 #               preview = "p", next_match = "n", prev_match = "N", spoiler = "s",
 #               all_spoilers = "S", download = "d", download_thread = "D", archive = "a"
 #   Watched/History: remove = "x"
+#   catalog, thread, Watched/History, image viewer: copy = "y", copy_link = "Y"
 [keys]
 # watch = "W"
 # help = ["?", "f1"]

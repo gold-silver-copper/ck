@@ -29,6 +29,10 @@ pub trait Backend: Send + Sync {
     }
     fn board_url(&self, board: &str) -> String;
     fn thread_url(&self, board: &str, no: u64) -> String;
+    /// A link to one post of a thread.
+    fn post_url(&self, board: &str, thread: u64, post: u64) -> String {
+        format!("{}#{post}", self.thread_url(board, thread))
+    }
 }
 
 pub fn build(cfg: &SiteConfig) -> Arc<dyn Backend> {

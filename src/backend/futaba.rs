@@ -220,6 +220,11 @@ impl Backend for Futaba {
             format!("{}/{}/res/{no}.html", self.web, enc(board))
         }
     }
+
+    fn post_url(&self, board: &str, thread: u64, post: u64) -> String {
+        let anchor = if self.is_4chan { "p" } else { "" };
+        format!("{}#{anchor}{post}", self.thread_url(board, thread))
+    }
 }
 
 #[cfg(test)]

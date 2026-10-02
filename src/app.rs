@@ -329,6 +329,8 @@ pub struct Preview {
 pub struct Viewer {
     pub files: Vec<Attachment>,
     pub index: usize,
+    /// Link to the post the files are from.
+    pub link: Option<String>,
 }
 
 enum Msg {
@@ -414,6 +416,8 @@ pub struct App {
     /// After a thread 404'd: the same thread on the site's configured archive.
     archive_offer: Option<ThreadKey>,
     pub keys: KeyMap,
+    /// The last text copied to the clipboard.
+    pub copied: Option<String>,
     /// The config file that settings are saved to (tests point it elsewhere).
     pub config_path: Option<std::path::PathBuf>,
     pub clock: Clock,
@@ -511,6 +515,7 @@ impl App {
             from_catalog: false,
             archive_offer: None,
             keys,
+            copied: None,
             config_path: Config::path(),
             clock: Clock::default(),
             downloads: Downloads::default(),
@@ -1309,6 +1314,8 @@ impl App {
             Action::View => self.open_viewer(),
             Action::Watch => self.toggle_watch(),
             Action::Remove => self.remove_entry(),
+            Action::Copy => self.copy(false),
+            Action::CopyLink => self.copy(true),
             Action::Sort => {
                 self.catalog_sort = self.catalog_sort.next();
                 self.catalog_list.state.select(Some(0));
@@ -1601,8 +1608,9 @@ impl App {
             self.status = Some(("Images are off (images = \"off\" in the config); i opens the file".into(), false));
             return;
         }
+        let link = self.selected_link();
         match self.selected_post().map(|p| p.files.clone()) {
-            Some(files) if !files.is_empty() => self.viewer = Some(Viewer { files, index: 0 }),
+            Some(files) if !files.is_empty() => self.viewer = Some(Viewer { files, index: 0, link }),
             _ => self.status = Some(("Post has no file".into(), false)),
         }
     }
@@ -1765,28 +1773,65 @@ impl App {
         }
     }
 
-    fn open_in_browser(&mut self) {
-        let backend = self.current_site().backend.clone();
-        let key_url = |key: &ThreadKey| {
-            let site = self.sites.iter().find(|s| s.cfg.name == key.site)?;
-            Some(site.backend.thread_url(&key.board, key.no))
+    /// Copy the selected thing's text (or file URL in the viewer), or with `link` its URL.
+    fn copy(&mut self, link: bool) {
+        let what = if let Some(v) = &self.viewer {
+            if link { v.link.clone().map(|l| ("link", l)) } else { Some(("file URL", v.files[v.index].url.clone())) }
+        } else if link {
+            self.selected_link().map(|l| ("link", l))
+        } else {
+            let saved = |key: &ThreadKey, subject: &str| {
+                let url = self.thread_link(key, None).unwrap_or_default();
+                format!("{subject}\n{url}").trim().to_string()
+            };
+            match self.view {
+                View::Thread => self.thread.as_ref().map(|t| ("text", copy_text(&t.posts[t.selected], false))),
+                View::Catalog => self.selected_post().map(|p| ("text", copy_text(p, true))),
+                View::Watched => self.selected_index().map(|i| ("text", saved(&self.store.watched[i].key, &self.store.watched[i].subject))),
+                View::History => self.selected_index().map(|i| ("text", saved(&self.store.history[i].key, &self.store.history[i].subject))),
+                _ => None,
+            }
         };
-        let url = match (self.view, &self.board) {
-            (View::Watched, _) => self.selected_index().and_then(|i| key_url(&self.store.watched[i].key)),
-            (View::History, _) => self.selected_index().and_then(|i| key_url(&self.store.history[i].key)),
+        let Some((what, text)) = what else { return };
+        if text.is_empty() {
+            self.status = Some(("Nothing to copy: the post has no text".into(), false));
+            return;
+        }
+        self.status = Some(match crate::clipboard::copy(&text) {
+            Ok(()) if what == "text" => (format!("Copied {} characters", text.chars().count()), false),
+            Ok(()) => (format!("Copied {what}: {text}"), false),
+            Err(e) => (format!("Couldn't copy: {e:#}"), true),
+        });
+        self.copied = Some(text);
+    }
+
+    /// A link to a thread (and post) on its site.
+    fn thread_link(&self, key: &ThreadKey, post: Option<u64>) -> Option<String> {
+        let site = self.sites.iter().find(|s| s.cfg.name == key.site)?;
+        Some(match post {
+            Some(p) if p != key.no => site.backend.post_url(&key.board, key.no, p),
+            _ => site.backend.thread_url(&key.board, key.no),
+        })
+    }
+
+    /// The link to what's selected: a post in a thread, a catalog thread, a saved thread, a board.
+    fn selected_link(&self) -> Option<String> {
+        let backend = &self.current_site().backend;
+        match (self.view, &self.board) {
+            (View::Watched, _) => self.selected_index().and_then(|i| self.thread_link(&self.store.watched[i].key, None)),
+            (View::History, _) => self.selected_index().and_then(|i| self.thread_link(&self.store.history[i].key, None)),
             (View::Boards, _) => self.selected_index().map(|i| backend.board_url(&self.boards()[i].uri)),
             (View::Catalog, Some(b)) => self.selected_index().map(|i| {
                 let p = &self.catalog[i];
                 backend.thread_url(p.board.as_deref().unwrap_or(&b.uri), p.no)
             }),
-            (View::Thread, Some(b)) => self.thread.as_ref().map(|t| {
-                let mut url = backend.thread_url(&b.uri, t.no);
-                url.push_str(&format!("#{}", t.posts[t.selected].no));
-                url
-            }),
+            (View::Thread, Some(b)) => self.thread.as_ref().and_then(|t| self.thread_link(&self.key(&b.uri, t.no), Some(t.posts[t.selected].no))),
             _ => None,
-        };
-        if let Some(url) = url {
+        }
+    }
+
+    fn open_in_browser(&mut self) {
+        if let Some(url) = self.selected_link() {
             self.open_url(&url);
         }
     }
@@ -1799,13 +1844,24 @@ impl App {
     }
 }
 
+/// A post's text as plain text, line by line (spoilers included); with `subject`, the
+/// subject first.
+pub fn copy_text(p: &Post, subject: bool) -> String {
+    let mut lines: Vec<String> = Vec::new();
+    if let Some(s) = p.subject.as_ref().filter(|_| subject) {
+        lines.push(s.clone());
+    }
+    lines.extend(p.body.iter().map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect::<String>().trim_end().to_string()));
+    lines.join("\n").trim().to_string()
+}
+
 /// A thread's subject for lists: its subject, or the start of the OP's text.
 fn thread_subject(posts: &[Post]) -> String {
     let Some(op) = posts.first() else { return String::new() };
     op.subject.clone().unwrap_or_else(|| op.plain_text().chars().take(80).collect())
 }
 
-fn on_path(program: &str) -> bool {
+pub fn on_path(program: &str) -> bool {
     std::env::var_os("PATH").is_some_and(|paths| std::env::split_paths(&paths).any(|dir| dir.join(program).is_file()))
 }
 
@@ -2019,6 +2075,40 @@ mod tests {
         app.settings.popup = None;
         app.view = View::Catalog;
         assert_eq!(app.keys.action(app.scope(), &KeyEvent::from(KeyCode::Char('w'))), Some(Action::Watch));
+    }
+
+    #[test]
+    fn copies_text_and_links() {
+        let mut app = test_app();
+        let html = "<a href=\"#p1\" class=\"quotelink\">&gt;&gt;1</a><br><span class=\"quote\">&gt;green</span><br><s>secret</s> text";
+        let parsed = crate::markup::parse_html(html, crate::markup::Flavor::Fourchan);
+        let post = |no, body: Vec<Line<'static>>| Post { no, subject: Some("Subj".into()), body, ..Default::default() };
+        app.board = Some(Board { uri: "g".into(), title: String::new(), nsfw: None });
+        app.thread = Some(ThreadView::new("g".into(), 1, vec![post(1, vec![Line::raw("op")]), post(2, parsed.lines)]));
+        app.thread.as_mut().unwrap().selected = 1;
+        app.view = View::Thread;
+        app.act(Action::Copy);
+        assert_eq!(app.copied.as_deref(), Some(">>1\n>green\nsecret text"));
+        assert_eq!(app.status.as_ref().unwrap().0, "Copied 22 characters");
+        app.act(Action::CopyLink);
+        assert_eq!(app.copied.as_deref(), Some("https://boards.4chan.org/g/thread/1#p2"));
+        // The viewer copies the file's URL, or the post's link.
+        app.thread.as_mut().unwrap().posts[1].files = vec![Attachment { url: "https://i.4cdn.org/g/1.png".into(), ..Default::default() }];
+        app.images = crate::images::Images::offline();
+        app.act(Action::View);
+        app.on_key(KeyEvent::from(KeyCode::Char('y')));
+        assert_eq!(app.copied.as_deref(), Some("https://i.4cdn.org/g/1.png"));
+        app.on_key(KeyEvent::from(KeyCode::Char('Y')));
+        assert_eq!(app.copied.as_deref(), Some("https://boards.4chan.org/g/thread/1#p2"));
+        app.viewer = None;
+        // Catalog: subject and text; a thread link.
+        app.catalog = vec![post(7, vec![Line::raw("hello")])];
+        app.catalog_list.state.select(Some(0));
+        app.view = View::Catalog;
+        app.act(Action::Copy);
+        assert_eq!(app.copied.as_deref(), Some("Subj\nhello"));
+        app.act(Action::CopyLink);
+        assert_eq!(app.copied.as_deref(), Some("https://boards.4chan.org/g/thread/7"));
     }
 
     #[test]

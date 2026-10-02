@@ -70,9 +70,15 @@ is in brackets):
 | `d`/`D` | thread             | save the post's / whole thread's files [`download`, `download_thread`] |
 | `a`  | thread                | after a 404: open the thread in the site's archive [`archive`] |
 | `x`  | Watched, History      | remove the entry [`remove`]                                |
+| `y`  | catalog, thread, Watched, History, viewer | copy the post's text (catalog: the OP's; Watched/History: subject and link; viewer: the file's URL) [`copy`] |
+| `Y`  | catalog, thread, Watched, History, viewer | copy the link to the post or thread [`copy_link`] |
 
 In the image viewer: `h`/`l` or arrows for the previous/next file, `i` to open it externally,
-`esc` or `q` to close.
+`y`/`Y` to copy the file's URL / the post's link, `esc` or `q` to close.
+
+Copying uses the terminal's clipboard escape (OSC 52), which also works over SSH; in tmux it
+needs `set -g set-clipboard on`. On a local machine ck also uses `pbcopy`, `wl-copy`,
+`xclip` or `xsel` when one is installed.
 
 ### Remapping keys
 

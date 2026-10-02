@@ -1,5 +1,6 @@
 mod app;
 mod backend;
+mod clipboard;
 #[cfg(test)]
 mod bench;
 mod config;

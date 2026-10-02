@@ -7,26 +7,26 @@ expression: snapshot(&mut a)
     Keys                                                                press a key · esc cancel
 
     Everywhere
-      q               quit             quit                                  everywhere
-      ?               help             help                                  everywhere
-      ,               settings         settings: theme, colors, keys, …      everywhere
-      /               search           filter the list; search a thread      everywhere
-      r               reload           reload                                everywhere
-      o               browser          open in the browser                   everywhere
+      q               quit             quit                                 everywhere
+      ?               help             help                                 everywhere
+      ,               settings         settings: theme, colors, keys, …     everywhere
+      /               search           filter the list; search a thread     everywhere
+      r               reload           reload                               everywhere
+      o               browser          open in the browser                  everywhere
 
     Catalog
-      v               view             view the post's images                catalog, thread
-      w               watch            watch / unwatch the thread            catalog, thread
-      s               sort             cycle the sort order                  catalog
-      c               compact          compact layout on / off               catalog
+      v               view             view the post's images               catalog, thread
+      w               watch            watch / unwatch the thread           catalog, thread
+      s               sort             cycle the sort order                 catalog
+      c               compact          compact layout on / off              catalog
+      y               copy             copy the text (viewer: file URL)     catalog, thread, wa…
+      Y               copy_link        copy the link                        catalog, thread, wa…
 
     Thread
-      i               open_file        open the file (videos in mpv)         thread
-      b               replies          jump to the first reply               thread
-      u               jump_back        jump back (also to the last thread)   thread
-      U               unread           jump to the first unread post         thread
-      p               preview          preview the quoted posts              thread
-      n               next_match       next search match                     thread
+      i               open_file        open the file (videos in mpv)        thread
+      b               replies          jump to the first reply              thread
+      u               jump_back        jump back (also to the last thread)  thread
+      U               unread           jump to the first unread post        thread
 
     Press the new key for quit   esc cancels
 

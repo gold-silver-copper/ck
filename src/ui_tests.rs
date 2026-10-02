@@ -268,7 +268,7 @@ fn image_viewer_placeholder() {
     let mut a = app(true);
     a.view = View::Thread;
     a.thread = Some(thread());
-    a.viewer = Some(Viewer { files: vec![file("op.png"), file("clip.webm")], index: 0 });
+    a.viewer = Some(Viewer { files: vec![file("op.png"), file("clip.webm")], index: 0, link: None });
     insta::assert_snapshot!(snapshot(&mut a));
 }
 

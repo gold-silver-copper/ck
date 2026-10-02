@@ -34,6 +34,8 @@ pub enum Action {
     DownloadThread,
     Archive,
     Remove,
+    Copy,
+    CopyLink,
 }
 
 /// Where a key applies. Global keys work in every view but the image viewer.
@@ -90,6 +92,8 @@ pub const ACTIONS: &[(Action, &str, &str, &[Scope], &str)] = &[
     (Action::DownloadThread, "download_thread", "D", &[Scope::Thread], "save the thread's files"),
     (Action::Archive, "archive", "a", &[Scope::Thread], "open a 404'd thread in the archive"),
     (Action::Remove, "remove", "x", &[Scope::Saved], "remove the entry"),
+    (Action::Copy, "copy", "y", &[Scope::Catalog, Scope::Thread, Scope::Saved, Scope::Viewer], "copy the text (viewer: file URL)"),
+    (Action::CopyLink, "copy_link", "Y", &[Scope::Catalog, Scope::Thread, Scope::Saved, Scope::Viewer], "copy the link"),
 ];
 
 /// A key with its modifiers: `w`, `W`, `ctrl-w`, `alt-x`, `tab`, `shift-tab`, `f5`, ...

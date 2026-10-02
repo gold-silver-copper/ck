@@ -24,7 +24,7 @@ pub struct Link {
     pub post: Option<u64>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Attachment {
     pub filename: String,
     pub url: String,

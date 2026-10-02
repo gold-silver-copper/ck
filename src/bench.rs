@@ -124,7 +124,7 @@ fn bench_images() {
             let mut a = app();
             a.images = Images::with_picker(picker(proto));
             a.images.insert_decoded("https://x/big.png", DynamicImage::new_rgb8(2048, 1536));
-            a.viewer = Some(Viewer { files: vec![file("https://x/big.png")], index: 0 });
+            a.viewer = Some(Viewer { files: vec![file("https://x/big.png")], index: 0, link: None });
             let mut t = term();
             let start = Instant::now();
             draw(&mut t, &mut a);

@@ -934,6 +934,7 @@ fn help_sections(keys: &KeyMap) -> Vec<(&'static str, Vec<(String, &'static str)
                 (k(Action::Watch), "watch / unwatch the thread"),
                 (k(Action::Sort), "cycle sort order"),
                 (k(Action::Compact), "compact layout on / off"),
+                (pair(Action::Copy, Action::CopyLink), "copy the OP's text / link"),
             ],
         ),
         (
@@ -954,14 +955,19 @@ fn help_sections(keys: &KeyMap) -> Vec<(&'static str, Vec<(String, &'static str)
                 (k(Action::Watch), "watch / unwatch the thread"),
                 (k(Action::Unread), "jump to the first unread post"),
                 (k(Action::Archive), "open 404'd thread in archive"),
+                (pair(Action::Copy, Action::CopyLink), "copy the post's text / link"),
             ],
         ),
-        ("Watched, History", vec![(k(Action::Remove), "remove the entry")]),
+        (
+            "Watched, History",
+            vec![(k(Action::Remove), "remove the entry"), (pair(Action::Copy, Action::CopyLink), "copy subject and link / link")],
+        ),
         (
             "Image viewer",
             vec![
                 ("h / l, ← / →".into(), "previous / next file"),
                 ("i".into(), "open externally"),
+                (pair(Action::Copy, Action::CopyLink), "copy the file's URL / post link"),
                 ("esc, q".into(), "close"),
             ],
         ),
@@ -1160,8 +1166,8 @@ fn draw_settings_popup(f: &mut Frame, app: &App) {
                     Line::from(vec![
                         Span::styled(format!("  {:<16}", truncate(&app.keys.label(action), 15)), key_style),
                         Span::styled(format!("{name:<17}"), dim()),
-                        Span::styled(format!("{desc:<38}"), Style::new().fg(t.text)),
-                        Span::styled(scopes, dim()),
+                        Span::styled(format!("{:<37}", truncate(desc, 36)), Style::new().fg(t.text)),
+                        Span::styled(truncate(&scopes, (inner.width as usize).saturating_sub(72)), dim()),
                     ]),
                 );
             }

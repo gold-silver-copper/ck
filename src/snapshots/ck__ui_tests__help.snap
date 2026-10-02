@@ -23,12 +23,12 @@ expression: snapshot(&mut a)
        8kun              w                   watch / unwatch the thread
        alogs             s                   cycle sort order
        trashchan         c                   compact layout on / off
-       ptchan
-       erischan        Thread
-       junkuchan         j / k               next / previous post
-       nukechan          J / K, space        scroll by line / page
-       palanq            enter, l            follow quote (any thread)
-       b4k               p                   preview the quoted posts
-                         b                   jump to first reply
+       ptchan            y / Y               copy the OP's text / link
+       erischan
+       junkuchan       Thread
+       nukechan          j / k               next / previous post
+       palanq            J / K, space        scroll by line / page
+       b4k               enter, l            follow quote (any thread)
+                         p                   preview the quoted posts
 
  enter open   / filter   o browser   r reload   , settings   ? help
