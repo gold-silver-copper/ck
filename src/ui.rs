@@ -416,6 +416,24 @@ fn current_filter(app: &App) -> &str {
 
 // ----- lists and cards -----
 
+/// The first row to show so that row `sel` is among the `fit` shown, moving as little as
+/// possible from `offset`.
+fn scroll_to(offset: usize, sel: usize, fit: usize) -> usize {
+    offset.min(sel).max((sel + 1).saturating_sub(fit))
+}
+
+/// A row's background (the selection's when selected, else `bg` if any), and the accent
+/// stripe at its left when it's selected or marked.
+fn paint_row(f: &mut Frame, row: Rect, bg: Option<Color>, selected: bool, marked: bool) {
+    let t = theme();
+    if let Some(c) = if selected { Some(t.selection) } else { bg } {
+        fill(f, row, c);
+    }
+    if selected || marked {
+        fill(f, Rect { width: 1, ..row }, t.primary);
+    }
+}
+
 /// Draw `count` items `height` rows tall with `gap` rows of background between them;
 /// `build` makes only the ones on screen. With `card` each item sits on that color; the
 /// selected one gets the selection color and an accent stripe, as do those `stripe` marks
@@ -434,16 +452,10 @@ fn draw_rows(
     if count == 0 || area.is_empty() {
         return None;
     }
-    let t = theme();
     let per = height + gap;
     let fit = ((area.height + gap) / per).max(1) as usize;
     let sel = state.selected().unwrap_or(0).min(count - 1);
-    let mut off = state.offset().min(count - 1);
-    if sel < off {
-        off = sel;
-    } else if sel >= off + fit {
-        off = sel + 1 - fit;
-    }
+    let off = scroll_to(state.offset(), sel, fit);
     *state.offset_mut() = off;
     for k in off..count {
         let y = area.y + (k - off) as u16 * per;
@@ -452,14 +464,7 @@ fn draw_rows(
         }
         let h = height.min(area.bottom() - y);
         let row = Rect::new(area.x, y, area.width, h);
-        if k == sel {
-            fill(f, row, t.selection);
-        } else if let Some(c) = card {
-            fill(f, row, c);
-        }
-        if k == sel || stripe(k) {
-            fill(f, Rect::new(row.x, y, 1, h), t.primary);
-        }
+        paint_row(f, row, card, k == sel, stripe(k));
         for (r, line) in build(k).into_iter().take(h as usize).enumerate() {
             put(f, row.x + PAD, y + r as u16, row.width.saturating_sub(PAD + 1), line);
         }
@@ -833,12 +838,7 @@ fn draw_gallery(f: &mut Frame, app: &mut App, area: Rect) {
     g.cols = cols;
     let n = g.files.len();
     let sel = g.state.selected().unwrap_or(0).min(n - 1);
-    let mut top = g.state.offset() / cols;
-    if sel / cols < top {
-        top = sel / cols;
-    } else if sel / cols >= top + rows {
-        top = sel / cols + 1 - rows;
-    }
+    let top = scroll_to(g.state.offset() / cols, sel / cols, rows);
     *g.state.offset_mut() = top * cols;
     let posts = app.tab.thread.as_ref().map(|t| &t.posts);
     for (k, (post, file)) in g.files.iter().enumerate().skip(top * cols).take((rows + 1) * cols) {
@@ -851,10 +851,7 @@ fn draw_gallery(f: &mut Frame, app: &mut App, area: Rect) {
             }
             continue;
         }
-        fill(f, card, if k == sel { t.selection } else { t.surface });
-        if k == sel {
-            fill(f, Rect::new(x, card.y, 1, card.height), t.primary);
-        }
+        paint_row(f, card, Some(t.surface), k == sel, false);
         draw_tile(f, &mut app.images, file, 1, Rect::new(x + PAD, y, THUMB.width, THUMB.height), area);
         let no = posts.and_then(|p| p.get(*post)).map_or(0, |p| p.no);
         let kind = file.ext().to_uppercase();
@@ -886,12 +883,7 @@ fn draw_grid(f: &mut Frame, app: &mut App, area: Rect) {
     app.grid_cols = cols;
     let state = &mut app.tab.catalog_list.state;
     let sel = state.selected().unwrap_or(0).min(visible.len() - 1);
-    let mut top = state.offset() / cols;
-    if sel / cols < top {
-        top = sel / cols;
-    } else if sel / cols >= top + rows {
-        top = sel / cols + 1 - rows;
-    }
+    let top = scroll_to(state.offset() / cols, sel / cols, rows);
     *state.offset_mut() = top * cols;
     for (k, &i) in visible.iter().enumerate().skip(top * cols).take((rows + 1) * cols) {
         let (r, c) = (k / cols - top, k % cols);
@@ -906,10 +898,7 @@ fn draw_grid(f: &mut Frame, app: &mut App, area: Rect) {
         }
         let p = &app.tab.catalog[i];
         let mark = app.tab.catalog_marks.get(i).cloned().unwrap_or_default();
-        fill(f, card, if k == sel { t.selection } else { t.surface });
-        if k == sel || mark.highlight.is_some() {
-            fill(f, Rect::new(x, card.y, 1, card.height), t.primary);
-        }
+        paint_row(f, card, Some(t.surface), k == sel, mark.highlight.is_some());
         let tile = Rect::new(x + PAD, y, THUMB.width, THUMB.height);
         match p.files.first() {
             Some(file) => draw_tile(f, &mut app.images, file, p.files.len(), tile, area),
@@ -1057,10 +1046,8 @@ fn draw_thread(f: &mut Frame, app: &mut App, area: Rect) {
         let width = area.right().saturating_sub(x);
         let y = area.y + row;
         let card = if entry.depth % 2 == 1 { th.surface_high } else { th.surface };
-        fill(f, Rect::new(x, y, width, 1), if e == cursor { th.selection } else { card });
-        if e == cursor || t.marks.get(entry.post).is_some_and(|m| m.highlight.is_some()) {
-            fill(f, Rect::new(x, y, 1, 1), th.primary);
-        }
+        let marked = t.marks.get(entry.post).is_some_and(|m| m.highlight.is_some());
+        paint_row(f, Rect::new(x, y, width, 1), Some(card), e == cursor, marked);
         if line.style == markup::CODE_LINE {
             let code_x = x + PAD + if l.thumbs.iter().any(|&(_, k)| k == e) { THUMB.width + 2 } else { 0 };
             fill(f, Rect::new(code_x, y, area.right().saturating_sub(code_x + 1), 1), th.code_bg);
@@ -1345,15 +1332,12 @@ fn draw_links(f: &mut Frame, app: &mut App) {
     let inner = panel(f, w, p.items.len() as u16 + 3, "Links", "enter open · y copy · esc close");
     let rows = inner.height as usize;
     let sel = p.list.selected().unwrap_or(0);
-    let off = p.list.offset().min(sel).max((sel + 1).saturating_sub(rows));
+    let off = scroll_to(p.list.offset(), sel, rows);
     *p.list.offset_mut() = off;
     p.area = inner;
     for (k, item) in p.items.iter().enumerate().skip(off).take(rows) {
         let y = inner.y + (k - off) as u16;
-        if k == sel {
-            fill(f, Rect::new(inner.x - 2, y, inner.width + 4, 1), t.selection);
-            fill(f, Rect::new(inner.x - 2, y, 1, 1), t.primary);
-        }
+        paint_row(f, Rect::new(inner.x - 2, y, inner.width + 4, 1), None, k == sel, false);
         let (kind, text, extra) = match item {
             LinkItem::Quote(_, label) => ("quote", label.clone(), String::new()),
             LinkItem::Url(u) => ("web", u.clone(), String::new()),
@@ -1385,7 +1369,7 @@ fn draw_image_search(f: &mut Frame, app: &mut App) {
     let inner = panel(f, 64, p.rows.len() as u16 + 3, "Search for this image", "enter open · y copy · esc close");
     let rows = inner.height as usize;
     let sel = p.list.selected().unwrap_or(0);
-    let off = p.list.offset().min(sel).max((sel + 1).saturating_sub(rows));
+    let off = scroll_to(p.list.offset(), sel, rows);
     *p.list.offset_mut() = off;
     p.area = inner;
     for (k, row) in p.rows.iter().enumerate().skip(off).take(rows) {
@@ -1393,10 +1377,7 @@ fn draw_image_search(f: &mut Frame, app: &mut App) {
         let line = match row {
             Err(file) => Line::styled(truncate(file, inner.width as usize), bold(t.primary)),
             Ok((_, e)) => {
-                if k == sel {
-                    fill(f, Rect::new(inner.x - 2, y, inner.width + 4, 1), t.selection);
-                    fill(f, Rect::new(inner.x - 2, y, 1, 1), t.primary);
-                }
+                paint_row(f, Rect::new(inner.x - 2, y, inner.width + 4, 1), None, k == sel, false);
                 Line::styled(format!("  {}", names[*e]), Style::new().fg(t.text))
             }
         };
@@ -1549,11 +1530,7 @@ fn draw_settings(f: &mut Frame, app: &mut App, area: Rect) {
             Err(title) => put(f, area.x, y, area.width, Line::styled(title.to_string(), bold(t.primary))),
             Ok(i) => {
                 let item = items[i];
-                let line = Rect::new(area.x, y, area.width, 1);
-                if i == selected {
-                    fill(f, line, t.selection);
-                    fill(f, Rect::new(area.x, y, 1, 1), t.primary);
-                }
+                paint_row(f, Rect::new(area.x, y, area.width, 1), None, i == selected, false);
                 let value = app.setting_value(item);
                 let hint_w = (area.width as usize).saturating_sub(PAD as usize + 1 + 18 + 34);
                 put(
@@ -1599,10 +1576,7 @@ fn draw_settings_popup(f: &mut Frame, app: &App) {
             let sel = list.selected().unwrap_or(0);
             for (k, name) in names.iter().enumerate().take(inner.height as usize) {
                 let y = inner.y + k as u16;
-                if k == sel {
-                    fill(f, Rect::new(inner.x - 2, y, inner.width + 4, 1), t.selection);
-                    fill(f, Rect::new(inner.x - 2, y, 1, 1), t.primary);
-                }
+                paint_row(f, Rect::new(inner.x - 2, y, inner.width + 4, 1), None, k == sel, false);
                 let mut spans = vec![Span::styled(format!("{name:<22}"), Style::new().fg(t.text))];
                 if let Ok(th) = theme::resolve(name, &app.themes) {
                     spans.extend(swatch(&th));
@@ -1620,10 +1594,7 @@ fn draw_settings_popup(f: &mut Frame, app: &App) {
             let first = sel.saturating_sub(rows.saturating_sub(1));
             for (k, (role, desc)) in ROLES.iter().enumerate().skip(first).take(rows) {
                 let y = inner.y + (k - first) as u16;
-                if k == sel {
-                    fill(f, Rect::new(inner.x - 2, y, inner.width + 4, 1), t.selection);
-                    fill(f, Rect::new(inner.x - 2, y, 1, 1), t.primary);
-                }
+                paint_row(f, Rect::new(inner.x - 2, y, inner.width + 4, 1), None, k == sel, false);
                 let c = t.get(role).unwrap_or(Color::Reset);
                 put(
                     f,
@@ -1667,10 +1638,7 @@ fn draw_settings_popup(f: &mut Frame, app: &App) {
                     }
                     Ok(i) => *i,
                 };
-                if k == sel {
-                    fill(f, Rect::new(inner.x - 2, y, inner.width + 4, 1), t.selection);
-                    fill(f, Rect::new(inner.x - 2, y, 1, 1), t.primary);
-                }
+                paint_row(f, Rect::new(inner.x - 2, y, inner.width + 4, 1), None, k == sel, false);
                 let (action, name, _, scopes, desc) = keys::ACTIONS[i];
                 let changed = !app.keys.is_default(action);
                 let key_style = if changed { bold(t.primary) } else { bold(t.text) };
