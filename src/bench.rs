@@ -102,11 +102,7 @@ fn bench_catalog() {
 
     // Filters run once per load; frames only look the results up.
     let toml_text: String = (0..20).map(|i| format!("[[filter]]\npattern = \"(?i)word{i}|other{i}\"\n")).collect();
-    #[derive(serde::Deserialize)]
-    struct C {
-        filter: Vec<crate::filter::FilterConfig>,
-    }
-    a.filters = crate::filter::Filters::new(&toml::from_str::<C>(&toml_text).unwrap().filter).unwrap();
+    a.filters = crate::filter::tests::filters(&toml_text).unwrap();
     a.tab.catalog = scale(&a.tab.catalog, 300);
     eprintln!("\n== catalog, 300 threads, 20 filters ==");
     time("filtering (once per load)", 50, || a.remark_catalog());

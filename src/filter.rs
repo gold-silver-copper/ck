@@ -140,13 +140,14 @@ impl Filters {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use ratatui::text::Line;
 
     use super::*;
     use crate::model::Attachment;
 
-    fn filters(toml_text: &str) -> Result<Filters> {
+    /// Filters from `[[filter]]` tables.
+    pub fn filters(toml_text: &str) -> Result<Filters> {
         #[derive(Deserialize)]
         struct C {
             filter: Vec<FilterConfig>,

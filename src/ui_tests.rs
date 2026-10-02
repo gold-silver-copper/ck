@@ -5,12 +5,10 @@ use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
 
 use crate::app::{App, Clock, Preview, SettingsPopup, ThreadView, View, Viewer};
-use crate::config::Config;
 use crate::images::Images;
-use crate::keys::KeyMap;
 use crate::markup::{Flavor, parse_html};
 use crate::model::{Attachment, Board, Post};
-use crate::store::{Store, ThreadKey, Visit, Watched};
+use crate::store::{ThreadKey, Visit, Watched};
 use crate::theme::theme;
 
 /// 2026-09-21 14:13:20 UTC.
@@ -18,10 +16,9 @@ const NOW: i64 = 1_790_000_000;
 const HOUR: i64 = 3600;
 
 fn app(images: bool) -> App {
-    let cfg: Config = toml::from_str(crate::config::DEFAULT_CONFIG).unwrap();
-    let mut store = Store::default();
+    let mut app = crate::app::tests::test_app();
     let key = |board: &str, no| ThreadKey { site: "4chan".into(), board: board.into(), no };
-    store.watched = vec![
+    app.store.watched = vec![
         Watched { key: key("g", 1000), subject: "Snapshot thread".into(), posts: 5, last_seen: 1002, unread: 2, ..Default::default() },
         Watched { key: key("g", 900), subject: "Old thread".into(), posts: 300, last_seen: 1199, dead: true, ..Default::default() },
         Watched {
@@ -32,15 +29,12 @@ fn app(images: bool) -> App {
             ..Default::default()
         },
     ];
-    store.history = vec![
+    app.store.history = vec![
         Visit { key: key("g", 1000), subject: "Snapshot thread".into(), last_seen: 1004, opened: NOW - 120 },
         Visit { key: key("b", 5), subject: "Random thread".into(), last_seen: 9, opened: NOW - 30 * HOUR },
     ];
-    let mut app = App::new(cfg, KeyMap::default(), None, store);
     app.clock = Clock { fixed: Some(NOW) };
     app.truecolor = true;
-    // Settings changes must never reach the real config file.
-    app.config_path = None;
     if images {
         app.images = Images::offline();
     }
@@ -77,6 +71,22 @@ fn file(name: &str) -> Attachment {
         size: Some(123_456),
         ..Default::default()
     }
+}
+
+/// The app on the thread fixture.
+fn thread_app(images: bool) -> App {
+    let mut a = app(images);
+    a.tab.view = View::Thread;
+    a.tab.thread = Some(thread());
+    a
+}
+
+/// The app on the catalog fixture.
+fn catalog_app(images: bool) -> App {
+    let mut a = app(images);
+    a.tab.view = View::Catalog;
+    a.tab.catalog = catalog();
+    a
 }
 
 fn catalog() -> Vec<Post> {
@@ -190,9 +200,7 @@ fn boards() {
 
 #[test]
 fn catalog_with_thumbnail_placeholders() {
-    let mut a = app(true);
-    a.tab.view = View::Catalog;
-    a.tab.catalog = catalog();
+    let mut a = catalog_app(true);
     a.tab.catalog_list.state.select(Some(1));
     insta::assert_snapshot!(snapshot(&mut a));
     insta::assert_snapshot!("catalog_backgrounds", bg_map(&mut a));
@@ -212,9 +220,7 @@ fn catalog_compact() {
 
 #[test]
 fn thread_view() {
-    let mut a = app(true);
-    a.tab.view = View::Thread;
-    a.tab.thread = Some(thread());
+    let mut a = thread_app(true);
     insta::assert_snapshot!(snapshot(&mut a));
     insta::assert_snapshot!("thread_backgrounds", bg_map(&mut a));
 }
@@ -269,9 +275,7 @@ fn history() {
 
 #[test]
 fn image_viewer_placeholder() {
-    let mut a = app(true);
-    a.tab.view = View::Thread;
-    a.tab.thread = Some(thread());
+    let mut a = thread_app(true);
     a.tab.viewer = Some(Viewer { files: vec![file("op.png"), file("clip.webm")], index: 0, link: None });
     insta::assert_snapshot!(snapshot(&mut a));
 }
@@ -307,9 +311,7 @@ fn color_editor() {
 fn other_themes_and_256_colors() {
     // Every built-in theme draws a thread; in 256-color mode no 24-bit color is left.
     for (name, t) in crate::theme::BUILTIN {
-        let mut a = app(false);
-        a.tab.view = View::Thread;
-        a.tab.thread = Some(thread());
+        let mut a = thread_app(false);
         a.set_theme(*t);
         a.truecolor = false;
         let (_, buf) = render(&mut a);
@@ -344,12 +346,8 @@ fn links_panel() {
 }
 
 fn with_filters(a: &mut App) {
-    #[derive(serde::Deserialize)]
-    struct C {
-        filter: Vec<crate::filter::FilterConfig>,
-    }
     let cfg = "[[filter]]\npattern = \"Rust\"\naction = \"highlight\"\nlabel = \"rust\"\n[[filter]]\npattern = \"implying\"\nlabel = \"no implying\"";
-    a.filters = crate::filter::Filters::new(&toml::from_str::<C>(cfg).unwrap().filter).unwrap();
+    a.filters = crate::filter::tests::filters(cfg).unwrap();
 }
 
 #[test]
@@ -375,9 +373,7 @@ fn filtered_catalog_and_thread() {
 
 #[test]
 fn your_posts_and_replies() {
-    let mut a = app(false);
-    a.tab.view = View::Thread;
-    a.tab.thread = Some(thread());
+    let mut a = thread_app(false);
     a.tab.thread.as_mut().unwrap().mine.insert(1001);
     a.store.watched[0].replies = 1;
     insta::assert_snapshot!(snapshot(&mut a));
@@ -387,9 +383,7 @@ fn your_posts_and_replies() {
 
 #[test]
 fn catalog_new_threads_and_replies() {
-    let mut a = app(false);
-    a.tab.view = View::Catalog;
-    a.tab.catalog = catalog();
+    let mut a = catalog_app(false);
     a.tab.catalog_new.insert(1100);
     a.store.opened("4chan", "g", 1000, 300, NOW);
     a.tab.catalog_list.state.select(Some(1));
@@ -398,9 +392,7 @@ fn catalog_new_threads_and_replies() {
 
 #[test]
 fn replies_inline() {
-    let mut a = app(true);
-    a.tab.view = View::Thread;
-    a.tab.thread = Some(thread());
+    let mut a = thread_app(true);
     a.on_key(ratatui::crossterm::event::KeyEvent::from(ratatui::crossterm::event::KeyCode::Char('e')));
     a.on_key(ratatui::crossterm::event::KeyEvent::from(ratatui::crossterm::event::KeyCode::Char('j')));
     a.on_key(ratatui::crossterm::event::KeyEvent::from(ratatui::crossterm::event::KeyCode::Char('e')));
@@ -468,9 +460,7 @@ fn image_search_panel() {
 
 #[test]
 fn tabs_row() {
-    let mut a = app(false);
-    a.tab.view = View::Catalog;
-    a.tab.catalog = catalog();
+    let mut a = catalog_app(false);
     a.tab.catalog_list.state.select(Some(1));
     a.new_tab();
     a.tab.thread = Some(thread());
@@ -549,9 +539,7 @@ fn watched_generals() {
 #[test]
 fn thread_lines_are_cached_but_never_stale() {
     use ratatui::crossterm::event::{KeyCode, KeyEvent};
-    let mut a = app(false);
-    a.tab.view = View::Thread;
-    a.tab.thread = Some(thread());
+    let mut a = thread_app(false);
     let blocks = |a: &App| a.tab.thread.as_ref().unwrap().layout.as_ref().unwrap().blocks.clone();
     render(&mut a);
     let first = blocks(&a);

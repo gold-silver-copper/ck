@@ -338,11 +338,7 @@ fn links_panel_lists_and_opens() {
 fn filters_and_hiding() {
     let mut app = local_app();
     let cfg = "[[filter]]\npattern = \"(?i)spam\"\nlabel = \"spam\"\n[[filter]]\npattern = \"rust\"\naction = \"highlight\"";
-    #[derive(serde::Deserialize)]
-    struct C {
-        filter: Vec<crate::filter::FilterConfig>,
-    }
-    app.filters = Filters::new(&toml::from_str::<C>(cfg).unwrap().filter).unwrap();
+    app.filters = crate::filter::tests::filters(cfg).unwrap();
     app.tab.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
     app.tab.catalog_board = "x".into();
     let op = |no, subject: &str| Post { no, subject: Some(subject.into()), ..Default::default() };
