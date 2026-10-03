@@ -1131,6 +1131,13 @@ fn adding_a_site() {
     a.adding = Some(Adding::Site { site: SiteConfig { boards: Some(boards), ..site }, name: "somechan".into(), open: None });
     let text = render(&mut a).0;
     assert!(text.contains("3 boards, from the list on its pages:") && text.contains("wiz dep hob"), "{text}");
+    // Where its files are, when that isn't the usual.
+    if let Some(Adding::Site { site, .. }) = &mut a.adding {
+        site.thumb_ext = Some("png".into());
+        site.media_url = Some("https://media.example".into());
+    }
+    let text = render(&mut a).0;
+    assert!(text.contains("Thumbnails are .png, files on media.example."), "{text}");
 }
 
 #[test]

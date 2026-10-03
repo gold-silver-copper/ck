@@ -608,6 +608,12 @@ and overboards, are left out. If a site's pages have no such bar, it starts with
 board of the link you pasted. Pasting a link to another of its boards in Settings › Sites
 › Add a site adds that board (once ck has checked its catalog is there).
 
+ck also works out where a vichan site's files are, from the thread previews on the same
+page: thumbnails all in one format whatever the file's (vichan's `thumb_ext`), and files
+on another host (`media_url`, like 8kun's). When the page has none to go by (a site whose
+pages are drawn in the browser), it asks for one thumbnail from the board's catalog in a
+couple of formats (at most three small requests). The popup says what it found.
+
 Settings › Sites › Your sites lists the `[[site]]` tables in your config; `x` twice takes
 one out.
 
