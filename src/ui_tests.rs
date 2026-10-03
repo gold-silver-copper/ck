@@ -1124,6 +1124,11 @@ fn adding_a_site() {
         archive: None,
         media_url: None,
     };
-    a.adding = Some(Adding::Site { site, name: "somechan".into(), open: None });
+    a.adding = Some(Adding::Site { site: site.clone(), name: "somechan".into(), open: None });
     insta::assert_snapshot!(snapshot(&mut a));
+    // Boards read from the bar on its pages.
+    let boards = ["wiz", "dep", "hob"].map(|b| BoardConfig::Full { uri: b.into(), title: String::new() }).to_vec();
+    a.adding = Some(Adding::Site { site: SiteConfig { boards: Some(boards), ..site }, name: "somechan".into(), open: None });
+    let text = render(&mut a).0;
+    assert!(text.contains("3 boards, from the list on its pages:") && text.contains("wiz dep hob"), "{text}");
 }

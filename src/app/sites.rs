@@ -63,7 +63,7 @@ impl App {
         };
         let site = &self.sites[i].cfg;
         let missing = match (&link.board, &site.boards) {
-            (Some(b), Some(list)) if site.kind == SiteKind::Vichan && !list.iter().any(|l| board_uri(l) == b) => Some(b.clone()),
+            (Some(b), Some(list)) if site.kind == SiteKind::Vichan && !list.iter().any(|l| l.uri() == b) => Some(b.clone()),
             _ => None,
         };
         let Some(board) = missing else {
@@ -279,11 +279,5 @@ impl App {
                 false
             }
         }
-    }
-}
-
-fn board_uri(b: &BoardConfig) -> &str {
-    match b {
-        BoardConfig::Uri(uri) | BoardConfig::Full { uri, .. } => uri,
     }
 }

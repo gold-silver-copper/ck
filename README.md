@@ -566,9 +566,12 @@ what it found with a name for it, which you can change: it's what you type after
 (`somechan/b`) and what favorites are saved under. `enter` adds it to the config as a
 `[[site]]`, and from `:` goes on to the link.
 
-vichan sites have no board list to ask for, so a vichan site starts with the board of the
-link you pasted. Pasting a link to another of its boards in Settings › Sites › Add a site
-adds that board too (once ck has checked its catalog is there).
+vichan sites have no board list API, so ck reads the boards from the bar at the top of the
+site's pages (the board's page for a link to a board, the front page for a link to the
+site): links to `/x/` with a title, the way vichan writes its boards. Pages like the rules,
+and overboards, are left out. If a site's pages have no such bar, it starts with the
+board of the link you pasted. Pasting a link to another of its boards in Settings › Sites
+› Add a site adds that board (once ck has checked its catalog is there).
 
 Settings › Sites › Your sites lists the `[[site]]` tables in your config; `x` twice takes
 one out.

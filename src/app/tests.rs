@@ -272,10 +272,15 @@ fn goto_opens_places_and_u_comes_back() {
     app.goto_str("a/x/abc");
     assert!(app.status.as_ref().unwrap().error);
     assert_eq!(app.tab.view, View::Boards);
-    // A link to a site ck doesn't have: it asks the site what it runs, to add it.
-    app.goto_str("https://example.com/g/");
-    assert!(matches!(&app.adding, Some(Adding::Looking { host, .. }) if host == "example.com"));
-    assert_eq!(app.tab.view, View::Boards);
+    // A link to a site ck doesn't have: it asks the site what it runs, to add it. Also
+    // without a scheme or a path (not a board of the current site called that).
+    for link in ["https://example.com/g/", "example.com"] {
+        app.adding = None;
+        app.goto_str(link);
+        assert!(matches!(&app.adding, Some(Adding::Looking { host, .. }) if host == "example.com"), "{link}");
+        assert_eq!(app.tab.view, View::Boards);
+    }
+    app.adding = None;
 }
 
 #[test]
@@ -1918,11 +1923,13 @@ fn a_link_to_a_new_site_adds_it_then_goes_there() {
     app.goto_str("https://newchan.invalid/tech/");
     assert!(app.adding.is_none());
     assert_eq!((app.tab.site, app.tab.view), (new, View::Catalog));
-    // A site that doesn't answer like any engine: said, nothing added.
+    // A site that doesn't answer like any engine: said, nothing added. (After the catalog
+    // load above has answered, so its error doesn't take the status.)
+    settle_until(&mut app, |a| a.tab.loading.is_none());
     serve("blank.invalid", vec![]);
     app.goto_str("blank.invalid/b/");
     settle_until(&mut app, |a| a.adding.is_none());
-    assert!(app.status.as_ref().unwrap().text.starts_with("blank.invalid doesn't answer like"));
+    assert!(app.status.as_ref().unwrap().text.starts_with("blank.invalid doesn't answer like"), "{:?}", app.status);
     assert_eq!(app.sites.len(), new + 1);
     crate::http::serve_test_host("newchan.invalid", None);
     crate::http::serve_test_host("blank.invalid", None);

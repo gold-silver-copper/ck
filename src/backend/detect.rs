@@ -5,7 +5,7 @@ use anyhow::{Result, bail};
 use serde_json::Value;
 
 use crate::config::{BoardConfig, SiteConfig, SiteKind};
-use crate::http::{HttpError, encode_segment as enc, get_json};
+use crate::http::{HttpError, encode_segment as enc, get_json, get_text};
 
 /// What a link says about its site: the address (scheme and host), the host, and the board
 /// the page is on, if any.
@@ -50,6 +50,54 @@ pub fn name_for(host: &str) -> String {
         Some((name, _)) if !name.is_empty() => name.to_string(),
         _ => host.to_string(),
     }
+}
+
+/// The boards in a vichan page's board bar (`<div class="boardlist">`), in its order: links
+/// on this site to `/X/` or `/X/index.html` with a `title`, which is how vichan writes its
+/// boards. Pages (`/rules.html`), the home link and overboards without a title are left out.
+pub fn boardlist(html: &str, host: &str) -> Vec<BoardConfig> {
+    let Some(start) = html.find(r#"class="boardlist""#) else { return Vec::new() };
+    let bar = html.get(start..).unwrap_or_default();
+    let bar = bar.get(..bar.find("</div>").unwrap_or(bar.len())).unwrap_or(bar);
+    let bare = |h: &str| h.strip_prefix("www.").unwrap_or(h).to_ascii_lowercase();
+    let mut out: Vec<BoardConfig> = Vec::new();
+    for tag in bar.split("<a").skip(1).filter_map(|rest| rest.split_once('>').map(|(tag, _)| tag)).filter(|t| t.starts_with(char::is_whitespace)) {
+        let (Some(href), Some(title)) = (attr(tag, "href"), attr(tag, "title").filter(|t| !t.trim().is_empty())) else { continue };
+        // On this site: a path, or a link to this host.
+        let path = match href.split_once("://").map(|(_, rest)| rest).or_else(|| href.strip_prefix("//")) {
+            Some(rest) => match rest.split_once('/') {
+                Some((h, p)) if bare(h) == bare(host) => format!("/{p}"),
+                _ => continue,
+            },
+            None => href,
+        };
+        let parts: Vec<&str> = path.split('/').collect();
+        let uri = match parts.as_slice() {
+            ["", uri, ""] | ["", uri, "index.html"] => crate::route::decode(uri),
+            _ => continue,
+        };
+        let seen = out.iter().any(|b| matches!(b, BoardConfig::Full { uri: u, .. } if *u == uri));
+        if uri.is_empty() || uri.contains(['.', '?', '#']) || seen {
+            continue;
+        }
+        out.push(BoardConfig::Full { uri, title: title.trim().to_string() });
+    }
+    out
+}
+
+/// An attribute's value in a tag (`name="value"`, entities decoded).
+fn attr(tag: &str, name: &str) -> Option<String> {
+    let key = format!("{name}=\"");
+    let mut from = 0;
+    while let Some(i) = tag.get(from..)?.find(&key).map(|i| i + from) {
+        // Not the end of another attribute's name (`data-title`).
+        if tag.get(..i)?.ends_with(char::is_whitespace) {
+            let value = tag.get(i + key.len()..)?;
+            return Some(crate::markup::decode(value.get(..value.find('"')?)?));
+        }
+        from = i + key.len();
+    }
+    None
 }
 
 /// A 4chan-style catalog: pages of `threads` (vichan's `/{board}/catalog.json`).
@@ -113,10 +161,28 @@ pub fn detect(link: &Link) -> Result<SiteConfig> {
     {
         return Ok(site(SiteKind::Foolfuuka, None));
     }
-    if let Some(board) = &link.board
-        && get(&format!("/{}/catalog.json", enc(board))).is_some_and(|v| is_catalog(&v))
+    // vichan has no board list API, but its pages have the boards in a bar at the top: the
+    // link's board's page, or the front page for a link to the site.
+    let page = |path: &str| get_text(&format!("{base}{path}")).map(|html| boardlist(&html, &link.host)).unwrap_or_default();
+    let mut listed = Vec::new();
+    let board = match &link.board {
+        Some(b) => Some(b.clone()),
+        None => {
+            listed = page("/");
+            listed.first().map(|b| b.uri().to_string())
+        }
+    };
+    if let Some(board) = board
+        && get(&format!("/{}/catalog.json", enc(&board))).is_some_and(|v| is_catalog(&v))
     {
-        return Ok(site(SiteKind::Vichan, Some(vec![BoardConfig::Uri(board.clone())])));
+        if link.board.is_some() {
+            listed = page(&format!("/{}/index.html", enc(&board)));
+        }
+        // The link's board, whatever the bar says.
+        if !listed.iter().any(|b| b.uri() == board) {
+            listed.insert(0, BoardConfig::Uri(board));
+        }
+        return Ok(site(SiteKind::Vichan, Some(listed)));
     }
     if let Some(v) = get("/api/mobile/v2/boards")
         && !super::makaba::parse_boards(&v).is_empty()
@@ -145,13 +211,18 @@ pub(crate) mod tests {
 
     /// Serve `host` with `pages` (path and query → JSON), 404 for the rest.
     pub fn serve(host: &str, pages: Vec<(&'static str, Value)>) {
+        serve_text(host, pages.into_iter().map(|(p, v)| (p, v.to_string())).collect());
+    }
+
+    /// Serve `host` with `pages` (path and query → body), 404 for the rest.
+    pub fn serve_text(host: &str, pages: Vec<(&'static str, String)>) {
         let host_name = host.to_string();
         serve_test_host(
             host,
             Some(Arc::new(move |url: &str, _| {
                 let path = url.strip_prefix(&format!("https://{host_name}")).unwrap_or(url);
                 match pages.iter().find(|(p, _)| *p == path) {
-                    Some((_, v)) => Raw { status: 200, last_modified: None, body: v.to_string() },
+                    Some((_, body)) => Raw { status: 200, last_modified: None, body: body.clone() },
                     None => Raw { status: 404, last_modified: None, body: String::new() },
                 }
             })),
@@ -172,6 +243,44 @@ pub(crate) mod tests {
         }
         assert_eq!(name_for("www.somechan.org"), "somechan");
         assert_eq!(name_for("boards.example.co:8080"), "boards.example");
+    }
+
+    /// Board bars as lainchan, wizchan and sushigirl write them (trimmed).
+    const LAINCHAN: &str = r#"<div class="boardlist"><span class="sub" data-description="Notices">[ <a href="/donate.html">$$$</a> / <a href="/rules.html">rules</a> ]</span>  <span class="sub" data-description="STEM">[ <a href="/λ/index.html" title="Programming">λ</a> / <a href="/Δ/index.html" title="Do It Yourself">diy</a> / <a href="/%CE%A9/index.html" title="Tech &amp; stuff">tech</a> ]</span></div><div class="boardlist"><a href="/zzz/index.html" title="Not the top bar">zzz</a></div>"#;
+    const WIZCHAN: &str = r#"<div class="boardlist"><span class="sub" data-description="0">[ <a href="/"><i class="fa fa-home"></i> Home</a> ]</span>  <span class="sub" data-description="1">[ <a href="/wiz/index.html" title="Wizardry">wiz</a> / <a href="/dep/index.html" title="Depression">dep</a> ]</span>  <span class="sub" data-description="2">[ <a href="/all/">all</a> ]</span>  <span class="sub" data-description="3">[ <a href="/rules.html"><i class="fa fa-book"></i>&nbsp;<b>Rules</b></a> ]</span></div>"#;
+    const SUSHI: &str = r#"<div class="boardlist"><span class="sub" data-description="0">[ <a href="/kaitensushi">kaitensushi</a> ]</span>  <span class="sub" data-description="1">[ <a href="/lounge/index.html" title="sushi social">lounge</a> / <a href="https://sushigirl.cafe/arcade/" title="vidya">arcade</a> / <a href="https://elsewhere.example/x/" title="Another site">x</a> / <a data-title="no" href="/kawaii/index.html" title="cute things">kawaii</a> / <a href="/lounge/" title="again">lounge</a> ]</span></div>"#;
+
+    #[test]
+    fn board_bars() {
+        let uris = |html, host| boardlist(html, host).iter().map(|b| (b.uri().to_string(), match b { BoardConfig::Full { title, .. } => title.clone(), BoardConfig::Uri(_) => String::new() })).collect::<Vec<_>>();
+        let pairs = |v: &[(&str, &str)]| v.iter().map(|(a, b)| (a.to_string(), b.to_string())).collect::<Vec<_>>();
+        // The board's address, not its text; titles decoded; only the first bar.
+        assert_eq!(uris(LAINCHAN, "lainchan.org"), pairs(&[("λ", "Programming"), ("Δ", "Do It Yourself"), ("Ω", "Tech & stuff")]));
+        // No home link, pages or overboard without a title.
+        assert_eq!(uris(WIZCHAN, "wizchan.org"), pairs(&[("wiz", "Wizardry"), ("dep", "Depression")]));
+        // Full links to this host count, other hosts don't; each board once.
+        assert_eq!(uris(SUSHI, "www.sushigirl.cafe"), pairs(&[("lounge", "sushi social"), ("arcade", "vidya"), ("kawaii", "cute things")]));
+        assert!(boardlist("<html>no bar</html>", "x.org").is_empty());
+        assert!(boardlist(r#"<div class="boardlist"><a href="/b/" title="unclosed"#, "x.org").is_empty());
+    }
+
+    #[test]
+    fn vichan_boards_come_from_the_bar() {
+        let catalog = fixture("vichan_catalog.json").to_string();
+        serve_text(
+            "wb.invalid",
+            vec![("/", WIZCHAN.into()), ("/wiz/catalog.json", catalog.clone()), ("/dep/catalog.json", catalog.clone()), ("/dep/index.html", WIZCHAN.into()), ("/x/catalog.json", catalog), ("/x/index.html", WIZCHAN.into())],
+        );
+        let found = |board: Option<&str>| {
+            let l = Link { base: "https://wb.invalid".into(), host: "wb.invalid".into(), board: board.map(String::from) };
+            detect(&l).unwrap().boards.unwrap().iter().map(|b| b.uri().to_string()).collect::<Vec<_>>()
+        };
+        // A link to the site: the front page's bar (its first board checked).
+        assert_eq!(found(None), ["wiz", "dep"]);
+        // A link to a board: its page's bar, in the bar's order; a board not in it first.
+        assert_eq!(found(Some("dep")), ["wiz", "dep"]);
+        assert_eq!(found(Some("x")), ["x", "wiz", "dep"]);
+        serve_test_host("wb.invalid", None);
     }
 
     #[test]
@@ -217,6 +326,7 @@ fn live_detect() {
     crate::http::NETWORK.store(true, std::sync::atomic::Ordering::Relaxed);
     let cases = [
         ("https://lainchan.org/%CE%BB/catalog.html", SiteKind::Vichan),
+        ("wizchan.org", SiteKind::Vichan),
         ("https://zzzchan.xyz/tech/", SiteKind::Jschan),
         ("https://endchan.net/art/", SiteKind::Lynxchan),
         ("https://desuarchive.org/a/", SiteKind::Foolfuuka),
@@ -225,8 +335,12 @@ fn live_detect() {
     let mut failures = Vec::new();
     for (url, kind) in cases {
         let got = link(url).ok_or_else(|| anyhow::anyhow!("not a link")).and_then(|l| detect(&l));
-        eprintln!("{url}: {:?}", got.as_ref().map(|s| (s.kind, &s.boards)));
+        eprintln!("{url}: {:?}", got.as_ref().map(|s| (s.kind, s.boards.as_ref().map(|b| b.iter().map(|b| b.uri().to_string()).collect::<Vec<_>>()))));
         match got {
+            // vichan's boards, from the bar on its pages.
+            Ok(s) if s.kind == SiteKind::Vichan && s.boards.as_ref().is_some_and(|b| b.len() < 4) => {
+                failures.push(format!("{url}: only {:?}", s.boards));
+            }
             Ok(s) if s.kind == kind => {}
             other => failures.push(format!("{url}: wanted {kind:?}, got {:?}", other.map(|s| s.kind))),
         }

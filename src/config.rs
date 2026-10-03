@@ -274,6 +274,14 @@ pub enum BoardConfig {
     },
 }
 
+impl BoardConfig {
+    pub fn uri(&self) -> &str {
+        match self {
+            BoardConfig::Uri(uri) | BoardConfig::Full { uri, .. } => uri,
+        }
+    }
+}
+
 /// Change a config file (the user's is `Config::path()`), keeping its comments and layout.
 /// A missing file is first created from the default config.
 pub fn edit_at(path: &Path, f: impl FnOnce(&mut DocumentMut)) -> Result<()> {
@@ -486,6 +494,7 @@ fn site_table(site: &SiteConfig) -> Table {
     t
 }
 
+/// `["b"]`, or one board a line, as the built-in sites have them.
 fn boards_array(boards: &[BoardConfig]) -> toml_edit::Array {
     let mut a = toml_edit::Array::new();
     for b in boards {
@@ -499,6 +508,13 @@ fn boards_array(boards: &[BoardConfig]) -> toml_edit::Array {
                 a.push(t);
             }
         }
+    }
+    if a.len() > 1 {
+        for v in a.iter_mut() {
+            v.decor_mut().set_prefix("\n  ");
+        }
+        a.set_trailing_comma(true);
+        a.set_trailing("\n");
     }
     a
 }

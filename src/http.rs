@@ -422,6 +422,17 @@ pub fn get_json(url: &str) -> Result<Value> {
     Ok(body)
 }
 
+/// GET a page's text (HTML) through the rate limiter, at this thread's priority. Not cached.
+pub fn get_text(url: &str) -> Result<String> {
+    let raw = transport(url, None)?;
+    match raw.status {
+        200..=299 => Ok(raw.body),
+        404 | 410 => Err(HttpError::NotFound(url.to_string()).into()),
+        429 => Err(HttpError::RateLimited.into()),
+        code => Err(HttpError::Status(code, url.to_string()).into()),
+    }
+}
+
 /// GET raw bytes (images, downloads) at low priority through the rate limiter. Not cached.
 pub fn get_bytes(url: &str, limit: u64) -> Result<Vec<u8>> {
     throttle(url, Priority::Low)?;
