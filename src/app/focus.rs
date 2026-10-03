@@ -427,6 +427,7 @@ impl App {
                         items.push(act(A::Browser, "open it in the browser"));
                     }
                     items.push(act(A::Search, "filter"));
+                    items.push(act(A::SearchSaved, "search inside the saved threads…"));
                     items.push(act(A::Hints, "pick a thread by its label"));
                 }
                 View::Search => {

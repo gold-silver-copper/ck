@@ -104,6 +104,18 @@ pub struct Post {
     pub text: OnceLock<(String, String)>,
 }
 
+/// What searching inside a thread looks through, lowercased: the name, subject, file names
+/// and text (`plain`, hidden spoilers left out). Searching saved threads uses it too.
+pub fn search_haystack<'a>(name: &str, subject: Option<&str>, files: impl IntoIterator<Item = &'a str>, plain: &str) -> String {
+    let mut s = format!("{name} {} ", subject.unwrap_or(""));
+    for f in files {
+        s.push_str(f);
+        s.push(' ');
+    }
+    s.push_str(plain);
+    s.to_lowercase()
+}
+
 impl Post {
     /// Body flattened to a single line of plain text, for previews and filtering. Spoilers
     /// are left out. Computed once.

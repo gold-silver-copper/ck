@@ -24,6 +24,11 @@ impl App {
             self.tab.view = view;
             return;
         }
+        // `saved WORDS`: search inside the saved threads.
+        if let Some(query) = input.trim().strip_prefix("saved ").map(str::trim).filter(|q| !q.is_empty()) {
+            self.tab.gallery = None;
+            return self.search_saved(query.to_string());
+        }
         // A link to a site ck doesn't have (`somechan.org/b/`, not a board called that): ask
         // it what it runs, to add it.
         let infos = self.site_infos();

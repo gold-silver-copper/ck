@@ -491,6 +491,13 @@ impl Store {
     }
 
     /// A thread's copy (once any write of it has finished).
+    /// Where saved copies are kept, and the copies newest first, for searching them.
+    pub fn saved_files(&self) -> Option<(PathBuf, Vec<ThreadKey>)> {
+        let mut metas: Vec<&SavedMeta> = self.saved.iter().collect();
+        metas.sort_by_key(|m| std::cmp::Reverse(m.saved));
+        Some((self.dir.clone()?, metas.into_iter().map(|m| m.key.clone()).collect()))
+    }
+
     pub fn load_saved(&mut self, key: &ThreadKey) -> Result<SavedThread> {
         let dir = self.dir.clone().context("no data folder")?;
         if let Some(w) = &self.writer {

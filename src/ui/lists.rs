@@ -318,14 +318,33 @@ pub(super) fn hidden_label(filter: &str) -> String {
 pub(super) fn draw_search(f: &mut Frame, app: &mut App, area: Rect) {
     let t = theme();
     let Some(s) = &app.tab.search else { return };
+    // Saved threads: how far the search has got, above the results.
+    let area = match &s.saved {
+        Some(saved) => {
+            let line = if saved.finished {
+                let skipped = if saved.skipped > 0 { format!(" ({} couldn't be read)", saved.skipped) } else { String::new() };
+                format!("{} in {} saved threads{skipped}", plural(s.hits.len(), "post"), saved.of)
+            } else {
+                format!("searching… {} of {} saved threads", saved.done, saved.of)
+            };
+            put(f, area.x + PAD, area.y, area.width.saturating_sub(PAD), Line::styled(line, dim()));
+            Rect { y: area.y + 2, height: area.height.saturating_sub(2), ..area }
+        }
+        None => area,
+    };
     let width = area.width.saturating_sub(PAD + 2) as usize;
     let more = app.more_results();
+    let needle = s.query.to_lowercase();
     let mut build = |k: usize| -> Vec<Line<'static>> {
         let (thread, p) = &s.hits[k];
         let mut head = vec![Span::styled(p.name.clone(), bold(t.name)), Span::raw("  ")];
+        let key = s.saved.as_ref().and_then(|x| x.keys.get(k));
+        if let Some(key) = key {
+            head.push(Span::styled(format!("{}/{}/{}  ", key.site, key.board, key.no), dim()));
+        }
         if p.no == *thread {
             head.extend([chip("OP", t.on_primary_container, t.primary_container), Span::raw(" ")]);
-        } else {
+        } else if key.is_none() {
             head.push(Span::styled(format!("in thread {thread}  "), dim()));
         }
         if let Some(subject) = &p.subject {
@@ -333,7 +352,11 @@ pub(super) fn draw_search(f: &mut Frame, app: &mut App, area: Rect) {
         }
         let right = vec![Span::styled(format!("No.{}  ·  {}", p.no, ago(p.time, app.clock)), dim())];
         let mut lines = vec![spread(head, right, width)];
-        lines.extend(excerpt(p.plain_text(), Style::new().fg(t.text), width, 2));
+        match key {
+            // The text around what matched, highlighted.
+            Some(_) => lines.extend(around_match(p.plain_text(), &needle, width)),
+            None => lines.extend(excerpt(p.plain_text(), Style::new().fg(t.text), width, 2)),
+        }
         lines
     };
     let mut state = app.tab.search_list.state;
@@ -351,6 +374,30 @@ pub(super) fn draw_search(f: &mut Frame, app: &mut App, area: Rect) {
         }
     }
     app.hit = hit;
+}
+
+/// A line of `text` around the first place `needle` (lowercase) is, with it highlighted; the
+/// start of the text when it's elsewhere (the name, a file name).
+fn around_match(text: &str, needle: &str, width: usize) -> Vec<Line<'static>> {
+    let t = theme();
+    let lower = text.to_lowercase();
+    // Lowercasing can change lengths (rarely): then the start of the text.
+    let at = lower.find(needle).filter(|_| lower.len() == text.len() && !needle.is_empty());
+    let Some(at) = at else { return excerpt(text, Style::new().fg(t.text), width, 1) };
+    let end = at + needle.len();
+    // Some context before it, from a character boundary.
+    let mut start = at.saturating_sub(width / 3);
+    while !text.is_char_boundary(start) {
+        start -= 1;
+    }
+    let (before, hit, after) = (text.get(start..at).unwrap_or(""), text.get(at..end).unwrap_or(""), text.get(end..).unwrap_or(""));
+    let lead = if start > 0 { "…" } else { "" };
+    let line = Line::from(vec![
+        Span::styled(format!("{lead}{before}"), Style::new().fg(t.text)),
+        Span::styled(hit.to_string(), search_hl()),
+        Span::styled(after.to_string(), Style::new().fg(t.text)),
+    ]);
+    vec![line]
 }
 
 /// Grid cards: a thumbnail over three lines of text.

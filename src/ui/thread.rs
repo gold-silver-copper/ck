@@ -395,7 +395,7 @@ pub(super) fn post_ctx(t: &ThreadView, i: usize, clock: Clock) -> PostCtx<'_> {
     }
 }
 
-fn search_hl() -> Style {
+pub(super) fn search_hl() -> Style {
     let t = theme();
     Style::new().fg(t.on_search).bg(t.search)
 }

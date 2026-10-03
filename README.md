@@ -370,6 +370,14 @@ thumbnails from the thumbnail cache; the rest show as placeholders. On a copy of
 that's still up, `r` opens the live thread. `x` (twice) deletes a copy; unwatching a thread
 keeps it.
 
+`:saved WORDS` (or "search inside the saved threads…" in the Saved view's `.` menu) searches
+every post of every copy, without the network, the way `/` searches inside a thread: the
+words as typed, in any case, in a post's name, subject, file names and text (hidden
+spoilers left out). Results come in as the copies are read, newest copy first, with where
+each is and the words highlighted; `enter` opens the copy on that post, with the search set
+so `n` / `N` go through it, and `esc` comes back. 500 MB of copies take about a second and a
+half.
+
 When the thread you open has 404'd and there's a copy, ck offers it ("a saved copy from
 2h ago: enter opens it"), and a thread that dies while you read it becomes its copy.
 Copies take at most `saved_max_mb` (500 MB by default; 0 for no limit): past that, the

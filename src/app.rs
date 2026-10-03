@@ -47,7 +47,7 @@ pub use gallery::Gallery;
 pub use home::BoardRef;
 pub use links::{ImageSearchPanel, LinkItem, LinksPanel};
 pub use saving::{Confirm, Saving};
-pub use search::Search;
+pub use search::{SavedSearch, Search};
 pub use sites::{Adding, MySites, origin as site_origin};
 pub use tabs::{MAX_TABS, Offline, Tab};
 pub use settings::{Popup as SettingsPopup, SECTIONS as SETTING_SECTIONS, key_rows, rows as setting_rows, tilde};
@@ -429,20 +429,17 @@ impl ThreadView {
     /// Lowercase searchable text of a post: name, subject, files and body (hidden spoilers excluded).
     fn post_text(&self, i: usize) -> String {
         let p = &self.posts[i];
-        let mut s = format!("{} {} ", p.name, p.subject.as_deref().unwrap_or(""));
-        for f in &p.files {
-            s.push_str(&f.filename);
-            s.push(' ');
-        }
+        let files = p.files.iter().map(|f| f.filename.as_str());
         if self.is_revealed(i) {
+            let mut text = String::new();
             for line in &p.body {
-                s.extend(line.spans.iter().map(|s| s.content.as_ref()));
-                s.push(' ');
+                text.extend(line.spans.iter().map(|s| s.content.as_ref()));
+                text.push(' ');
             }
+            crate::model::search_haystack(&p.name, p.subject.as_deref(), files, &text)
         } else {
-            s.push_str(p.plain_text());
+            crate::model::search_haystack(&p.name, p.subject.as_deref(), files, p.plain_text())
         }
-        s.to_lowercase()
     }
 
     /// The next (or previous) matching post after the selection, wrapping around.
@@ -908,6 +905,8 @@ enum Msg {
     Download(DlEvent),
     /// What a site runs, or has (for adding it).
     Detected(u64, Result<sites::Detected>),
+    /// What a search of the saved threads found in one more copy.
+    SavedSearch(u64, search::SavedFound),
     Input(Event),
     /// Something else (a loaded image) needs a redraw.
     Wake,
@@ -967,6 +966,8 @@ pub struct App {
     pub confirm: Option<saving::Confirm>,
     /// Adding a site (see `add_site_from`).
     pub adding: Option<sites::Adding>,
+    /// The search of saved threads that's wanted; a running one stops when it changes.
+    saved_search: Arc<std::sync::atomic::AtomicU64>,
     /// Sites taken out of the config in Settings: off the home screen until ck restarts.
     pub removed_sites: std::collections::BTreeSet<String>,
     pub store: Store,
@@ -1126,6 +1127,7 @@ impl App {
             saved_confirm: None,
             confirm: None,
             adding: None,
+            saved_search: Arc::default(),
             removed_sites: Default::default(),
             store,
             refresh_thread,
@@ -1448,6 +1450,7 @@ impl App {
             Msg::GeneralCatalog(key, res) => self.general_catalog(key, res),
             Msg::Download(ev) => self.download_event(ev),
             Msg::Detected(id, res) => self.detected(id, res),
+            Msg::SavedSearch(id, found) => self.saved_found(id, found),
             Msg::Found(_, board, post, res) => {
                 self.tab.loading = None;
                 match res {
