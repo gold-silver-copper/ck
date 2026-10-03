@@ -30,9 +30,11 @@ What it does, besides browsing:
   and replies to posts you've marked as yours. Each is **saved** as it refreshes, so a
   thread that dies can still be read, offline.
 - **Catalogs** as cards, a compact list or a grid, marking threads that are new since your
-  last visit; **filters** to hide or highlight threads and posts.
-- **Threads** with replies expandable inline, quote previews, search, a links panel, and
-  copying text and links to the clipboard; save a thread as a page for offline reading.
+  last visit; **filters** to hide or highlight threads and posts, added from a post with `X`
+  and managed in Settings.
+- **Threads** with replies expandable inline, quote previews, search, a links panel, a
+  **conversation view** (`c`: one post's back-and-forth alone), and copying text and links
+  to the clipboard; save a thread as a page for offline reading.
 - **Archive search** on FoolFuuka archives (desuarchive and others).
 - **Few keys to learn**: `.` lists what you can do with what's selected, `tab` steps through
   a post's images and links, and `f` labels everything on screen to open by typing.
@@ -149,6 +151,7 @@ the action name is in brackets. The `?` help lists the same, with your keys.
 | `n` / `N` | next / previous search match [`next_match`, `prev_match`] |
 | `s` / `S` | show spoilers in the post / the whole thread [`spoiler`, `all_spoilers`] |
 | `e`  | show / hide the post's replies under it, indented; again on a reply goes a level deeper (up to 4) [`expand`] |
+| `c`  | the post's conversation alone: what it replies to and the replies to it; `esc` (or `c`) shows the whole thread again [`conversation`] |
 | `v` / `V` | image viewer for the post's files / gallery of every file in the thread [`view`, `gallery`] |
 | `i` / `R` | open the post's file (videos in mpv if it's installed) / reverse image search [`open_file`, `image_search`] |
 | `O`  | the post's links: quotes of other threads, web links, files; `enter` opens, `y` copies [`links`] |
@@ -160,6 +163,21 @@ the action name is in brackets. The `?` help lists the same, with your keys.
 | `F`  | follow the thread as a general: when it dies or fills up, the next one is watched [`follow`] |
 | `a`  | after a 404: open the thread in the site's archive [`archive`] |
 | `y` / `Y` | copy the post's text (a focused part: its URL) / the post's link [`copy`, `copy_link`] |
+
+### Conversations
+
+`c` on a post shows just its conversation: the post, what it quotes in the thread (and
+what those quote, on up), and the replies to it (and the replies to those, on down), in
+thread order. Other replies to the posts it quotes aren't in it, and since everyone quotes
+the OP, the OP's replies only count when it's the OP's conversation. Replies are indented
+by how far down they are; the post itself is marked "conversation", and the top bar says
+"Conversation of No.123" with how many posts. Everything works as in the whole thread:
+`tab` and the menu, quotes (one to a post outside the conversation leaves it and goes
+there), search (within the conversation), `e`, previews, the gallery (its files). New
+replies that belong in it appear as the thread refreshes. `esc` or `c` goes back to the
+whole thread, scrolled where it was, and tabs and the next start remember a conversation
+that was open. At most 500 posts are shown, the nearest ones; the footer says when there
+are more.
 
 In the gallery (`V`), `h`/`j`/`k`/`l` move, `enter` views (`h`/`l` there go through every
 file of the thread), `d` saves the file, `esc` returns to its post.

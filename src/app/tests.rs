@@ -660,6 +660,7 @@ fn sessions_save_and_restore() {
         selected: Some(6),
         sort: Some(Sort::Newest),
         filter: String::new(),
+        conversation: None,
     });
     // The next run starts there.
     let mut next = local_app();
@@ -1448,4 +1449,123 @@ fn the_filter_list_edits_turns_off_and_removes() {
     app.on_key(KeyEvent::from(KeyCode::Char(' ')));
     assert!(app.status.as_ref().unwrap().text.contains("changed since ck read it"));
     assert!(config_text(&app).contains("eggs") && !config_text(&app).contains("enabled"));
+}
+
+// ----- conversations -----
+
+/// A thread of `(no, quotes)`.
+fn talk(posts: &[(u64, &[u64])]) -> ThreadView {
+    let posts = posts.iter().map(|&(no, quotes)| Post { no, quotes: quotes.to_vec(), ..Default::default() }).collect();
+    ThreadView::new("x".into(), 1, posts)
+}
+
+/// The conversation of post `no`: `(post, depth)` in thread order, and whether it was capped.
+fn conv(t: &ThreadView, no: u64) -> (Vec<(u64, i32)>, bool) {
+    let (depth, capped) = conversation_of(&t.posts, &t.index, &t.backlinks, t.index[&no]);
+    (depth.into_iter().map(|(i, d)| (t.posts[i].no, d)).collect(), capped)
+}
+
+#[test]
+fn conversations_go_up_and_down_never_sideways() {
+    // 1 is the OP; 3 and 5 both reply to 2; 4 replies to 3, 6 to 4 and the OP, 7 to 5.
+    let t = talk(&[(1, &[]), (2, &[1]), (3, &[2]), (4, &[3]), (5, &[2]), (6, &[4, 1]), (7, &[5]), (8, &[99])]);
+    // Up to the OP (shown, not gone through), down to 6; not 5 or 7 (other replies to 2).
+    assert_eq!(conv(&t, 3), (vec![(1, -2), (2, -1), (3, 0), (4, 1), (6, 2)], false));
+    assert_eq!(conv(&t, 6).0, [(1, -1), (2, -3), (3, -2), (4, -1), (6, 0)]);
+    // The OP's own: everything that replies to it, on down; 8 quotes another thread.
+    assert_eq!(conv(&t, 1).0.len(), 7);
+    // An OP quoting a later post is in that post's conversation, but nothing beyond it.
+    let t = talk(&[(1, &[3]), (2, &[1]), (3, &[]), (4, &[1])]);
+    assert_eq!(conv(&t, 3).0, [(1, 1), (3, 0)]);
+    // Quote loops end.
+    let t = talk(&[(1, &[]), (10, &[11]), (11, &[10, 11])]);
+    assert_eq!(conv(&t, 10).0, [(10, 0), (11, -1)]);
+    // At most 500, the nearest first.
+    let chain: Vec<(u64, Vec<u64>)> = (1..=700u64).map(|no| (no, if no > 1 { vec![no - 1] } else { vec![] })).collect();
+    let chain: Vec<(u64, &[u64])> = chain.iter().map(|(n, q)| (*n, q.as_slice())).collect();
+    let t = talk(&chain);
+    let (posts, capped) = conv(&t, 350);
+    assert!(capped && posts.len() == CONVERSATION_MAX);
+    // All 349 above (up to the OP), then the 150 nearest below.
+    assert_eq!((posts.first().copied(), posts.last().copied()), (Some((1, -349)), Some((500, 150))));
+}
+
+#[test]
+fn c_shows_a_conversation_until_esc() {
+    let mut app = local_app();
+    app.goto_str("a/x/1");
+    let posts = [(1, vec![]), (2, vec![1]), (3, vec![2]), (4, vec![3]), (5, vec![2]), (6, vec![99])];
+    let post = |&(no, ref quotes): &(u64, Vec<u64>)| Post { no, quotes: quotes.clone(), ..Default::default() };
+    app.handle(Msg::Thread(app.tab.req, Ok(posts.iter().map(post).collect())));
+    let t = app.tab.thread.as_mut().unwrap();
+    t.scroll = 7;
+    t.select(2);
+    app.act(Action::Conversation);
+    let shown = |app: &App| app.tab.thread.as_ref().unwrap().entries.iter().map(|e| (app.tab.thread.as_ref().unwrap().posts[e.post].no, e.depth)).collect::<Vec<_>>();
+    assert_eq!(shown(&app), [(1, 0), (2, 0), (3, 0), (4, 1)]);
+    assert_eq!(app.tab.thread.as_ref().unwrap().current().unwrap().no, 3);
+    // A refresh keeps it, with a new reply that belongs (and not one that doesn't).
+    let mut more: Vec<Post> = posts.iter().map(post).collect();
+    more.push(post(&(7, vec![4])));
+    more.push(post(&(8, vec![5])));
+    app.set_thread(more);
+    assert_eq!(shown(&app), [(1, 0), (2, 0), (3, 0), (4, 1), (7, 2)]);
+    // esc: the whole thread, the post still selected, scrolled where it was.
+    app.on_key(KeyEvent::from(KeyCode::Esc));
+    let t = app.tab.thread.as_ref().unwrap();
+    assert!(t.conversation.is_none() && t.entries.len() == 8);
+    assert_eq!((t.current().unwrap().no, t.scroll), (3, 7));
+    // A post with nothing to talk about has none.
+    app.tab.thread.as_mut().unwrap().select(5);
+    app.act(Action::Conversation);
+    assert!(app.tab.thread.as_ref().unwrap().conversation.is_none());
+    assert!(app.status.as_ref().unwrap().text.contains("isn't part of a conversation"));
+    // Jumping to a post outside it leaves it.
+    app.tab.thread.as_mut().unwrap().select(3);
+    app.act(Action::Conversation);
+    assert!(app.tab.thread.as_mut().unwrap().jump_to(8));
+    let t = app.tab.thread.as_ref().unwrap();
+    assert!(t.conversation.is_none() && t.current().unwrap().no == 8);
+    // u comes back (into the whole thread).
+    app.act(Action::JumpBack);
+    assert_eq!(app.tab.thread.as_ref().unwrap().current().unwrap().no, 4);
+}
+
+#[test]
+fn a_conversation_is_remembered_in_the_session() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = local_app();
+    app.store = Store::load(Some(dir.path().to_path_buf())).0;
+    app.goto_str("a/x/1");
+    let posts = || vec![Post { no: 1, ..Default::default() }, Post { no: 2, quotes: vec![1], ..Default::default() }, Post { no: 3, quotes: vec![2], ..Default::default() }, Post { no: 4, quotes: vec![1], ..Default::default() }];
+    app.handle(Msg::Thread(app.tab.req, Ok(posts())));
+    app.tab.thread.as_mut().unwrap().select(1);
+    app.act(Action::Conversation);
+    app.tab.thread.as_mut().unwrap().select(2);
+    app.save_session(None);
+    let place = app.store.load_session().unwrap().tabs[0].clone();
+    assert_eq!((place.conversation, place.selected), (Some(2), Some(3)));
+    // An old session without it still loads.
+    let old: crate::store::Place = serde_json::from_str(r#"{"view":"thread","site":"a","board":"x","thread":1}"#).unwrap();
+    assert_eq!(old.conversation, None);
+    let mut next = local_app();
+    next.go_to_place(&place);
+    next.handle(Msg::Thread(next.tab.req, Ok(posts())));
+    let t = next.tab.thread.as_ref().unwrap();
+    assert_eq!((t.conversation.as_ref().map(|c| c.anchor), t.current().unwrap().no, t.entries.len()), (Some(2), 3, 3));
+}
+
+#[test]
+fn back_to_a_catalog_of_the_same_board_name_on_another_site_loads_it() {
+    // (Found by fuzzing.) a/g's catalog, then a thread on b/g: back shows b/g's catalog, not a's.
+    let mut app = app_with(
+        "[[site]]\nname = \"a\"\nkind = \"vichan\"\nurl = \"http://127.0.0.1:3\"\nboards = [\"g\"]\n\
+         [[site]]\nname = \"b\"\nkind = \"vichan\"\nurl = \"http://localhost:3\"\nboards = [\"g\"]",
+    );
+    app.goto_str("a/g");
+    app.handle(Msg::Catalog(app.tab.req, Ok(vec![Post { no: 1, ..Default::default() }])));
+    app.goto_str("b/g/5");
+    app.back();
+    assert_eq!((app.tab.view, app.tab.site, app.tab.catalog_site), (View::Catalog, 1, 1));
+    assert!(app.tab.catalog.is_empty() && app.tab.loading.is_some());
 }

@@ -237,6 +237,7 @@ fn location(app: &App) -> (Vec<String>, Vec<Span<'static>>) {
             vec![site(), board().unwrap_or_default()]
         }
         View::Thread => {
+            let mut return_crumbs = None;
             let th = app.tab.thread.as_ref();
             let subject = th.and_then(|th| th.posts.first()?.subject.clone()).unwrap_or_else(|| {
                 th.map_or("Thread".into(), |th| format!("Thread {}", th.no))
@@ -252,7 +253,15 @@ fn location(app: &App) -> (Vec<String>, Vec<Span<'static>>) {
                 }
             }
             let uri = app.tab.board.as_ref().map(|b| format!("/{}/", b.uri)).unwrap_or_default();
-            if let Some(g) = &app.tab.gallery {
+            if let Some(c) = th.and_then(|th| th.conversation.as_ref()).filter(|_| app.tab.gallery.is_none()) {
+                // The conversation's posts instead of the thread's.
+                meta.retain(|m| !m.ends_with("posts") && !m.ends_with("post"));
+                meta.insert(0, if c.capped { format!("first {}", plural(c.depth.len(), "post")) } else { plural(c.depth.len(), "post") });
+                return_crumbs = Some(vec![site(), uri.clone(), truncate(&subject, 24), format!("Conversation of No.{}", c.anchor)]);
+            }
+            if let Some(crumbs) = return_crumbs {
+                crumbs
+            } else if let Some(g) = &app.tab.gallery {
                 meta.insert(0, plural(g.files.len(), "file"));
                 vec![site(), uri, truncate(&subject, 40), "Files".into()]
             } else {
@@ -419,16 +428,38 @@ fn footer_hints(app: &App) -> Vec<(String, &'static str)> {
                 (k(Action::Menu), "more"),
                 ("esc".into(), "the post"),
             ],
-            None => vec![
-                ("j/k".into(), "post"),
-                (k(Action::NextPart), "images & links"),
-                (k(Action::Hints), "hints"),
-                (k(Action::Menu), "more"),
-                ("enter".into(), "quote"),
-                (k(Action::JumpBack), "back"),
-                (k(Action::Search), "search"),
-                (k(Action::Watch), "watch"),
-            ],
+            None if app.tab.thread.as_ref().is_some_and(|t| t.conversation.is_some()) => {
+                let capped = app.tab.thread.as_ref().and_then(|t| t.conversation.as_ref()).is_some_and(|c| c.capped);
+                let mut hints = vec![
+                    ("j/k".into(), "post"),
+                    (k(Action::NextPart), "images & links"),
+                    (k(Action::Menu), "more"),
+                    ("enter".into(), "quote"),
+                    (format!("esc/{}", k(Action::Conversation)), "whole thread"),
+                ];
+                if capped {
+                    hints.push(("".into(), "the nearest 500 posts"));
+                }
+                hints
+            }
+            None => {
+                let mut hints = vec![
+                    ("j/k".into(), "post"),
+                    (k(Action::NextPart), "images & links"),
+                    (k(Action::Hints), "hints"),
+                    (k(Action::Menu), "more"),
+                    ("enter".into(), "quote"),
+                ];
+                // A post that's part of a conversation.
+                let talks = app.tab.thread.as_ref().is_some_and(|t| {
+                    t.current().is_some_and(|p| !t.backlinks[t.selected].is_empty() || p.quotes.iter().any(|q| t.index.contains_key(q)))
+                });
+                if talks {
+                    hints.push((k(Action::Conversation), "conversation"));
+                }
+                hints.extend([(k(Action::JumpBack), "back"), (k(Action::Search), "search"), (k(Action::Watch), "watch")]);
+                hints
+            }
         },
         View::Catalog => vec![
             ("enter".into(), "open"),
@@ -1246,7 +1277,7 @@ fn shown_with(t: &ThreadView, i: usize, p: &Post, ctx: &PostCtx) -> u64 {
     let in_added = !s.is_empty() && (s.contains(['(', ')']) || " (op)".contains(s) || " (you)".contains(s));
     let highlighted = t.matches.binary_search(&i).is_ok() || (quotes_marked && in_added);
     (ago(p.time, ctx.clock), ctx.is_op, ctx.is_new, ctx.reveal, ctx.mark, ctx.mine.contains(&p.no), quotes_marked, ctx.backlinks).hash(&mut h);
-    ctx.focus.hash(&mut h);
+    (ctx.focus, ctx.anchor).hash(&mut h);
     if highlighted {
         ctx.search.hash(&mut h);
     }
@@ -1268,6 +1299,8 @@ struct PostCtx<'a> {
     mine: &'a std::collections::HashSet<u64>,
     /// The focused part, when this is the selected entry.
     focus: Option<&'a Part>,
+    /// The post a conversation is shown for.
+    anchor: bool,
 }
 
 fn post_ctx(t: &ThreadView, i: usize, clock: Clock) -> PostCtx<'_> {
@@ -1282,6 +1315,7 @@ fn post_ctx(t: &ThreadView, i: usize, clock: Clock) -> PostCtx<'_> {
         mark: t.marks.get(i),
         mine: &t.mine,
         focus: None,
+        anchor: t.conversation.as_ref().is_some_and(|c| c.anchor == t.posts[i].no),
     }
 }
 
@@ -1303,6 +1337,9 @@ fn post_lines(p: &Post, ctx: &PostCtx, width: usize) -> (Vec<Line<'static>>, Vec
     }
     if ctx.is_new {
         head.extend([chip("new", t.background, t.new), Span::raw(" ")]);
+    }
+    if ctx.anchor {
+        head.extend([chip("conversation", t.on_primary, t.primary), Span::raw(" ")]);
     }
     if ctx.mine.contains(&p.no) {
         head.extend([chip("you", t.on_primary, t.primary), Span::raw(" ")]);
@@ -1630,8 +1667,7 @@ fn help_sections(keys: &KeyMap) -> Vec<(&'static str, Vec<(String, &'static str)
                 (k(Action::Favorite), "favorite this board"),
                 (pair(Action::Sort, Action::Compact), "sort / layout (grid, …)"),
                 (k(Action::Links), "the OP's links and files"),
-                (pair(Action::Hide, Action::ShowHidden), "hide / show hidden"),
-                (k(Action::Filter), "filter threads like this"),
+                (format!("{} / {}", pair(Action::Hide, Action::ShowHidden), k(Action::Filter)), "hide / show hidden / filter"),
                 (k(Action::ArchiveSearch), "search the board's archive"),
                 (pair(Action::Copy, Action::CopyLink), "copy text / link"),
             ],
@@ -1645,14 +1681,13 @@ fn help_sections(keys: &KeyMap) -> Vec<(&'static str, Vec<(String, &'static str)
                 (pair(Action::JumpBack, Action::Unread), "jump back / first unread"),
                 (pair(Action::NextMatch, Action::PrevMatch), "next / previous match"),
                 (pair(Action::Spoiler, Action::AllSpoilers), "spoilers: post / all"),
-                (k(Action::Expand), "replies under the post"),
+                (pair(Action::Expand, Action::Conversation), "replies under it / conversation"),
                 (pair(Action::View, Action::Gallery), "view images / gallery"),
                 (pair(Action::OpenFile, Action::ImageSearch), "open file / image search"),
                 (k(Action::Links), "the post's links and files"),
                 (format!("{} / {}", pair(Action::Download, Action::DownloadThread), k(Action::Export)), "save: files / all / page"),
                 (format!("{} / {} / {}", k(Action::Watch), k(Action::NewTab), k(Action::Follow)), "watch / quote tab / general"),
-                (pair(Action::Hide, Action::ShowHidden), "hide post / show hidden"),
-                (k(Action::Filter), "filter posts like this"),
+                (format!("{} / {}", pair(Action::Hide, Action::ShowHidden), k(Action::Filter)), "hide / show hidden / filter"),
                 (k(Action::Mine), "mark as yours (replies)"),
                 (k(Action::Archive), "open a 404'd thread archived"),
                 (pair(Action::Copy, Action::CopyLink), "copy text / link"),

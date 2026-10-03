@@ -282,6 +282,11 @@ impl App {
                         let hidden = t.marks.get(t.selected).is_some_and(|m| m.hidden.is_some());
                         items.push(act(A::Hide, if hidden { "unhide it" } else { "hide it" }));
                         items.push(act(A::Filter, "hide or highlight posts like it…"));
+                        if t.conversation.is_some() {
+                            items.push(act(A::Conversation, "the whole thread again"));
+                        } else if t.backlinks[t.selected].len() + p.quotes.iter().filter(|q| t.index.contains_key(q)).count() > 0 {
+                            items.push(act(A::Conversation, "its conversation alone"));
+                        }
                         items.push(act(A::Watch, if watching(t.no) { "stop watching the thread" } else { "watch the thread" }));
                         items.push(act(A::Follow, "follow the thread as a general"));
                         if t.posts.iter().any(|p| !p.files.is_empty()) {
