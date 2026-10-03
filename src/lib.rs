@@ -45,6 +45,7 @@ pub mod fuzzing;
 mod fuzz;
 pub mod http;
 pub mod images;
+pub mod input_log;
 pub mod keys;
 pub mod markup;
 pub mod model;

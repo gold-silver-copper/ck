@@ -51,7 +51,9 @@ fn main() -> Result<()> {
         let _ = execute!(stdout(), DisableMouseCapture, DisableBracketedPaste);
         hook(info);
     }));
+    ck::input_log::note(|| "images  asking the terminal".into());
     let picker = (config.images != ImagesMode::Off).then(|| detect_images(config.images));
+    ck::input_log::note(|| format!("images  {:?}", picker.as_ref().map(|p| p.protocol_type())));
     let mut app = App::new(config, keys, picker, store);
     if let Some(w) = warnings.first() {
         app.error(w);
@@ -105,11 +107,33 @@ fn detect_images(mode: ImagesMode) -> Picker {
     if matches!(std::env::var("TERM").as_deref(), Ok("dumb" | "linux")) && mode == ImagesMode::Auto {
         return Picker::halfblocks();
     }
-    let options = QueryStdioOptions { timeout: Duration::from_secs(1), ..Default::default() };
-    let mut picker = Picker::from_query_stdio_with_options(options).unwrap_or_else(|_| Picker::halfblocks());
+    const TIMEOUT: Duration = Duration::from_secs(1);
+    let options = QueryStdioOptions { timeout: TIMEOUT, ..Default::default() };
+    let asked = Instant::now();
+    let picker = Picker::from_query_stdio_with_options(options);
+    // No answer in time comes back as a guess, not an error: the time it took tells.
+    if picker.is_err() || asked.elapsed() >= TIMEOUT {
+        release_query_reader();
+    }
+    let mut picker = picker.unwrap_or_else(|_| Picker::halfblocks());
     let in_zellij = std::env::var_os("ZELLIJ").is_some();
     picker.set_protocol_type(ck::images::choose_protocol(mode, picker.protocol_type(), in_zellij));
     picker
+}
+
+/// After a terminal query that got no answer in time. ratatui-image reads the answer on a
+/// thread of its own, which is still waiting on stdin, and would take the first key typed
+/// (tmux, unless `allow-passthrough` is on, drops the whole query, so nothing ever comes).
+/// Ask what every terminal answers, a status report, so that thread gets its answer and
+/// ends before ck starts reading input. If the reply comes to ck instead, it's dropped as
+/// an unknown sequence.
+fn release_query_reader() {
+    use std::io::Write;
+    let mut out = stdout();
+    if out.write_all(b"\x1b[5n").and_then(|()| out.flush()).is_ok() {
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    ck::input_log::note(|| "images  no answer: asked for a status report to end the query".into());
 }
 
 /// Draw, then sleep until input, a finished request, or the next deadline.
@@ -133,10 +157,12 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
             screen = now;
         }
         let frame = terminal.draw(|f| ui::draw(f, app))?;
+        ck::input_log::note(|| "frame".into());
         if let Some(path) = &dump {
             let _ = std::fs::write(path, frame_text(frame.buffer));
         }
         let timeout = app.next_wake(Instant::now());
+        ck::input_log::note(|| format!("sleep   up to {timeout:?}"));
         if !app.wait(timeout) {
             app.tick = app.tick.wrapping_add(1);
         }

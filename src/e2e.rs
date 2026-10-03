@@ -208,9 +208,9 @@ fn rss_kb(pid: u32) -> Option<u64> {
     String::from_utf8_lossy(&out.stdout).trim().parse().ok()
 }
 
-/// Wait until ck answers keys, with help open. Keys typed while it asks the terminal about
-/// images are swallowed, and keep it asking (ratatui-image restarts its timeout on every
-/// byte), so the first one waits until it has drawn.
+/// Wait until ck has drawn, then check that the first key, sent once after a pause, is
+/// acted on. (A query about images that the terminal never answered used to leave a reader
+/// on stdin that took the first key: tmux drops the query unless `allow-passthrough` is on.)
 fn ready(t: &Tmux) {
     for _ in 0..50 {
         if t.screen().contains(" ck ") {
@@ -218,9 +218,10 @@ fn ready(t: &Tmux) {
         }
         std::thread::sleep(Duration::from_millis(100));
     }
-    for _ in 0..40 {
-        t.keys(&["?"]);
-        std::thread::sleep(Duration::from_millis(400));
+    std::thread::sleep(Duration::from_secs(3));
+    t.keys(&["?"]);
+    for _ in 0..20 {
+        std::thread::sleep(Duration::from_millis(100));
         let s = t.screen();
         assert!(!s.contains("CK_EXIT="), "ck exited while starting:\n{s}");
         if s.contains("esc close") {
@@ -229,7 +230,7 @@ fn ready(t: &Tmux) {
             return;
         }
     }
-    panic!("ck didn't respond:\n{}", t.screen());
+    panic!("the first key wasn't acted on:\n{}", t.screen());
 }
 
 const KEYS: &[&str] = &[

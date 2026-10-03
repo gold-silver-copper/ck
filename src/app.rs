@@ -1387,6 +1387,7 @@ impl App {
         let tx = self.tx.clone();
         std::thread::spawn(move || {
             while let Ok(ev) = event::read() {
+                crate::input_log::note(|| format!("read    {ev:?}"));
                 if tx.send(Msg::Input(ev)).is_err() {
                     return;
                 }
@@ -1404,6 +1405,10 @@ impl App {
         }
         if other.is_some() && !matches!(msg, Msg::Boards(..)) {
             return;
+        }
+        if let Msg::Input(ev) = &msg {
+            let acted = !matches!(ev, Event::Key(k) if k.kind != KeyEventKind::Press);
+            crate::input_log::note(|| format!("handle  {ev:?}{}", if acted { "" } else { "  (not a press: ignored)" }));
         }
         match msg {
             Msg::Wake => {}
