@@ -1718,9 +1718,18 @@ fn draw_adding(f: &mut Frame, app: &App) {
         Adding::Site { site, name, .. } => {
             let host = crate::http::host(site.url.as_deref().unwrap_or_default()).to_string();
             let mut lines = vec![text(format!("It runs {}.", site.kind.label()))];
-            if let Some([crate::config::BoardConfig::Uri(b) | crate::config::BoardConfig::Full { uri: b, .. }]) = site.boards.as_deref() {
-                lines.push(text(format!("Its boards: /{b}/ so far. vichan has no board list: Settings › Sites")));
-                lines.push(text("adds more from links to them.".into()));
+            match site.boards.as_deref() {
+                Some([b]) => {
+                    lines.push(text(format!("Its boards: /{}/ so far. vichan has no board list: Settings › Sites", b.uri())));
+                    lines.push(text("adds more from links to them.".into()));
+                }
+                // Read from the board bar on its pages.
+                Some(boards) => {
+                    let names: Vec<&str> = boards.iter().map(|b| b.uri()).collect();
+                    lines.push(text(format!("{} boards, from the list on its pages:", boards.len())));
+                    lines.push(Line::styled(truncate(&names.join(" "), 80), dim()));
+                }
+                None => {}
             }
             lines.extend([
                 Line::default(),

@@ -24,11 +24,18 @@ impl App {
             self.tab.view = view;
             return;
         }
+        // A link to a site ck doesn't have (`somechan.org/b/`, not a board called that): ask
+        // it what it runs, to add it.
+        let infos = self.site_infos();
+        if let Some(link) = crate::backend::detect::link(input) {
+            let host = link.host.strip_prefix("www.").unwrap_or(&link.host);
+            if !infos.iter().any(|s| s.hosts.iter().any(|h| h == host)) {
+                return self.add_site_from(input, true);
+            }
+        }
         let board = self.tab.board.as_ref().map(|b| b.uri.clone());
-        match route::resolve(input, &self.site_infos(), (self.tab.site, board.as_deref())) {
+        match route::resolve(input, &infos, (self.tab.site, board.as_deref())) {
             Ok(target) => self.go(target),
-            // A link to a site ck doesn't have: ask it what it runs, to add it.
-            Err(_) if crate::backend::detect::link(input).is_some() => self.add_site_from(input, true),
             Err(e) => self.error(e),
         }
     }

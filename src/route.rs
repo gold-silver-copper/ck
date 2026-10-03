@@ -53,9 +53,10 @@ pub fn resolve(input: &str, sites: &[SiteInfo], here: (usize, Option<&str>)) -> 
         bail!("Type {FORMS}");
     }
     if let Some(rest) = input.split_once("://").map(|(_, r)| r).or_else(|| input.strip_prefix("//")).or_else(|| {
-        // `boards.4chan.org/g/` without a scheme: the first part looks like a host.
+        // `boards.4chan.org/g/` (or just the host) without a scheme: the first part is a
+        // site's host.
         let first = input.split('/').next()?;
-        (first.contains('.') && input.contains('/') && sites.iter().any(|s| s.hosts.iter().any(|h| *h == bare(first)))).then_some(input)
+        (first.contains('.') && sites.iter().any(|s| s.hosts.iter().any(|h| *h == bare(first)))).then_some(input)
     }) {
         let host = bare(rest.split(['/', '?', '#']).next().unwrap_or(rest));
         let Some(site) = sites.iter().position(|s| s.hosts.iter().any(|h| h == host)) else {
@@ -119,7 +120,7 @@ fn number(s: &str) -> Option<u64> {
 }
 
 /// Undo percent-encoding (`%CE%BB` is λ).
-fn decode(s: &str) -> String {
+pub(crate) fn decode(s: &str) -> String {
     let b = s.as_bytes();
     let mut out = Vec::with_capacity(b.len());
     let mut i = 0;
@@ -178,6 +179,7 @@ mod tests {
         assert_eq!(at("https://boards.4chan.org/g/thread/109953009/lmg-local-models#p109953010"), t(fourchan, "g", Some(109953009), Some(109953010)));
         assert_eq!(at("https://boards.4channel.org/v/thread/1#q2"), t(fourchan, "v", Some(1), Some(2)));
         assert_eq!(at("boards.4chan.org/g/catalog#s=lmg%2F"), t(fourchan, "g", None, None));
+        assert_eq!(at("lainchan.org"), Target { site: site("lainchan"), board: None, thread: None, post: None });
         assert_eq!(at("https://lainchan.org/%CE%BB/res/42.html#43"), t(site("lainchan"), "λ", Some(42), Some(43)));
         assert_eq!(at("https://8kun.top/pnd/res/12345+50.html#12399"), t(site("8kun"), "pnd", Some(12345), Some(12399)));
         assert_eq!(at("https://2ch.hk/b/res/3000.html#3001"), t(site("2ch"), "b", Some(3000), Some(3001)));
