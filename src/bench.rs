@@ -105,9 +105,16 @@ fn bench_saved() {
     let mut n = 0;
     time("saving a watched thread as posts arrive", 20, || {
         n += 1;
-        store.keep_thread(&key, "s", "u", &posts[..posts.len() - n % 2], 0).unwrap()
+        store.keep_thread(&key, "s", "u", &posts[..posts.len() - n % 2], 0)
     });
-    time("a refresh with nothing new (not written)", 20, || store.keep_thread(&key, "s", "u", &posts[..posts.len() - n % 2], 0).unwrap());
+    time("a refresh with nothing new (not written)", 20, || store.keep_thread(&key, "s", "u", &posts[..posts.len() - n % 2], 0));
+    // The work the writer thread does for each (off the UI thread).
+    store.flush(std::time::Duration::from_secs(30));
+    time("saving: the background writer's part", 20, || {
+        n += 1;
+        store.keep_thread(&key, "s", "u", &posts[..posts.len() - n % 2], 0);
+        store.flush(std::time::Duration::from_secs(30))
+    });
     time("opening a saved copy", 20, || {
         let t = store.load_saved(&key).unwrap();
         t.posts.into_iter().map(Post::from).collect::<Vec<_>>()

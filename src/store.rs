@@ -142,9 +142,36 @@ pub struct Store {
     pub saved: Vec<SavedMeta>,
     /// Past this many bytes, the oldest dead, unwatched copies are removed.
     pub saved_max: u64,
+    /// Writes saved copies in the background (with a data directory).
+    writer: Option<crate::writer::Writer<Wrote>>,
     /// A hash of each file's content as last read or written, so unchanged files aren't
     /// written again.
     written: std::cell::RefCell<std::collections::HashMap<&'static str, u64>>,
+}
+
+/// What a background write of a saved copy came to.
+pub enum Wrote {
+    /// Written: its size.
+    Saved(ThreadKey, u64),
+    Failed(String),
+    /// Nothing to tell (a removal, or marking a copy that isn't there dead).
+    Nothing,
+}
+
+/// A cheap fingerprint of a thread's posts, to tell whether they changed: each post's
+/// number, name and subject length, files, and how much text it has.
+pub fn signature(posts: &[Post]) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    posts.len().hash(&mut h);
+    for p in posts {
+        let text: usize = p.body.iter().map(|l| l.spans.iter().map(|s| s.content.len()).sum::<usize>() + 1).sum();
+        (p.no, p.name.len(), p.subject.as_ref().map(String::len), p.files.len(), p.body.len(), text).hash(&mut h);
+        for f in &p.files {
+            f.url.hash(&mut h);
+        }
+    }
+    h.finish()
 }
 
 /// `saved.json`: the list of saved threads.
@@ -176,7 +203,8 @@ impl Store {
     /// file is moved aside and ck starts with an empty list.
     pub fn load(dir: Option<PathBuf>) -> (Self, Vec<String>) {
         let mut warnings = Vec::new();
-        let mut store = Store { dir, ..Default::default() };
+        let writer = dir.is_some().then(crate::writer::Writer::new);
+        let mut store = Store { dir, writer, ..Default::default() };
         if let Some(dir) = &store.dir {
             store.watched = load_file(&dir.join("watched.json"), &mut warnings);
             store.history = load_file(&dir.join("history.json"), &mut warnings);
@@ -359,57 +387,112 @@ impl Store {
         self.saved.iter().find(|m| &m.key == key)
     }
 
-    /// Keep a copy of a thread's posts (written only when they changed); returns whether it
-    /// was written. Then the oldest dead copies go, past `saved_max`.
-    pub fn keep_thread(&mut self, key: &ThreadKey, subject: &str, url: &str, posts: &[Post], now: i64) -> Result<bool> {
-        let Some(dir) = self.dir.clone() else { return Ok(false) };
+    /// Keep a copy of a thread's posts; returns whether it's being written. Posts that
+    /// haven't changed (by `signature`) aren't. The list is updated at once; the copy is
+    /// converted and written in the background (see `settle`).
+    pub fn keep_thread(&mut self, key: &ThreadKey, subject: &str, url: &str, posts: &[Post], now: i64) -> bool {
+        let (Some(dir), Some(writer)) = (self.dir.clone(), &self.writer) else { return false };
         if posts.is_empty() {
-            return Ok(false);
+            return false;
         }
-        let posts: Vec<SavedPost> = posts.iter().map(SavedPost::from).collect();
-        let h = hash(&serde_json::to_vec(&posts)?);
-        if self.saved(key).is_some_and(|m| m.hash == h && !m.dead) {
-            return Ok(false);
+        let sig = signature(posts);
+        let before = self.saved(key);
+        if before.is_some_and(|m| m.hash == sig && !m.dead) {
+            return false;
         }
+        let bytes = before.map_or(0, |m| m.bytes);
         let (count, newest) = (posts.len(), posts.iter().map(|p| p.no).max().unwrap_or(0));
-        let thread = SavedThread {
-            version: saved::VERSION,
-            site: key.site.clone(),
-            board: key.board.clone(),
-            no: key.no,
-            subject: subject.to_string(),
-            saved: now,
-            dead: false,
-            url: url.to_string(),
-            posts,
-        };
-        let bytes = saved::write(&dir, &thread)?;
+        let (posts, key2, subject2, url2) = (posts.to_vec(), key.clone(), subject.to_string(), url.to_string());
+        writer.run(move || {
+            let thread = SavedThread {
+                version: saved::VERSION,
+                site: key2.site.clone(),
+                board: key2.board.clone(),
+                no: key2.no,
+                subject: subject2,
+                saved: now,
+                dead: false,
+                url: url2,
+                posts: posts.iter().map(SavedPost::from).collect(),
+            };
+            match saved::write(&dir, &thread) {
+                Ok(bytes) => Wrote::Saved(key2, bytes),
+                Err(e) => Wrote::Failed(format!("Couldn't save a copy of thread {}: {e:#}", key2.no)),
+            }
+        });
         self.saved.retain(|m| &m.key != key);
-        let meta = SavedMeta { key: key.clone(), subject: subject.to_string(), saved: now, dead: false, bytes, posts: count, newest, hash: h };
+        let meta = SavedMeta { key: key.clone(), subject: subject.to_string(), saved: now, dead: false, bytes, posts: count, newest, hash: sig };
         // Newest first.
         let at = self.saved.iter().position(|m| m.saved <= now).unwrap_or(self.saved.len());
         self.saved.insert(at, meta);
-        self.prune_saved();
-        Ok(true)
+        true
     }
 
-    /// The thread 404'd: its copy is marked dead (and kept).
+    /// Collect what background writes came to: copies' sizes (then the oldest dead copies
+    /// go, past `saved_max`), and errors to tell about.
+    pub fn settle(&mut self) -> Vec<String> {
+        let Some(writer) = &self.writer else { return Vec::new() };
+        let mut errors = Vec::new();
+        let mut wrote = false;
+        for r in writer.results() {
+            match r {
+                Wrote::Saved(key, bytes) => {
+                    if let Some(m) = self.saved.iter_mut().find(|m| m.key == key) {
+                        m.bytes = bytes;
+                        wrote = true;
+                    }
+                }
+                Wrote::Failed(e) => errors.push(e),
+                Wrote::Nothing => {}
+            }
+        }
+        if wrote {
+            self.prune_saved();
+        }
+        errors
+    }
+
+    /// Wait (at most `within`) for background writes, then `settle`, and again for what
+    /// that started (pruning removes files in the background too).
+    pub fn flush(&mut self, within: std::time::Duration) -> Vec<String> {
+        let deadline = std::time::Instant::now() + within;
+        let mut errors = Vec::new();
+        for _ in 0..4 {
+            if let Some(w) = &self.writer {
+                w.flush(deadline.saturating_duration_since(std::time::Instant::now()));
+            }
+            errors.extend(self.settle());
+            if self.writer.as_ref().is_none_or(crate::writer::Writer::is_idle) {
+                break;
+            }
+        }
+        errors
+    }
+
+    /// The thread 404'd: its copy is marked dead (and kept), after any write still going.
     pub fn saved_dead(&mut self, key: &ThreadKey) {
-        let Some(dir) = self.dir.clone() else { return };
+        let (Some(dir), Some(writer)) = (self.dir.clone(), &self.writer) else { return };
         let Some(m) = self.saved.iter_mut().find(|m| &m.key == key) else { return };
         if m.dead {
             return;
         }
         m.dead = true;
-        if let Ok(mut t) = saved::read(&dir, key) {
-            t.dead = true;
-            let _ = saved::write(&dir, &t);
-        }
+        let key = key.clone();
+        writer.run(move || match saved::read(&dir, &key) {
+            Ok(mut t) => {
+                t.dead = true;
+                saved::write(&dir, &t).map_or(Wrote::Nothing, |bytes| Wrote::Saved(key, bytes))
+            }
+            Err(_) => Wrote::Nothing,
+        });
     }
 
-    /// A thread's copy.
+    /// A thread's copy (once any write of it has finished).
     pub fn load_saved(&mut self, key: &ThreadKey) -> Result<SavedThread> {
         let dir = self.dir.clone().context("no data folder")?;
+        if let Some(w) = &self.writer {
+            w.flush(std::time::Duration::from_secs(5));
+        }
         let t = saved::read(&dir, key);
         // A copy that's gone (or was set aside) leaves the list.
         if t.is_err() {
@@ -418,11 +501,15 @@ impl Store {
         t
     }
 
-    /// Remove a thread's copy.
+    /// Remove a thread's copy (after any write of it still going).
     pub fn forget_saved(&mut self, key: &ThreadKey) {
         self.saved.retain(|m| &m.key != key);
-        if let Some(dir) = &self.dir {
-            let _ = std::fs::remove_file(saved::path(dir, key));
+        if let (Some(dir), Some(writer)) = (self.dir.clone(), &self.writer) {
+            let path = saved::path(&dir, key);
+            writer.run(move || {
+                let _ = std::fs::remove_file(path);
+                Wrote::Nothing
+            });
         }
     }
 
@@ -642,18 +729,32 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let (mut s, _) = Store::load(Some(dir.path().to_path_buf()));
         let file = dir.path().join("threads/4chan/g/1.json");
-        assert!(s.keep_thread(&key(1), "one", "u", &posts(&[1, 2]), 10).unwrap());
-        assert!(file.exists());
+        assert!(s.keep_thread(&key(1), "one", "u", &posts(&[1, 2]), 10));
+        // std::time::Duration::from_secs(10)ritten in the background; the list knows at once.
+        assert_eq!(s.saved[0].posts, 2);
+        assert!(s.flush(std::time::Duration::from_secs(10)).is_empty());
+        assert!(file.exists() && s.saved[0].bytes > 0);
         // The same posts again: not written.
         std::fs::remove_file(&file).unwrap();
-        assert!(!s.keep_thread(&key(1), "one", "u", &posts(&[1, 2]), 20).unwrap());
+        assert!(!s.keep_thread(&key(1), "one", "u", &posts(&[1, 2]), 20));
+        s.flush(std::time::Duration::from_secs(10));
         assert!(!file.exists());
-        assert!(s.keep_thread(&key(1), "one", "u", &posts(&[1, 2, 3]), 30).unwrap());
+        // An edited post (more text) or a file added is noticed.
+        let mut edited = posts(&[1, 2]);
+        edited[1].body.push("more".into());
+        assert!(s.keep_thread(&key(1), "one", "u", &edited, 25));
+        edited[0].files.push(crate::model::Attachment { url: "f".into(), ..Default::default() });
+        assert!(s.keep_thread(&key(1), "one", "u", &edited, 26));
+        assert!(s.keep_thread(&key(1), "one", "u", &posts(&[1, 2, 3]), 30));
         assert_eq!((s.saved[0].posts, s.saved[0].newest, s.saved[0].saved), (3, 3, 30));
+        // std::time::Duration::from_secs(10)ritten in order: the last one is what's on disk.
+        s.flush(std::time::Duration::from_secs(10));
+        assert_eq!(s.load_saved(&key(1)).unwrap().posts.len(), 3);
         // Nothing for an empty thread.
-        assert!(!s.keep_thread(&key(2), "", "u", &[], 30).unwrap());
+        assert!(!s.keep_thread(&key(2), "", "u", &[], 30));
 
-        // Dead: marked in the list and the file, and kept.
+        // Dead: marked in the list and the file (after the writes before it), and kept.
+        assert!(s.keep_thread(&key(1), "one", "u", &posts(&[1, 2, 3, 4]), 31));
         s.saved_dead(&key(1));
         assert!(s.saved(&key(1)).unwrap().dead);
         assert!(s.load_saved(&key(1)).unwrap().dead);
@@ -678,21 +779,30 @@ mod tests {
         let (mut s, _) = Store::load(Some(dir.path().to_path_buf()));
         let many: Vec<u64> = (1..50).collect();
         for no in 1..=4 {
-            s.keep_thread(&key(no), "", "u", &posts(&many), no as i64).unwrap();
+            s.keep_thread(&key(no), "", "u", &posts(&many), no as i64);
         }
+        s.flush(std::time::Duration::from_secs(10));
         let one = s.saved[0].bytes;
         // 1 and 2 dead; 1 watched.
         s.saved_dead(&key(1));
         s.saved_dead(&key(2));
         s.toggle_watch(key(1), String::new(), 0, 0);
         s.saved_max = one * 2;
-        s.keep_thread(&key(5), "", "u", &posts(&many), 5).unwrap();
-        // Only 2 could go; the rest stay over the limit.
+        s.keep_thread(&key(5), "", "u", &posts(&many), 5);
+        // Once written, only 2 can go; the rest stay over the limit.
+        s.flush(std::time::Duration::from_secs(10));
         let left: Vec<u64> = s.saved.iter().map(|m| m.key.no).collect();
         assert_eq!(left, [5, 4, 3, 1]);
         assert!(!dir.path().join("threads/4chan/g/2.json").exists());
         assert!(dir.path().join("threads/4chan/g/1.json").exists());
         s.forget_saved(&key(4));
+        s.flush(std::time::Duration::from_secs(10));
         assert!(!dir.path().join("threads/4chan/g/4.json").exists() && s.saved(&key(4)).is_none());
+        // A write that fails is told about.
+        std::fs::remove_dir_all(dir.path().join("threads")).unwrap();
+        std::fs::write(dir.path().join("threads"), "not a folder").unwrap();
+        s.keep_thread(&key(6), "", "u", &posts(&many), 6);
+        let errors = s.flush(std::time::Duration::from_secs(10));
+        assert!(errors.len() == 1 && errors[0].contains("Couldn't save a copy of thread 6"), "{errors:?}");
     }
 }

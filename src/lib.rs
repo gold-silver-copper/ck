@@ -54,5 +54,6 @@ pub mod saved;
 pub mod store;
 pub mod theme;
 pub mod ui;
+pub mod writer;
 #[cfg(test)]
 mod ui_tests;

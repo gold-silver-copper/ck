@@ -1096,6 +1096,9 @@ impl App {
     /// next draw, so held-down keys don't build up a lag.
     pub fn poll(&mut self) {
         self.images.poll();
+        for e in self.store.settle() {
+            self.error(e);
+        }
         while let Ok(msg) = self.rx.try_recv() {
             self.handle(msg);
         }
@@ -1453,6 +1456,13 @@ impl App {
     /// seconds and on quit.
     fn save(&mut self) {
         self.save_pending = true;
+    }
+
+    /// Finish the background writes (on quit), within a few seconds.
+    pub fn flush_writes(&mut self) {
+        for e in self.store.flush(Duration::from_secs(5)) {
+            self.error(e);
+        }
     }
 
     /// Save now (what the user just did).
@@ -1987,10 +1997,8 @@ impl App {
             return;
         }
         let url = self.thread_link(key, None).unwrap_or_default();
-        match self.store.keep_thread(key, &thread_subject(posts), &url, posts, self.clock.now()) {
-            Ok(true) => self.save(),
-            Ok(false) => {}
-            Err(e) => self.error(format!("Couldn't save a copy of thread {}: {e:#}", key.no)),
+        if self.store.keep_thread(key, &thread_subject(posts), &url, posts, self.clock.now()) {
+            self.save();
         }
     }
 
