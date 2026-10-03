@@ -84,6 +84,12 @@ fn bench_thread() {
         a.on_key(ratatui::crossterm::event::KeyEvent::from(ratatui::crossterm::event::KeyCode::Char('e')));
         draw(&mut t, &mut a)
     });
+    // The conversation of the most-replied post, and of the OP (everything, capped).
+    let th = a.tab.thread.as_ref().unwrap();
+    let n = crate::app::conversation_of(&th.posts, &th.index, &th.backlinks, most).0.len();
+    eprintln!("(a conversation of {n} posts)");
+    time("conversation of a post", 200, || crate::app::conversation_of(&th.posts, &th.index, &th.backlinks, most));
+    time("conversation of the OP (500 posts at most)", 200, || crate::app::conversation_of(&th.posts, &th.index, &th.backlinks, 0));
 }
 
 #[test]

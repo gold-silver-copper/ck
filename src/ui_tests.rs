@@ -341,6 +341,15 @@ fn filter_editor() {
 }
 
 #[test]
+fn conversation() {
+    use ratatui::crossterm::event::{KeyCode, KeyEvent};
+    let mut a = thread_app(false);
+    a.tab.thread.as_mut().unwrap().select(1);
+    a.on_key(KeyEvent::from(KeyCode::Char('c')));
+    insta::assert_snapshot!(snapshot(&mut a));
+}
+
+#[test]
 fn history() {
     let mut a = app(false);
     a.tab.view = View::History;

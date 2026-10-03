@@ -91,6 +91,7 @@ actions! {
     Gallery, "gallery", Key::char('V'), &[Scope::Thread], "the thread's files as a grid";
     Export, "export", Key::char('E'), &[Scope::Thread], "save the thread as HTML and JSON";
     Expand, "expand", Key::char('e'), &[Scope::Thread], "show / hide the post's replies under it";
+    Conversation, "conversation", Key::char('c'), &[Scope::Thread], "the post's conversation alone: what it replies to, and its replies";
     Mine, "mine", Key::char('m'), &[Scope::Thread], "mark the post as yours (notified of replies)";
     NewTab, "new_tab", Key::char('T'), &[Scope::Catalog, Scope::Thread, Scope::Saved], "open the thread (or link) in a new tab";
     Favorite, "favorite", Key::char('*'), &[Scope::Lists, Scope::Catalog], "favorite board: on / off";

@@ -263,6 +263,12 @@ impl App {
                     t.set_search(String::new());
                 }
             }
+            // Out of a conversation, to the whole thread.
+            KeyCode::Esc if self.tab.view == View::Thread && self.tab.thread.as_ref().is_some_and(|t| t.conversation.is_some()) => {
+                if let Some(t) = &mut self.tab.thread {
+                    t.leave_conversation();
+                }
+            }
             KeyCode::Esc => {
                 if let Some((p, _)) = self.picker().filter(|(p, _)| !p.filter.is_empty()) {
                     p.filter.clear();
@@ -321,6 +327,7 @@ impl App {
             Action::Search => self.filtering = true,
             Action::Reload => self.refresh(),
             Action::Filter => self.open_add_filter(),
+            Action::Conversation => self.toggle_conversation(),
             Action::Browser => match self.focused_url() {
                 Some((_, url)) => self.open_url(&url),
                 None => self.open_in_browser(),

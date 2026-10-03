@@ -49,6 +49,7 @@ impl App {
                 let t = self.tab.thread.as_ref();
                 place.thread = t.map(|t| t.no).or((self.tab.pending_thread > 0).then_some(self.tab.pending_thread));
                 place.selected = t.and_then(|t| t.current()).map(|p| p.no).or(self.tab.pending_post);
+                place.conversation = t.and_then(|t| Some(t.conversation.as_ref()?.anchor)).or(self.tab.pending_conversation);
             }
             View::Catalog => {
                 place.selected = self.tab.catalog_list.state.selected().and_then(|i| self.visible_catalog().get(i).map(|&k| self.tab.catalog[k].no));
@@ -108,6 +109,7 @@ impl App {
             ("watched", ..) => self.tab.view = View::Watched,
             ("history", ..) => self.tab.view = View::History,
             ("saved", Some(board), Some(no)) => {
+                self.tab.pending_conversation = p.conversation;
                 self.open_saved(crate::store::ThreadKey { site: p.site.clone(), board: board.uri, no });
                 if let Some(t) = &mut self.tab.thread
                     && let Some(&i) = p.selected.and_then(|s| t.index.get(&s))
@@ -126,6 +128,7 @@ impl App {
             }
             ("thread", Some(board), Some(no)) => {
                 self.open_thread_at(board, no, p.selected);
+                self.tab.pending_conversation = p.conversation;
                 self.tab.restoring = true;
             }
             _ => self.tab.view = View::Sites,

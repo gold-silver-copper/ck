@@ -669,6 +669,8 @@ impl World {
                 app.on_key(KeyEvent::from(KeyCode::Enter));
             }
             Act::Filter(k, opts) => {
+                // (A popup already open was made from a post that may since have been replaced.)
+                let fresh = app.filter_add.is_none();
                 app.on_key(KeyEvent::from(KeyCode::Char('X')));
                 let Some((n, post)) = app.filter_add.as_ref().map(|a| (a.candidates.len(), a.post)) else { return };
                 for _ in 0..k % n.max(1) {
@@ -682,7 +684,7 @@ impl World {
                 let before = app.filter_cfgs.len();
                 app.on_key(KeyEvent::from(KeyCode::Enter));
                 // A filter made from a post catches that post, at once.
-                if app.filter_cfgs.len() == before + 1 {
+                if fresh && app.filter_cfgs.len() == before + 1 {
                     let mark = match app.tab.view {
                         View::Thread => app.tab.thread.as_ref().and_then(|t| t.marks.get(*t.index.get(&post)?).cloned()),
                         _ => app.tab.catalog.iter().position(|p| p.no == post).and_then(|i| app.tab.catalog_marks.get(i).cloned()),
@@ -814,6 +816,15 @@ fn replay(seed: u64, acts: &[Act]) -> Result<(), (String, String)> {
             draw(&mut world.app, w, h);
             check(&world.app);
             let calls = if Arc::ptr_eq(&gate, &world.gate) { world.gate.log_since(before.log) } else { Vec::new() };
+            if std::env::var_os("FUZZ_TRACE").is_some() {
+                let a = &world.app;
+                let hid: Vec<String> = a.store.hidden.iter().map(|(k, v)| format!("{k}:{}", v.len())).collect();
+                let m: usize = a.tab.catalog_marks.iter().filter(|m| m.hidden.is_some()).count();
+                eprintln!("TRACE {step} {act}: tab {} view {:?} site {} board {:?} cat_board {} cat {} hidden-marks {m} store {hid:?} filters {}", a.active, a.tab.view, a.current_site().cfg.name, a.tab.board.as_ref().map(|b| &b.uri), a.tab.catalog_board, a.tab.catalog.len(), a.filter_cfgs.len());
+                let w: Vec<String> = a.store.watched.iter().map(|w| format!("{}/{}/{} dead={} seen={}", w.key.site, w.key.board, w.key.no, w.dead, w.last_seen)).collect();
+                let sv: Vec<String> = a.store.saved.iter().map(|m| format!("{}/{}/{}", m.key.site, m.key.board, m.key.no)).collect();
+                eprintln!("TRACE   watched {w:?} saved {sv:?} status {:?}", a.status.as_ref().map(|s| &s.text));
+            }
             check_saved(&world.app, &before, &calls, &mut removed);
             check_marks(&world.app, &before);
             // A step asks a handful of things at most (a few refreshes may fall due at once).
@@ -991,6 +1002,20 @@ fn check_thread(t: &ThreadView) -> Result<(), String> {
     if t.entries.iter().any(|e| e.post >= n) || t.matches.iter().any(|&m| m >= n) || t.revealed.iter().any(|&m| m >= n) {
         return Err(format!("an entry, match or revealed post past the {n} posts"));
     }
+    // A conversation shows just its posts, all of them, its own post among them; without
+    // one, every post is there.
+    let top: Vec<usize> = t.entries.iter().filter(|e| e.path.len() == 1).map(|e| e.post).collect();
+    match &t.conversation {
+        Some(c) => {
+            let Some(&p) = t.index.get(&c.anchor) else { return Err(format!("a conversation of No.{}, which isn't in the thread", c.anchor)) };
+            let (set, _) = conversation_of(&t.posts, &t.index, &t.backlinks, p);
+            if top != set.keys().copied().collect::<Vec<_>>() {
+                return Err(format!("the conversation of No.{} shows {top:?}, not {:?}", c.anchor, set.keys().collect::<Vec<_>>()));
+            }
+        }
+        None if top != (0..n).collect::<Vec<_>>() => return Err(format!("the whole thread shows {} of {n} posts", top.len())),
+        None => {}
+    }
     if let Some(l) = &t.layout {
         let consistent = l.blocks.len() == t.entries.len()
             && l.starts.len() == l.blocks.len() + 1
@@ -1035,10 +1060,22 @@ fn check_marks(app: &App, before: &Before) {
         return;
     }
     let tab = &app.tab;
-    if !tab.catalog.is_empty() {
-        assert!(app.marks(&tab.catalog, |p| app.board_of(p)) == tab.catalog_marks, "catalog marks don't match the filters");
+    // (A catalog left loaded from another site is marked for that one.)
+    if !tab.catalog.is_empty() && tab.catalog_site == tab.site {
+        let want = app.marks(&tab.catalog, |p| app.board_of(p));
+        if let Some(i) = (0..want.len()).find(|&i| tab.catalog_marks.get(i) != Some(&want[i])) {
+            let p = &tab.catalog[i];
+            panic!(
+                "catalog marks don't match the filters: thread {} on /{}/ ({:?}) is marked {:?}, not {:?}",
+                p.no,
+                app.board_of(p),
+                app.current_site().cfg.name,
+                tab.catalog_marks.get(i),
+                want[i]
+            );
+        }
     }
-    if let Some(t) = &tab.thread {
+    if let Some(t) = tab.thread.as_ref().filter(|_| tab.view == View::Thread) {
         assert!(app.marks(&t.posts, |_| t.board.clone()) == t.marks, "thread marks don't match the filters");
     }
     // And they're what's in the config file.

@@ -132,6 +132,56 @@ pub struct Entry {
 /// How deep replies can be expanded inline.
 const MAX_DEPTH: u8 = 4;
 
+/// The most posts a conversation shows.
+pub const CONVERSATION_MAX: usize = 500;
+
+/// One post's conversation (`c`): the post, what it quotes in the thread (and what those
+/// quote, on up), and what quotes it (and what quotes those, on down).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Conversation {
+    /// The post it's about.
+    pub anchor: u64,
+    /// Its posts (indices, so in thread order), each with its distance from the anchor:
+    /// negative for what the anchor replies to, positive for replies.
+    pub depth: std::collections::BTreeMap<usize, i32>,
+    /// It had more than `CONVERSATION_MAX` posts; the nearest ones are shown.
+    pub capped: bool,
+    /// Where the whole thread was scrolled to, for coming back.
+    pub back_scroll: usize,
+}
+
+/// The conversation of post `p`: up through what it quotes and down through what quotes
+/// it, never sideways (other replies to what it quotes aren't in it). Everyone quotes the
+/// OP, so it's never gone through, unless it's `p`. Quote loops are followed once.
+pub fn conversation_of(posts: &[Post], index: &HashMap<u64, usize>, backlinks: &[Vec<u64>], p: usize) -> (std::collections::BTreeMap<usize, i32>, bool) {
+    let mut depth = std::collections::BTreeMap::from([(p, 0)]);
+    let mut capped = false;
+    let through = |i: usize| i == p || i != 0;
+    for up in [true, false] {
+        let mut queue = std::collections::VecDeque::from([(p, 0)]);
+        while let Some((i, d)) = queue.pop_front() {
+            if !through(i) {
+                continue;
+            }
+            let next: Vec<u64> = if up { posts[i].quotes.clone() } else { backlinks[i].clone() };
+            let d = if up { d - 1 } else { d + 1 };
+            for no in next {
+                let Some(&j) = index.get(&no) else { continue };
+                if depth.contains_key(&j) {
+                    continue;
+                }
+                if depth.len() >= CONVERSATION_MAX {
+                    capped = true;
+                    break;
+                }
+                depth.insert(j, d);
+                queue.push_back((j, d));
+            }
+        }
+    }
+    (depth, capped)
+}
+
 #[derive(Default)]
 pub struct ThreadView {
     pub board: String,
@@ -170,6 +220,8 @@ pub struct ThreadView {
     pub mine: HashSet<u64>,
     /// The part of the selected post that has focus (`tab`); `None`: the post itself.
     pub focus: Option<Part>,
+    /// Showing one post's conversation instead of the whole thread.
+    pub conversation: Option<Conversation>,
     /// Scroll the focused part into view at the next draw.
     pub follow_focus: bool,
 }
@@ -284,7 +336,7 @@ impl ThreadView {
         self.matches = if needle.is_empty() {
             Vec::new()
         } else {
-            (0..self.posts.len()).filter(|&i| self.post_text(i).contains(&needle)).collect()
+            (0..self.posts.len()).filter(|&i| self.in_view(i) && self.post_text(i).contains(&needle)).collect()
         };
         self.search = query;
         self.layout = None;
@@ -318,6 +370,40 @@ impl ThreadView {
         }
     }
 
+    /// Whether post `i` is shown: always, unless a conversation is, without it.
+    pub fn in_view(&self, i: usize) -> bool {
+        self.conversation.as_ref().is_none_or(|c| c.depth.contains_key(&i))
+    }
+
+    /// `c`: show the selected post's conversation alone.
+    pub fn enter_conversation(&mut self) -> Result<usize, String> {
+        let Some(p) = self.current() else { return Err("No posts".into()) };
+        let no = p.no;
+        let quotes = p.quotes.iter().any(|q| self.index.contains_key(q));
+        if !quotes && self.backlinks[self.selected].is_empty() {
+            return Err(format!("No.{no} isn't part of a conversation here: it quotes no post in the thread, and none quote it"));
+        }
+        self.conversation = Some(Conversation { anchor: no, depth: Default::default(), capped: false, back_scroll: self.scroll });
+        self.focus = None;
+        self.scroll = 0;
+        self.rebuild_entries();
+        self.set_search(self.search.clone());
+        Ok(self.conversation.as_ref().map_or(0, |c| c.depth.len()))
+    }
+
+    /// Back to the whole thread, with the conversation's post selected and the thread
+    /// scrolled where it was.
+    pub fn leave_conversation(&mut self) {
+        let Some(c) = self.conversation.take() else { return };
+        self.focus = None;
+        if let Some(&i) = self.index.get(&c.anchor) {
+            self.selected = i;
+        }
+        self.rebuild_entries();
+        self.scroll = c.back_scroll;
+        self.set_search(self.search.clone());
+    }
+
     pub fn is_new(&self, i: usize) -> bool {
         self.new_after > 0 && self.posts[i].no > self.new_after
     }
@@ -327,7 +413,7 @@ impl ThreadView {
     pub fn entry(&self) -> usize {
         match self.entries.get(self.cursor) {
             Some(e) if e.post == self.selected => self.cursor,
-            _ => self.entries.iter().position(|e| e.depth == 0 && e.post == self.selected).unwrap_or(0),
+            _ => self.entries.iter().position(|e| e.path.len() == 1 && e.post == self.selected).unwrap_or(0),
         }
     }
 
@@ -392,20 +478,40 @@ impl ThreadView {
         true
     }
 
-    /// Rebuild `entries` from `expanded`, keeping the cursor on the same path if it's still there.
+    /// Rebuild `entries` from `expanded` (and the conversation, which is worked out again:
+    /// a refresh may add to it), keeping the cursor on the same path if it's still there.
     fn rebuild_entries(&mut self) {
         let path = self.entries.get(self.entry()).map(|e| e.path.clone());
-        let mut out = Vec::with_capacity(self.posts.len());
-        for i in 0..self.posts.len() {
+        if let Some(c) = &mut self.conversation {
+            match self.index.get(&c.anchor) {
+                Some(&p) => (c.depth, c.capped) = conversation_of(&self.posts, &self.index, &self.backlinks, p),
+                None => self.conversation = None,
+            }
+        }
+        let shown: Vec<(usize, i32)> = match &self.conversation {
+            Some(c) => c.depth.iter().map(|(&i, &d)| (i, d)).collect(),
+            None => (0..self.posts.len()).map(|i| (i, 0)).collect(),
+        };
+        let mut out = Vec::with_capacity(shown.len());
+        for (i, d) in shown {
             let path = vec![self.posts[i].no];
-            out.push(Entry { post: i, depth: 0, path: path.clone() });
-            self.push_replies(&mut out, i, path, 1);
+            // Replies are indented by how far down from the conversation's post they are.
+            let depth = d.clamp(0, MAX_DEPTH as i32 - 1) as u8;
+            out.push(Entry { post: i, depth, path: path.clone() });
+            self.push_replies(&mut out, i, path, depth + 1);
         }
         self.entries = out;
         self.layout = None;
         match path.and_then(|p| self.entries.iter().position(|e| e.path == p)) {
             Some(e) => self.set_cursor(e),
-            None => self.cursor = 0,
+            // The selected post, if it's still shown.
+            None => match self.entries.iter().position(|e| e.path.len() == 1 && e.post == self.selected) {
+                Some(e) => self.set_cursor(e),
+                None => {
+                    self.cursor = 0;
+                    self.selected = self.entries.first().map_or(0, |e| e.post);
+                }
+            },
         }
     }
 
@@ -448,10 +554,13 @@ impl ThreadView {
         Some((top, self.scroll - l.starts[top]))
     }
 
-    /// Select a post's top-level entry.
+    /// Select a post's top-level entry. A post outside the conversation shown leaves it.
     pub fn select(&mut self, i: usize) {
         let i = i.min(self.posts.len().saturating_sub(1));
-        let e = self.entries.iter().position(|e| e.depth == 0 && e.post == i).unwrap_or(0);
+        if !self.in_view(i) {
+            self.leave_conversation();
+        }
+        let e = self.entries.iter().position(|e| e.path.len() == 1 && e.post == i).unwrap_or(0);
         self.select_entry(e);
     }
 
@@ -1305,6 +1414,7 @@ impl App {
     fn load_catalog(&mut self) {
         let Some(board) = self.tab.board.clone() else { return };
         self.tab.catalog_board = board.uri.clone();
+        self.tab.catalog_site = self.tab.site;
         self.tab.catalog_of = Some(board.clone());
         self.apply_board_sort();
         let job = move |b: &dyn Backend, id, tx: &Sender<Msg>| {
@@ -1362,6 +1472,8 @@ impl App {
                 tv.selected = old.current().and_then(|p| tv.index.get(&p.no)).copied().unwrap_or(0);
                 // Expanded replies, the selected entry and the one at the top stay put.
                 tv.expanded = old.expanded.clone();
+                // A conversation stays, with any new replies that belong in it.
+                tv.conversation = old.conversation.clone();
                 let cursor_path = old.entries.get(old.entry()).map(|e| e.path.clone());
                 tv.rebuild_entries();
                 if let Some(e) = cursor_path.and_then(|p| tv.entries.iter().position(|e| e.path == p)) {
@@ -1385,6 +1497,14 @@ impl App {
                 tv.new_after = self.store.last_seen(&key);
                 if let Some(i) = self.tab.pending_post.take().and_then(|no| tv.index.get(&no).copied()) {
                     tv.selected = i;
+                }
+                // A conversation that was open last time.
+                if let Some(&i) = self.tab.pending_conversation.take().and_then(|no| tv.index.get(&no)) {
+                    let selected = tv.selected;
+                    tv.selected = i;
+                    if tv.enter_conversation().is_ok() && tv.in_view(selected) {
+                        tv.select(selected);
+                    }
                 }
             }
         }
@@ -1493,7 +1613,7 @@ impl App {
             _ => return,
         };
         if let Some(label) = mark.and_then(|m| m.hidden).filter(|l| !l.is_empty()) {
-            self.info(format!("Hidden by the filter \"{label}\"; change [[filter]] in the config to show it"));
+            self.info(format!("Hidden by the filter \"{label}\"; Settings › Filters changes it"));
             return;
         }
         let site = self.current_site().cfg.name.clone();
@@ -1831,6 +1951,23 @@ impl App {
         }
         self.info(if watching { format!("Watching thread {no}") } else { format!("Stopped watching thread {no}") });
         self.save_now();
+    }
+
+    /// `c`: the selected post's conversation alone, or the whole thread again.
+    fn toggle_conversation(&mut self) {
+        let Some(t) = self.tab.thread.as_mut().filter(|_| self.tab.view == View::Thread && self.tab.gallery.is_none()) else { return };
+        if t.conversation.is_some() {
+            t.leave_conversation();
+            return;
+        }
+        match t.enter_conversation() {
+            Ok(n) => {
+                let capped = t.conversation.as_ref().is_some_and(|c| c.capped);
+                let esc = if capped { format!(" (the nearest {n}; there are more)") } else { String::new() };
+                self.info(format!("{}{esc}; esc or {} shows the whole thread", plural_posts(n), self.keys.key(Action::Conversation)));
+            }
+            Err(e) => self.info(e),
+        }
     }
 
     /// Keep a copy of a thread's posts in the data directory (a watched thread's, or with
@@ -2184,9 +2321,10 @@ impl App {
         if self.tab.view == View::Catalog && std::mem::take(&mut self.tab.from_catalog) {
             self.tab.board = self.tab.catalog_of.clone();
         }
-        // After following links to another board, the loaded catalog is for the old one.
+        // After following links to another board (or a board of the same name on another
+        // site), the loaded catalog is for the old one.
         if self.tab.view == View::Catalog
-            && let Some(board) = self.tab.board.clone().filter(|b| b.uri != self.tab.catalog_board)
+            && let Some(board) = self.tab.board.clone().filter(|b| b.uri != self.tab.catalog_board || self.tab.site != self.tab.catalog_site)
         {
             self.open_catalog(board);
             return;
@@ -2310,6 +2448,10 @@ pub fn copy_text(p: &Post, subject: bool) -> String {
     }
     lines.extend(p.body.iter().map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect::<String>().trim_end().to_string()));
     lines.join("\n").trim().to_string()
+}
+
+fn plural_posts(n: usize) -> String {
+    if n == 1 { "1 post".into() } else { format!("{n} posts") }
 }
 
 /// A thread's subject for lists: its subject, or the start of the OP's text.

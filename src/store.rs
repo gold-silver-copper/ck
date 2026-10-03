@@ -109,6 +109,9 @@ pub struct Place {
     pub sort: Option<crate::config::Sort>,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub filter: String,
+    /// The post whose conversation was shown (`c`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conversation: Option<u64>,
 }
 
 /// UI settings that couldn't be saved in config.toml.

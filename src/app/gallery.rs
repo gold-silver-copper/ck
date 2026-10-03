@@ -1,4 +1,4 @@
-//! `V`: every file of the thread as a grid of thumbnails.
+//! `V`: every file of the thread (or the conversation shown) as a grid of thumbnails.
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 use ratatui::widgets::ListState;
@@ -19,10 +19,11 @@ pub struct Gallery {
 impl App {
     pub fn open_gallery(&mut self) {
         let Some(t) = &self.tab.thread else { return };
+        // In a conversation, its files.
         let files: Vec<(usize, Attachment)> =
-            t.posts.iter().enumerate().flat_map(|(i, p)| p.files.iter().map(move |f| (i, f.clone()))).collect();
+            t.posts.iter().enumerate().filter(|&(i, _)| t.in_view(i)).flat_map(|(i, p)| p.files.iter().map(move |f| (i, f.clone()))).collect();
         if files.is_empty() {
-            self.info("Thread has no files");
+            self.info(if t.conversation.is_some() { "The conversation has no files" } else { "Thread has no files" });
             return;
         }
         // Start at the selected post's first file, or the next one after it.

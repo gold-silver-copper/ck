@@ -204,8 +204,22 @@ impl From<SavedPost> for Post {
 
 /// Where a thread's copy is kept.
 pub fn path(dir: &Path, key: &ThreadKey) -> PathBuf {
-    use crate::download::sanitize;
-    dir.join("threads").join(sanitize(&key.site)).join(sanitize(&key.board)).join(format!("{}.json", key.no))
+    dir.join("threads").join(component(&key.site)).join(component(&key.board)).join(format!("{}.json", key.no))
+}
+
+/// A site or board name as a folder name every filesystem takes (APFS refuses unassigned
+/// characters, for one): letters, digits, `-`, `_` and `.`, the rest `_`, and then a hash of
+/// the name, so names that differ only there stay apart.
+fn component(name: &str) -> String {
+    use std::hash::{Hash, Hasher};
+    let kept: String = name.chars().map(|c| if c.is_alphanumeric() || matches!(c, '-' | '_' | '.') { c } else { '_' }).collect();
+    let clean = crate::download::sanitize(&kept);
+    if clean == name {
+        return clean;
+    }
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    name.hash(&mut h);
+    format!("{clean}-{:08x}", h.finish() as u32)
 }
 
 /// Write a thread's copy; its size.
@@ -308,14 +322,26 @@ mod tests {
         let listed = scan(dir.path());
         assert_eq!(listed.len(), 1);
         assert_eq!((listed[0].bytes, listed[0].posts, &listed[0].key), (size, t.posts.len(), &key));
-        // A board name can't climb out of the directory.
+        // A board name can't climb out of the directory, and only plain characters reach the
+        // filesystem (an unassigned one made APFS refuse the folder; found by fuzzing).
         let odd = ThreadKey { site: "../x".into(), board: "../../y".into(), no: 2 };
         assert!(path(dir.path(), &odd).starts_with(dir.path().join("threads")));
         assert!(!path(dir.path(), &odd).components().any(|c| c == std::path::Component::ParentDir));
+        let odd = ThreadKey { site: "4chan".into(), board: "AZf9b\u{af4}\u{594}fy".into(), no: 3 };
+        let p = path(dir.path(), &odd);
+        assert!(p.to_str().unwrap().is_ascii(), "{p:?}");
+        let t = SavedThread { site: odd.site.clone(), board: odd.board.clone(), no: 3, ..t.clone() };
+        write(dir.path(), &t).unwrap();
+        assert_eq!(read(dir.path(), &odd).unwrap().board, odd.board);
+        // Unicode boards stay readable; different odd names stay apart.
+        assert!(path(dir.path(), &ThreadKey { site: "lainchan".into(), board: "λ".into(), no: 1 }).ends_with("lainchan/λ/1.json"));
+        let a = ThreadKey { board: "a?b".into(), ..odd.clone() };
+        let b = ThreadKey { board: "a*b".into(), ..odd.clone() };
+        assert_ne!(path(dir.path(), &a), path(dir.path(), &b));
 
         std::fs::write(path(dir.path(), &key), b"{ not json").unwrap();
         assert!(read(dir.path(), &key).is_err());
         assert!(dir.path().join("threads/4chan/g/1.json.corrupt").exists());
-        assert!(scan(dir.path()).is_empty());
+        assert_eq!(scan(dir.path()).iter().map(|m| m.key.no).collect::<Vec<_>>(), [3]);
     }
 }

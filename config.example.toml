@@ -302,6 +302,7 @@ url = "https://arch.b4k.dev"
 #               show_hidden = "Z", filter = "X", archive_search = "A"
 #   thread:     next_part = "tab", prev_part = "shift-tab",
 #               view, watch, links, hide, show_hidden, filter, mine = "m", expand = "e", gallery = "V",
+#               conversation = "c",
 #               image_search = "R", open_file = "i",
 #               replies = "b", jump_back = "u", unread = "U",
 #               preview = "p", next_match = "n", prev_match = "N", spoiler = "s",

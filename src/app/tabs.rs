@@ -49,8 +49,12 @@ pub struct Tab {
     pub trail: Vec<(usize, Board, u64, u64)>,
     /// Post to select once the loading thread arrives.
     pub pending_post: Option<u64>,
+    /// Post whose conversation to show once the loading thread arrives (a session's).
+    pub pending_conversation: Option<u64>,
     /// Board the loaded catalog belongs to.
     pub catalog_board: String,
+    /// The site the loaded catalog is from.
+    pub catalog_site: usize,
     /// The board whose catalog is loaded, to return to from a thread opened on another board
     /// (an overboard's threads live on their own boards).
     pub catalog_of: Option<Board>,
@@ -99,10 +103,12 @@ impl Tab {
             trail: Vec::new(),
             pending_post: None,
             catalog_board: String::new(),
+            catalog_site: site,
             catalog_of: None,
             from_catalog: false,
             archive_offer: None,
             saved_offer: None,
+            pending_conversation: None,
             offline: None,
             req: 0,
             pending_thread: 0,
