@@ -47,7 +47,7 @@ fn main() -> Result<()> {
         let _ = execute!(stdout(), DisableMouseCapture, DisableBracketedPaste);
         hook(info);
     }));
-    let picker = (config.images == ImagesMode::Auto).then(detect_images);
+    let picker = (config.images != ImagesMode::Off).then(|| detect_images(config.images));
     let mut app = App::new(config, keys, picker, store);
     if let Some(w) = warnings.first() {
         app.error(w);
@@ -90,16 +90,20 @@ Press ? inside ck for the keys. See the README for configuration.
     )
 }
 
-/// Ask the terminal which image protocol it speaks; half-blocks if it doesn't answer.
-/// Must run after entering the alternate screen and before reading any events.
-fn detect_images() -> Picker {
+/// Ask the terminal which image protocol it speaks (and its cell size); half-blocks if it
+/// doesn't answer. `images` in the config may name the protocol instead. Must run after
+/// entering the alternate screen and before reading any events.
+fn detect_images(mode: ImagesMode) -> Picker {
     // Terminals that can't show graphics: don't wait for an answer that won't come (it
     // would also swallow the first keypress).
-    if matches!(std::env::var("TERM").as_deref(), Ok("dumb" | "linux")) {
+    if matches!(std::env::var("TERM").as_deref(), Ok("dumb" | "linux")) && mode == ImagesMode::Auto {
         return Picker::halfblocks();
     }
     let options = QueryStdioOptions { timeout: Duration::from_secs(1), ..Default::default() };
-    Picker::from_query_stdio_with_options(options).unwrap_or_else(|_| Picker::halfblocks())
+    let mut picker = Picker::from_query_stdio_with_options(options).unwrap_or_else(|_| Picker::halfblocks());
+    let in_zellij = std::env::var_os("ZELLIJ").is_some();
+    picker.set_protocol_type(ck::images::choose_protocol(mode, picker.protocol_type(), in_zellij));
+    picker
 }
 
 /// Draw, then sleep until input, a finished request, or the next deadline.

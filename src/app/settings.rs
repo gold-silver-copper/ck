@@ -146,8 +146,9 @@ impl App {
             },
             Item::Compact => self.default_layout.as_str().into(),
             Item::Images => match self.images_mode {
+                ImagesMode::Auto if self.images.enabled() => format!("on ({})", self.images.protocol_name()),
                 ImagesMode::Auto => "on".into(),
-                ImagesMode::Off => "off".into(),
+                m => m.as_str().into(),
             },
             Item::Filters => {
                 let hidden: usize = self.store.hidden.values().map(Vec::len).sum();

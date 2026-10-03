@@ -145,12 +145,18 @@ cycle!(CatalogLayout { Cards => "cards", Compact => "compact", Grid => "grid" })
 #[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum ImagesMode {
+    /// What the terminal says it can show.
     #[default]
     Auto,
+    /// One protocol, whatever the terminal says.
+    Halfblocks,
+    Sixel,
+    Kitty,
+    Iterm2,
     Off,
 }
 
-cycle!(ImagesMode { Auto => "auto", Off => "off" });
+cycle!(ImagesMode { Auto => "auto", Halfblocks => "halfblocks", Sixel => "sixel", Kitty => "kitty", Iterm2 => "iterm2", Off => "off" });
 
 /// Color depth: 24-bit if the terminal says it supports it, or forced either way.
 #[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]

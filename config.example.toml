@@ -21,6 +21,8 @@
 
 # Thumbnails in the catalog and thread views, and the `v` image viewer.
 #   "auto"  detect the terminal's image protocol (kitty, sixel, iTerm2), else half-blocks
+#           (inside zellij, which says sixel whatever the terminal is: half-blocks)
+#   "halfblocks", "sixel", "kitty", "iterm2"   that protocol, whatever the terminal says
 #   "off"   no images, no image requests
 images = "auto"
 
