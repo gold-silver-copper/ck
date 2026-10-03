@@ -305,6 +305,17 @@ The open thread refreshes in the background every 10 seconds and watched threads
 minimums). Posts that arrived since your last visit are marked "new"; `U` jumps to the
 first one.
 
+### Opening what you've seen before
+
+ck keeps the last copy of each catalog and thread you open in its cache directory
+(`$XDG_CACHE_HOME/ck/pages`, at most `page_cache_mb`, 100 MB by default). Opening one again
+shows that copy at once, marked "cached 3m ago" in the top bar, and the same request as
+always refreshes it in place, keeping your place. It's never an extra request: the copy
+also lets the first request after a restart ask whether anything changed, so an unchanged
+thread costs a "not modified" reply instead of the whole thread. When the refresh fails, the
+copy stays up, still marked (and "dead" if the thread is gone). Watched threads open from
+their saved copy the same way. A start that restores your tabs fills them in at once, too.
+
 ### Saved threads
 
 Watched threads are saved as they refresh: each time new posts arrive, the thread's last

@@ -307,9 +307,14 @@ fn location(app: &App) -> (Vec<String>, Vec<Span<'static>>) {
     if let Some(q) = query {
         spans.extend([chip(q, t.on_primary_container, t.primary_container), Span::raw("  ")]);
     }
-    // A saved copy, read offline.
-    if let Some(off) = app.tab.offline.filter(|_| app.tab.view == View::Thread) {
-        spans.extend([chip(format!("saved {}", ago(off.saved, app.clock)), t.on_primary_container, t.primary_container), Span::raw(" ")]);
+    // A saved copy, read offline; or the last copy kept, shown while it loads.
+    let copy = match app.tab.view {
+        View::Thread => app.tab.offline.map(|o| ("saved", o)).or(app.tab.cached.map(|c| ("cached", c))),
+        View::Catalog => app.tab.catalog_cached.map(|c| ("cached", c)),
+        _ => None,
+    };
+    if let Some((what, off)) = copy {
+        spans.extend([chip(format!("{what} {}", ago(off.saved, app.clock)), t.on_primary_container, t.primary_container), Span::raw(" ")]);
         if off.dead {
             spans.push(chip("dead", t.background, t.error));
         }

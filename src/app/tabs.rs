@@ -66,6 +66,10 @@ pub struct Tab {
     pub saved_offer: Option<ThreadKey>,
     /// The open thread is a saved copy, read offline.
     pub offline: Option<Offline>,
+    /// The thread shown is the last copy kept (it's being fetched): when it was fetched.
+    pub cached: Option<Offline>,
+    /// The same for the catalog.
+    pub catalog_cached: Option<Offline>,
     /// The tab's request in flight (0: none).
     pub req: u64,
     /// The thread number of the last thread load, for 404 handling.
@@ -109,6 +113,8 @@ impl Tab {
             archive_offer: None,
             saved_offer: None,
             pending_conversation: None,
+            cached: None,
+            catalog_cached: None,
             offline: None,
             req: 0,
             pending_thread: 0,

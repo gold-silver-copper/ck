@@ -24,6 +24,10 @@ pub struct Config {
     /// the oldest dead, unwatched ones go. 0 keeps everything.
     #[serde(default = "default_saved_max_mb")]
     pub saved_max_mb: u64,
+    /// The last copy of each catalog and thread opened is kept (in the cache directory) to
+    /// show at once next time, up to this many megabytes. 0 keeps none.
+    #[serde(default = "default_page_cache_mb")]
+    pub page_cache_mb: u64,
     /// Sites left off the home screen (by name).
     #[serde(default)]
     pub hidden_sites: Vec<String>,
@@ -83,6 +87,10 @@ fn default_refresh_watched() -> u64 {
 
 fn default_saved_max_mb() -> u64 {
     500
+}
+
+fn default_page_cache_mb() -> u64 {
+    100
 }
 
 /// Catalog sort orders, cycled with `s`. Saved under their labels.

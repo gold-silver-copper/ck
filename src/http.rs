@@ -42,6 +42,53 @@ thread_local! {
     static CACHED_AGE: Cell<Option<Duration>> = const { Cell::new(None) };
     /// Priority of `get_json` calls on this thread.
     static PRIORITY: Cell<Priority> = const { Cell::new(Priority::User) };
+    /// While set, `get_json` on this thread answers from these copies only (no requests).
+    static COPIES: std::cell::RefCell<Option<HashMap<String, Value>>> = const { std::cell::RefCell::new(None) };
+    /// While set, `get_json` on this thread notes each response it used.
+    static RECORD: std::cell::RefCell<Option<Vec<Copy>>> = const { std::cell::RefCell::new(None) };
+}
+
+/// A JSON response kept to show again: where it came from, its `Last-Modified`, and the
+/// body.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct Copy {
+    pub url: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_modified: Option<String>,
+    pub body: Value,
+}
+
+/// Run `f`, and the responses its `get_json` calls used (fetched, or from the cache).
+pub fn recording<T>(f: impl FnOnce() -> T) -> (T, Vec<Copy>) {
+    RECORD.with(|r| *r.borrow_mut() = Some(Vec::new()));
+    let out = f();
+    let copies = RECORD.with(|r| r.borrow_mut().take()).unwrap_or_default();
+    (out, copies)
+}
+
+/// Run `f` with `get_json` answering from `copies` only: no request is made, and a URL
+/// without a copy is an error.
+pub fn from_copies<T>(copies: &[Copy], f: impl FnOnce() -> T) -> T {
+    let map = copies.iter().map(|c| (c.url.clone(), c.body.clone())).collect();
+    COPIES.with(|c| *c.borrow_mut() = Some(map));
+    let out = f();
+    COPIES.with(|c| *c.borrow_mut() = None);
+    out
+}
+
+/// Whether this thread is answering from copies (`from_copies`): no request can be made.
+pub fn from_copies_only() -> bool {
+    COPIES.with(|c| c.borrow().is_some())
+}
+
+/// Put copies kept from an earlier run into the cache, so the next request for each asks
+/// `If-Modified-Since` (and an unchanged page costs a 304). They don't count as fresh: the
+/// request is still made. Entries already cached are kept.
+pub fn seed(copies: &[Copy]) {
+    let mut cache = lock(&CACHE);
+    for c in copies.iter().filter(|c| c.last_modified.is_some()) {
+        cache.seed(&c.url, c.last_modified.clone(), c.body.clone());
+    }
 }
 
 /// Who a request is for. Only user requests book future rate-limit slots.
@@ -57,11 +104,18 @@ pub enum Priority {
 
 /// What a test host answers (tests only).
 #[cfg(test)]
-pub type TestHost = std::sync::Arc<dyn Fn(&str) -> Raw + Send + Sync>;
+/// It's given the URL and the request's `If-Modified-Since`, if any.
+pub type TestHost = std::sync::Arc<dyn Fn(&str, Option<&str>) -> Raw + Send + Sync>;
 
 /// In tests, `*.invalid` hosts answer `get_json` from here instead of the network.
 #[cfg(test)]
 static TEST_HOSTS: LazyLock<Mutex<HashMap<String, TestHost>>> = LazyLock::new(Default::default);
+
+/// Forget what the cache holds from a host, as a restart would (tests only).
+#[cfg(test)]
+pub fn forget_host(h: &str) {
+    lock(&CACHE).entries.retain(|url, _| host(url) != h);
+}
 
 /// Serve a `*.invalid` host (tests only); `None` stops serving it.
 #[cfg(test)]
@@ -233,7 +287,8 @@ pub struct Raw {
 struct Entry {
     last_modified: Option<String>,
     body: Value,
-    checked: Instant,
+    /// When the site last confirmed it; never, for a copy seeded from disk.
+    checked: Option<Instant>,
 }
 
 /// Parsed JSON bodies keyed by URL, evicting the least recently checked entry.
@@ -250,8 +305,26 @@ impl Cache {
     /// The cached body if it was checked less than `MIN_REFETCH` ago, with its age.
     fn fresh(&self, url: &str, now: Instant) -> Option<(Value, Duration)> {
         let e = self.entries.get(url)?;
-        let age = now.saturating_duration_since(e.checked);
+        let age = now.saturating_duration_since(e.checked?);
         (age < MIN_REFETCH).then(|| (e.body.clone(), age))
+    }
+
+    fn seed(&mut self, url: &str, last_modified: Option<String>, body: Value) {
+        if self.entries.contains_key(url) {
+            return;
+        }
+        self.make_room(url);
+        self.entries.insert(url.to_string(), Entry { last_modified, body, checked: None });
+    }
+
+    /// Evict the least recently checked entry when full (never-checked ones first).
+    fn make_room(&mut self, url: &str) {
+        if self.entries.len() >= self.cap && !self.entries.contains_key(url) {
+            let oldest = self.entries.iter().min_by_key(|(_, e)| e.checked).map(|(k, _)| k.clone());
+            if let Some(k) = oldest {
+                self.entries.remove(&k);
+            }
+        }
     }
 
     fn last_modified(&self, url: &str) -> Option<String> {
@@ -263,7 +336,7 @@ impl Cache {
         match raw.status {
             304 => {
                 if let Some(e) = self.entries.get_mut(url) {
-                    e.checked = now;
+                    e.checked = Some(now);
                     return Ok(e.body.clone());
                 }
                 anyhow::bail!("{url} answered 304 Not Modified to a request we have no copy for")
@@ -272,13 +345,8 @@ impl Cache {
                 let body: Value =
                     serde_json::from_str(&raw.body).with_context(|| format!("{url} did not return JSON"))?;
                 if raw.last_modified.is_some() {
-                    if self.entries.len() >= self.cap && !self.entries.contains_key(url) {
-                        let oldest = self.entries.iter().min_by_key(|(_, e)| e.checked).map(|(k, _)| k.clone());
-                        if let Some(k) = oldest {
-                            self.entries.remove(&k);
-                        }
-                    }
-                    let entry = Entry { last_modified: raw.last_modified, body: body.clone(), checked: now };
+                    self.make_room(url);
+                    let entry = Entry { last_modified: raw.last_modified, body: body.clone(), checked: Some(now) };
                     self.entries.insert(url.to_string(), entry);
                 }
                 Ok(body)
@@ -316,7 +384,7 @@ fn transport(url: &str, since: Option<&str>) -> Result<Raw> {
     #[cfg(test)]
     if host(url).ends_with(".invalid") {
         let answer = lock(&TEST_HOSTS).get(host(url)).cloned();
-        return answer.map(|a| a(url)).ok_or_else(|| anyhow::anyhow!("{url}: a test host, not fetched"));
+        return answer.map(|a| a(url, since)).ok_or_else(|| anyhow::anyhow!("{url}: a test host, not fetched"));
     }
     throttle(url, PRIORITY.get())?;
     let mut req = AGENT.get(url);
@@ -340,8 +408,17 @@ fn transport(url: &str, since: Option<&str>) -> Result<Raw> {
 
 /// GET a URL and parse the body as JSON, through the rate limiter and cache.
 pub fn get_json(url: &str) -> Result<Value> {
+    if let Some(copy) = COPIES.with(|c| c.borrow().as_ref().map(|m| m.get(url).cloned())) {
+        return copy.ok_or_else(|| anyhow::anyhow!("{url}: no copy kept"));
+    }
     let (body, age) = cached_get(&CACHE, url, Instant::now, transport)?;
     CACHED_AGE.set(age);
+    RECORD.with(|r| {
+        if let Some(r) = r.borrow_mut().as_mut() {
+            let last_modified = lock(&CACHE).last_modified(url);
+            r.push(Copy { url: url.to_string(), last_modified, body: body.clone() });
+        }
+    });
     Ok(body)
 }
 

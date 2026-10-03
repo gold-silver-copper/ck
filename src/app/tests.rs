@@ -1152,12 +1152,21 @@ fn a_dead_thread_offers_its_saved_copy() {
     let dir = tempfile::tempdir().unwrap();
     let mut app = saving_app(dir.path(), 10_000);
     let key = ThreadKey { site: "a".into(), board: "x".into(), no: 1 };
+    // A watched thread opens from its saved copy at once, and when it's gone, that's it.
     app.store.toggle_watch(key.clone(), "one".into(), 2, 2);
     app.store.keep_thread(&key, "one", "u", &nos(&[1, 2]), 10_000 - 7200);
-    // Opened, and gone: the copy is offered (and the thread marked dead, copy and all).
     app.goto_str("a/x/1");
+    assert_eq!(app.tab.cached, Some(tabs::Offline { saved: 10_000 - 7200, dead: false }));
+    assert!(app.tab.loading.is_some() && app.tab.thread.as_ref().unwrap().posts.len() == 2);
     app.handle(Msg::Thread(app.tab.req, Err(gone())));
     assert!(app.store.watched(&key).unwrap().dead && app.store.saved(&key).unwrap().dead);
+    assert_eq!((app.tab.cached, app.tab.offline.map(|o| o.dead)), (None, Some(true)));
+    // An exported copy of a thread that isn't watched: offered when the thread is gone.
+    app.store.toggle_watch(key.clone(), String::new(), 0, 0);
+    app.goto_str("a/x");
+    app.goto_str("a/x/1");
+    assert!(app.tab.thread.is_none());
+    app.handle(Msg::Thread(app.tab.req, Err(gone())));
     let text = &app.status.as_ref().unwrap().text;
     assert!(text.contains("A saved copy from 2h ago: enter opens it"), "{text}");
     app.on_key(KeyEvent::from(KeyCode::Enter));
@@ -1172,8 +1181,8 @@ fn a_dead_thread_offers_its_saved_copy() {
         assert!(app.tab.loading.is_none() && app.refreshing.is_empty() && app.tab.req == 0);
     }
     assert!(app.next_wake(app.clock.instant()) > Duration::from_millis(500));
-    // Opening it isn't a visit (which would bring the dead thread back to life).
-    assert!(app.store.watched(&key).unwrap().dead);
+    // Opening it isn't a visit, nor a save (which would bring the dead copy back to life).
+    assert!(app.store.saved(&key).unwrap().dead);
 }
 
 #[test]
@@ -1614,4 +1623,144 @@ fn the_viewer_goes_through_the_whole_thread_and_zooms() {
     app.act(Action::View);
     let v = app.tab.viewer.as_ref().unwrap();
     assert!(v.files.len() == 2 && v.posts.is_empty());
+}
+
+// ----- opening from the last copy -----
+
+/// A vichan site on a test host: what was asked (with `If-Modified-Since`), how it answers
+/// (200, 304 when asked if modified, 404 or 500), and a gate holding answers back.
+/// Each request: its URL, and its `If-Modified-Since`.
+type Asked = Arc<std::sync::Mutex<Vec<(String, Option<String>)>>>;
+
+struct PageSite {
+    asked: Asked,
+    mode: Arc<std::sync::Mutex<u16>>,
+    gate: Arc<(std::sync::Mutex<bool>, std::sync::Condvar)>,
+}
+
+impl PageSite {
+    fn serve(host: &str) -> Self {
+        let site = PageSite { asked: Default::default(), mode: Arc::new(std::sync::Mutex::new(200)), gate: Arc::new((std::sync::Mutex::new(true), std::sync::Condvar::new())) };
+        let (asked, mode, gate) = (site.asked.clone(), site.mode.clone(), site.gate.clone());
+        crate::http::serve_test_host(
+            host,
+            Some(Arc::new(move |url: &str, since: Option<&str>| {
+                let mut open = http::lock(&gate.0);
+                while !*open {
+                    open = gate.1.wait(open).unwrap();
+                }
+                drop(open);
+                http::lock(&asked).push((url.to_string(), since.map(String::from)));
+                let fixture = if url.contains("/res/") { "vichan_thread.json" } else { "vichan_catalog.json" };
+                let body = std::fs::read_to_string(format!("{}/tests/fixtures/{fixture}", env!("CARGO_MANIFEST_DIR"))).unwrap();
+                let status = match *http::lock(&mode) {
+                    304 if since == Some("day 1") => 304,
+                    304 => 200,
+                    m => m,
+                };
+                http::Raw { status, last_modified: Some("day 1".into()), body }
+            })),
+        );
+        site
+    }
+
+    fn hold(&self, held: bool) {
+        *http::lock(&self.gate.0) = !held;
+        self.gate.1.notify_all();
+    }
+
+    fn asked(&self) -> Vec<Option<String>> {
+        http::lock(&self.asked).iter().map(|(_, s)| s.clone()).collect()
+    }
+}
+
+/// Handle messages until nothing is loading (or `until` holds).
+fn settle_until(app: &mut App, until: impl Fn(&App) -> bool) {
+    for _ in 0..500 {
+        if until(app) {
+            return;
+        }
+        app.wait(Duration::from_millis(10));
+    }
+    panic!("never settled");
+}
+
+fn page_app(host: &str, dir: &std::path::Path) -> App {
+    let mut app = app_with(&format!("[[site]]\nname = \"c\"\nkind = \"vichan\"\nurl = \"http://{host}\"\nboards = [\"g\"]\n"));
+    app.store = Store::load(Some(dir.join("data"))).0;
+    app.pages = Some(crate::pages::Pages::new(dir.join("pages"), 1 << 24));
+    app.clock = Clock { fixed: Some(5000), ..Default::default() };
+    app
+}
+
+#[test]
+fn threads_open_from_their_last_copy_then_refresh() {
+    let host = "pages-thread.invalid";
+    let site = PageSite::serve(host);
+    let dir = tempfile::tempdir().unwrap();
+    // The first time: fetched, and kept.
+    let mut app = page_app(host, dir.path());
+    app.goto_str("c/g/30364");
+    settle_until(&mut app, |a| a.tab.loading.is_none());
+    let n = app.tab.thread.as_ref().unwrap().posts.len();
+    assert!(n > 3 && app.tab.cached.is_none());
+    assert_eq!(site.asked(), [None]);
+    // A restart: shown at once from the copy (no request for that), marked cached.
+    http::forget_host(host);
+    let mut app = page_app(host, dir.path());
+    site.hold(true);
+    app.goto_str("c/g/30364");
+    settle_until(&mut app, |a| a.tab.thread.is_some());
+    assert_eq!(app.tab.cached, Some(tabs::Offline { saved: 5000, dead: false }));
+    assert!(app.tab.loading.is_some());
+    // Nothing is new against the last visit; reading on while it loads.
+    let t = app.tab.thread.as_mut().unwrap();
+    assert!((0..n).all(|i| !t.is_new(i)));
+    t.select(3);
+    // The refresh asks If-Modified-Since; unchanged, it's a 304, and the place stays.
+    *http::lock(&site.mode) = 304;
+    site.hold(false);
+    settle_until(&mut app, |a| a.tab.loading.is_none());
+    let t = app.tab.thread.as_ref().unwrap();
+    assert_eq!((t.selected, t.posts.len(), app.tab.cached), (3, n, None));
+    assert_eq!(site.asked(), [None, Some("day 1".into())]);
+    // A failing refresh leaves the copy shown, still marked.
+    for (mode, dead) in [(500, false), (404, true)] {
+        http::forget_host(host);
+        let mut app = page_app(host, dir.path());
+        *http::lock(&site.mode) = mode;
+        app.goto_str("c/g/30364");
+        settle_until(&mut app, |a| a.tab.loading.is_none());
+        assert_eq!(app.tab.cached.map(|c| c.dead), Some(dead), "{mode}");
+        assert!(app.status.as_ref().unwrap().error);
+    }
+    // One request per open, whatever came from the copy.
+    assert_eq!(site.asked().len(), 4);
+    crate::http::serve_test_host(host, None);
+}
+
+#[test]
+fn catalogs_open_from_their_last_copy_keeping_the_selection() {
+    let host = "pages-catalog.invalid";
+    let site = PageSite::serve(host);
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = page_app(host, dir.path());
+    app.goto_str("c/g");
+    settle_until(&mut app, |a| a.tab.loading.is_none());
+    let n = app.tab.catalog.len();
+    assert!(n > 3);
+    http::forget_host(host);
+    let mut app = page_app(host, dir.path());
+    site.hold(true);
+    app.goto_str("c/g");
+    settle_until(&mut app, |a| !a.tab.catalog.is_empty());
+    assert!(app.tab.catalog_cached.is_some() && app.tab.catalog.len() == n);
+    app.tab.catalog_list.state.select(Some(2));
+    let picked = app.selected_index().map(|i| app.tab.catalog[i].no);
+    site.hold(false);
+    settle_until(&mut app, |a| a.tab.loading.is_none());
+    assert!(app.tab.catalog_cached.is_none());
+    assert_eq!(app.selected_index().map(|i| app.tab.catalog[i].no), picked);
+    assert_eq!(site.asked().len(), 2);
+    crate::http::serve_test_host(host, None);
 }
