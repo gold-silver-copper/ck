@@ -25,6 +25,7 @@ use crate::model::{Attachment, Board, Link, Post};
 use crate::store::{Store, ThreadKey};
 use crate::theme::{self, ThemeDef, ThemeSetting};
 
+mod filters;
 mod focus;
 mod gallery;
 mod input;
@@ -37,6 +38,7 @@ mod search;
 mod session;
 mod tabs;
 mod settings;
+pub use filters::{AddFilter, Candidate, EDIT_ROWS, EditRow, Reach, problem as filters_problem, with_text as filters_with_text};
 pub use focus::{HintTarget, HintTo, Hints, Menu, MenuItem};
 pub use gallery::Gallery;
 pub use home::BoardRef;
@@ -682,6 +684,12 @@ pub struct App {
     boards_refreshing: HashSet<usize>,
     boards_tried: HashMap<usize, Instant>,
     pub filters: Filters,
+    /// The config's `[[filter]]` tables, as last read or written (`filters` is made from them).
+    pub filter_cfgs: Vec<crate::filter::FilterConfig>,
+    /// `X`: a filter being made from the selected post.
+    pub filter_add: Option<AddFilter>,
+    /// The filter just added (and where): `u` as the next key takes it back.
+    pub filter_undo: Option<(usize, crate::filter::FilterConfig)>,
     /// Show hidden threads and posts (dimmed) instead of leaving them out.
     pub show_hidden: bool,
     /// True while typing into the filter.
@@ -810,6 +818,9 @@ impl App {
             boards_refreshing: HashSet::new(),
             boards_tried: HashMap::new(),
             filters: Filters::new(&cfg.filters).unwrap_or_default(),
+            filter_cfgs: cfg.filters.clone(),
+            filter_add: None,
+            filter_undo: None,
             show_hidden: false,
             filtering: false,
             status: None,

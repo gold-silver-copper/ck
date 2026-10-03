@@ -86,6 +86,12 @@ impl App {
         let text = text.trim().replace(['\n', '\r'], " ");
         if let Some(g) = &mut self.goto {
             g.push_str(&text);
+        } else if let Some(a) = &mut self.filter_add {
+            if let Some(label) = &mut a.typing {
+                label.push_str(&text);
+            }
+        } else if let Some(super::settings::Popup::FilterEdit { typing: Some(field), .. }) = &mut self.settings_popup {
+            field.push_str(&text);
         } else if self.searching {
             if let Some(t) = &mut self.tab.thread {
                 let q = format!("{}{text}", t.search);

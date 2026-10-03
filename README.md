@@ -132,6 +132,7 @@ the action name is in brackets. The `?` help lists the same, with your keys.
 | `c`  | cycle the layout: cards, compact (a line per thread), grid (thumbnails in columns), remembered per board [`compact`] |
 | `O`  | the OP's links and files [`links`] |
 | `H` / `Z` | hide / unhide the thread; show hidden threads, dimmed [`hide`, `show_hidden`] |
+| `X`  | hide or highlight threads like this one: by subject, image or file name (a filter) [`filter`] |
 | `A`  | search the board's archive [`archive_search`] |
 | `y` / `Y` | copy the OP's subject and text / the thread's link [`copy`, `copy_link`] |
 
@@ -154,6 +155,7 @@ the action name is in brackets. The `?` help lists the same, with your keys.
 | `d` / `D` / `E` | save the post's files / all the thread's files / the thread as a page [`download`, `download_thread`, `export`] |
 | `w` / `T` | watch / unwatch; follow the quote `enter` would follow in a new tab [`watch`, `new_tab`] |
 | `H` / `Z` | hide / unhide the post; show hidden posts [`hide`, `show_hidden`] |
+| `X`  | hide or highlight posts like this one: by name and tripcode, image, file name, or (on the OP) subject (a filter) [`filter`] |
 | `m`  | mark the post as yours, to be told about replies [`mine`] |
 | `F`  | follow the thread as a general: when it dies or fills up, the next one is watched [`follow`] |
 | `a`  | after a 404: open the thread in the site's archive [`archive`] |
@@ -236,7 +238,19 @@ the viewer's own commands apply.
 one line, so replies to them still make sense. What you hide is remembered per board in
 the data directory.
 
-Filters in the config hide or highlight automatically:
+Filters hide or highlight automatically. The quickest way to make one is `X` (or "hide or
+highlight posts like it…" in the `.` menu) on a post or catalog thread: it offers what
+the post can be caught by (its name with the tripcode, its image's MD5, its file's name,
+and an OP's subject; never the site's anonymous name), whether to hide or highlight
+(`a`), where (`s`: this board, this site, or everywhere) and a label (`e`). `enter` adds
+it: it's written to the config as a `[[filter]]`, applies at once, and the footer says
+what it caught; `u` as the next key takes it back.
+
+Settings › Filters lists every filter with what it catches in the open catalog and thread.
+`enter` edits one (pattern, label, action, the fields it looks at, sites and boards; a
+pattern that isn't a valid regex says why and isn't saved), `space` turns it off or on
+(`enabled = false`), `a` adds one and `x` removes one. Each change is written at once;
+the rest of the config, comments included, stays as it was. In the config:
 
 ```toml
 [[filter]]
@@ -249,6 +263,7 @@ action = "highlight"           # "hide" (the default) or "highlight"
 field = ["subject", "comment"] # subject, comment, name, filename, md5; default subject + comment
 sites = ["4chan"]              # optional: only these sites
 boards = ["g"]                 #           and these boards
+enabled = false                # kept, but not applied
 
 [[filter]]
 pattern = "u8Vh17KxaDvUJ6bBcmE/eg=="   # field = "md5": a file's MD5 (base64, as 4chan shows it)

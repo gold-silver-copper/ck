@@ -225,13 +225,21 @@ pub enum BoardConfig {
 /// Change a config file (the user's is `Config::path()`), keeping its comments and layout.
 /// A missing file is first created from the default config.
 pub fn edit_at(path: &Path, f: impl FnOnce(&mut DocumentMut)) -> Result<()> {
+    try_edit_at(path, |d| {
+        f(d);
+        Ok(())
+    })
+}
+
+/// `edit_at`, with an edit that can refuse (nothing is written then).
+pub fn try_edit_at(path: &Path, f: impl FnOnce(&mut DocumentMut) -> Result<()>) -> Result<()> {
     let text = match std::fs::read_to_string(path) {
         Ok(t) => t,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => DEFAULT_CONFIG.to_string(),
         Err(e) => return Err(e).with_context(|| format!("reading {}", path.display())),
     };
     let mut doc: DocumentMut = text.parse().with_context(|| format!("parsing {}", path.display()))?;
-    f(&mut doc);
+    f(&mut doc)?;
     // Don't write something ck itself couldn't read back.
     let out = doc.to_string();
     toml::from_str::<Config>(&out).with_context(|| format!("the edited {} wouldn't load", path.display()))?;
@@ -273,6 +281,48 @@ pub fn set_theme_color(doc: &mut DocumentMut, name: &str, base: Option<&str>, ro
 }
 
 /// Set an action's keys in `[keys]`, or with `None` (the default) remove its entry.
+/// A change to the config's `[[filter]]` tables. A change or removal names the table by
+/// position and what ck read there, and is refused if the file says otherwise now.
+pub enum FilterEdit<'a> {
+    Add(&'a crate::filter::FilterConfig),
+    Change(usize, &'a crate::filter::FilterConfig, &'a crate::filter::FilterConfig),
+    Remove(usize, &'a crate::filter::FilterConfig),
+}
+
+pub fn edit_filters(doc: &mut DocumentMut, edit: FilterEdit) -> Result<()> {
+    use crate::filter::FilterConfig;
+    if doc.get("filter").is_none() {
+        doc.insert("filter", Item::ArrayOfTables(Default::default()));
+    }
+    let tables = doc.get_mut("filter").and_then(Item::as_array_of_tables_mut).context("`filter` in the config isn't a list of [[filter]] tables")?;
+    let check = |tables: &toml_edit::ArrayOfTables, i: usize, old: &FilterConfig| -> Result<()> {
+        let now = tables.get(i).map(|t| DocumentMut::from(t.clone()).to_string()).and_then(|text| toml::from_str::<FilterConfig>(&text).ok());
+        anyhow::ensure!(now.as_ref() == Some(old), "filter #{} in the config changed since ck read it (restart ck to edit it here)", i + 1);
+        Ok(())
+    };
+    match edit {
+        FilterEdit::Add(new) => {
+            let mut t = Table::new();
+            new.write(&mut t, None);
+            tables.push(t);
+        }
+        FilterEdit::Change(i, old, new) => {
+            check(tables, i, old)?;
+            if let Some(t) = tables.get_mut(i) {
+                new.write(t, Some(old));
+            }
+        }
+        FilterEdit::Remove(i, old) => {
+            check(tables, i, old)?;
+            tables.remove(i);
+        }
+    }
+    if doc.get("filter").and_then(Item::as_array_of_tables).is_some_and(|t| t.is_empty()) {
+        doc.remove("filter");
+    }
+    Ok(())
+}
+
 pub fn set_key(doc: &mut DocumentMut, action: &str, binding: Option<&Binding>) {
     if !doc.contains_key("keys") {
         doc.insert("keys", Item::Table(Table::new()));

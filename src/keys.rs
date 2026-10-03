@@ -85,6 +85,7 @@ actions! {
     ArchiveSearch, "archive_search", Key::char('A'), &[Scope::Catalog], "search the board's archive";
     Links, "links", Key::char('O'), &[Scope::Catalog, Scope::Thread], "the post's links and files";
     Hide, "hide", Key::char('H'), &[Scope::Catalog, Scope::Thread], "hide / unhide the thread or post";
+    Filter, "filter", Key::char('X'), &[Scope::Catalog, Scope::Thread], "hide or highlight posts like this one (a filter)";
     ShowHidden, "show_hidden", Key::char('Z'), &[Scope::Catalog, Scope::Thread], "show hidden threads and posts";
     ImageSearch, "image_search", Key::char('R'), &[Scope::Thread, Scope::Viewer], "reverse image search";
     Gallery, "gallery", Key::char('V'), &[Scope::Thread], "the thread's files as a grid";

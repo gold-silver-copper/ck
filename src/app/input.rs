@@ -6,6 +6,7 @@ use super::*;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Modal {
     Settings,
+    AddFilter,
     Help,
     Menu,
     Hints,
@@ -62,6 +63,7 @@ impl App {
             self.modal(),
             Some(
                 Modal::Settings
+                    | Modal::AddFilter
                     | Modal::Help
                     | Modal::Menu
                     | Modal::Hints
@@ -84,10 +86,11 @@ impl App {
             }
             Some(Modal::Links) => return self.on_links_click(ev.column, ev.row, now),
             Some(Modal::ImageSearch) => return self.on_image_search_click(ev.column, ev.row),
-            Some(Modal::Help | Modal::Preview) => {
+            Some(Modal::Help | Modal::Preview | Modal::AddFilter) => {
                 // Clicking anywhere closes a popup.
                 self.show_help = false;
                 self.tab.preview = None;
+                self.filter_add = None;
                 return;
             }
             Some(Modal::Viewer | Modal::Searching | Modal::Filtering) => return,
@@ -133,6 +136,7 @@ impl App {
     fn modal(&self) -> Option<Modal> {
         let open = [
             (self.settings_popup.is_some(), Modal::Settings),
+            (self.filter_add.is_some(), Modal::AddFilter),
             (self.show_help, Modal::Help),
             (self.menu.is_some(), Modal::Menu),
             (self.hints.is_some(), Modal::Hints),
@@ -195,9 +199,20 @@ impl App {
             self.quit = true;
             return;
         }
+        // `u` right after adding a filter takes it back; any other key keeps it.
+        if let Some(undo) = self.filter_undo.take()
+            && self.modal().is_none()
+            && key.code == KeyCode::Char('u')
+            && key.modifiers == KeyModifiers::NONE
+        {
+            self.filter_undo = Some(undo);
+            self.undo_filter();
+            return;
+        }
         if let Some(modal) = self.modal() {
             match modal {
                 Modal::Settings => self.on_settings_popup_key(key),
+                Modal::AddFilter => self.on_add_filter_key(key),
                 Modal::Menu => self.on_menu_key(key),
                 Modal::Hints => self.on_hints_key(key),
                 Modal::Help => match key.code {
@@ -305,6 +320,7 @@ impl App {
             }
             Action::Search => self.filtering = true,
             Action::Reload => self.refresh(),
+            Action::Filter => self.open_add_filter(),
             Action::Browser => match self.focused_url() {
                 Some((_, url)) => self.open_url(&url),
                 None => self.open_in_browser(),

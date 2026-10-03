@@ -12,15 +12,15 @@ expression: snapshot(&mut a)
   Catalog
     Default layout    cards                             c in a catalog sets a board's own
     Images            on                                Thumbnails and the image viewer (after a…
-    Filters           0 filters, 0 hidden by hand       Hide or highlight by pattern; X adds one…
+    Filters                             enter edit · space on/off · a add · x remove · esc close
 
-  Background refresh
-    Open thread       every 10s                         How often the open thread updates
-    Watched threads   every 60s                         How often each watched thread updates
-    Notifications     auto (terminal bell)              New posts in watched threads, replies to…
+     hide        crypto                subject+comment   everywhere          (?i)…  nothing here
+     highlight   Named !Trip           name              /g/ on 4chan        ^Named !Tr…  1 post
+     off         implying              comment           everywhere          implying     1 post
 
-  Downloads
-    Folder            ~/Downloads/ck/{site}/{board}/{…  Where d / D save files
+
+    Counts are for the open catalog and thread. Kept in the config as [[filter]] tables.
+
 
   Startup
     Last place        restored                          Start where you left off (ck URL starts …

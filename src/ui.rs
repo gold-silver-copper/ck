@@ -127,6 +127,9 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         if app.settings_popup.is_some() {
             draw_settings_popup(f, app);
         }
+        if app.filter_add.is_some() {
+            draw_add_filter(f, app);
+        }
         if app.show_help {
             draw_help(f, app);
         }
@@ -1628,6 +1631,7 @@ fn help_sections(keys: &KeyMap) -> Vec<(&'static str, Vec<(String, &'static str)
                 (pair(Action::Sort, Action::Compact), "sort / layout (grid, …)"),
                 (k(Action::Links), "the OP's links and files"),
                 (pair(Action::Hide, Action::ShowHidden), "hide / show hidden"),
+                (k(Action::Filter), "filter threads like this"),
                 (k(Action::ArchiveSearch), "search the board's archive"),
                 (pair(Action::Copy, Action::CopyLink), "copy text / link"),
             ],
@@ -1648,6 +1652,7 @@ fn help_sections(keys: &KeyMap) -> Vec<(&'static str, Vec<(String, &'static str)
                 (format!("{} / {}", pair(Action::Download, Action::DownloadThread), k(Action::Export)), "save: files / all / page"),
                 (format!("{} / {} / {}", k(Action::Watch), k(Action::NewTab), k(Action::Follow)), "watch / quote tab / general"),
                 (pair(Action::Hide, Action::ShowHidden), "hide post / show hidden"),
+                (k(Action::Filter), "filter posts like this"),
                 (k(Action::Mine), "mark as yours (replies)"),
                 (k(Action::Archive), "open a 404'd thread archived"),
                 (pair(Action::Copy, Action::CopyLink), "copy text / link"),
@@ -1841,6 +1846,8 @@ fn draw_settings_popup(f: &mut Frame, app: &App) {
             };
             put(f, inner.x, y, inner.width, line);
         }
+        Some(SettingsPopup::Filters { list, counts }) => draw_filter_list(f, app, list, counts),
+        Some(SettingsPopup::FilterEdit { index, draft, row, typing }) => draw_filter_edit(f, app, *index, draft, *row, typing.as_deref()),
         Some(SettingsPopup::Folder { value }) => {
             let inner = panel(f, 90, 7, "Download folder", "enter save · esc cancel");
             let field = Rect::new(inner.x, inner.y, inner.width, 1);
@@ -1852,6 +1859,141 @@ fn draw_settings_popup(f: &mut Frame, app: &App) {
         }
         None => {}
     }
+}
+
+// ----- filters -----
+
+/// Where a filter applies, in words.
+fn filter_scope(c: &crate::filter::FilterConfig) -> String {
+    let boards = c.boards.iter().map(|b| format!("/{b}/")).collect::<Vec<_>>().join(" ");
+    match (c.sites.is_empty(), c.boards.is_empty()) {
+        (true, true) => "everywhere".into(),
+        (false, true) => c.sites.join(", "),
+        (true, false) => format!("{boards} on any site"),
+        (false, false) => format!("{boards} on {}", c.sites.join(", ")),
+    }
+}
+
+fn counts_text((posts, threads): (usize, usize)) -> String {
+    match (posts, threads) {
+        (0, 0) => "nothing here".into(),
+        (p, 0) => plural(p, "post"),
+        (0, t) => plural(t, "thread"),
+        (p, t) => format!("{}, {}", plural(p, "post"), plural(t, "thread")),
+    }
+}
+
+/// `X`: a filter like the selected post.
+fn draw_add_filter(f: &mut Frame, app: &App) {
+    use crate::filter::FilterAction;
+    let t = theme();
+    let Some(a) = &app.filter_add else { return };
+    let h = a.candidates.len() as u16 + 9;
+    let inner = panel(f, 72, h, &format!("Filter like No.{}", a.post), "enter add · esc cancel");
+    let sel = a.list.selected().unwrap_or(0);
+    for (k, c) in a.candidates.iter().enumerate().take(inner.height as usize) {
+        let y = inner.y + k as u16;
+        paint_row(f, Rect::new(inner.x - 2, y, inner.width + 4, 1), None, k == sel, false);
+        let left = vec![Span::styled(c.what.clone(), Style::new().fg(t.text))];
+        put(f, inner.x, y, inner.width, spread(left, vec![Span::styled(c.field.as_str(), dim())], inner.width as usize));
+    }
+    let y = inner.y + a.candidates.len() as u16 + 1;
+    let row = |f: &mut Frame, k: u16, name: &str, value: Vec<Span<'static>>, key: &str| {
+        let mut spans = vec![Span::styled(format!("{name:<8}"), dim())];
+        spans.extend(value);
+        put(f, inner.x, y + k, inner.width, spread(spans, vec![Span::styled(key.to_string(), dim())], inner.width as usize));
+    };
+    let (verb, other) = match a.action {
+        FilterAction::Hide => ("hide them", "a: highlight instead"),
+        FilterAction::Highlight => ("highlight them", "a: hide instead"),
+    };
+    row(f, 0, "Do", vec![Span::styled(verb, bold(t.text))], other);
+    row(f, 1, "Where", vec![Span::styled(a.reach_text(), bold(t.text))], "s: change");
+    match &a.typing {
+        Some(text) => row(f, 2, "Label", vec![Span::styled(text.clone(), bold(t.text)), Span::styled("▏", Style::new().fg(t.primary))], "enter: keep"),
+        None => row(f, 2, "Label", vec![Span::styled(a.label(), bold(t.text))], "e: edit"),
+    }
+    let note = "Saved in the config as a [[filter]]; u right after takes it back.";
+    put(f, inner.x, y + 4, inner.width, Line::styled(note, dim()));
+}
+
+/// Settings › Filters: every `[[filter]]`, with what it catches on screen now.
+fn draw_filter_list(f: &mut Frame, app: &App, list: &ratatui::widgets::ListState, counts: &[(usize, usize)]) {
+    let t = theme();
+    let cfgs = &app.filter_cfgs;
+    let h = (cfgs.len().max(1) as u16 + 6).min(f.area().height.saturating_sub(4));
+    let inner = panel(f, 110, h, "Filters", "enter edit · space on/off · a add · x remove · esc close");
+    let view = inner.height.saturating_sub(2) as usize;
+    let sel = list.selected().unwrap_or(0);
+    let first = (sel + 1).saturating_sub(view);
+    if cfgs.is_empty() {
+        let x = app.keys.key(Action::Filter);
+        put(f, inner.x, inner.y, inner.width, Line::styled(format!("No filters yet. a adds one; {x} on a post makes one like it."), dim()));
+    }
+    let wide = inner.width >= 90;
+    for (k, c) in cfgs.iter().enumerate().skip(first).take(view) {
+        let y = inner.y + (k - first) as u16;
+        paint_row(f, Rect::new(inner.x - 2, y, inner.width + 4, 1), None, k == sel, false);
+        let style = if c.enabled { Style::new().fg(t.text) } else { dim() };
+        let fields = c.fields().iter().map(|f| f.as_str()).collect::<Vec<_>>().join("+");
+        let mut left = vec![
+            if c.enabled { chip(format!("{:<9}", c.action.as_str()), t.on_primary_container, t.primary_container) } else { chip(format!("{:<9}", "off"), t.text_dim, t.surface_high) },
+            Span::raw("  "),
+            Span::styled(format!("{:<22}", truncate(c.label(), 21)), if c.enabled { bold(t.text) } else { dim() }),
+            Span::styled(format!("{:<18}", truncate(&fields, 17)), style),
+        ];
+        let count = counts.get(k).map_or(String::new(), |&n| counts_text(n));
+        if wide {
+            left.push(Span::styled(format!("{:<20}", truncate(&filter_scope(c), 19)), style));
+            // The pattern gets what's left, beside the count.
+            let used: usize = left.iter().map(|s| s.width()).sum::<usize>() + count.width() + 2;
+            left.push(Span::styled(truncate(&c.pattern, (inner.width as usize).saturating_sub(used)), dim()));
+        }
+        let right = vec![Span::styled(count, dim())];
+        put(f, inner.x, y, inner.width, spread(left, right, inner.width as usize));
+    }
+    let note = "Counts are for the open catalog and thread. Kept in the config as [[filter]] tables.";
+    put(f, inner.x, inner.bottom().saturating_sub(1), inner.width, Line::styled(note, dim()));
+}
+
+/// One filter in the editor.
+fn draw_filter_edit(f: &mut Frame, app: &App, index: Option<usize>, draft: &crate::filter::FilterConfig, row: usize, typing: Option<&str>) {
+    use crate::app::{EDIT_ROWS, EditRow};
+    let t = theme();
+    let title = match index {
+        Some(_) => format!("Filter: {}", draft.label()),
+        None => "New filter".into(),
+    };
+    let hint = if typing.is_some() { "enter keep · esc cancel" } else { "enter change · esc back" };
+    let inner = panel(f, 84, EDIT_ROWS.len() as u16 + 6, &title, hint);
+    let fields = draft.fields();
+    for (k, r) in EDIT_ROWS.iter().enumerate().take(inner.height.saturating_sub(2) as usize) {
+        let y = inner.y + k as u16;
+        paint_row(f, Rect::new(inner.x - 2, y, inner.width + 4, 1), None, k == row, false);
+        let (name, value): (String, String) = match r {
+            EditRow::Pattern => ("Pattern".into(), draft.pattern.clone()),
+            EditRow::Label => ("Label".into(), draft.label.clone().unwrap_or_else(|| "(the pattern)".into())),
+            EditRow::Action => ("Action".into(), draft.action.as_str().into()),
+            EditRow::Field(field) => (format!("  {}", field.as_str()), if fields.contains(field) { "✓ looked at".into() } else { "·".into() }),
+            EditRow::Sites => ("Sites".into(), if draft.sites.is_empty() { "(any)".into() } else { draft.sites.join(", ") }),
+            EditRow::Boards => ("Boards".into(), if draft.boards.is_empty() { "(any)".into() } else { draft.boards.join(", ") }),
+            EditRow::Enabled => ("On".into(), if draft.enabled { "yes".into() } else { "no (kept, not applied)".into() }),
+        };
+        let mut spans = vec![Span::styled(format!("{name:<12}"), dim())];
+        match typing.filter(|_| k == row) {
+            Some(text) => spans.extend([Span::styled(text.to_string(), bold(t.text)), Span::styled("▏", Style::new().fg(t.primary))]),
+            None => spans.push(Span::styled(truncate(&value, (inner.width as usize).saturating_sub(13)), Style::new().fg(t.text))),
+        }
+        put(f, inner.x, y, inner.width, Line::from(spans));
+    }
+    // What's wrong with what's being typed, as it's typed; else what it catches.
+    let r = EDIT_ROWS.get(row).copied().unwrap_or(EditRow::Pattern);
+    let line = match typing.map(|text| crate::app::filters_problem(&crate::app::filters_with_text(draft, r, text))) {
+        Some(Some(e)) => Line::styled(e, Style::new().fg(t.error)),
+        _ if draft.pattern.is_empty() => Line::styled("Type a pattern (a regex; an MD5 for the md5 field).", dim()),
+        _ => Line::styled(format!("Catches {} now. Each change is saved in the config.", counts_text(app.filter_counts(draft))), dim()),
+    };
+    put(f, inner.x, inner.bottom().saturating_sub(1), inner.width, line);
 }
 
 // ----- the image viewer -----

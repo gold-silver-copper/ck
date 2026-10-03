@@ -3,19 +3,19 @@ source: src/ui_tests.rs
 expression: snapshot(&mut a)
 ---
  ck  4chan  ›  /g/  ›  Snapshot thread                                            5 posts  ·  2 new
-
                              No.1001             enter run · esc close
-    Anonymous   OP  2026-09
-    Snapshot thread          enter  go to the post it quotes
-    op.png  800x600 · 121 K  y      copy the post's text
-                             Y      copy the post's link
-    A thread for snapshot t  o      open the post in the browser
-    It has a few replies.    O      list its links and files
-                             p      preview the posts it quotes
-    Replies  >>1001          b      go to the first reply
-                             e      show its replies under it
+
+    Anonymous   OP  2026-09  enter  go to the post it quotes
+    Snapshot thread          y      copy the post's text
+    op.png  800x600 · 121 K  Y      copy the post's link
+                             o      open the post in the browser
+    A thread for snapshot t  O      list its links and files
+    It has a few replies.    p      preview the posts it quotes
+                             b      go to the first reply
+    Replies  >>1001          e      show its replies under it
                              m      mark it as yours
                              H      hide it
+                             X      hide or highlight posts like it…
     Anonymous  2026-09-21 1  w      stop watching the thread
                              F      follow the thread as a general
     >>1000 (OP)              V      all the thread's files

@@ -739,7 +739,7 @@ fn config_once(seed: u64) {
         "refresh_watched_secs", "restore_session", "download_dir", "favorites", "hidden_sites",
     ];
     for _ in 0..1 + rng.below(5) {
-        match rng.below(6) {
+        match rng.below(8) {
             0 => doc[*rng.pick(KEYS)] = odd_toml(&mut rng),
             1 => {
                 doc.remove(rng.pick(KEYS));
@@ -751,7 +751,7 @@ fn config_once(seed: u64) {
             3 => {
                 let mut f = toml_edit::Table::new();
                 f["pattern"] = toml_edit::value(*rng.pick(&["(", "a{99999}", "", "(?i)x", "[", "\\p{Han}"]));
-                f[*rng.pick(&["action", "field", "label"])] = odd_toml(&mut rng);
+                f[*rng.pick(&["action", "field", "label", "enabled", "sites", "boards"])] = odd_toml(&mut rng);
                 doc["filter"].or_insert(toml_edit::Item::ArrayOfTables(Default::default()));
                 if let Some(a) = doc["filter"].as_array_of_tables_mut() {
                     a.push(f);
@@ -761,6 +761,23 @@ fn config_once(seed: u64) {
                 doc["themes"]["odd"][*rng.pick(&["base", "seed", "mode", "primary", "background"])] = odd_toml(&mut rng);
                 if rng.chance(50) {
                     doc["theme"] = toml_edit::value("odd");
+                }
+            }
+            // A valid filter: any fields, any scope, on or off.
+            6 | 7 => {
+                use crate::filter::{Field, FilterAction, FilterConfig};
+                let fields: Vec<Field> = Field::ALL.into_iter().filter(|_| rng.chance(40)).collect();
+                let mut f = FilterConfig::new(rng.pick(&["(?i)word", "^Anon$", "日本", "abc==", "x|y"]).to_string(), if fields.is_empty() { &[Field::Comment] } else { &fields });
+                f.action = if rng.chance(50) { FilterAction::Hide } else { FilterAction::Highlight };
+                f.sites = (0..rng.below(3)).map(|_| rng.pick(&["4chan", "lainchan", "nosuch"]).to_string()).collect();
+                f.boards = (0..rng.below(3)).map(|_| rng.pick(&["g", "λ", "b"]).to_string()).collect();
+                f.label = rng.chance(50).then(|| html(&mut rng, 1));
+                f.enabled = rng.chance(70);
+                let mut t = toml_edit::Table::new();
+                f.write(&mut t, None);
+                doc["filter"].or_insert(toml_edit::Item::ArrayOfTables(Default::default()));
+                if let Some(a) = doc["filter"].as_array_of_tables_mut() {
+                    a.push(t);
                 }
             }
             _ => {
@@ -785,13 +802,60 @@ fn config_once(seed: u64) {
     if crate::filter::Filters::new(&cfg.filters).is_err() || crate::theme::from_config(cfg.theme.as_ref(), &cfg.themes).is_err() {
         return;
     }
+    // Editing its filters changes just the one, and what's written reads back.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    std::fs::write(&path, &text).unwrap();
+    if !cfg.filters.is_empty() {
+        use crate::config::{FilterEdit, try_edit_at, edit_filters};
+        let filters = |path: &std::path::Path| toml::from_str::<crate::config::Config>(&std::fs::read_to_string(path).unwrap()).unwrap().filters;
+        let i = rng.below(cfg.filters.len());
+        let old = cfg.filters[i].clone();
+        let mut new = crate::filter::FilterConfig { enabled: !old.enabled, ..old.clone() };
+        if rng.chance(50) {
+            new.set_fields(&[crate::filter::Field::Name]);
+            new.boards.clear();
+        }
+        let mut want = cfg.filters.clone();
+        match rng.below(3) {
+            0 => {
+                try_edit_at(&path, |d| edit_filters(d, FilterEdit::Change(i, &old, &new))).unwrap();
+                want[i] = new;
+            }
+            1 => {
+                try_edit_at(&path, |d| edit_filters(d, FilterEdit::Remove(i, &old))).unwrap();
+                want.remove(i);
+            }
+            _ => {
+                try_edit_at(&path, |d| edit_filters(d, FilterEdit::Add(&new))).unwrap();
+                want.push(new);
+            }
+        }
+        assert_eq!(filters(&path), want, "seed {seed}");
+        // An edit naming what isn't there is refused, and nothing is written.
+        let before = std::fs::read_to_string(&path).unwrap();
+        let other = crate::filter::FilterConfig::new("not there".into(), &[crate::filter::Field::Md5]);
+        assert!(try_edit_at(&path, |d| edit_filters(d, FilterEdit::Remove(0, &other))).is_err());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), before);
+        std::fs::write(&path, &text).unwrap();
+    }
     let mut app = crate::app::App::new(cfg, keys, None, crate::store::Store::default());
-    app.config_path = None;
+    app.config_path = Some(path);
     let mut term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 24)).unwrap();
     for key in [KeyCode::Enter, KeyCode::Char(','), KeyCode::Char('j'), KeyCode::Enter, KeyCode::Esc] {
         app.on_key(KeyEvent::from(key));
         term.draw(|f| crate::ui::draw(f, &mut app)).unwrap();
     }
+    // The filter list, and whatever its keys do.
+    app.settings_popup = Some(app.filter_list(0));
+    for _ in 0..rng.below(12) {
+        let key = *rng.pick(&[KeyCode::Char('j'), KeyCode::Char(' '), KeyCode::Char('x'), KeyCode::Enter, KeyCode::Char('a'), KeyCode::Char('k'), KeyCode::Esc, KeyCode::Char('w')]);
+        app.on_key(KeyEvent::from(key));
+        term.draw(|f| crate::ui::draw(f, &mut app)).unwrap();
+    }
+    // What's in memory is what's in the file.
+    let on_disk = toml::from_str::<crate::config::Config>(&std::fs::read_to_string(app.config_path.as_ref().unwrap()).unwrap()).unwrap();
+    assert_eq!(on_disk.filters, app.filter_cfgs, "seed {seed}");
 }
 
 #[test]
