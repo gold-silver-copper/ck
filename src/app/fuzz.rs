@@ -863,7 +863,7 @@ fn replay(seed: u64, acts: &[Act]) -> Result<(), (String, String)> {
                 eprintln!("TRACE   watched {w:?} saved {sv:?} status {:?}", a.status.as_ref().map(|s| &s.text));
                 if let Some(t) = &a.tab.thread {
                     let l = t.layout.as_ref().map(|l| (l.starts.clone(), l.exact.clone()));
-                    eprintln!("TRACE   thread entry {} selected {} scroll {} view {} entries {} layout {l:?}", t.entry(), t.selected, t.scroll, t.viewport, t.entries.len());
+                    eprintln!("TRACE   thread entry {} selected {} scroll {} view {} entries {} focus {:?} conv {:?} layout {l:?}", t.entry(), t.selected, t.scroll, t.viewport, t.entries.len(), t.focus, t.conversation.as_ref().map(|c| c.anchor));
                 }
             }
             check(&world.app);

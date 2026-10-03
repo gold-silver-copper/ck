@@ -585,6 +585,12 @@ impl App {
         match to {
             HintTo::Thread(e, part) => {
                 let Some(t) = &mut self.tab.thread else { return };
+                // Labels put up before the thread changed (a refresh) may point at what's
+                // gone (found by fuzzing).
+                if e >= t.entries.len() || part.as_ref().is_some_and(|p| !t.parts_of(e).contains(p)) {
+                    self.info("That's changed since the labels went up: f labels it again");
+                    return;
+                }
                 t.set_cursor(e);
                 t.focus = part.clone();
                 t.layout = None;
