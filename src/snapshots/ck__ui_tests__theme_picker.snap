@@ -1,5 +1,6 @@
 ---
 source: src/ui_tests.rs
+assertion_line: 708
 expression: snapshot(&mut a)
 ---
  ck  Settings
@@ -21,7 +22,7 @@ expression: snapshot(&mut a)
     Notifications     au  tokyo-night                                        threads, replies to…
                           solarized-light
   Downloads               terminal
-    Folder            ~/                                                    es
+    Folder            ~/                                                    d pages go
 
   Startup
     Last place        restored                          Start where you left off (ck URL starts …

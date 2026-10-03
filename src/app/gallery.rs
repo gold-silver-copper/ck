@@ -52,22 +52,34 @@ impl App {
             return;
         }
         match (key.code, action) {
-            (KeyCode::Enter, _) | (_, Some(Action::View)) => self.view_from_gallery(cur),
-            (_, Some(Action::Download | Action::DownloadThread)) => self.download_file(cur),
-            (_, Some(Action::Menu)) => self.open_menu(),
-            (_, Some(Action::Copy)) => {
+            (KeyCode::Enter, _) => self.view_from_gallery(cur),
+            (KeyCode::Esc | KeyCode::Char('q' | 'h') | KeyCode::Left | KeyCode::Backspace, _) => self.close_gallery(),
+            (_, Some(action)) => self.gallery_action(action),
+            _ => {}
+        }
+    }
+
+    /// A command in the gallery, on the selected file.
+    pub(super) fn gallery_action(&mut self, action: Action) {
+        let Some(g) = &self.tab.gallery else { return };
+        let cur = g.state.selected().unwrap_or(0);
+        match action {
+            Action::View => self.view_from_gallery(cur),
+            Action::Download => self.download_file(cur),
+            Action::DownloadThread => self.ask_to_save(super::Saving::Files),
+            Action::Export => self.ask_to_save(super::Saving::Page),
+            Action::Menu => self.open_menu(),
+            Action::Copy => {
                 if let Some(url) = g.files.get(cur).map(|(_, f)| f.url.clone()) {
                     self.copy_text("file URL", url);
                 }
             }
-            (_, Some(Action::CopyLink)) => {
+            Action::CopyLink => {
                 if let Some(link) = self.gallery_link(cur) {
                     self.copy_text("link", link);
                 }
             }
-            (KeyCode::Esc | KeyCode::Char('q' | 'h') | KeyCode::Left | KeyCode::Backspace, _) | (_, Some(Action::Gallery)) => {
-                self.close_gallery()
-            }
+            Action::Gallery => self.close_gallery(),
             _ => {}
         }
     }

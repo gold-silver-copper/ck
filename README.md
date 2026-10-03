@@ -120,6 +120,7 @@ the action name is in brackets. The `?` help lists the same, with your keys.
 | `+` / `-` / `0` | zoom in / out (up to 800%) / fit again; zoomed in, `h`/`j`/`k`/`l` and the arrows move around, page up / down change file, `esc` fits |
 | `i`  | open the file externally |
 | `y` / `Y` | copy the file's URL / the post's link [`copy`, `copy_link`] |
+| `d`  | save the file [`download`] |
 | `R`  | reverse image search [`image_search`] |
 | `esc`, `q` | close |
 
@@ -156,7 +157,8 @@ the action name is in brackets. The `?` help lists the same, with your keys.
 | `v` / `V` | image viewer from the post's files on through the thread's / gallery of every file in the thread [`view`, `gallery`] |
 | `i` / `R` | open the post's file (videos in mpv if it's installed) / reverse image search [`open_file`, `image_search`] |
 | `O`  | the post's links: quotes of other threads, web links, files; `enter` opens, `y` copies [`links`] |
-| `d` / `D` / `E` | save the post's files / all the thread's files / the thread as a page [`download`, `download_thread`, `export`] |
+| `d`  | save the focused file (`tab` to it first); in the gallery, the selected one [`download`] |
+| `.` menu | save all the post's files / all the thread's files / the thread as a page; the last two ask first [`download_post`, `download_thread`, `export`: no key unless you give one] |
 | `w` / `T` | watch / unwatch; follow the quote `enter` would follow in a new tab [`watch`, `new_tab`] |
 | `H` / `Z` | hide / unhide the post; show hidden posts [`hide`, `show_hidden`] |
 | `X`  | hide or highlight posts like this one: by name and tripcode, image, file name, or (on the OP) subject (a filter) [`filter`] |
@@ -253,16 +255,20 @@ were. `ck URL` (or `ck 4chan/g`) starts there.
 ### Remapping keys
 
 `,` → Key bindings lists every command with its keys. `enter` and then a key rebinds the
-command, `a` adds another key, `x` resets it to the default. A key that another command
-already uses in the same view is refused. Changes apply at once and are saved in the
-config's `[keys]` section (only the keys you changed):
+command, `a` adds another key, `u` takes its keys away, `x` resets it to the default. A key
+that another command already uses in the same view is refused. Changes apply at once and
+are saved in the config's `[keys]` section (only the keys you changed):
 
 ```toml
 [keys]
 watch = "W"
 help = ["?", "f1"]
 reload = "ctrl-r"
+download_thread = "D"   # no key by default
+mine = []               # no key: only in the . menu
 ```
+
+A command without a key is still in the `.` menu where it applies.
 
 Keys are a character (`"w"`, `"W"`, `":"`), `ctrl-` or `alt-` with one, or a named key:
 `tab`, `shift-tab`, `enter`, `esc`, `backspace`, `delete`, `insert`, arrows (`up`, ...),
@@ -341,13 +347,13 @@ their saved copy the same way. A start that restores your tabs fills them in at 
 Watched threads are saved as they refresh: each time new posts arrive, the thread's last
 good copy is written to the data directory (`threads/<site>/<board>/<no>.json`, only when
 something changed, and in the background so ck never waits on it). When a watched thread 404s, its copy is kept and marked dead, so the
-thread isn't lost. `E` saves a copy too, of any thread.
+thread isn't lost. Saving a thread as a page (in the `.` menu) saves a copy too, of any thread.
 
 "Saved" on the home screen (or `:saved`) lists the copies, newest first, with "dead" on
 threads that are gone and "watching" on ones you watch. `enter` opens one in the usual
 thread view, read offline: the top bar says "saved 2h ago" (and "dead"), nothing in it is
 refreshed or fetched, and everything else works (replies, search, the menu, the gallery).
-Images come from the thread's download folder when you saved them with `d`/`D`, and
+Images come from the thread's download folder when you saved them, and
 thumbnails from the thumbnail cache; the rest show as placeholders. On a copy of a thread
 that's still up, `r` opens the live thread. `x` (twice) deletes a copy; unwatching a thread
 keeps it.
@@ -453,20 +459,29 @@ url = "https://saucenao.com/search.php?url={url}"
 
 ## Downloads
 
-`d` saves the selected post's files and `D` all of the thread's, into
-`~/Downloads/ck/{site}/{board}/{thread}/` (your system's Downloads folder). Files are named
-`{post}_{original name}` with unsafe characters replaced; files that already exist are
-skipped, so `D` again later only fetches what's new. Progress shows at the right of the
-footer. Downloads go through the same rate limiter as images.
+Only one key saves files: `d`, which saves the file in front of you (one you've focused
+with `tab`, the one in the image viewer, or the one selected in the gallery). On a post
+with nothing focused it says how instead of saving anything. The `.` menu saves more: all
+of a post's files, all of the thread's ("save all the thread's files…"), or the thread as
+a page ("save the thread as a page…"). The last two first say what they'll write (how many
+files, about how big) and where; `enter` saves, anything else cancels. To have keys for
+these, give `download_post`, `download_thread` or `export` one (see
+[Remapping keys](#remapping-keys)); they still ask first.
+
+Files go into `~/Downloads/ck/{site}/{board}/{thread}/` (your system's Downloads folder).
+Files are named `{post}_{original name}` with unsafe characters replaced; files that
+already exist are skipped, so saving all the thread's files again later only fetches
+what's new. Progress shows at the right of the footer. Downloads go through the same rate
+limiter as images.
 
 ### Saving a thread
 
-`E` writes the open thread into its download folder (the same one `D` uses) as
-`thread.html`, a page with the current theme's colors that reads offline, and
-`thread.json`, the posts as data (`"format": 1`). Files already saved there with `d`/`D`
-are shown from the folder; the others link to the site. So `D` then `E` makes a complete
-offline copy. Saving again replaces both. The thread is also saved for ck itself, to open
-from the Saved view.
+"Save the thread as a page…" in the `.` menu writes the open thread into its download
+folder as `thread.html`, a page with the current theme's colors that reads offline, and
+`thread.json`, the posts as data (`"format": 1`). Files already saved there are shown from
+the folder; the others link to the site. So saving all the thread's files and then the
+page makes a complete offline copy. Saving again replaces both. The thread is also saved
+for ck itself, to open from the Saved view.
 
 ## Themes and settings
 
@@ -531,7 +546,8 @@ All settings are optional; see `config.example.toml` for every option with comme
 - `[[image_search]]`: reverse image search engines, see
   [Reverse image search](#reverse-image-search).
 - `archive = "desuarchive"` on a `[[site]]`: the archive for 404'd threads and `A` searches.
-- `[keys]`: `action = "key"` or `action = ["key", ...]`, e.g. `watch = "W"`; see
+- `[keys]`: `action = "key"`, `action = ["key", ...]`, or `action = []` for none (the `.`
+  menu only), e.g. `watch = "W"`; see
   [Remapping keys](#remapping-keys). Unknown actions, things that aren't keys, and two
   commands on one key in the same view are reported at startup.
 - `theme = "nord"`, `[themes.NAME]`, `color = "auto" | "truecolor" | "256"`: see

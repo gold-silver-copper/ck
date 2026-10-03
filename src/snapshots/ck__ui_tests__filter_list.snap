@@ -1,5 +1,6 @@
 ---
 source: src/ui_tests.rs
+assertion_line: 330
 expression: snapshot(&mut a)
 ---
  ck  Settings
@@ -21,7 +22,7 @@ expression: snapshot(&mut a)
 
     Counts are for the open catalog and thread. Kept in the config as [[filter]] tables.
 
-    Folder            ~/Downloads/ck/{site}/{board}/{…  Where d / D save files
+    Folder            ~/Downloads/ck/{site}/{board}/{…  Where saved files and pages go
 
   Startup
     Last place        restored                          Start where you left off (ck URL starts …

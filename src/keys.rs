@@ -39,7 +39,8 @@ impl Scope {
 const VIEWS: [Scope; 5] = [Scope::Lists, Scope::Catalog, Scope::Thread, Scope::Saved, Scope::Viewer];
 
 /// Declares `Action` and `ACTIONS` (every action: config name, default key, scopes, and
-/// what it does) from one list.
+/// what it does) from one list. Actions without a default key are in the `.` menu, and can
+/// be given one.
 macro_rules! actions {
     ($($action:ident, $name:literal, $key:expr, $scopes:expr, $what:literal;)*) => {
         #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -47,58 +48,59 @@ macro_rules! actions {
             $($action,)*
         }
 
-        pub const ACTIONS: &[(Action, &str, Key, &[Scope], &str)] = &[$((Action::$action, $name, $key, $scopes, $what),)*];
+        pub const ACTIONS: &[(Action, &str, Option<Key>, &[Scope], &str)] = &[$((Action::$action, $name, $key, $scopes, $what),)*];
     };
 }
 
 actions! {
-    Quit, "quit", Key::char('q'), &[Scope::Global], "quit";
-    Help, "help", Key::char('?'), &[Scope::Global], "help";
-    Settings, "settings", Key::char(','), &[Scope::Global], "settings: theme, colors, keys, …";
-    Search, "search", Key::char('/'), &[Scope::Global], "filter the list; search a thread";
-    Reload, "reload", Key::char('r'), &[Scope::Global], "reload";
-    Browser, "browser", Key::char('o'), &[Scope::Global], "open in the browser";
-    Goto, "goto", Key::char(':'), &[Scope::Global], "go to a URL or site/board/thread";
-    NextTab, "next_tab", Key::char(']'), &[Scope::Global], "next tab";
-    PrevTab, "prev_tab", Key::char('['), &[Scope::Global], "previous tab";
-    Menu, "menu", Key::char('.'), &[Scope::Global, Scope::Viewer], "what you can do with what's selected";
-    Hints, "hints", Key::char('f'), &[Scope::Lists, Scope::Catalog, Scope::Thread, Scope::Saved], "label what's on screen; type a label to open it";
-    NextPart, "next_part", Key::code(KeyCode::Tab), &[Scope::Thread], "focus the post's next image or link (then the next post's)";
-    PrevPart, "prev_part", Key::code(KeyCode::BackTab), &[Scope::Thread], "focus the previous image or link";
-    CloseTab, "close_tab", Key::ctrl('w'), &[Scope::Global], "close the tab";
-    View, "view", Key::char('v'), &[Scope::Catalog, Scope::Thread], "view the post's images";
-    Watch, "watch", Key::char('w'), &[Scope::Catalog, Scope::Thread], "watch / unwatch the thread";
-    Sort, "sort", Key::char('s'), &[Scope::Catalog], "cycle the sort order";
-    Compact, "compact", Key::char('c'), &[Scope::Catalog], "layout: cards, compact, grid";
-    OpenFile, "open_file", Key::char('i'), &[Scope::Thread], "open the file (videos in mpv)";
-    Replies, "replies", Key::char('b'), &[Scope::Thread], "jump to the first reply";
-    JumpBack, "jump_back", Key::char('u'), &[Scope::Thread], "jump back (also to the last thread)";
-    Unread, "unread", Key::char('U'), &[Scope::Thread], "jump to the first unread post";
-    Preview, "preview", Key::char('p'), &[Scope::Thread], "preview the quoted posts";
-    NextMatch, "next_match", Key::char('n'), &[Scope::Thread], "next search match";
-    PrevMatch, "prev_match", Key::char('N'), &[Scope::Thread], "previous search match";
-    Spoiler, "spoiler", Key::char('s'), &[Scope::Thread], "show the post's spoilers";
-    AllSpoilers, "all_spoilers", Key::char('S'), &[Scope::Thread], "show all spoilers";
-    Download, "download", Key::char('d'), &[Scope::Thread], "save the post's files";
-    DownloadThread, "download_thread", Key::char('D'), &[Scope::Thread], "save the thread's files";
-    Archive, "archive", Key::char('a'), &[Scope::Thread], "open a 404'd thread in the archive";
-    ArchiveSearch, "archive_search", Key::char('A'), &[Scope::Catalog], "search the board's archive";
-    Links, "links", Key::char('O'), &[Scope::Catalog, Scope::Thread], "the post's links and files";
-    Hide, "hide", Key::char('H'), &[Scope::Catalog, Scope::Thread], "hide / unhide the thread or post";
-    Filter, "filter", Key::char('X'), &[Scope::Catalog, Scope::Thread], "hide or highlight posts like this one (a filter)";
-    ShowHidden, "show_hidden", Key::char('Z'), &[Scope::Catalog, Scope::Thread], "show hidden threads and posts";
-    ImageSearch, "image_search", Key::char('R'), &[Scope::Thread, Scope::Viewer], "reverse image search";
-    Gallery, "gallery", Key::char('V'), &[Scope::Thread], "the thread's files as a grid";
-    Export, "export", Key::char('E'), &[Scope::Thread], "save the thread as HTML and JSON";
-    Expand, "expand", Key::char('e'), &[Scope::Thread], "show / hide the post's replies under it";
-    Conversation, "conversation", Key::char('c'), &[Scope::Thread], "the post's conversation alone: what it replies to, and its replies";
-    Mine, "mine", Key::char('m'), &[Scope::Thread], "mark the post as yours (notified of replies)";
-    NewTab, "new_tab", Key::char('T'), &[Scope::Catalog, Scope::Thread, Scope::Saved], "open the thread (or link) in a new tab";
-    Favorite, "favorite", Key::char('*'), &[Scope::Lists, Scope::Catalog], "favorite board: on / off";
-    Follow, "follow", Key::char('F'), &[Scope::Catalog, Scope::Thread, Scope::Saved], "follow as a general: watch its next thread";
-    Remove, "remove", Key::char('x'), &[Scope::Saved, Scope::Lists], "remove the entry (home: a favorite)";
-    Copy, "copy", Key::char('y'), &[Scope::Catalog, Scope::Thread, Scope::Saved, Scope::Viewer], "copy the text (viewer: file URL)";
-    CopyLink, "copy_link", Key::char('Y'), &[Scope::Catalog, Scope::Thread, Scope::Saved, Scope::Viewer], "copy the link";
+    Quit, "quit", Some(Key::char('q')), &[Scope::Global], "quit";
+    Help, "help", Some(Key::char('?')), &[Scope::Global], "help";
+    Settings, "settings", Some(Key::char(',')), &[Scope::Global], "settings: theme, colors, keys, …";
+    Search, "search", Some(Key::char('/')), &[Scope::Global], "filter the list; search a thread";
+    Reload, "reload", Some(Key::char('r')), &[Scope::Global], "reload";
+    Browser, "browser", Some(Key::char('o')), &[Scope::Global], "open in the browser";
+    Goto, "goto", Some(Key::char(':')), &[Scope::Global], "go to a URL or site/board/thread";
+    NextTab, "next_tab", Some(Key::char(']')), &[Scope::Global], "next tab";
+    PrevTab, "prev_tab", Some(Key::char('[')), &[Scope::Global], "previous tab";
+    Menu, "menu", Some(Key::char('.')), &[Scope::Global, Scope::Viewer], "what you can do with what's selected";
+    Hints, "hints", Some(Key::char('f')), &[Scope::Lists, Scope::Catalog, Scope::Thread, Scope::Saved], "label what's on screen; type a label to open it";
+    NextPart, "next_part", Some(Key::code(KeyCode::Tab)), &[Scope::Thread], "focus the post's next image or link (then the next post's)";
+    PrevPart, "prev_part", Some(Key::code(KeyCode::BackTab)), &[Scope::Thread], "focus the previous image or link";
+    CloseTab, "close_tab", Some(Key::ctrl('w')), &[Scope::Global], "close the tab";
+    View, "view", Some(Key::char('v')), &[Scope::Catalog, Scope::Thread], "view the post's images";
+    Watch, "watch", Some(Key::char('w')), &[Scope::Catalog, Scope::Thread], "watch / unwatch the thread";
+    Sort, "sort", Some(Key::char('s')), &[Scope::Catalog], "cycle the sort order";
+    Compact, "compact", Some(Key::char('c')), &[Scope::Catalog], "layout: cards, compact, grid";
+    OpenFile, "open_file", Some(Key::char('i')), &[Scope::Thread], "open the file (videos in mpv)";
+    Replies, "replies", Some(Key::char('b')), &[Scope::Thread], "jump to the first reply";
+    JumpBack, "jump_back", Some(Key::char('u')), &[Scope::Thread], "jump back (also to the last thread)";
+    Unread, "unread", Some(Key::char('U')), &[Scope::Thread], "jump to the first unread post";
+    Preview, "preview", Some(Key::char('p')), &[Scope::Thread], "preview the quoted posts";
+    NextMatch, "next_match", Some(Key::char('n')), &[Scope::Thread], "next search match";
+    PrevMatch, "prev_match", Some(Key::char('N')), &[Scope::Thread], "previous search match";
+    Spoiler, "spoiler", Some(Key::char('s')), &[Scope::Thread], "show the post's spoilers";
+    AllSpoilers, "all_spoilers", Some(Key::char('S')), &[Scope::Thread], "show all spoilers";
+    Download, "download", Some(Key::char('d')), &[Scope::Thread, Scope::Viewer], "save the file in front of you: focused, viewed, or in the gallery";
+    DownloadPost, "download_post", None, &[Scope::Thread], "save all the post's files";
+    DownloadThread, "download_thread", None, &[Scope::Thread], "save all the thread's files (asks first)";
+    Archive, "archive", Some(Key::char('a')), &[Scope::Thread], "open a 404'd thread in the archive";
+    ArchiveSearch, "archive_search", Some(Key::char('A')), &[Scope::Catalog], "search the board's archive";
+    Links, "links", Some(Key::char('O')), &[Scope::Catalog, Scope::Thread], "the post's links and files";
+    Hide, "hide", Some(Key::char('H')), &[Scope::Catalog, Scope::Thread], "hide / unhide the thread or post";
+    Filter, "filter", Some(Key::char('X')), &[Scope::Catalog, Scope::Thread], "hide or highlight posts like this one (a filter)";
+    ShowHidden, "show_hidden", Some(Key::char('Z')), &[Scope::Catalog, Scope::Thread], "show hidden threads and posts";
+    ImageSearch, "image_search", Some(Key::char('R')), &[Scope::Thread, Scope::Viewer], "reverse image search";
+    Gallery, "gallery", Some(Key::char('V')), &[Scope::Thread], "the thread's files as a grid";
+    Export, "export", None, &[Scope::Thread], "save the thread as a page, HTML and JSON (asks first)";
+    Expand, "expand", Some(Key::char('e')), &[Scope::Thread], "show / hide the post's replies under it";
+    Conversation, "conversation", Some(Key::char('c')), &[Scope::Thread], "the post's conversation alone: what it replies to, and its replies";
+    Mine, "mine", Some(Key::char('m')), &[Scope::Thread], "mark the post as yours (notified of replies)";
+    NewTab, "new_tab", Some(Key::char('T')), &[Scope::Catalog, Scope::Thread, Scope::Saved], "open the thread (or link) in a new tab";
+    Favorite, "favorite", Some(Key::char('*')), &[Scope::Lists, Scope::Catalog], "favorite board: on / off";
+    Follow, "follow", Some(Key::char('F')), &[Scope::Catalog, Scope::Thread, Scope::Saved], "follow as a general: watch its next thread";
+    Remove, "remove", Some(Key::char('x')), &[Scope::Saved, Scope::Lists], "remove the entry (home: a favorite)";
+    Copy, "copy", Some(Key::char('y')), &[Scope::Catalog, Scope::Thread, Scope::Saved, Scope::Viewer], "copy the text (viewer: file URL)";
+    CopyLink, "copy_link", Some(Key::char('Y')), &[Scope::Catalog, Scope::Thread, Scope::Saved, Scope::Viewer], "copy the link";
 }
 
 /// A key with its modifiers: `w`, `W`, `ctrl-w`, `alt-x`, `tab`, `shift-tab`, `f5`, ...
@@ -202,7 +204,7 @@ impl fmt::Display for Key {
     }
 }
 
-/// `watch = "W"` or `watch = ["W", "alt-w"]`.
+/// `watch = "W"` or `watch = ["W", "alt-w"]`; `watch = []` for none.
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(untagged)]
 pub enum Binding {
@@ -264,7 +266,7 @@ pub struct KeyMap {
 
 impl Default for KeyMap {
     fn default() -> Self {
-        let keys = ACTIONS.iter().map(|&(a, _, key, ..)| (a, vec![key])).collect();
+        let keys = ACTIONS.iter().map(|&(a, _, key, ..)| (a, key.into_iter().collect())).collect();
         let mut map = Self { keys, actions: HashMap::new() };
         // The defaults don't clash (a test checks), so this can't fail.
         let _ = map.check();
@@ -273,12 +275,12 @@ impl Default for KeyMap {
 }
 
 fn default_keys(action: Action) -> Vec<Key> {
-    ACTIONS.iter().filter(|e| e.0 == action).map(|e| e.2).collect()
+    ACTIONS.iter().filter(|e| e.0 == action).filter_map(|e| e.2).collect()
 }
 
 impl KeyMap {
     /// Apply `[keys]` overrides, rejecting unknown actions, things that aren't keys, and two
-    /// commands on one key in the same view.
+    /// commands on one key in the same view. No keys (`[]`) leaves an action to the menu.
     pub fn new(overrides: &HashMap<String, Binding>) -> Result<Self> {
         let mut map = Self::default();
         let mut names: Vec<_> = overrides.keys().collect();
@@ -289,9 +291,6 @@ impl KeyMap {
                 bail!("[keys]: unknown action `{name}` (known: {})", known.join(", "));
             };
             let specs = overrides[name].specs();
-            if specs.is_empty() {
-                bail!("[keys]: `{name}` has no keys");
-            }
             let keys = specs.iter().map(|s| Key::parse(s)).collect::<Result<Vec<_>>>();
             map.keys.insert(action, keys.map_err(|e| anyhow::anyhow!("[keys]: `{name}`: {e}"))?);
         }
@@ -321,14 +320,25 @@ impl KeyMap {
         Ok(())
     }
 
-    /// The first key of an action, as shown in hints.
+    /// The first key of an action, as shown in hints; empty when it has none.
     pub fn key(&self, action: Action) -> String {
-        self.keys[&action][0].to_string()
+        self.keys[&action].first().map(Key::to_string).unwrap_or_default()
     }
 
-    /// All of an action's keys, for help.
+    /// All of an action's keys, for help; empty when it has none.
     pub fn label(&self, action: Action) -> String {
         self.keys[&action].iter().map(Key::to_string).collect::<Vec<_>>().join(", ")
+    }
+
+    /// How to get to an action, for messages: its key, or the menu.
+    pub fn how(&self, action: Action) -> String {
+        match self.keys[&action].first() {
+            Some(k) => k.to_string(),
+            None => match self.keys[&Action::Menu].first() {
+                Some(m) => format!("the {m} menu"),
+                None => "the menu (right-click)".into(),
+            },
+        }
     }
 
     pub fn keys(&self, action: Action) -> &[Key] {
@@ -433,5 +443,28 @@ mod tests {
         assert!(m.with(Action::Sort, Some(vec![Key::char('v')])).is_err());
         let m = m.with(Action::Watch, None).unwrap();
         assert!(m.is_default(Action::Watch));
+    }
+
+    #[test]
+    fn actions_without_keys() {
+        // Saving all the thread's files or the page has no key by default: it's in the menu.
+        let m = map(&[]).unwrap();
+        assert!(m.keys(Action::Export).is_empty() && m.key(Action::Export).is_empty());
+        assert_eq!(m.action(Scope::Thread, &ch('E')), None);
+        assert_eq!(m.how(Action::Export), "the . menu");
+        assert_eq!(m.how(Action::Download), "d");
+        assert_eq!(m.binding(Action::Export), None);
+        // `[]` takes a key away; it's kept as `[]`, and the key is free.
+        let none = HashMap::from([("download".to_string(), Binding::Many(vec![]))]);
+        let m = KeyMap::new(&none).unwrap();
+        assert_eq!(m.action(Scope::Thread, &ch('d')), None);
+        assert_eq!(m.binding(Action::Download), Some(Binding::Many(vec![])));
+        assert_eq!(map(&[("watch", "d")]).unwrap_err().to_string(), "[keys]: `download` and `watch` both use 'd' in the thread view");
+        assert_eq!(KeyMap::new(&none).unwrap().with(Action::Watch, Some(vec![Key::char('d')])).unwrap().action(Scope::Thread, &ch('d')), Some(Action::Watch));
+        // Given a key, it works like any other.
+        let m = map(&[("export", "E")]).unwrap();
+        assert_eq!(m.action(Scope::Thread, &ch('E')), Some(Action::Export));
+        let m = map(&[("menu", "alt-m")]).unwrap().with(Action::Menu, Some(vec![])).unwrap();
+        assert_eq!(m.how(Action::Export), "the menu (right-click)");
     }
 }

@@ -1,5 +1,6 @@
 ---
 source: src/ui_tests.rs
+assertion_line: 698
 expression: snapshot(&mut a)
 ---
  ck  Settings
@@ -21,7 +22,7 @@ expression: snapshot(&mut a)
     Notifications     auto (terminal bell)              New posts in watched threads, replies to…
 
   Downloads
-    Folder            ~/Downloads/ck/{site}/{board}/{…  Where d / D save files
+    Folder            ~/Downloads/ck/{site}/{board}/{…  Where saved files and pages go
 
   Startup
     Last place        restored                          Start where you left off (ck URL starts …

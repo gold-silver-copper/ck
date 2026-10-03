@@ -145,6 +145,9 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     if app.image_search_panel.is_some() {
         draw_image_search(f, app);
     }
+    if app.confirm.is_some() {
+        draw_confirm(f, app);
+    }
     app.images.end_frame();
     // Every 24-bit color to the nearest of 256, for terminals without 24-bit color.
     if !app.truecolor {
@@ -761,9 +764,9 @@ fn draw_saved(f: &mut Frame, app: &mut App, area: Rect) {
     app.saved_list.state = state;
     if app.hit.is_none() {
         let msg = format!(
-            "No saved threads. Watched threads are saved as they refresh ({} watches one), and {} saves one.",
-            app.keys.key(Action::Watch),
-            app.keys.key(Action::Export)
+            "No saved threads. Watched threads are saved as they refresh ({} watches one), and so is one you save as a page ({}).",
+            app.keys.how(Action::Watch),
+            app.keys.how(Action::Export)
         );
         empty(f, area, &msg);
     }
@@ -1684,6 +1687,50 @@ fn draw_peek(f: &mut Frame, app: &App, area: Rect) {
     }
 }
 
+/// A big save asking first: what it will write, and where (a long folder wraps at its
+/// slashes).
+fn draw_confirm(f: &mut Frame, app: &App) {
+    let Some(c) = &app.confirm else { return };
+    let t = theme();
+    let w = (c.lines.iter().map(|l| l.width()).max().unwrap_or(0).max(c.title.width() + 24) + 6).min(100) as u16;
+    let width = (w.min(f.area().width.saturating_sub(4)).saturating_sub(4) as usize).max(10);
+    let lines: Vec<String> = c.lines.iter().flat_map(|l| wrap_path(l, width)).collect();
+    let inner = panel(f, w, lines.len() as u16 + 3, c.title, "enter save · esc cancel");
+    for (i, line) in lines.into_iter().enumerate() {
+        put(f, inner.x, inner.y + i as u16, inner.width, Line::styled(line, Style::new().fg(t.text)));
+    }
+}
+
+/// `text` in lines of at most `width` columns, broken after a `/` where it can be.
+pub(crate) fn wrap_path(text: &str, width: usize) -> Vec<String> {
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = Vec::new();
+    let mut start = 0;
+    while start < chars.len() {
+        // As many characters as fit (at least one), then back to just after the last slash.
+        let (mut end, mut w) = (start, 0);
+        while end < chars.len() {
+            let cw = unicode_width::UnicodeWidthChar::width(chars[end]).unwrap_or(0);
+            if w + cw > width && end > start {
+                break;
+            }
+            w += cw;
+            end += 1;
+        }
+        if end < chars.len()
+            && let Some(slash) = (start..end).rev().find(|&i| chars[i] == '/').filter(|&i| i + 1 - start > (end - start) / 2)
+        {
+            end = slash + 1;
+        }
+        out.push(chars[start..end].iter().collect());
+        start = end;
+    }
+    if out.is_empty() {
+        out.push(String::new());
+    }
+    out
+}
+
 /// The menu for what's selected: each thing that can be done, with its key.
 fn draw_menu(f: &mut Frame, app: &mut App) {
     let t = theme();
@@ -1810,6 +1857,13 @@ fn draw_image_search(f: &mut Frame, app: &mut App) {
 fn help_sections(keys: &KeyMap) -> Vec<(&'static str, Vec<(String, &'static str)>)> {
     let k = |a| keys.label(a);
     let pair = |a, b| format!("{} / {}", keys.label(a), keys.label(b));
+    // Saving more than a file is in the menu, unless given keys.
+    let bulk = [Action::DownloadPost, Action::DownloadThread, Action::Export];
+    let saves = if bulk.iter().all(|&a| keys.keys(a).is_empty()) {
+        format!("{} menu", keys.label(Action::Menu))
+    } else {
+        bulk.map(|a| if keys.keys(a).is_empty() { "-".to_string() } else { keys.label(a) }).join(" / ")
+    };
     // In this order, the two columns split evenly (Everywhere to the viewer, then the rest).
     vec![
         (
@@ -1848,6 +1902,7 @@ fn help_sections(keys: &KeyMap) -> Vec<(&'static str, Vec<(String, &'static str)
                 ("+ / - / 0".into(), "zoom in / out / fit"),
                 ("i".into(), "open externally"),
                 (pair(Action::Copy, Action::CopyLink), "copy file URL / post link"),
+                (k(Action::Download), "save the file"),
                 (k(Action::ImageSearch), "reverse image search"),
                 ("esc, q".into(), "close"),
             ],
@@ -1878,7 +1933,8 @@ fn help_sections(keys: &KeyMap) -> Vec<(&'static str, Vec<(String, &'static str)
                 (pair(Action::View, Action::Gallery), "view images / gallery"),
                 (pair(Action::OpenFile, Action::ImageSearch), "open file / image search"),
                 (k(Action::Links), "the post's links and files"),
-                (format!("{} / {}", pair(Action::Download, Action::DownloadThread), k(Action::Export)), "save: files / all / page"),
+                (k(Action::Download), "save the focused file (tab)"),
+                (saves, "save: post / all files / page"),
                 (format!("{} / {} / {}", k(Action::Watch), k(Action::NewTab), k(Action::Follow)), "watch / quote tab / general"),
                 (format!("{} / {}", pair(Action::Hide, Action::ShowHidden), k(Action::Filter)), "hide / show hidden / filter"),
                 (k(Action::Mine), "mark as yours (replies)"),
@@ -2029,7 +2085,7 @@ fn draw_settings_popup(f: &mut Frame, app: &App) {
         }
         Some(SettingsPopup::Keys { list, capture }) => {
             let rows = key_rows();
-            let hint = if capture.is_some() { "press a key · esc cancel" } else { "enter rebind · a add · x reset · esc close" };
+            let hint = if capture.is_some() { "press a key · esc cancel" } else { "enter rebind · a add · u unbind · x reset · esc close" };
             let h = (rows.len() as u16 + 5).min(f.area().height.saturating_sub(4));
             let inner = panel(f, 96, h, "Keys", hint);
             let view = inner.height.saturating_sub(2) as usize;
@@ -2049,7 +2105,11 @@ fn draw_settings_popup(f: &mut Frame, app: &App) {
                 let changed = !app.keys.is_default(action);
                 let key_style = if changed { bold(t.primary) } else { bold(t.text) };
                 let scopes = scopes.iter().map(|s| s.label()).collect::<Vec<_>>().join(", ");
-                let mut spans = vec![Span::styled(format!("  {:<16}", truncate(&app.keys.label(action), 15)), key_style)];
+                let label = app.keys.label(action);
+                let mut spans = match label.as_str() {
+                    "" => vec![Span::styled(format!("  {:<16}", "menu"), dim())],
+                    _ => vec![Span::styled(format!("  {:<16}", truncate(&label, 15)), key_style)],
+                };
                 // Narrow: just the key and what it does.
                 if inner.width >= 80 {
                     spans.push(Span::styled(format!("{name:<17}"), dim()));
@@ -2070,7 +2130,7 @@ fn draw_settings_popup(f: &mut Frame, app: &App) {
                         Span::styled("   esc cancels", dim()),
                     ])
                 }
-                _ => Line::styled("Changed keys are saved in [keys]; navigation keys are fixed.", dim()),
+                _ => Line::styled("Changed keys are saved in [keys]; navigation keys are fixed. Without a key: in the . menu.", dim()),
             };
             put(f, inner.x, y, inner.width, line);
         }
@@ -2262,13 +2322,15 @@ fn draw_viewer(f: &mut Frame, app: &mut App) {
     if let Some(s) = &app.status {
         hints.extend(status_spans(s, t));
     } else {
-        let keys: &[(&str, &str)] = if crop.is_fit() {
-            &[("h/l", "previous / next"), ("+/-", "zoom"), ("i", "open externally"), ("esc", "close")]
+        let save = app.keys.key(Action::Download);
+        let mut keys: Vec<(&str, &str)> = if crop.is_fit() {
+            vec![("h/l", "previous / next"), ("+/-", "zoom"), ("i", "open externally"), (&save, "save"), ("esc", "close")]
         } else {
-            &[("h/j/k/l", "move"), ("+/-", "zoom"), ("pgup/pgdn", "previous / next"), ("0, esc", "fit")]
+            vec![("h/j/k/l", "move"), ("+/-", "zoom"), ("pgup/pgdn", "previous / next"), ("0, esc", "fit")]
         };
-        for &(k, label) in keys {
-            hints.extend([Span::styled(k, bold(t.primary)), Span::styled(format!(" {label}   "), dim())]);
+        keys.retain(|(k, _)| !k.is_empty());
+        for (k, label) in keys {
+            hints.extend([Span::styled(k.to_string(), bold(t.primary)), Span::styled(format!(" {label}   "), dim())]);
         }
     }
     put(f, bottom.x, bottom.y, bottom.width, Line::from(hints));

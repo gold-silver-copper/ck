@@ -34,6 +34,7 @@ mod goto;
 mod home;
 mod links;
 mod saved;
+mod saving;
 mod search;
 mod session;
 mod tabs;
@@ -43,6 +44,7 @@ pub use focus::{HintTarget, HintTo, Hints, Menu, MenuItem};
 pub use gallery::Gallery;
 pub use home::BoardRef;
 pub use links::{ImageSearchPanel, LinkItem, LinksPanel};
+pub use saving::{Confirm, Saving};
 pub use search::Search;
 pub use tabs::{MAX_TABS, Offline, Tab};
 pub use settings::{Popup as SettingsPopup, SECTIONS as SETTING_SECTIONS, key_rows, rows as setting_rows, tilde};
@@ -778,7 +780,7 @@ impl Clock {
     }
 }
 
-/// Progress of the downloads started with `d`/`D`.
+/// Progress of the files being saved.
 #[derive(Default)]
 pub struct Downloads {
     pub total: usize,
@@ -941,6 +943,8 @@ pub struct App {
     pub saved_list: Picker,
     /// The saved copy `x` was pressed on once: a second `x` removes it.
     pub saved_confirm: Option<ThreadKey>,
+    /// A big save asking first (see `ask_to_save`).
+    pub confirm: Option<saving::Confirm>,
     pub store: Store,
     refresh_thread: Duration,
     refresh_watched: Duration,
@@ -1011,7 +1015,7 @@ pub struct App {
     pub config_path: Option<std::path::PathBuf>,
     pub clock: Clock,
     pub downloads: Downloads,
-    download_dir: Option<String>,
+    pub(crate) download_dir: Option<String>,
     /// Set by the UI every frame.
     pub hit: Option<Hit>,
     /// Where each tab's chip was drawn, for clicks.
@@ -1088,6 +1092,7 @@ impl App {
             history_list: Picker::top(),
             saved_list: Picker::top(),
             saved_confirm: None,
+            confirm: None,
             store,
             refresh_thread,
             refresh_watched,
@@ -2074,7 +2079,7 @@ impl App {
         self.start_download(jobs, dir, if whole_thread { "Thread has no files" } else { "Post has no file" });
     }
 
-    /// `E`: save the thread as thread.html and thread.json in its download folder.
+    /// Save the thread as thread.html and thread.json in its download folder.
     fn export_thread(&mut self) {
         let (Some(t), Some(b)) = (&self.tab.thread, &self.tab.board) else { return };
         let site = self.current_site();
