@@ -350,6 +350,14 @@ fn conversation() {
 }
 
 #[test]
+fn thread_from_its_last_copy() {
+    let mut a = thread_app(false);
+    a.tab.cached = Some(crate::app::Offline { saved: NOW - 3 * 60, dead: false });
+    a.tab.loading = Some("Loading thread 1000".into());
+    insta::assert_snapshot!(snapshot(&mut a));
+}
+
+#[test]
 fn history() {
     let mut a = app(false);
     a.tab.view = View::History;

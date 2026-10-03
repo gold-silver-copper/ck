@@ -210,7 +210,7 @@ pub fn path(dir: &Path, key: &ThreadKey) -> PathBuf {
 /// A site or board name as a folder name every filesystem takes (APFS refuses unassigned
 /// characters, for one): letters, digits, `-`, `_` and `.`, the rest `_`, and then a hash of
 /// the name, so names that differ only there stay apart.
-fn component(name: &str) -> String {
+pub(crate) fn component(name: &str) -> String {
     use std::hash::{Hash, Hasher};
     let kept: String = name.chars().map(|c| if c.is_alphanumeric() || matches!(c, '-' | '_' | '.') { c } else { '_' }).collect();
     let clean = crate::download::sanitize(&kept);

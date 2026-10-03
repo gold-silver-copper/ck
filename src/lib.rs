@@ -48,6 +48,7 @@ pub mod images;
 pub mod keys;
 pub mod markup;
 pub mod model;
+pub mod pages;
 pub mod notify;
 pub mod route;
 pub mod saved;

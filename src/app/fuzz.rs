@@ -345,11 +345,18 @@ impl Backend for Gated {
     }
 
     fn catalog(&self, board: &str, partial: Partial<Post>) -> Result<Vec<Post>> {
+        // From the copies kept: no request to hold back.
+        if crate::http::from_copies_only() {
+            return self.data.catalog(board, partial);
+        }
         let _pass = self.gate.enter(format!("{} catalog /{board}/", self.site));
         self.data.catalog(board, partial)
     }
 
     fn thread(&self, board: &str, no: u64) -> Result<Vec<Post>> {
+        if crate::http::from_copies_only() {
+            return self.data.thread(board, no);
+        }
         let _pass = self.gate.enter(format!("{} thread /{board}/{no}", self.site));
         self.data.thread(board, no)
     }
@@ -590,6 +597,7 @@ impl World {
         let mut app = App::new(cfg, KeyMap::default(), None, store);
         app.config_path = Some(dir.join("config.toml"));
         app.download_dir = Some(dir.join("downloads").display().to_string());
+        app.pages = Some(crate::pages::Pages::new(dir.join("cache/pages"), 4 << 20));
         app.images = Images::offline();
         for site in &mut app.sites {
             let urls = site.backend.clone();
@@ -933,6 +941,16 @@ fn check(app: &App) {
         }
         if tab.loading.is_some() && tab.req == 0 {
             fail(format!("tab {i} is loading with no request"));
+        }
+        // A copy shown while loading is marked as one, and there's something to show.
+        if tab.cached.is_some() && tab.thread.is_none() {
+            fail(format!("tab {i}: marked cached with no thread"));
+        }
+        if tab.catalog_cached.is_some() && tab.catalog.is_empty() {
+            fail(format!("tab {i}: catalog marked cached with nothing in it"));
+        }
+        if tab.cached.is_some() && tab.offline.is_some() {
+            fail(format!("tab {i}: both a saved copy and a cached one"));
         }
         if let Some(v) = &tab.viewer
             && v.index >= v.files.len()

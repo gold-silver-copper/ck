@@ -498,7 +498,7 @@ pub fn mutate(rng: &mut Rng, v: &mut Value) {
 /// A fake site of `kind`: what its API answers (badly, `percent` of the time).
 pub fn fake_site(kind: SiteKind, seed: u64, percent: u64) -> http::TestHost {
     let rng = Mutex::new(Rng::new(seed));
-    std::sync::Arc::new(move |url: &str| {
+    std::sync::Arc::new(move |url: &str, _since: Option<&str>| {
         let mut rng = http::lock(&rng);
         let names = fixtures_for(kind);
         let wanted: Vec<&&str> = names
@@ -711,6 +711,63 @@ fn fuzz_data_dir() {
 #[ignore]
 fn fuzz_data_dir_long() {
     run("fuzz_data_dir", true, 0, 5_000, data_dir_once);
+}
+
+/// The page cache with broken files: reading never panics, a broken file is dropped, and
+/// what's read parses (as opening from it would) without a request.
+fn pages_once(seed: u64) {
+    use crate::backend::Backend;
+    use crate::pages::Pages;
+    let mut rng = Rng::new(seed);
+    let dir = tempfile::tempdir().unwrap();
+    let pages = Pages::new(dir.path().to_path_buf(), 1 << 22);
+    let fourchan = crate::backend::futaba::Futaba::fourchan(None);
+    let fixture = crate::backend::fixture("4chan_thread.json");
+    let n = 1 + rng.below(5) as u64;
+    for no in 0..n {
+        let body = if rng.chance(30) { mangle_json(&mut rng, &fixture) } else { fixture.clone() };
+        let copy = http::Copy { url: format!("https://a.4cdn.org/g/thread/{no}.json"), last_modified: rng.chance(70).then(|| "day".into()), body };
+        pages.write("4chan", "g", Some(no), &[copy], no as i64);
+    }
+    // Break some files.
+    let walk = |p: &std::path::Path| std::fs::read_dir(p).into_iter().flatten().flatten().map(|e| e.path()).collect::<Vec<_>>();
+    for file in walk(&dir.path().join("4chan").join("g")) {
+        if rng.chance(40) {
+            let bytes = break_bytes(&mut rng, &std::fs::read(&file).unwrap_or_default());
+            std::fs::write(&file, bytes).unwrap();
+        }
+    }
+    for no in 0..n {
+        let Some((copies, _)) = pages.read("4chan", "g", Some(no)) else { continue };
+        // From the copies only: an error at worst, never a request (4chan is a real host,
+        // which tests refuse).
+        let _ = http::from_copies(&copies, || fourchan.thread("g", no));
+    }
+    // What's left loads (broken files were dropped).
+    for file in walk(&dir.path().join("4chan").join("g")) {
+        let name = file.file_stem().and_then(|s| s.to_str()).and_then(|s| s.parse().ok());
+        assert!(name.is_some_and(|no| pages.read("4chan", "g", Some(no)).is_some()), "{} stayed broken (seed {seed})", file.display());
+    }
+}
+
+/// A JSON value with a few parts changed.
+fn mangle_json(rng: &mut Rng, v: &Value) -> Value {
+    let mut v = v.clone();
+    for _ in 0..1 + rng.below(4) {
+        mutate(rng, &mut v);
+    }
+    v
+}
+
+#[test]
+fn fuzz_pages() {
+    run("fuzz_pages", false, 1, 40, pages_once);
+}
+
+#[test]
+#[ignore]
+fn fuzz_pages_long() {
+    run("fuzz_pages", true, 0, 5_000, pages_once);
 }
 
 /// Odd values for a config setting.

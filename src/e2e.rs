@@ -35,7 +35,10 @@ fn serve(kind: SiteKind, seed: u64) -> u16 {
     port
 }
 
-fn respond(mut stream: TcpStream, port: u16, answer: &(dyn Fn(&str) -> crate::http::Raw + Send + Sync), rng: &std::sync::Mutex<Rng>) {
+/// What every JSON answer says it was last modified (so ck asks `If-Modified-Since`).
+const MODIFIED: &str = "Thu, 01 Oct 2026 00:00:00 GMT";
+
+fn respond(mut stream: TcpStream, port: u16, answer: &(dyn Fn(&str, Option<&str>) -> crate::http::Raw + Send + Sync), rng: &std::sync::Mutex<Rng>) {
     let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
     let mut request = Vec::new();
     let mut buf = [0; 4096];
@@ -45,27 +48,32 @@ fn respond(mut stream: TcpStream, port: u16, answer: &(dyn Fn(&str) -> crate::ht
             Ok(n) => request.extend_from_slice(&buf[..n]),
         }
     }
-    let path = String::from_utf8_lossy(&request).split_whitespace().nth(1).unwrap_or("/").to_string();
-    let (delay, drop, image_index, corrupt) = {
+    let text = String::from_utf8_lossy(&request).to_string();
+    let path = text.split_whitespace().nth(1).unwrap_or("/").to_string();
+    let since = text.lines().any(|l| l.to_ascii_lowercase().starts_with("if-modified-since:") && l.contains(MODIFIED));
+    let (delay, drop, image_index, corrupt, unchanged) = {
         let mut r = crate::http::lock(rng);
-        (Duration::from_millis(*r.pick(&[0, 0, 0, 50, 300, 1500]) as u64), r.chance(2), r.below(10), r.chance(15))
+        (Duration::from_millis(*r.pick(&[0, 0, 0, 50, 300, 1500]) as u64), r.chance(2), r.below(10), r.chance(15), r.chance(50))
     };
     std::thread::sleep(delay);
     if drop {
         return;
     }
     let is_image = [".png", ".jpg", ".jpeg", ".gif", ".webp", "/thumb/", "/src/", "/ext/"].iter().any(|k| path.contains(k)) && !path.ends_with(".json");
-    let (status, kind, body) = if is_image {
+    let (status, kind, body) = if since && unchanged && !is_image {
+        (304, "application/json", Vec::new())
+    } else if is_image {
         let mut bytes = fuzz::IMAGES[image_index % fuzz::IMAGES.len()].clone();
         if corrupt {
             bytes.truncate(bytes.len() / 2);
         }
         (200, "image/png", bytes)
     } else {
-        let raw = answer(&format!("http://127.0.0.1:{port}{path}"));
+        let raw = answer(&format!("http://127.0.0.1:{port}{path}"), None);
         (raw.status, "application/json", local_urls(&raw.body, port).into_bytes())
     };
-    let head = format!("HTTP/1.1 {status} X\r\nContent-Type: {kind}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len());
+    let modified = if kind == "application/json" && status == 200 { format!("Last-Modified: {MODIFIED}\r\n") } else { String::new() };
+    let head = format!("HTTP/1.1 {status} X\r\nContent-Type: {kind}\r\n{modified}Content-Length: {}\r\nConnection: close\r\n\r\n", body.len());
     let _ = stream.write_all(head.as_bytes());
     let _ = stream.write_all(&body);
 }

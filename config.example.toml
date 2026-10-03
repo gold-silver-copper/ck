@@ -51,6 +51,12 @@ refresh_watched_secs = 60
 # the oldest copies of dead threads you no longer watch are removed (0 keeps everything).
 saved_max_mb = 500
 
+# The last copy of each catalog and thread you open is kept in the cache directory, so
+# opening one again shows it at once (marked "cached") while it's refreshed, and the first
+# request after a restart can be answered "not modified". At most this many megabytes, the
+# oldest out first; 0 keeps none.
+page_cache_mb = 100
+
 # Favorite boards, shown at the top of the home screen (1-9 open them). * on a board adds
 # or removes one, and saves the list here.
 favorites = []
