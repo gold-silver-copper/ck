@@ -2286,3 +2286,70 @@ fn an_unknown_nsfw_flag_loads_the_board_list_once() {
     app.know_nsfw(1);
     assert!(app.boards_refreshing.is_empty() && !app.images_on(1, "y"));
 }
+
+fn posts_saying(list: &[(u64, &str)]) -> Vec<Post> {
+    list.iter().map(|&(no, text)| Post { no, name: "Anonymous".into(), body: vec![Line::from(text.to_string())], ..Default::default() }).collect()
+}
+
+#[test]
+fn searching_inside_saved_threads() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = saving_app(dir.path(), 1000);
+    let key = |board: &str, no| ThreadKey { site: "a".into(), board: board.into(), no };
+    app.store.keep_thread(&key("x", 1), "one", "u", &posts_saying(&[(1, "about rust"), (2, "nothing here"), (3, "Rust again")]), 900);
+    app.store.keep_thread(&key("xy", 7), "seven", "u", &posts_saying(&[(7, "no match"), (8, "a crab: RUST")]), 950);
+    app.store.keep_thread(&key("x", 9), "nine", "u", &posts_saying(&[(9, "quiet")]), 980);
+    app.flush_writes();
+    app.tab.view = View::Saved;
+    // From the Saved view's menu: `:` with "saved " typed.
+    run_menu_row(&mut app, "search inside the saved threads…");
+    assert_eq!(app.goto.as_deref(), Some("saved "));
+    type_text(&mut app, "rust");
+    app.on_key(KeyEvent::from(KeyCode::Enter));
+    assert_eq!(app.tab.view, View::Search);
+    settle_until(&mut app, |a| a.tab.search.as_ref().unwrap().saved.as_ref().unwrap().finished);
+    let s = app.tab.search.as_ref().unwrap();
+    // Newest copy first; case doesn't matter.
+    let found: Vec<(u64, u64)> = s.hits.iter().map(|(t, p)| (*t, p.no)).collect();
+    assert_eq!(found, [(7, 8), (1, 1), (1, 3)]);
+    assert_eq!(s.saved.as_ref().unwrap().done, 3);
+    draw_at(&mut app, 100, 30);
+    // Enter: the saved copy, on the post, with the search set (n / N go through it).
+    app.tab.search_list.state.select(Some(2));
+    app.on_key(KeyEvent::from(KeyCode::Enter));
+    let t = app.tab.thread.as_ref().unwrap();
+    assert!(app.tab.offline.is_some());
+    assert_eq!((t.no, t.current().unwrap().no, t.search.as_str(), t.matches.len()), (1, 3, "rust", 2));
+    // esc: back to the results, then where the search started.
+    app.on_key(KeyEvent::from(KeyCode::Esc));
+    app.on_key(KeyEvent::from(KeyCode::Esc));
+    assert_eq!(app.tab.view, View::Search);
+    app.on_key(KeyEvent::from(KeyCode::Esc));
+    assert_eq!(app.tab.view, View::Saved);
+    // A copy that can't be read is skipped and said; the rest still count.
+    std::fs::write(crate::saved::path(dir.path(), &key("x", 9)), b"not json").unwrap();
+    app.goto_str("saved quiet");
+    settle_until(&mut app, |a| a.tab.search.as_ref().unwrap().saved.as_ref().unwrap().finished);
+    let s = app.tab.search.as_ref().unwrap();
+    assert_eq!((s.hits.len(), s.saved.as_ref().unwrap().skipped), (0, 1));
+    assert_eq!(app.status.as_ref().unwrap().text, "No saved post matches \"quiet\"");
+    // Another search stops the one running: only its answers count.
+    app.goto_str("saved rust");
+    app.goto_str("saved crab");
+    settle_until(&mut app, |a| a.tab.search.as_ref().unwrap().saved.as_ref().unwrap().finished);
+    let s = app.tab.search.as_ref().unwrap();
+    assert_eq!((s.query.as_str(), s.hits.len()), ("crab", 1));
+}
+
+#[test]
+fn searching_saved_threads_with_none_saved() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = saving_app(dir.path(), 1000);
+    app.goto_str("saved anything");
+    settle_until(&mut app, |a| a.tab.search.as_ref().is_some_and(|s| s.saved.as_ref().unwrap().finished));
+    assert!(app.tab.search.as_ref().unwrap().hits.is_empty());
+    assert!(app.status.as_ref().unwrap().text.starts_with("Nothing is saved yet"));
+    // `saved` alone is still the Saved view.
+    app.goto_str("saved");
+    assert_eq!(app.tab.view, View::Saved);
+}

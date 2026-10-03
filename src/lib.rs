@@ -53,6 +53,7 @@ pub mod pages;
 pub mod notify;
 pub mod route;
 pub mod saved;
+pub mod saved_search;
 pub mod store;
 pub mod theme;
 pub mod ui;

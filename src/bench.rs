@@ -266,3 +266,39 @@ fn bench_images() {
         report(&format!("{proto:?}: thread frame with 3 new thumbnails"), total / runs);
     }
 }
+
+/// Searching saved threads (`:saved WORDS`): about 500 MB of saved copies, the most
+/// `saved_max_mb` keeps by default, read the way the search's thread reads them.
+#[test]
+#[ignore]
+fn bench_saved_search() {
+    use crate::saved::{SavedPost, SavedThread};
+    use crate::store::ThreadKey;
+    eprintln!("== searching saved threads, 500 MB ==");
+    let base = Futaba::fourchan(None).parse_thread("g", &fixture("4chan_thread.json"));
+    let posts: Vec<SavedPost> = scale(&base, 1000).iter().map(SavedPost::from).collect();
+    let dir = tempfile::tempdir().unwrap();
+    let one = serde_json::to_vec(&SavedThread { version: 1, site: "s".into(), board: "g".into(), no: 1, subject: String::new(), saved: 0, dead: false, url: String::new(), posts: posts.clone() }).unwrap();
+    let copies = (500 << 20) / one.len() + 1;
+    let keys: Vec<ThreadKey> = (0..copies as u64).map(|no| ThreadKey { site: "s".into(), board: "g".into(), no: no + 1 }).collect();
+    for k in &keys {
+        let t = SavedThread { version: 1, site: k.site.clone(), board: k.board.clone(), no: k.no, subject: String::new(), saved: 0, dead: false, url: String::new(), posts: posts.clone() };
+        crate::saved::write(dir.path(), &t).unwrap();
+    }
+    eprintln!("({copies} copies of {} KB, {} MB)", one.len() >> 10, (one.len() * copies) >> 20);
+    for (label, needle) in [("a word in every copy", "the"), ("a word in none", "zqxjkw")] {
+        let start = Instant::now();
+        let mut first = None;
+        for k in &keys {
+            let bytes = std::fs::read(crate::saved::path(dir.path(), k)).unwrap();
+            let hits = crate::saved_search::matching(&bytes, needle).unwrap();
+            if first.is_none() && !hits.is_empty() {
+                first = Some(start.elapsed());
+            }
+        }
+        if let Some(f) = first {
+            report(&format!("saved search, {label}: first results"), f);
+        }
+        report(&format!("saved search, {label}: every copy"), start.elapsed());
+    }
+}

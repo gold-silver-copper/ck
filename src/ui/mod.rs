@@ -330,7 +330,11 @@ fn location(app: &App) -> (Vec<String>, Vec<Span<'static>>) {
                 Some(t) => meta.push(format!("{} of {}", s.hits.len(), plural(t as usize, "result"))),
                 None => meta.push(plural(s.hits.len(), "result")),
             }
-            vec![site(), format!("/{}/", s.board), format!("Search: {}", truncate(&s.query, 40))]
+            if s.saved.is_some() {
+                vec!["Saved".into(), format!("Search: {}", truncate(&s.query, 40))]
+            } else {
+                vec![site(), format!("/{}/", s.board), format!("Search: {}", truncate(&s.query, 40))]
+            }
         }
     };
     let mut spans: Vec<Span> = Vec::new();
@@ -529,6 +533,9 @@ fn footer_hints(app: &App) -> Vec<(String, &'static str)> {
             (k(Action::Search), "filter"),
         ],
         View::Settings => vec![("enter".into(), "change"), ("esc".into(), "back")],
+        View::Search if app.tab.search.as_ref().is_some_and(|s| s.saved.is_some()) => {
+            vec![("enter".into(), "read the saved copy"), (k(Action::Reload), "search again"), ("esc".into(), "back")]
+        }
         View::Search => vec![("enter".into(), "open the thread"), (k(Action::NextMatch), "more results"), ("esc".into(), "back")],
         _ => vec![
             ("enter".into(), "open"),

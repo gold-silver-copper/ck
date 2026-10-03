@@ -1146,3 +1146,17 @@ fn images_off_on_a_board() {
     insta::assert_snapshot!("images_off_thread", snapshot(&mut a));
     assert_eq!(a.images.queued(), 0);
 }
+
+#[test]
+fn saved_search_results() {
+    use crate::app::{SavedSearch, Search};
+    let mut a = app(false);
+    let key = |board: &str, no| ThreadKey { site: "4chan".into(), board: board.into(), no };
+    let hit = |no, text: &str| Post { no, name: "Anonymous".into(), time: NOW - HOUR, body: vec![ratatui::text::Line::from(text.to_string())], ..Default::default() };
+    let hits = vec![(1000, hit(1002, "we were talking about rust and the borrow checker today")), (900, hit(900, "Rust or C++?"))];
+    let mut s = Search::for_tests("", "rust", crate::backend::SearchPage { hits, total: None });
+    s.saved = Some(SavedSearch::for_tests(vec![key("g", 1000), key("g", 900)], 2, 5, false));
+    a.tab.search = Some(s);
+    a.tab.view = View::Search;
+    insta::assert_snapshot!(snapshot(&mut a));
+}
