@@ -269,8 +269,12 @@ fn goto_opens_places_and_u_comes_back() {
     app.goto_str("b");
     assert_eq!((app.tab.site, app.tab.view), (1, View::Boards));
     // Errors are said, not acted on.
-    app.goto_str("https://example.com/g/");
+    app.goto_str("a/x/abc");
     assert!(app.status.as_ref().unwrap().error);
+    assert_eq!(app.tab.view, View::Boards);
+    // A link to a site ck doesn't have: it asks the site what it runs, to add it.
+    app.goto_str("https://example.com/g/");
+    assert!(matches!(&app.adding, Some(Adding::Looking { host, .. }) if host == "example.com"));
     assert_eq!(app.tab.view, View::Boards);
 }
 
@@ -1864,4 +1868,121 @@ fn an_action_without_a_key_is_in_the_menu() {
     // A key given back still asks first.
     app.on_key(KeyEvent::from(KeyCode::Char('E')));
     assert!(app.confirm.is_some());
+}
+
+fn type_text(app: &mut App, text: &str) {
+    for c in text.chars() {
+        app.on_key(KeyEvent::from(KeyCode::Char(c)));
+    }
+}
+
+#[test]
+fn a_link_to_a_new_site_adds_it_then_goes_there() {
+    use crate::backend::detect::tests::serve;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    let mut app = local_app();
+    app.config_path = Some(path.clone());
+    serve("newchan.invalid", vec![("/boards.json", crate::backend::fixture("jschan_boards.json"))]);
+    app.act(Action::Goto);
+    type_text(&mut app, "https://newchan.invalid/v/thread/5.html#7");
+    app.on_key(KeyEvent::from(KeyCode::Enter));
+    assert!(matches!(&app.adding, Some(Adding::Looking { host, .. }) if host == "newchan.invalid"));
+    settle_until(&mut app, |a| matches!(a.adding, Some(Adding::Site { .. })));
+    assert!(matches!(&app.adding, Some(Adding::Site { site, name, .. }) if name == "newchan" && site.kind == crate::config::SiteKind::Jschan));
+    // The name can be changed; a taken one (or one with a slash) is refused.
+    for _ in 0..7 {
+        app.on_key(KeyEvent::from(KeyCode::Backspace));
+    }
+    type_text(&mut app, "A");
+    app.on_key(KeyEvent::from(KeyCode::Enter));
+    assert!(app.adding.is_some() && app.status.as_ref().unwrap().text == "A site is already called A");
+    app.on_key(KeyEvent::from(KeyCode::Backspace));
+    type_text(&mut app, "my/chan");
+    app.on_key(KeyEvent::from(KeyCode::Enter));
+    assert!(app.adding.is_some() && app.status.as_ref().unwrap().text.contains("can't have /"));
+    for _ in 0..5 {
+        app.on_key(KeyEvent::from(KeyCode::Backspace));
+    }
+    type_text(&mut app, "chan");
+    app.on_key(KeyEvent::from(KeyCode::Enter));
+    // Added, saved, and the link opened on it.
+    assert!(app.adding.is_none());
+    let new = app.sites.len() - 1;
+    assert_eq!((app.sites[new].cfg.name.as_str(), app.sites[new].cfg.url.as_deref()), ("mychan", Some("https://newchan.invalid")));
+    let saved: Config = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(saved.sites, [app.sites[new].cfg.clone()]);
+    assert_eq!((app.tab.site, app.tab.view, app.tab.pending_thread, app.tab.pending_post), (new, View::Thread, 5, Some(7)));
+    assert!(app.visible_sites().contains(&SiteRow::Site(new)));
+    // From now on its links just open.
+    app.goto_str("https://newchan.invalid/tech/");
+    assert!(app.adding.is_none());
+    assert_eq!((app.tab.site, app.tab.view), (new, View::Catalog));
+    // A site that doesn't answer like any engine: said, nothing added.
+    serve("blank.invalid", vec![]);
+    app.goto_str("blank.invalid/b/");
+    settle_until(&mut app, |a| a.adding.is_none());
+    assert!(app.status.as_ref().unwrap().text.starts_with("blank.invalid doesn't answer like"));
+    assert_eq!(app.sites.len(), new + 1);
+    crate::http::serve_test_host("newchan.invalid", None);
+    crate::http::serve_test_host("blank.invalid", None);
+}
+
+#[test]
+fn settings_add_sites_and_vichan_boards_and_remove_them() {
+    use crate::backend::detect::tests::serve;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    let mut app = local_app();
+    app.config_path = Some(path.clone());
+    let catalog = crate::backend::fixture("vichan_catalog.json");
+    serve("vi2.invalid", vec![("/tech/catalog.json", catalog.clone()), ("/b/catalog.json", catalog)]);
+    app.tab.view = View::Sites;
+    // From the home screen's menu (it has no key).
+    run_menu_row(&mut app, "add a site…");
+    app.paste("vi2.invalid/tech/");
+    app.on_key(KeyEvent::from(KeyCode::Enter));
+    settle_until(&mut app, |a| matches!(a.adding, Some(Adding::Site { .. })));
+    app.on_key(KeyEvent::from(KeyCode::Enter));
+    let i = app.sites.len() - 1;
+    assert_eq!(app.status.as_ref().unwrap().text, "Added vi2 (vichan): it's on the home screen");
+    assert_eq!(app.tab.view, View::Sites);
+    // A link to a board it doesn't list adds the board; one it doesn't have is refused.
+    app.adding = Some(Adding::Typing(String::new()));
+    app.paste("https://vi2.invalid/b/res/1.html");
+    app.on_key(KeyEvent::from(KeyCode::Enter));
+    settle_until(&mut app, |a| matches!(a.adding, Some(Adding::Board { .. })));
+    app.on_key(KeyEvent::from(KeyCode::Enter));
+    let boards = |app: &App| app.sites[i].cfg.boards.clone().unwrap().iter().map(|b| crate::backend::to_board(b).uri).collect::<Vec<_>>();
+    assert_eq!(boards(&app), ["tech", "b"]);
+    let saved: Config = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(saved.sites[0].boards, app.sites[i].cfg.boards);
+    app.adding = Some(Adding::Typing("vi2.invalid/zz/".into()));
+    app.on_key(KeyEvent::from(KeyCode::Enter));
+    settle_until(&mut app, |a| a.adding.is_none());
+    assert!(app.status.as_ref().unwrap().text.contains("has no /zz/"));
+    // One it has: nothing to do.
+    app.adding = Some(Adding::Typing("vi2.invalid/b/".into()));
+    app.on_key(KeyEvent::from(KeyCode::Enter));
+    assert!(app.adding.is_none() && app.status.as_ref().unwrap().text == "vi2 is already one of your sites");
+    // esc while asking: the answer is dropped.
+    app.adding = Some(Adding::Typing("vi2.invalid/b2/".into()));
+    app.on_key(KeyEvent::from(KeyCode::Enter));
+    app.on_key(KeyEvent::from(KeyCode::Esc));
+    std::thread::sleep(Duration::from_millis(50));
+    app.poll();
+    assert!(app.adding.is_none());
+    // Settings › Your sites lists it; x twice takes it out of the config and off the home screen.
+    app.open_settings();
+    let mine = settings::items().iter().position(|&it| it == settings::Item::MySites).unwrap();
+    app.settings_list.state.select(Some(mine));
+    app.activate_setting();
+    assert!(matches!(&app.settings_popup, Some(SettingsPopup::Sites(m)) if m.sites.len() == 1 && m.sites[0].name == "vi2"));
+    app.on_key(KeyEvent::from(KeyCode::Char('x')));
+    assert_eq!(app.status.as_ref().unwrap().text, "x again removes vi2 from your config");
+    app.on_key(KeyEvent::from(KeyCode::Char('x')));
+    assert!(matches!(&app.settings_popup, Some(SettingsPopup::Sites(m)) if m.sites.is_empty()));
+    assert!(!app.visible_sites().contains(&SiteRow::Site(i)));
+    assert!(toml::from_str::<Config>(&std::fs::read_to_string(&path).unwrap()).unwrap().sites.is_empty());
+    crate::http::serve_test_host("vi2.invalid", None);
 }

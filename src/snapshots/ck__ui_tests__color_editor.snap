@@ -1,5 +1,6 @@
 ---
 source: src/ui_tests.rs
+assertion_line: 718
 expression: snapshot(&mut a)
 ---
  ck  Settings
@@ -30,5 +31,5 @@ expression: snapshot(&mut a)
 
     Changing a color of a built-in theme saves it as a copy: NAME-custom.
 
-
+  Keys
  enter change   esc back   , settings   ? help

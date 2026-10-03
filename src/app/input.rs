@@ -6,6 +6,7 @@ use super::*;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Modal {
     Confirm,
+    Adding,
     Settings,
     AddFilter,
     Help,
@@ -64,6 +65,7 @@ impl App {
             self.modal(),
             Some(
                 Modal::Confirm
+                    | Modal::Adding
                     | Modal::Settings
                     | Modal::AddFilter
                     | Modal::Help
@@ -88,9 +90,10 @@ impl App {
             }
             Some(Modal::Links) => return self.on_links_click(ev.column, ev.row, now),
             Some(Modal::ImageSearch) => return self.on_image_search_click(ev.column, ev.row),
-            Some(Modal::Help | Modal::Preview | Modal::AddFilter | Modal::Confirm) => {
-                // Clicking anywhere closes a popup (a save that asks isn't made).
+            Some(Modal::Help | Modal::Preview | Modal::AddFilter | Modal::Confirm | Modal::Adding) => {
+                // Clicking anywhere closes a popup (a save that asks isn't made, nor a site added).
                 self.confirm = None;
+                self.adding = None;
                 self.show_help = false;
                 self.tab.preview = None;
                 self.filter_add = None;
@@ -145,6 +148,7 @@ impl App {
     fn modal(&self) -> Option<Modal> {
         let open = [
             (self.confirm.is_some(), Modal::Confirm),
+            (self.adding.is_some(), Modal::Adding),
             (self.settings_popup.is_some(), Modal::Settings),
             (self.filter_add.is_some(), Modal::AddFilter),
             (self.show_help, Modal::Help),
@@ -222,6 +226,7 @@ impl App {
         if let Some(modal) = self.modal() {
             match modal {
                 Modal::Confirm => self.on_confirm_key(key),
+                Modal::Adding => self.on_adding_key(key),
                 Modal::Settings => self.on_settings_popup_key(key),
                 Modal::AddFilter => self.on_add_filter_key(key),
                 Modal::Menu => self.on_menu_key(key),
@@ -373,6 +378,7 @@ impl App {
             Action::ImageSearch => self.open_image_search(),
             Action::NewTab => self.new_tab(),
             Action::Favorite => self.toggle_favorite(),
+            Action::AddSite => self.adding = Some(super::Adding::Typing(String::new())),
             Action::Follow => self.toggle_follow(),
             Action::NextTab => self.cycle_tab(true),
             Action::PrevTab => self.cycle_tab(false),

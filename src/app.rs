@@ -39,6 +39,7 @@ mod search;
 mod session;
 mod tabs;
 mod settings;
+mod sites;
 pub use filters::{AddFilter, Candidate, EDIT_ROWS, EditRow, Reach, problem as filters_problem, with_text as filters_with_text};
 pub use focus::{HintTarget, HintTo, Hints, Menu, MenuItem};
 pub use gallery::Gallery;
@@ -46,6 +47,7 @@ pub use home::BoardRef;
 pub use links::{ImageSearchPanel, LinkItem, LinksPanel};
 pub use saving::{Confirm, Saving};
 pub use search::Search;
+pub use sites::{Adding, MySites, origin as site_origin};
 pub use tabs::{MAX_TABS, Offline, Tab};
 pub use settings::{Popup as SettingsPopup, SECTIONS as SETTING_SECTIONS, key_rows, rows as setting_rows, tilde};
 
@@ -888,6 +890,8 @@ enum Msg {
     /// The thread a quoted post is in: (board, post, thread).
     Found(u64, Board, u64, Result<Option<u64>>),
     Download(DlEvent),
+    /// What a site runs, or has (for adding it).
+    Detected(u64, Result<sites::Detected>),
     Input(Event),
     /// Something else (a loaded image) needs a redraw.
     Wake,
@@ -945,6 +949,10 @@ pub struct App {
     pub saved_confirm: Option<ThreadKey>,
     /// A big save asking first (see `ask_to_save`).
     pub confirm: Option<saving::Confirm>,
+    /// Adding a site (see `add_site_from`).
+    pub adding: Option<sites::Adding>,
+    /// Sites taken out of the config in Settings: off the home screen until ck restarts.
+    pub removed_sites: std::collections::BTreeSet<String>,
     pub store: Store,
     refresh_thread: Duration,
     refresh_watched: Duration,
@@ -1093,6 +1101,8 @@ impl App {
             saved_list: Picker::top(),
             saved_confirm: None,
             confirm: None,
+            adding: None,
+            removed_sites: Default::default(),
             store,
             refresh_thread,
             refresh_watched,
@@ -1168,7 +1178,12 @@ impl App {
             .into_iter()
             .chain((0..self.favorites.len()).map(SiteRow::Favorite))
             .chain(self.recent_rows().into_iter().map(SiteRow::Recent))
-            .chain((0..self.sites.len()).filter(|&i| self.show_hidden_sites || !self.is_site_hidden(i)).map(SiteRow::Site))
+            .chain(
+                (0..self.sites.len())
+                    .filter(|&i| !self.removed_sites.contains(&self.sites[i].cfg.name))
+                    .filter(|&i| self.show_hidden_sites || !self.is_site_hidden(i))
+                    .map(SiteRow::Site),
+            )
             .chain((!self.hidden_sites.is_empty()).then_some(SiteRow::HiddenSites))
             .collect();
         let name = |k: usize| match &rows[k] {
@@ -1399,6 +1414,7 @@ impl App {
             Msg::Refreshed(key, res) => self.refreshed(key, res),
             Msg::GeneralCatalog(key, res) => self.general_catalog(key, res),
             Msg::Download(ev) => self.download_event(ev),
+            Msg::Detected(id, res) => self.detected(id, res),
             Msg::Found(_, board, post, res) => {
                 self.tab.loading = None;
                 match res {

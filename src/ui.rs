@@ -145,6 +145,9 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     if app.image_search_panel.is_some() {
         draw_image_search(f, app);
     }
+    if app.adding.is_some() {
+        draw_adding(f, app);
+    }
     if app.confirm.is_some() {
         draw_confirm(f, app);
     }
@@ -1687,6 +1690,57 @@ fn draw_peek(f: &mut Frame, app: &App, area: Rect) {
     }
 }
 
+/// Adding a site: typing its link, asking it what it runs, then naming it.
+fn draw_adding(f: &mut Frame, app: &App) {
+    use crate::app::Adding;
+    let Some(a) = &app.adding else { return };
+    let t = theme();
+    let field = |label: &str, text: &str| {
+        Line::from(vec![
+            Span::styled(format!("{label}  "), dim()),
+            Span::styled(text.to_string(), Style::new().fg(t.text)),
+            Span::styled("▏", Style::new().fg(t.primary)),
+        ])
+    };
+    let text = |s: String| Line::styled(s, Style::new().fg(t.text));
+    let (title, hint, lines): (String, &str, Vec<Line>) = match a {
+        Adding::Typing(link) => (
+            "Add a site".into(),
+            "enter look · esc cancel",
+            vec![
+                field("Link", link),
+                Line::default(),
+                Line::styled("A link to any page of it: https://somechan.org/b/ or just somechan.org.", dim()),
+                Line::styled("ck asks the site what it runs (jschan, LynxChan, vichan, …).", dim()),
+            ],
+        ),
+        Adding::Looking { host, .. } => ("Add a site".into(), "esc cancel", vec![text(format!("Asking {host} what it runs…"))]),
+        Adding::Site { site, name, .. } => {
+            let host = crate::http::host(site.url.as_deref().unwrap_or_default()).to_string();
+            let mut lines = vec![text(format!("It runs {}.", site.kind.label()))];
+            if let Some([crate::config::BoardConfig::Uri(b) | crate::config::BoardConfig::Full { uri: b, .. }]) = site.boards.as_deref() {
+                lines.push(text(format!("Its boards: /{b}/ so far. vichan has no board list: Settings › Sites")));
+                lines.push(text("adds more from links to them.".into()));
+            }
+            lines.extend([
+                Line::default(),
+                field("Name", name),
+                Line::styled(format!("For : and favorites, like {}/board. Saved in your config.", name.trim()), dim()),
+            ]);
+            (format!("Add {host}?"), "enter add · esc cancel", lines)
+        }
+        Adding::Board { site, board, .. } => {
+            let name = app.sites.get(*site).map_or("", |s| s.cfg.name.as_str());
+            (format!("Add /{board}/ to {name}?"), "enter add · esc cancel", vec![text(format!("{name} doesn't list /{board}/ yet; the site has it."))])
+        }
+    };
+    let w = lines.iter().map(|l| l.width()).max().unwrap_or(0).max(title.width() + hint.width() + 8).max(60) + 6;
+    let inner = panel(f, w.min(100) as u16, lines.len() as u16 + 3, &title, hint);
+    for (i, line) in lines.into_iter().enumerate() {
+        put(f, inner.x, inner.y + i as u16, inner.width, line);
+    }
+}
+
 /// A big save asking first: what it will write, and where (a long folder wraps at its
 /// slashes).
 fn draw_confirm(f: &mut Frame, app: &App) {
@@ -1884,6 +1938,7 @@ fn help_sections(keys: &KeyMap) -> Vec<(&'static str, Vec<(String, &'static str)
             vec![
                 (format!("1-9 / {}", k(Action::Favorite)), "open / favorite a board"),
                 (k(Action::Remove), "unfavorite, hide a site"),
+                (format!("{} link", k(Action::Goto)), "add a site (any page of it)"),
             ],
         ),
         (
@@ -2135,6 +2190,7 @@ fn draw_settings_popup(f: &mut Frame, app: &App) {
             put(f, inner.x, y, inner.width, line);
         }
         Some(SettingsPopup::Filters { list, counts }) => draw_filter_list(f, app, list, counts),
+        Some(SettingsPopup::Sites(m)) => draw_my_sites(f, m),
         Some(SettingsPopup::FilterEdit { index, draft, row, typing }) => draw_filter_edit(f, app, *index, draft, *row, typing.as_deref()),
         Some(SettingsPopup::Folder { value }) => {
             let inner = panel(f, 90, 7, "Download folder", "enter save · esc cancel");
@@ -2207,6 +2263,33 @@ fn draw_add_filter(f: &mut Frame, app: &App) {
 }
 
 /// Settings › Filters: every `[[filter]]`, with what it catches on screen now.
+/// Settings › Sites › Your sites: the config's `[[site]]` tables.
+fn draw_my_sites(f: &mut Frame, m: &crate::app::MySites) {
+    let t = theme();
+    let h = (m.sites.len().max(1) as u16 + 6).min(f.area().height.saturating_sub(4));
+    let inner = panel(f, 100, h, "Your sites", "a add · x remove · esc close");
+    let view = inner.height.saturating_sub(2) as usize;
+    let sel = m.list.selected().unwrap_or(0);
+    let first = (sel + 1).saturating_sub(view);
+    if m.sites.is_empty() {
+        put(f, inner.x, inner.y, inner.width, Line::styled("None yet: only the built-in sites. a adds one from a link to it.", dim()));
+    }
+    for (k, s) in m.sites.iter().enumerate().skip(first).take(view) {
+        let y = inner.y + (k - first) as u16;
+        paint_row(f, Rect::new(inner.x - 2, y, inner.width + 4, 1), None, k == sel, false);
+        let origin = crate::app::site_origin(s);
+        let left = vec![
+            Span::styled(format!("{:<18}", truncate(&s.name, 17)), bold(t.text)),
+            Span::styled(format!("{:<11}", s.kind.as_str()), Style::new().fg(t.text)),
+            Span::styled(truncate(s.url.as_deref().unwrap_or(""), (inner.width as usize).saturating_sub(52)), dim()),
+        ];
+        let tag = if m.armed == Some(k) { "x again removes it".to_string() } else { origin.to_string() };
+        put(f, inner.x, y, inner.width, spread(left, vec![Span::styled(tag, dim())], inner.width as usize));
+    }
+    let note = "Kept in the config as [[site]] tables; the built-in sites are always there too.";
+    put(f, inner.x, inner.bottom().saturating_sub(1), inner.width, Line::styled(note, dim()));
+}
+
 fn draw_filter_list(f: &mut Frame, app: &App, list: &ratatui::widgets::ListState, counts: &[(usize, usize)]) {
     let t = theme();
     let cfgs = &app.filter_cfgs;

@@ -378,6 +378,7 @@ impl App {
                     }
                     items.push(act(A::Search, "filter"));
                     items.push(act(A::Hints, "pick a row by its label"));
+                    items.push(act(A::AddSite, "add a site…"));
                 }
                 View::Boards => {
                     if let Some(i) = self.selected_index() {

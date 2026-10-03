@@ -73,8 +73,12 @@ pub struct Config {
     /// `[[filter]]`: hide or highlight threads and posts.
     #[serde(default, rename = "filter")]
     pub filters: Vec<crate::filter::FilterConfig>,
-    #[serde(rename = "site")]
+    /// `[[site]]`: sites you added, or built-in ones you changed (by name).
+    #[serde(default, rename = "site")]
     pub sites: Vec<SiteConfig>,
+    /// `false`: only the sites in this file, none of the built-in ones.
+    #[serde(default = "default_true")]
+    pub default_sites: bool,
 }
 
 fn default_true() -> bool {
@@ -197,7 +201,7 @@ impl ColorMode {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 pub struct SiteConfig {
     pub name: String,
     pub kind: SiteKind,
@@ -233,7 +237,33 @@ pub enum SiteKind {
     Makaba,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+impl SiteKind {
+    /// As written in the config.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SiteKind::Fourchan => "4chan",
+            SiteKind::Vichan => "vichan",
+            SiteKind::Lynxchan => "lynxchan",
+            SiteKind::Foolfuuka => "foolfuuka",
+            SiteKind::Jschan => "jschan",
+            SiteKind::Makaba => "makaba",
+        }
+    }
+
+    /// The engine's name, for people.
+    pub fn label(self) -> &'static str {
+        match self {
+            SiteKind::Fourchan => "4chan's API",
+            SiteKind::Vichan => "vichan",
+            SiteKind::Lynxchan => "LynxChan",
+            SiteKind::Foolfuuka => "FoolFuuka",
+            SiteKind::Jschan => "jschan",
+            SiteKind::Makaba => "makaba",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(untagged)]
 pub enum BoardConfig {
     Uri(String),
@@ -255,12 +285,11 @@ pub fn edit_at(path: &Path, f: impl FnOnce(&mut DocumentMut)) -> Result<()> {
 
 /// `edit_at`, with an edit that can refuse (nothing is written then).
 pub fn try_edit_at(path: &Path, f: impl FnOnce(&mut DocumentMut) -> Result<()>) -> Result<()> {
-    let text = match std::fs::read_to_string(path) {
-        Ok(t) => t,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => DEFAULT_CONFIG.to_string(),
+    let mut doc: DocumentMut = match std::fs::read_to_string(path) {
+        Ok(text) => text.parse().with_context(|| format!("parsing {}", path.display()))?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => fresh(),
         Err(e) => return Err(e).with_context(|| format!("reading {}", path.display())),
     };
-    let mut doc: DocumentMut = text.parse().with_context(|| format!("parsing {}", path.display()))?;
     f(&mut doc)?;
     // Don't write something ck itself couldn't read back.
     let out = doc.to_string();
@@ -391,6 +420,150 @@ fn keep_comments(doc: &mut DocumentMut, comments: &str, after: Option<isize>) {
     }
 }
 
+/// A new config file: the default config without its `[[site]]` tables, so the built-in
+/// sites aren't frozen in it (they're added when it loads, and can change with ck).
+pub fn fresh() -> DocumentMut {
+    let mut doc: DocumentMut = DEFAULT_CONFIG.parse().unwrap_or_default();
+    let tables = doc.get("site").and_then(Item::as_array_of_tables);
+    // Comments above the first site belong to the setting before it; the rest are about sites.
+    let first = tables.and_then(|t| t.get(0)).and_then(|t| t.decor().prefix()?.as_str().map(String::from));
+    let last = tables.and_then(|t| t.iter().filter_map(Table::position).max());
+    doc.remove("site");
+    if let Some(c) = first.filter(|c| c.contains('#')) {
+        keep_comments(&mut doc, &format!("{}\n", c.trim_end()), last);
+    }
+    doc
+}
+
+/// The built-in sites, as `[[site]]` tables (to copy one and change it).
+pub fn builtin_sites_text() -> String {
+    let doc: DocumentMut = DEFAULT_CONFIG.parse().unwrap_or_default();
+    let mut out = DocumentMut::new();
+    if let Some(mut sites) = doc.get("site").and_then(Item::as_array_of_tables).cloned() {
+        // The first one's comments are about the setting before it.
+        if let Some(t) = sites.get_mut(0) {
+            t.decor_mut().set_prefix("");
+        }
+        out.insert("site", Item::ArrayOfTables(sites));
+    }
+    out.to_string().trim_start().to_string()
+}
+
+/// The built-in sites.
+pub fn builtin_sites() -> &'static [SiteConfig] {
+    static SITES: std::sync::LazyLock<Vec<SiteConfig>> =
+        std::sync::LazyLock::new(|| toml::from_str::<Config>(DEFAULT_CONFIG).map(|c| c.sites).unwrap_or_default());
+    &SITES
+}
+
+/// The built-in sites in their order, each replaced by yours of the same name, then the
+/// ones you added.
+pub fn merge_sites(mine: Vec<SiteConfig>, builtin: Vec<SiteConfig>) -> Vec<SiteConfig> {
+    let same = |a: &SiteConfig, b: &SiteConfig| a.name.eq_ignore_ascii_case(&b.name);
+    let mut mine: Vec<Option<SiteConfig>> = mine.into_iter().map(Some).collect();
+    let mut out: Vec<SiteConfig> = builtin
+        .into_iter()
+        .map(|b| mine.iter_mut().find(|m| m.as_ref().is_some_and(|m| same(m, &b))).and_then(Option::take).unwrap_or(b))
+        .collect();
+    out.extend(mine.into_iter().flatten());
+    out
+}
+
+/// A site as a `[[site]]` table.
+fn site_table(site: &SiteConfig) -> Table {
+    let mut t = Table::new();
+    t["name"] = value(site.name.as_str());
+    t["kind"] = value(site.kind.as_str());
+    let optional = [("url", &site.url), ("thumb_ext", &site.thumb_ext), ("media_url", &site.media_url), ("archive", &site.archive)];
+    for (key, v) in optional {
+        if let Some(v) = v {
+            t[key] = value(v.as_str());
+        }
+    }
+    if let Some(boards) = &site.boards {
+        t["boards"] = value(boards_array(boards));
+    }
+    t
+}
+
+fn boards_array(boards: &[BoardConfig]) -> toml_edit::Array {
+    let mut a = toml_edit::Array::new();
+    for b in boards {
+        match b {
+            BoardConfig::Uri(uri) => a.push(uri.as_str()),
+            BoardConfig::Full { uri, title } if title.is_empty() => a.push(uri.as_str()),
+            BoardConfig::Full { uri, title } => {
+                let mut t = toml_edit::InlineTable::new();
+                t.insert("uri", uri.as_str().into());
+                t.insert("title", title.as_str().into());
+                a.push(t);
+            }
+        }
+    }
+    a
+}
+
+/// Add a `[[site]]` (after the comments at the end, when it's the first).
+pub fn add_site(doc: &mut DocumentMut, site: &SiteConfig) -> Result<()> {
+    let mut moved = None;
+    if doc.get("site").is_none() {
+        doc.insert("site", Item::ArrayOfTables(Default::default()));
+        moved = doc.trailing().as_str().map(String::from).filter(|t| !t.trim().is_empty());
+        if moved.is_some() {
+            doc.set_trailing("");
+        }
+    }
+    let tables = doc.get_mut("site").and_then(Item::as_array_of_tables_mut).context("`site` in the config isn't a list of [[site]] tables")?;
+    let mut t = site_table(site);
+    if let Some(m) = moved {
+        t.decor_mut().set_prefix(format!("{m}\n"));
+    }
+    tables.push(t);
+    Ok(())
+}
+
+/// Give a site these boards: in its `[[site]]` table, or (a built-in site) in a new one.
+pub fn set_site_boards(doc: &mut DocumentMut, site: &SiteConfig, boards: &[BoardConfig]) -> Result<()> {
+    let mine = doc
+        .get_mut("site")
+        .and_then(Item::as_array_of_tables_mut)
+        .and_then(|ts| ts.iter_mut().find(|t| t.get("name").and_then(Item::as_str).is_some_and(|n| n.eq_ignore_ascii_case(&site.name))));
+    match mine {
+        Some(t) => {
+            t["boards"] = value(boards_array(boards));
+            Ok(())
+        }
+        None => add_site(doc, &SiteConfig { boards: Some(boards.to_vec()), ..site.clone() }),
+    }
+}
+
+/// Remove `[[site]]` number `i`, which ck read as `old` (refused if the file says otherwise
+/// now). Its comments stay.
+pub fn remove_site(doc: &mut DocumentMut, i: usize, old: &SiteConfig) -> Result<()> {
+    let tables = doc.get_mut("site").and_then(Item::as_array_of_tables_mut).context("the config has no [[site]] tables")?;
+    let now = tables.get(i).map(|t| DocumentMut::from(t.clone()).to_string()).and_then(|text| toml::from_str::<SiteConfig>(&text).ok());
+    anyhow::ensure!(now.as_ref() == Some(old), "site #{} in the config changed since ck read it (restart ck to remove it here)", i + 1);
+    let at = tables.get(i).and_then(Table::position);
+    let comments = tables.get(i).and_then(|t| t.decor().prefix()?.as_str().map(String::from)).filter(|p| p.contains('#'));
+    tables.remove(i);
+    if tables.is_empty() {
+        doc.remove("site");
+    }
+    if let Some(c) = comments {
+        keep_comments(doc, &c, at);
+    }
+    Ok(())
+}
+
+/// The `[[site]]` tables of a config file, as ck reads them (none if it doesn't exist).
+pub fn sites_in(path: &Path) -> Result<Vec<SiteConfig>> {
+    match std::fs::read_to_string(path) {
+        Ok(text) => Ok(toml::from_str::<Config>(&text).with_context(|| format!("parsing {}", path.display()))?.sites),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
+        Err(e) => Err(e).with_context(|| format!("reading {}", path.display())),
+    }
+}
+
 pub fn set_key(doc: &mut DocumentMut, action: &str, binding: Option<&Binding>) {
     if !doc.contains_key("keys") {
         doc.insert("keys", Item::Table(Table::new()));
@@ -424,13 +597,24 @@ impl Config {
         Some(base.join("ck").join("config.toml"))
     }
 
-    /// Load the user config if it exists, otherwise the built-in defaults.
+    /// Load the user config if it exists, otherwise the built-in defaults. Its sites come
+    /// with the built-in ones (see `merge_sites`).
     pub fn load() -> Result<Self> {
-        if let Some(path) = Self::path().filter(|p| p.exists()) {
-            let text = std::fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
-            return toml::from_str(&text).with_context(|| format!("parsing {}", path.display()));
+        let Some(path) = Self::path().filter(|p| p.exists()) else {
+            return toml::from_str(DEFAULT_CONFIG).context("parsing the built-in config");
+        };
+        let text = std::fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
+        let cfg: Config = toml::from_str(&text).with_context(|| format!("parsing {}", path.display()))?;
+        cfg.with_builtin_sites().with_context(|| format!("in {}", path.display()))
+    }
+
+    /// The sites to show: the built-in ones and this config's (unless `default_sites = false`).
+    pub fn with_builtin_sites(mut self) -> Result<Self> {
+        if self.default_sites {
+            self.sites = merge_sites(std::mem::take(&mut self.sites), builtin_sites().to_vec());
         }
-        toml::from_str(DEFAULT_CONFIG).context("parsing the built-in config")
+        anyhow::ensure!(!self.sites.is_empty(), "no sites: add a [[site]], or take out `default_sites = false`");
+        Ok(self)
     }
 }
 
@@ -487,9 +671,73 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("ck").join("config.toml");
         edit_at(&path, |d| set_theme(d, "nord")).unwrap();
-        let c: Config = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        let c: Config = toml::from_str(&text).unwrap();
         assert!(matches!(c.theme, Some(ThemeSetting::Name(ref n)) if n == "nord"));
-        assert!(c.sites.len() > 5);
+        // Without the built-in sites, which come with it when it loads; the comments before
+        // them stay.
+        assert!(c.sites.is_empty() && !text.contains("\n[[site]]\n"), "{text}");
+        assert!(text.contains("# download_dir = ") && text.contains("[keys]"), "{text}");
+        assert_eq!(c.with_builtin_sites().unwrap().sites, builtin_sites());
+    }
+
+    #[test]
+    fn your_sites_come_with_the_built_in_ones() {
+        let parse = |text: &str| toml::from_str::<Config>(text).unwrap().with_builtin_sites();
+        let builtin = builtin_sites();
+        // None of yours: the built-in ones.
+        assert_eq!(parse("").unwrap().sites, builtin);
+        // Yours after them; one of the same name instead of it, in its place.
+        let c = parse("[[site]]\nname = \"mine\"\nkind = \"jschan\"\nurl = \"https://mine.example\"\n\n[[site]]\nname = \"Lainchan\"\nkind = \"vichan\"\nurl = \"https://lainchan.org\"\nboards = [\"λ\"]\n").unwrap();
+        let names: Vec<&str> = c.sites.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(names.len(), builtin.len() + 1);
+        assert_eq!(names.last(), Some(&"mine"));
+        let lain = builtin.iter().position(|s| s.name == "lainchan").unwrap();
+        assert_eq!((names[lain], c.sites[lain].boards.as_ref().unwrap().len()), ("Lainchan", 1));
+        // A copy of all the defaults (an older config) keeps them as they were.
+        assert_eq!(parse(DEFAULT_CONFIG).unwrap().sites, builtin);
+        // Only yours.
+        let c = parse("default_sites = false\n[[site]]\nname = \"mine\"\nkind = \"4chan\"\n").unwrap();
+        assert_eq!(c.sites.len(), 1);
+        assert!(parse("default_sites = false\n").unwrap_err().to_string().contains("no sites"));
+    }
+
+    #[test]
+    fn adding_and_removing_sites() {
+        let site = |name: &str, boards: Option<Vec<BoardConfig>>| SiteConfig {
+            name: name.into(),
+            kind: SiteKind::Vichan,
+            url: Some(format!("https://{name}.example")),
+            boards,
+            thumb_ext: None,
+            archive: None,
+            media_url: None,
+        };
+        let mut d = fresh();
+        let a = site("a", Some(vec![BoardConfig::Uri("b".into())]));
+        add_site(&mut d, &a).unwrap();
+        let text = d.to_string();
+        assert!(text.ends_with("[[site]]\nname = \"a\"\nkind = \"vichan\"\nurl = \"https://a.example\"\nboards = [\"b\"]\n"), "{text}");
+        let c: Config = toml::from_str(&text).unwrap();
+        assert_eq!(c.sites, std::slice::from_ref(&a));
+        // Another board, written into its table.
+        let boards = vec![BoardConfig::Uri("b".into()), BoardConfig::Full { uri: "tech".into(), title: "Tech".into() }];
+        set_site_boards(&mut d, &a, &boards).unwrap();
+        let c: Config = toml::from_str(&d.to_string()).unwrap();
+        assert_eq!(c.sites[0].boards.as_deref(), Some(&boards[..]));
+        // A built-in site's board: a [[site]] of its own, which replaces the built-in one.
+        let lain = builtin_sites().iter().find(|s| s.name == "lainchan").unwrap().clone();
+        set_site_boards(&mut d, &lain, &[BoardConfig::Uri("mega".into())]).unwrap();
+        let c: Config = toml::from_str(&d.to_string()).unwrap();
+        assert_eq!((c.sites[1].name.as_str(), c.sites[1].thumb_ext.as_deref(), c.sites[1].boards.as_ref().unwrap().len()), ("lainchan", lain.thumb_ext.as_deref(), 1));
+        // Removing: refused if the file changed, and the last one takes the list along.
+        let a2 = SiteConfig { boards: Some(boards.clone()), ..a.clone() };
+        assert!(remove_site(&mut d, 0, &a).unwrap_err().to_string().contains("changed since ck read it"));
+        remove_site(&mut d, 0, &a2).unwrap();
+        remove_site(&mut d, 0, &c.sites[1]).unwrap();
+        assert_eq!(d.to_string(), fresh().to_string());
+        // Printing them for copying: tables only.
+        assert!(builtin_sites_text().starts_with("[[site]]\nname = \"4chan\""));
     }
 
     #[test]
