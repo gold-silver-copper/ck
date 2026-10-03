@@ -31,5 +31,5 @@ expression: snapshot(&mut a)
 
     Changing a color of a built-in theme saves it as a copy: NAME-custom.
 
-
+  Startup
  enter change   esc back   , settings   ? help

@@ -4,6 +4,7 @@
 use super::*;
 
 pub(super) fn draw_thread(f: &mut Frame, app: &mut App, area: Rect) {
+    let off = app.tab.thread.as_ref().is_some_and(|t| !app.images_on(app.tab.site, &t.board));
     let Some(t) = &mut app.tab.thread else {
         if app.tab.loading.is_some() {
             return;
@@ -127,7 +128,7 @@ pub(super) fn draw_thread(f: &mut Frame, app: &mut App, area: Rect) {
             let full = line >= top && line + h <= top + view;
             let p = &t.posts[t.entries[e].post];
             if full {
-                draw_tile(f, &mut app.images, &p.files[0], p.files.len(), tile, area);
+                draw_tile(f, &mut app.images, &p.files[0], p.files.len(), off, tile, area);
             } else {
                 fill(f, tile.intersection(area), th.surface_high);
             }
@@ -135,7 +136,7 @@ pub(super) fn draw_thread(f: &mut Frame, app: &mut App, area: Rect) {
     }
     for &(line, e) in &l.thumbs {
         let near = !(line >= top && line + h <= top + view) && line + h + view > top && line < top + 2 * view;
-        if let Some(url) = t.posts[t.entries[e].post].files[0].thumb.as_ref().filter(|u| near && http::is_media_host(u)) {
+        if let Some(url) = t.posts[t.entries[e].post].files[0].thumb.as_ref().filter(|u| near && !off && http::is_media_host(u)) {
             app.images.want(url, Kind::Thumb);
         }
     }

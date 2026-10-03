@@ -297,12 +297,13 @@ pub(super) fn draw_catalog(f: &mut Frame, app: &mut App, area: Rect) {
     let on_screen = (area.height / per) as usize + 1;
     let offset = app.tab.catalog_list.state.offset();
     for (k, &i) in visible.iter().enumerate().skip(offset).take(on_screen * 2) {
+        let off = app.tab.catalog.get(i).is_some_and(|p| !app.catalog_images_on(p));
         let Some(file) = app.tab.catalog[i].files.first() else { continue };
         let row = (k - offset) as u16 * per;
         if row < area.height {
             let tile = Rect::new(area.x + PAD, area.y + row, CAT_THUMB.width, CAT_THUMB.height);
-            draw_tile(f, &mut app.images, file, app.tab.catalog[i].files.len(), tile, area);
-        } else if let Some(url) = file.thumb.as_ref().filter(|u| http::is_media_host(u)) {
+            draw_tile(f, &mut app.images, file, app.tab.catalog[i].files.len(), off, tile, area);
+        } else if let Some(url) = file.thumb.as_ref().filter(|u| !off && http::is_media_host(u)) {
             app.images.want(url, Kind::Thumb);
         }
     }
@@ -378,9 +379,10 @@ fn draw_grid(f: &mut Frame, app: &mut App, area: Rect) {
         let (r, c) = (k / cols - top, k % cols);
         let (x, y) = (area.x + c as u16 * cell_w, area.y + r as u16 * cell_h);
         let card = Rect::new(x, y, GRID_CARD.width, GRID_CARD.height).intersection(area);
+        let off = app.tab.catalog.get(i).is_some_and(|p| !app.catalog_images_on(p));
         if card.is_empty() {
             // Below the screen: prefetch from media hosts.
-            if let Some(url) = app.tab.catalog[i].files.first().and_then(|f| f.thumb.as_ref()).filter(|u| http::is_media_host(u)) {
+            if let Some(url) = app.tab.catalog[i].files.first().and_then(|f| f.thumb.as_ref()).filter(|u| !off && http::is_media_host(u)) {
                 app.images.want(url, Kind::Thumb);
             }
             continue;
@@ -390,7 +392,7 @@ fn draw_grid(f: &mut Frame, app: &mut App, area: Rect) {
         paint_row(f, card, Some(t.surface), k == sel, mark.highlight.is_some());
         let tile = Rect::new(x + PAD, y, THUMB.width, THUMB.height);
         match p.files.first() {
-            Some(file) => draw_tile(f, &mut app.images, file, p.files.len(), tile, area),
+            Some(file) => draw_tile(f, &mut app.images, file, p.files.len(), off, tile, area),
             None => {
                 fill(f, tile.intersection(area), t.surface_high);
                 put(f, tile.x, tile.y + tile.height / 2, tile.width, Line::styled("no file", dim()).centered());
@@ -450,7 +452,10 @@ pub(super) fn beside_tile(lines: Vec<Line<'static>>, width: u16) -> Vec<Line<'st
 
 /// A thumbnail tile: a flat square with the file's type, and the image over it once it's
 /// loaded and the tile is fully on screen (`clip`).
-pub(super) fn draw_tile(f: &mut Frame, images: &mut Images, file: &Attachment, count: usize, tile: Rect, clip: Rect) {
+/// A file's thumbnail in `tile` (`off`: images are off on its board, so a placeholder and
+/// nothing asked for).
+#[allow(clippy::too_many_arguments)]
+pub(super) fn draw_tile(f: &mut Frame, images: &mut Images, file: &Attachment, count: usize, off: bool, tile: Rect, clip: Rect) {
     let t = theme();
     let shown = tile.intersection(clip);
     if shown.is_empty() {
@@ -464,6 +469,9 @@ pub(super) fn draw_tile(f: &mut Frame, images: &mut Images, file: &Attachment, c
             put(f, tile.x, label_row, tile.width, Line::styled(truncate(&s, tile.width as usize), style).centered());
         }
     };
+    if off {
+        return label(f, "image off".into(), dim());
+    }
     let mut kind = if file.spoiler {
         "spoiler".to_string()
     } else {

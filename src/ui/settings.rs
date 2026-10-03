@@ -149,6 +149,7 @@ pub(super) fn draw_settings_popup(f: &mut Frame, app: &App) {
         }
         Some(SettingsPopup::Filters { list, counts }) => draw_filter_list(f, app, list, counts),
         Some(SettingsPopup::Sites(m)) => draw_my_sites(f, m),
+        Some(SettingsPopup::BoardImages { list }) => draw_board_images(f, app, list),
         Some(SettingsPopup::FilterEdit { index, draft, row, typing }) => draw_filter_edit(f, app, *index, draft, *row, typing.as_deref()),
         Some(SettingsPopup::Folder { value }) => {
             let inner = panel(f, 90, 7, "Download folder", "enter save · esc cancel");
@@ -186,6 +187,29 @@ fn counts_text((posts, threads): (usize, usize)) -> String {
 }
 
 /// Settings › Filters: every `[[filter]]`, with what it catches on screen now.
+/// Settings › Catalog › Board images: boards with their own image setting.
+fn draw_board_images(f: &mut Frame, app: &App, list: &ListState) {
+    let t = theme();
+    let boards = app.boards_with_images_set();
+    let h = (boards.len().max(1) as u16 + 5).min(f.area().height.saturating_sub(4));
+    let inner = panel(f, 70, h, "Board images", "x back to the default · esc close");
+    let sel = list.selected().unwrap_or(0);
+    let view = inner.height.saturating_sub(2) as usize;
+    let first = (sel + 1).saturating_sub(view);
+    if boards.is_empty() {
+        put(f, inner.x, inner.y, inner.width, Line::styled("None: every board follows the default. A board's . menu changes it.", dim()));
+    }
+    for (k, (key, on)) in boards.iter().enumerate().skip(first).take(view) {
+        let y = inner.y + (k - first) as u16;
+        paint_row(f, Rect::new(inner.x - 2, y, inner.width + 4, 1), None, k == sel, false);
+        let left = vec![Span::styled(key.clone(), Style::new().fg(t.text))];
+        let right = vec![Span::styled(if *on { "images on" } else { "images off" }, dim())];
+        put(f, inner.x, y, inner.width, spread(left, right, inner.width as usize));
+    }
+    let note = "Boards the site marks NSFW follow the NSFW boards setting; the rest show images.";
+    put(f, inner.x, inner.bottom().saturating_sub(1), inner.width, Line::styled(note, dim()));
+}
+
 /// Settings › Sites › Your sites: the config's `[[site]]` tables.
 fn draw_my_sites(f: &mut Frame, m: &crate::app::MySites) {
     let t = theme();

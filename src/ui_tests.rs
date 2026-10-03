@@ -1132,3 +1132,17 @@ fn adding_a_site() {
     let text = render(&mut a).0;
     assert!(text.contains("3 boards, from the list on its pages:") && text.contains("wiz dep hob"), "{text}");
 }
+
+#[test]
+fn images_off_on_a_board() {
+    // The board's own setting: tiles say so, nothing's asked for, and the top bar says it.
+    let mut a = catalog_app(true);
+    a.tab.catalog_board = "g".into();
+    a.store.board_prefs.entry("4chan/g".into()).or_default().images = Some(false);
+    insta::assert_snapshot!("images_off_catalog", snapshot(&mut a));
+    assert_eq!(a.images.queued(), 0);
+    let mut a = thread_app(true);
+    a.store.board_prefs.entry("4chan/g".into()).or_default().images = Some(false);
+    insta::assert_snapshot!("images_off_thread", snapshot(&mut a));
+    assert_eq!(a.images.queued(), 0);
+}

@@ -94,6 +94,9 @@ impl App {
     }
 
     pub fn view_from_gallery(&mut self, k: usize) {
+        if self.images_off_here() {
+            return;
+        }
         let Some(g) = &self.tab.gallery else { return };
         if !self.images.enabled() {
             let Some((_, f)) = g.files.get(k).cloned() else { return };

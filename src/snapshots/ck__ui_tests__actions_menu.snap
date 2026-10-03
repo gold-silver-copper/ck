@@ -25,11 +25,11 @@ expression: snapshot(&mut a)
     Replies  >>1003          U      the first unread post
                              /      search the thread
                              f      pick a link or post by its label
-                                    save the thread as a page…
-    Anonymous  2026-09-21 1  r      reload
-                             :      go to a URL or site/board/thread
-    Code:                    ,      settings
-    fn main() {              ?      every key
-        println!("snapshot"  q      quit
+                                    images on this board: on → off
+    Anonymous  2026-09-21 1         save the thread as a page…
+                             r      reload
+    Code:                    :      go to a URL or site/board/thread
+    fn main() {              ,      settings
+        println!("snapshot"  ?      every key
     }
  j/k post   tab images & links   f hints   . more   enter quote   c conversation   u back   / search

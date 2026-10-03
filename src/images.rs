@@ -338,6 +338,12 @@ impl Images {
         lock(&self.queue.state).jobs.len()
     }
 
+    /// What's been asked for and not fetched yet (tests).
+    #[cfg(test)]
+    pub fn queued_urls(&self) -> Vec<String> {
+        lock(&self.queue.state).jobs.iter().map(|(u, ..)| u.clone()).collect()
+    }
+
     /// The image at `url` fitted into `size` cells, starting a fetch or an encoding if needed.
     /// While a new size is encoded, a previous encoding is returned if it still fits.
     pub fn get(&mut self, url: &str, size: Size, kind: Kind) -> State<'_> {

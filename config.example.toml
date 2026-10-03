@@ -31,6 +31,11 @@
 #   "off"   no images, no image requests
 images = "auto"
 
+# Images on boards the site marks NSFW: "show", or "off" (no thumbnails, nothing asked for).
+# A board's own setting (". menu › images on this board") comes first. vichan sites don't
+# mark boards, so theirs count as worksafe.
+nsfw_images = "show"
+
 # Colors. Press `,` in ck to pick a theme (with a live preview) or change any color; the
 # settings screen saves to this file. Built-in themes: material, material-light, nord,
 # gruvbox, catppuccin, tokyo-night, solarized-light, and terminal (keeps the terminal's

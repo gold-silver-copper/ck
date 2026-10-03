@@ -83,6 +83,9 @@ impl App {
         if !self.images.enabled() {
             return self.open_file(&file);
         }
+        if self.images_off_here() {
+            return;
+        }
         if self.thread_viewer(k) {
             return;
         }
@@ -311,6 +314,9 @@ impl App {
                         }
                         items.push(act(A::Search, "search the thread"));
                         items.push(act(A::Hints, "pick a link or post by its label"));
+                        if let Some(row) = self.board_images_row() {
+                            items.push(MenuItem::Act(A::BoardImages, row));
+                        }
                         items.push(act(A::Export, "save the thread as a page…"));
                         match self.tab.offline {
                             Some(o) if o.dead => {}
@@ -344,6 +350,9 @@ impl App {
                     let layout = self.layout();
                     items.push(MenuItem::Act(A::Compact, format!("{} layout (now {})", layout.next().as_str(), layout.as_str())));
                     items.push(act(A::Favorite, "favorite the board (or not)"));
+                    if let Some(row) = self.board_images_row() {
+                        items.push(MenuItem::Act(A::BoardImages, row));
+                    }
                     if self.archive_site().is_some() {
                         items.push(act(A::ArchiveSearch, "search the board's archive"));
                     }
@@ -387,6 +396,9 @@ impl App {
                         items.push(MenuItem::Enter(format!("open /{uri}/")));
                         items.push(act(A::Favorite, "favorite it (or not)"));
                         items.push(act(A::Browser, "open it in the browser"));
+                        if let Some(row) = self.board_images_row() {
+                            items.push(MenuItem::Act(A::BoardImages, row));
+                        }
                     }
                     items.push(act(A::Search, "filter the boards"));
                     items.push(act(A::Hints, "pick a board by its label"));

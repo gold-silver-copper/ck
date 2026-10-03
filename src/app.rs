@@ -35,6 +35,7 @@ mod home;
 mod links;
 mod saved;
 mod saving;
+mod board_images;
 mod search;
 mod session;
 mod tabs;
@@ -1021,6 +1022,12 @@ pub struct App {
     pub restore_session: bool,
     /// Reading the end of a thread, new posts come into view (`follow_new_posts`).
     pub follow_new_posts: bool,
+    /// Images on boards the site marks NSFW (`nsfw_images`).
+    pub nsfw_images: crate::config::NsfwImages,
+    /// NSFW boards of sites whose board list isn't loaded, from their saved lists; and the
+    /// sites asked for theirs, once, to know.
+    nsfw_saved: HashMap<usize, HashSet<String>>,
+    nsfw_asked: HashSet<usize>,
     /// The data directory has changes to write, and when it was last written.
     save_pending: bool,
     saved_at: Instant,
@@ -1160,6 +1167,9 @@ impl App {
             image_search_panel: None,
             restore_session: cfg.restore_session,
             follow_new_posts: cfg.follow_new_posts,
+            nsfw_images: cfg.nsfw_images,
+            nsfw_saved: HashMap::new(),
+            nsfw_asked: HashSet::new(),
             save_pending: false,
             saved_at: Instant::now(),
             session_saved: (None, Instant::now()),
@@ -2011,6 +2021,7 @@ impl App {
     /// Start background refreshes that are due: the open thread every `refresh_thread`, and
     /// each watched thread every `refresh_watched`, a couple at a time.
     fn background(&mut self) {
+        self.know_nsfw(self.tab.site);
         // A saved copy open isn't refreshed (a watched thread still is, below, unless it's dead).
         let open = self.tab.thread.as_ref().filter(|_| self.tab.view == View::Thread && self.tab.offline.is_none()).map(|t| self.key(&t.board, t.no));
         let now = self.clock.instant();
@@ -2524,6 +2535,9 @@ impl App {
     fn open_viewer(&mut self) {
         if !self.images.enabled() {
             self.info("Images are off (images = \"off\" in the config); i opens the file");
+            return;
+        }
+        if self.images_off_here() {
             return;
         }
         let link = self.selected_link();

@@ -260,6 +260,9 @@ fn location(app: &App) -> (Vec<String>, Vec<Span<'static>>) {
             if app.tab.catalog_sort != Sort::Bump {
                 meta.push(app.tab.catalog_sort.as_str().into());
             }
+            if !app.tab.catalog_board.is_empty() && !app.images_on(app.tab.catalog_site, &app.tab.catalog_board) {
+                meta.push("images off".into());
+            }
             vec![site(), board().unwrap_or_default()]
         }
         View::Thread => {
@@ -283,6 +286,9 @@ fn location(app: &App) -> (Vec<String>, Vec<Span<'static>>) {
                 if let (Some(((at, n), ..)), Some(p)) = (th.tall(), th.current()) {
                     meta.insert(0, format!("No.{} ({at}/{n})", p.no));
                 }
+            }
+            if th.is_some_and(|th| !app.images_on(app.tab.site, &th.board)) {
+                meta.push("images off".into());
             }
             let uri = app.tab.board.as_ref().map(|b| format!("/{}/", b.uri)).unwrap_or_default();
             if let Some(c) = th.and_then(|th| th.conversation.as_ref()).filter(|_| app.tab.gallery.is_none()) {
