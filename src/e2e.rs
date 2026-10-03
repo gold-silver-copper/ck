@@ -285,7 +285,7 @@ fn e2e_soak() {
     ready(&tmux);
 
     let start = Instant::now();
-    let (mut sent, mut restarts, mut warm, mut peak) = (0u64, 0, None, 0u64);
+    let (mut sent, mut restarts, mut quits, mut warm, mut peak) = (0u64, 0, 0, None, 0u64);
     while start.elapsed() < Duration::from_secs(secs) {
         match rng.below(100) {
             0..80 => tmux.keys(&[*rng.pick(KEYS)]),
@@ -319,7 +319,16 @@ fn e2e_soak() {
         sent += 1;
         std::thread::sleep(Duration::from_millis(30));
         if sent % 25 == 0 {
-            let s = tmux.screen();
+            let mut s = tmux.screen();
+            // Random keys can choose "quit" in the . menu (G goes to its last row, enter runs
+            // it): a clean exit from a frame showing the menu is that. Start again.
+            let frame = std::fs::read_to_string(dir.path().join("frame.txt")).unwrap_or_default();
+            if s.contains("CK_EXIT=0") && frame.contains("enter run") && frame.lines().any(|l| l.trim_end().ends_with(" quit")) {
+                tmux.start(&ck, &env, (110, 32));
+                ready(&tmux);
+                (quits, warm) = (quits + 1, None);
+                s = tmux.screen();
+            }
             assert!(!s.contains("CK_EXIT="), "ck exited (seed {seed}, after {sent} steps):\n{s}");
             assert!(!s.contains("panicked"), "ck panicked (seed {seed}):\n{s}");
             // The screen is what ck drew: nothing left over, nothing out of place.
@@ -346,5 +355,5 @@ fn e2e_soak() {
     assert!(s.contains("CK_EXIT=0"), "ck didn't quit cleanly at the end (seed {seed}):\n{s}");
     let (_, warnings) = crate::store::Store::load(Some(dir.path().join("data/ck")));
     assert!(warnings.is_empty(), "the data doesn't load cleanly: {warnings:?}");
-    eprintln!("e2e_soak: {sent} steps, {restarts} restarts, peak {peak} KB, no failures");
+    eprintln!("e2e_soak: {sent} steps, {restarts} restarts, {quits} quits from the menu, peak {peak} KB, no failures");
 }
