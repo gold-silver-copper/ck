@@ -1993,3 +1993,165 @@ fn settings_add_sites_and_vichan_boards_and_remove_them() {
     assert!(toml::from_str::<Config>(&std::fs::read_to_string(&path).unwrap()).unwrap().sites.is_empty());
     crate::http::serve_test_host("vi2.invalid", None);
 }
+
+/// Draw the app once at `w`x`h` (layouts are made by drawing).
+fn draw_at(app: &mut App, w: u16, h: u16) {
+    let mut term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(w, h)).unwrap();
+    term.draw(|f| crate::ui::draw(f, app)).unwrap();
+}
+
+/// Posts 1..=n, some taller than others.
+fn posts_upto(n: u64) -> Vec<Post> {
+    (1..=n).map(|no| Post { no, body: (0..1 + no % 4).map(|k| Line::from(format!("post {no} line {k}"))).collect(), ..Default::default() }).collect()
+}
+
+/// The selected post's first row on screen.
+fn selected_row(app: &App) -> isize {
+    let t = app.tab.thread.as_ref().unwrap();
+    let l = t.layout.as_ref().unwrap();
+    l.starts[t.entry()] as isize - t.scroll as isize
+}
+
+fn thread_app_of(n: u64) -> App {
+    let mut app = local_app();
+    app.tab.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
+    app.tab.view = View::Thread;
+    app.set_thread(posts_upto(n));
+    draw_at(&mut app, 100, 30);
+    app
+}
+
+#[test]
+fn reading_the_end_new_posts_come_into_view() {
+    let mut app = thread_app_of(40);
+    app.on_key(KeyEvent::from(KeyCode::Char('G')));
+    draw_at(&mut app, 100, 30);
+    assert!(app.tab.thread.as_ref().unwrap().at_end());
+    // A refresh brings 41-45: the first new one is selected, at the margin, as `j` would.
+    app.set_thread(posts_upto(45));
+    draw_at(&mut app, 100, 30);
+    let t = app.tab.thread.as_ref().unwrap();
+    assert_eq!(t.current().unwrap().no, 41);
+    let m = ((t.viewport as f32 * t.margin) as isize).min((t.viewport as isize - 1) / 2);
+    assert_eq!(selected_row(&app), m);
+    // They're new now (a first visit had nothing new), and nothing is left below.
+    assert!(t.is_new(t.selected) && t.new_below() < 5);
+    // Reading on to the end, the next refresh follows again.
+    for _ in 0..5 {
+        app.on_key(KeyEvent::from(KeyCode::Char('j')));
+        draw_at(&mut app, 100, 30);
+    }
+    assert!(app.tab.thread.as_ref().unwrap().at_end());
+    app.set_thread(posts_upto(46));
+    draw_at(&mut app, 100, 30);
+    assert_eq!(app.tab.thread.as_ref().unwrap().current().unwrap().no, 46);
+}
+
+#[test]
+fn reading_higher_up_nothing_moves() {
+    let mut app = thread_app_of(40);
+    app.on_key(KeyEvent::from(KeyCode::Char('G')));
+    draw_at(&mut app, 100, 30);
+    for _ in 0..12 {
+        app.on_key(KeyEvent::from(KeyCode::Char('k')));
+        draw_at(&mut app, 100, 30);
+    }
+    let (selected, scroll) = (app.tab.thread.as_ref().unwrap().selected, app.tab.thread.as_ref().unwrap().scroll);
+    assert!(!app.tab.thread.as_ref().unwrap().at_end());
+    app.set_thread(posts_upto(45));
+    draw_at(&mut app, 100, 30);
+    let t = app.tab.thread.as_ref().unwrap();
+    assert_eq!((t.selected, t.scroll), (selected, scroll));
+    // The top bar says how many are below; U goes to the first.
+    assert_eq!(t.new_below(), 5);
+    app.act(Action::Unread);
+    draw_at(&mut app, 100, 30);
+    assert_eq!(app.tab.thread.as_ref().unwrap().current().unwrap().no, 41);
+}
+
+#[test]
+fn following_edge_cases() {
+    // Nothing new, or only changed posts: nothing moves.
+    let mut app = thread_app_of(40);
+    app.on_key(KeyEvent::from(KeyCode::Char('G')));
+    draw_at(&mut app, 100, 30);
+    let scroll = app.tab.thread.as_ref().unwrap().scroll;
+    let mut changed = posts_upto(40);
+    changed[39].body.push(Line::from("edited"));
+    app.set_thread(changed);
+    draw_at(&mut app, 100, 30);
+    let t = app.tab.thread.as_ref().unwrap();
+    assert_eq!((t.current().unwrap().no, t.new_below()), (40, 0));
+    assert!(t.scroll >= scroll);
+    // New posts that are hidden are passed over; all hidden: nothing moves.
+    app.store.toggle_hidden("a", "x", 41);
+    app.set_thread(posts_upto(42));
+    draw_at(&mut app, 100, 30);
+    assert_eq!(app.tab.thread.as_ref().unwrap().current().unwrap().no, 42);
+    // Turned off: nothing moves.
+    let mut app = thread_app_of(40);
+    app.follow_new_posts = false;
+    app.on_key(KeyEvent::from(KeyCode::Char('G')));
+    draw_at(&mut app, 100, 30);
+    app.set_thread(posts_upto(45));
+    draw_at(&mut app, 100, 30);
+    assert_eq!(app.tab.thread.as_ref().unwrap().current().unwrap().no, 40);
+    // In a conversation, only posts that belong to it count.
+    let mut app = local_app();
+    app.tab.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
+    app.tab.view = View::Thread;
+    let quoting = |no, q: u64| Post { no, quotes: vec![q], body: vec![Line::from("r")], ..Default::default() };
+    app.set_thread(vec![Post { no: 1, ..Default::default() }, quoting(2, 1), Post { no: 3, ..Default::default() }]);
+    draw_at(&mut app, 100, 30);
+    app.act(Action::Conversation);
+    app.on_key(KeyEvent::from(KeyCode::Char('G')));
+    draw_at(&mut app, 100, 30);
+    app.set_thread(vec![Post { no: 1, ..Default::default() }, quoting(2, 1), Post { no: 3, ..Default::default() }, Post { no: 4, ..Default::default() }]);
+    draw_at(&mut app, 100, 30);
+    assert_eq!(app.tab.thread.as_ref().unwrap().current().unwrap().no, 2);
+    app.set_thread(vec![Post { no: 1, ..Default::default() }, quoting(2, 1), Post { no: 3, ..Default::default() }, Post { no: 4, ..Default::default() }, quoting(5, 1)]);
+    draw_at(&mut app, 100, 30);
+    assert_eq!(app.tab.thread.as_ref().unwrap().current().unwrap().no, 5);
+}
+
+#[test]
+fn following_a_tall_last_post_waits_for_its_end() {
+    // The last post is taller than the screen: while its start is shown, the end isn't on
+    // screen, so a refresh doesn't move; at its last screenful it does.
+    let mut posts = posts_upto(10);
+    posts[9].body = (0..80).map(|k| Line::from(format!("tall line {k}"))).collect();
+    let mut app = local_app();
+    app.tab.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
+    app.tab.view = View::Thread;
+    app.set_thread(posts.clone());
+    draw_at(&mut app, 100, 30);
+    app.act(Action::Unread);
+    for _ in 0..9 {
+        app.on_key(KeyEvent::from(KeyCode::Char('j')));
+        draw_at(&mut app, 100, 30);
+    }
+    assert_eq!(app.tab.thread.as_ref().unwrap().current().unwrap().no, 10);
+    let more = |posts: &Vec<Post>| {
+        let mut p = posts.clone();
+        p.push(Post { no: 11, body: vec![Line::from("eleven")], ..Default::default() });
+        p
+    };
+    if !app.tab.thread.as_ref().unwrap().at_end() {
+        app.set_thread(more(&posts));
+        draw_at(&mut app, 100, 30);
+        assert_eq!(app.tab.thread.as_ref().unwrap().current().unwrap().no, 10);
+        app.set_thread(posts.clone());
+        draw_at(&mut app, 100, 30);
+    }
+    for _ in 0..10 {
+        if app.tab.thread.as_ref().unwrap().at_end() {
+            break;
+        }
+        app.on_key(KeyEvent::from(KeyCode::Char('j')));
+        draw_at(&mut app, 100, 30);
+    }
+    assert!(app.tab.thread.as_ref().unwrap().at_end());
+    app.set_thread(more(&posts));
+    draw_at(&mut app, 100, 30);
+    assert_eq!(app.tab.thread.as_ref().unwrap().current().unwrap().no, 11);
+}

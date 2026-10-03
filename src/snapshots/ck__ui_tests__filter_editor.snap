@@ -20,16 +20,16 @@ expression: snapshot(&mut a)
     Open    filename  ·
     Watc    md5       ·                                                                     s
     Noti  Sites       4chan                                                                 s to…
-          Boards      g
-  Sites   On          yes
+    Read  Boards      g                                                                     ead …
+          On          yes
+  Sites
     Add                                                                                     inds…
-    Your                                                                                     you…
-          Not a valid pattern: unclosed group
-  Downlo
+    Your  Not a valid pattern: unclosed group                                                you…
+
+  Downloads
     Folder            ~/Downloads/ck/{site}/{board}/{…  Where saved files and pages go
 
   Startup
     Last place        restored                          Start where you left off (ck URL starts …
 
-  Keys
  enter change   esc back   , settings   ? help

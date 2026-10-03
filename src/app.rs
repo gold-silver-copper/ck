@@ -631,6 +631,21 @@ impl ThreadView {
     }
 
     /// The entry at the top of the view and how many of its lines are scrolled past.
+    /// Whether the end of the thread is being read: the last entry shown is selected, and
+    /// the end is on screen.
+    pub fn at_end(&self) -> bool {
+        let Some(l) = &self.layout else { return false };
+        // The last line is the gap after the last post.
+        self.viewport > 0 && self.entry() + 1 == self.entries.len() && self.scroll + self.viewport + 1 >= l.len()
+    }
+
+    /// New posts whose entries start below the screen.
+    pub fn new_below(&self) -> usize {
+        let Some(l) = &self.layout else { return 0 };
+        let bottom = self.scroll + self.viewport;
+        self.entries.iter().enumerate().filter(|&(e, x)| l.starts.get(e).is_some_and(|&s| s >= bottom) && self.is_new(x.post)).count()
+    }
+
     fn top_anchor(&self) -> Option<(usize, usize)> {
         let l = self.layout.as_ref()?;
         let top = l.starts.partition_point(|&s| s <= self.scroll).saturating_sub(1);
@@ -1004,6 +1019,8 @@ pub struct App {
     pub image_search_panel: Option<ImageSearchPanel>,
     /// Save where you are and start there next time.
     pub restore_session: bool,
+    /// Reading the end of a thread, new posts come into view (`follow_new_posts`).
+    pub follow_new_posts: bool,
     /// The data directory has changes to write, and when it was last written.
     save_pending: bool,
     saved_at: Instant,
@@ -1142,6 +1159,7 @@ impl App {
             image_search: if cfg.image_search.is_empty() { crate::config::ImageSearch::defaults() } else { cfg.image_search.clone() },
             image_search_panel: None,
             restore_session: cfg.restore_session,
+            follow_new_posts: cfg.follow_new_posts,
             save_pending: false,
             saved_at: Instant::now(),
             session_saved: (None, Instant::now()),
@@ -1789,10 +1807,16 @@ impl App {
         tv.margin = self.scroll_margin;
         // On a refresh, the newest post already shown.
         let mut shown_max = None;
+        // Reading the end: the last entry shown, to go on from once the posts are marked.
+        let mut follow = None;
         match self.tab.thread.take().filter(|t| t.no == no && t.board == tv.board) {
             // On refresh, keep the selected post and what's at the top of the view.
             Some(old) => {
                 shown_max = old.posts.iter().map(|p| p.no).max().filter(|_| !replacing);
+                // Reading the end: posts this brings come into view.
+                if self.follow_new_posts && !replacing && old.at_end() {
+                    follow = old.entries.last().map(|e| e.path.clone());
+                }
                 tv.selected = old.current().and_then(|p| tv.index.get(&p.no)).copied().unwrap_or(0);
                 // Expanded replies, the selected entry and the one at the top stay put.
                 tv.expanded = old.expanded.clone();
@@ -1818,6 +1842,12 @@ impl App {
                 tv.set_search(old.search);
                 // The focused part, if the post still has it.
                 tv.focus = old.focus.filter(|f| tv.parts_of(tv.entry()).contains(f));
+                // On a first visit nothing was new; what this brings is.
+                if tv.new_after == 0
+                    && let Some(m) = shown_max.filter(|&m| tv.posts.iter().any(|p| p.no > m))
+                {
+                    tv.new_after = m;
+                }
             }
             None => {
                 tv.new_after = self.store.last_seen(&key);
@@ -1840,6 +1870,15 @@ impl App {
         }
         self.tab.thread = Some(tv);
         self.remark_thread();
+        // Following: the first new entry that isn't hidden, revealed as `j` would.
+        if let Some(last) = follow
+            && let Some(t) = &mut self.tab.thread
+            && let Some(at) = t.entries.iter().position(|e| e.path == last)
+            && let Some(next) = (at + 1..t.entries.len()).find(|&e| !t.is_collapsed(t.entries[e].post))
+        {
+            t.set_cursor(next);
+            t.reveal = Some(Reveal::Step);
+        }
     }
 
     /// A thread's posts arrived: note the visit, and keep a copy if it's watched.

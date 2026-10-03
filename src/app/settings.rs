@@ -23,6 +23,7 @@ pub enum Item {
     RefreshThread,
     RefreshWatched,
     Notify,
+    FollowNew,
     DownloadDir,
     Restore,
     Keys,
@@ -50,6 +51,7 @@ pub const SECTIONS: &[(&str, &[Row])] = &[
         (Item::RefreshThread, "Open thread", "How often the open thread updates"),
         (Item::RefreshWatched, "Watched threads", "How often each watched thread updates"),
         (Item::Notify, "Notifications", "New posts in watched threads, replies to yours (m)"),
+        (Item::FollowNew, "Reading the end", "New posts come into view while you read the last one"),
     ]),
     ("Sites", &[
         (Item::AddSite, "Add a site", "Paste a link to any page of it; ck finds out what it runs"),
@@ -191,6 +193,7 @@ impl App {
             }
             Item::DownloadDir => self.download_dir.clone().unwrap_or_else(|| "~/Downloads/ck/{site}/{board}/{thread}".into()),
             Item::Restore => if self.restore_session { "restored" } else { "not restored" }.into(),
+            Item::FollowNew => if self.follow_new_posts { "new posts come into view" } else { "nothing moves" }.into(),
             Item::Keys => match ACTIONS.iter().filter(|e| !self.keys.is_default(e.0)).count() {
                 0 => "defaults".into(),
                 n => format!("{n} changed"),
@@ -263,6 +266,13 @@ impl App {
             }
             Item::DownloadDir => {
                 self.settings_popup = Some(Popup::Folder { value: self.download_dir.clone().unwrap_or_default() });
+            }
+            Item::FollowNew => {
+                self.follow_new_posts = !self.follow_new_posts;
+                let on = self.follow_new_posts;
+                self.save_config(if on { "following new posts" } else { "not following new posts" }, |d| {
+                    d["follow_new_posts"] = toml_edit::value(on)
+                });
             }
             Item::Restore => {
                 self.restore_session = !self.restore_session;

@@ -871,6 +871,9 @@ fn replay(seed: u64, acts: &[Act]) -> Result<(), (String, String)> {
             let calls = if Arc::ptr_eq(&gate, &world.gate) { world.gate.log_since(before.log) } else { Vec::new() };
             check_saved(&world.app, &before, &calls, &mut removed);
             check_marks(&world.app, &before);
+            if matches!(act, Act::Answer(_) | Act::AnswerAll | Act::Wait(_)) {
+                check_follow(&world.app, &before);
+            }
             // A step asks a handful of things at most (a few refreshes may fall due at once).
             let asked = world.gate.calls() - if Arc::ptr_eq(&gate, &world.gate) { calls_before } else { 0 };
             assert!(asked <= 12, "{asked} requests from one step");
@@ -1093,6 +1096,9 @@ struct Before {
     offline_dead: Option<(usize, ThreadKey)>,
     log: usize,
     filters: Vec<crate::filter::FilterConfig>,
+    /// The thread on screen: its tab, thread, post count, whether its end was being read,
+    /// and the post at the top of the screen.
+    reading: Option<(usize, String, u64, usize, bool, u64)>,
 }
 
 impl Before {
@@ -1105,7 +1111,30 @@ impl Before {
             }
             _ => None,
         };
-        Before { saved, in_saved_view: app.tab.view == View::Saved, offline_dead, log: gate.log_len(), filters: app.filter_cfgs.clone() }
+        let shown = app.tab.view == View::Thread && app.tab.gallery.is_none() && app.tab.viewer.is_none();
+        let reading = app.tab.thread.as_ref().filter(|_| shown).and_then(|t| {
+            let top = t.posts[t.entries.get(t.layout.as_ref()?.entry_at(t.scroll))?.post].no;
+            Some((app.active, t.board.clone(), t.no, t.posts.len(), t.at_end(), top))
+        });
+        Before { saved, in_saved_view: app.tab.view == View::Saved, offline_dead, log: gate.log_len(), filters: app.filter_cfgs.clone(), reading }
+    }
+}
+
+/// A refresh that brought posts to the thread on screen: reading its end, the selected post
+/// is on screen; reading elsewhere, the same post is at the top.
+fn check_follow(app: &App, before: &Before) {
+    let Some((tab, board, no, posts, at_end, top)) = &before.reading else { return };
+    let shown = app.tab.view == View::Thread && app.tab.gallery.is_none() && app.tab.viewer.is_none();
+    let Some(t) = app.tab.thread.as_ref().filter(|t| shown && app.active == *tab && t.board == *board && t.no == *no && t.posts.len() > *posts) else { return };
+    let Some(l) = &t.layout else { return };
+    let e = t.entry();
+    if *at_end && app.follow_new_posts {
+        let (start, end) = (l.starts[e], l.starts[e + 1]);
+        assert!(start < t.scroll + t.viewport && end > t.scroll, "following: the selected post (lines {start}..{end}) isn't on screen (scroll {}, {} rows)", t.scroll, t.viewport);
+    } else if t.index.contains_key(top) {
+        // (A post deleted by the refresh can't stay at the top.)
+        let now = t.entries.get(l.entry_at(t.scroll)).map(|x| t.posts[x.post].no);
+        assert_eq!(now, Some(*top), "not following: the post at the top changed after a refresh (still there: {}, scroll {}, len {}, view {})", t.index.contains_key(top), t.scroll, l.len(), t.viewport);
     }
 }
 
