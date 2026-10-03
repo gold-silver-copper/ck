@@ -7,7 +7,8 @@
 //!
 //! `cargo test fuzz_app` runs a short pass; `cargo test --profile fuzz -- --ignored
 //! fuzz_app_long --nocapture` a long one (`FUZZ_SEED`, `FUZZ_RUNS` or `FUZZ_SECS`,
-//! `FUZZ_STEPS`, and `FUZZ_SHRINK=0` to skip shrinking a failure).
+//! `FUZZ_STEPS`, `FUZZ_SHRINK=0` to skip shrinking a failure, and `FUZZ_TRACE=1` to print
+//! the app's state after every step).
 
 use std::collections::{HashMap, HashSet};
 use std::panic::{AssertUnwindSafe, catch_unwind};

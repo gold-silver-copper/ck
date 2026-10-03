@@ -1929,7 +1929,8 @@ fn draw_add_filter(f: &mut Frame, app: &App) {
     for (k, c) in a.candidates.iter().enumerate().take(inner.height as usize) {
         let y = inner.y + k as u16;
         paint_row(f, Rect::new(inner.x - 2, y, inner.width + 4, 1), None, k == sel, false);
-        let left = vec![Span::styled(c.what.clone(), Style::new().fg(t.text))];
+        let room = (inner.width as usize).saturating_sub(c.field.as_str().len() + 2);
+        let left = vec![Span::styled(truncate(&c.what, room), Style::new().fg(t.text))];
         put(f, inner.x, y, inner.width, spread(left, vec![Span::styled(c.field.as_str(), dim())], inner.width as usize));
     }
     let y = inner.y + a.candidates.len() as u16 + 1;
@@ -1971,13 +1972,15 @@ fn draw_filter_list(f: &mut Frame, app: &App, list: &ratatui::widgets::ListState
         paint_row(f, Rect::new(inner.x - 2, y, inner.width + 4, 1), None, k == sel, false);
         let style = if c.enabled { Style::new().fg(t.text) } else { dim() };
         let fields = c.fields().iter().map(|f| f.as_str()).collect::<Vec<_>>().join("+");
+        let count = counts.get(k).map_or(String::new(), |&n| counts_text(n));
+        // Narrow: the label and fields share what the count leaves.
+        let (label_w, fields_w) = if wide { (22, 18) } else { ((inner.width as usize).saturating_sub(count.width() + 15) * 3 / 5, (inner.width as usize).saturating_sub(count.width() + 15) * 2 / 5) };
         let mut left = vec![
             if c.enabled { chip(format!("{:<9}", c.action.as_str()), t.on_primary_container, t.primary_container) } else { chip(format!("{:<9}", "off"), t.text_dim, t.surface_high) },
             Span::raw("  "),
-            Span::styled(format!("{:<22}", truncate(c.label(), 21)), if c.enabled { bold(t.text) } else { dim() }),
-            Span::styled(format!("{:<18}", truncate(&fields, 17)), style),
+            Span::styled(format!("{:<label_w$}", truncate(c.label(), label_w.saturating_sub(1))), if c.enabled { bold(t.text) } else { dim() }),
+            Span::styled(format!("{:<fields_w$}", truncate(&fields, fields_w.saturating_sub(1))), style),
         ];
-        let count = counts.get(k).map_or(String::new(), |&n| counts_text(n));
         if wide {
             left.push(Span::styled(format!("{:<20}", truncate(&filter_scope(c), 19)), style));
             // The pattern gets what's left, beside the count.

@@ -291,8 +291,15 @@ pub enum FilterEdit<'a> {
 
 pub fn edit_filters(doc: &mut DocumentMut, edit: FilterEdit) -> Result<()> {
     use crate::filter::FilterConfig;
+    // The first filter goes at the very end, after the comments there (they'd read as its
+    // own otherwise); it takes them along as its prefix.
+    let mut moved = None;
     if doc.get("filter").is_none() {
         doc.insert("filter", Item::ArrayOfTables(Default::default()));
+        moved = doc.trailing().as_str().map(String::from).filter(|t| !t.trim().is_empty());
+        if moved.is_some() {
+            doc.set_trailing("");
+        }
     }
     let tables = doc.get_mut("filter").and_then(Item::as_array_of_tables_mut).context("`filter` in the config isn't a list of [[filter]] tables")?;
     let check = |tables: &toml_edit::ArrayOfTables, i: usize, old: &FilterConfig| -> Result<()> {
@@ -304,6 +311,9 @@ pub fn edit_filters(doc: &mut DocumentMut, edit: FilterEdit) -> Result<()> {
         FilterEdit::Add(new) => {
             let mut t = Table::new();
             new.write(&mut t, None);
+            if let Some(m) = moved {
+                t.decor_mut().set_prefix(format!("{m}\n"));
+            }
             tables.push(t);
         }
         FilterEdit::Change(i, old, new) => {
@@ -314,13 +324,49 @@ pub fn edit_filters(doc: &mut DocumentMut, edit: FilterEdit) -> Result<()> {
         }
         FilterEdit::Remove(i, old) => {
             check(tables, i, old)?;
+            let at = tables.get(i).and_then(Table::position);
+            let comments = tables.get(i).and_then(|t| t.decor().prefix()?.as_str().map(String::from)).filter(|p| p.contains('#'));
             tables.remove(i);
+            if let Some(c) = comments {
+                keep_comments(doc, &c, at);
+            }
         }
     }
     if doc.get("filter").and_then(Item::as_array_of_tables).is_some_and(|t| t.is_empty()) {
         doc.remove("filter");
     }
     Ok(())
+}
+
+/// Comments that were above a removed table stay: above the table after it (by position),
+/// or at the end of the file.
+fn keep_comments(doc: &mut DocumentMut, comments: &str, after: Option<isize>) {
+    let mut next: Option<&mut Table> = None;
+    for (_, item) in doc.iter_mut() {
+        let tables: Vec<&mut Table> = match item {
+            Item::Table(t) => vec![t],
+            Item::ArrayOfTables(a) => a.iter_mut().collect(),
+            _ => continue,
+        };
+        for t in tables {
+            let later = matches!((t.position(), after), (Some(p), Some(a)) if p > a);
+            if later && next.as_ref().is_none_or(|n| n.position() > t.position()) {
+                next = Some(t);
+            }
+        }
+    }
+    match next {
+        Some(t) => {
+            let rest = t.decor().prefix().and_then(|p| p.as_str()).unwrap_or("").to_string();
+            t.decor_mut().set_prefix(format!("{comments}{rest}"));
+        }
+        None => {
+            let trailing = doc.trailing().as_str().unwrap_or("").to_string();
+            // Undoing a first filter leaves the end as it was.
+            let comments = comments.strip_suffix('\n').filter(|c| c.ends_with('\n') && trailing.is_empty()).unwrap_or(comments);
+            doc.set_trailing(format!("{comments}{trailing}"));
+        }
+    }
 }
 
 pub fn set_key(doc: &mut DocumentMut, action: &str, binding: Option<&Binding>) {
@@ -457,5 +503,32 @@ mod tests {
         std::fs::write(&path, "[[site]]\nname = \"x\"\nkind = \"4chan\"\n").unwrap();
         assert!(edit_at(&path, |d| d["images"] = toml_edit::value("sometimes")).is_err());
         assert!(!std::fs::read_to_string(&path).unwrap().contains("sometimes"));
+    }
+}
+
+
+#[cfg(test)]
+mod tests_filters {
+    use super::*;
+    use crate::filter::{Field, FilterConfig};
+
+    #[test]
+    fn filter_tables_go_after_the_comments_and_removing_keeps_them() {
+        let f = FilterConfig::new("x".into(), &[Field::Name]);
+        // The default config ends with comments (under [keys]): the first filter goes after them.
+        let mut d: DocumentMut = DEFAULT_CONFIG.parse().unwrap();
+        edit_filters(&mut d, FilterEdit::Add(&f)).unwrap();
+        let text = d.to_string();
+        assert!(text.trim_end().ends_with("[[filter]]\npattern = \"x\"\nfield = \"name\"\naction = \"hide\""), "{text}");
+        assert!(text.contains("[keys]\n# watch = \"W\""), "{text}");
+        // Taking it back leaves the file as it was.
+        edit_filters(&mut d, FilterEdit::Remove(0, &f)).unwrap();
+        assert_eq!(d.to_string(), DEFAULT_CONFIG);
+        // A removed filter's comments stay, above what came after it.
+        let text = "[[filter]]\npattern = \"a\"\n\n# about b\n[[filter]]\npattern = \"b\"\n\n# sites\n[[site]]\nname = \"s\"\n";
+        let mut d: DocumentMut = text.parse().unwrap();
+        let b: FilterConfig = toml::from_str("pattern = \"b\"").unwrap();
+        edit_filters(&mut d, FilterEdit::Remove(1, &b)).unwrap();
+        assert_eq!(d.to_string(), "[[filter]]\npattern = \"a\"\n\n# about b\n\n# sites\n[[site]]\nname = \"s\"\n");
     }
 }
