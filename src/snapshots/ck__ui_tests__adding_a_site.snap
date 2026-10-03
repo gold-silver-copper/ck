@@ -1,0 +1,35 @@
+---
+source: src/ui_tests.rs
+assertion_line: 1128
+expression: snapshot(&mut a)
+---
+ ck  Sites                                                                                 23 sites
+
+    ◉  Watched         3 threads   2 new
+    ◷  History         2 threads recent
+    ▤  Saved           0 threads
+       4chan            fourchan    https://4chan.org
+       lainchan         vichan      https://lainchan.org
+       wizchan          vichan      https://wizchan.org
+       uboachan         vichan      https://uboachan.net
+       endchan          lynxchan    https://endchan.net
+       kohlcha  Add somechan.org?                             enter add · esc cancel
+       desuarc
+       zzzchan  It runs vichan.
+       2ch      Its boards: /b/ so far. vichan has no board list: Settings › Sites
+       smuglo.  adds more from links to them.
+       kissu
+       tvch     Name  somechan▏
+       sushigi  For : and favorites, like somechan/board. Saved in your config.
+       leftypo
+       8kun             vichan      https://8kun.top
+       alogs            lynxchan    https://alogs.space
+       trashchan        jschan      https://trashchan.xyz
+       ptchan           jschan      https://ptch.net
+       erischan         jschan      https://erischan.org
+       junkuchan        jschan      https://junkuchan.org
+       nukechan         jschan      https://nukechan.net
+       palanq           foolfuuka   https://archive.palanq.win
+       b4k              foolfuuka   https://arch.b4k.dev
+
+ enter open   . more   / filter   o browser   r reload   , settings   ? help

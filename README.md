@@ -11,7 +11,8 @@ A terminal imageboard browser built with [ratatui](https://ratatui.rs). One inte
 | `jschan`   | jschan                                   | zzzchan, trashchan, ptchan, erischan, junkuchan, nukechan |
 | `makaba`   | 2ch.hk's engine                          | 2ch                              |
 
-All of the examples are in the default config, so they show up without any setup.
+All of the examples are built in, so they show up without any setup. Any other site running
+one of these engines can be added by pasting a link to it (see [Adding sites](#adding-sites)).
 
 Overboards (one catalog mixing threads from many boards) work where the site says which
 board each thread is on: jschan and LynxChan sites list theirs first in the Boards view,
@@ -236,8 +237,9 @@ anyway). The tabs are part of the session that's restored at the next start.
 
 ### Going to a URL
 
-`:` asks where to go. Paste a thread or board URL from any configured site (pasting while
-nothing else is being typed starts this by itself), or type a short form:
+`:` asks where to go. Paste a thread or board URL from any of your sites (pasting while
+nothing else is being typed starts this by itself), or type a short form. A link to a site
+ck doesn't have yet offers to add it (see [Adding sites](#adding-sites)), then goes there.
 
 | input                  | goes to                                            |
 |------------------------|----------------------------------------------------|
@@ -545,6 +547,7 @@ All settings are optional; see `config.example.toml` for every option with comme
 - `[[filter]]`: hide or highlight threads and posts, see [Filters](#filters-and-hiding).
 - `[[image_search]]`: reverse image search engines, see
   [Reverse image search](#reverse-image-search).
+- `[[site]]`, `default_sites = false`: see [Adding sites](#adding-sites).
 - `archive = "desuarchive"` on a `[[site]]`: the archive for 404'd threads and `A` searches.
 - `[keys]`: `action = "key"`, `action = ["key", ...]`, or `action = []` for none (the `.`
   menu only), e.g. `watch = "W"`; see
@@ -556,7 +559,24 @@ All settings are optional; see `config.example.toml` for every option with comme
 
 ## Adding sites
 
-Add a `[[site]]` entry. vichan sites have no board-list API, so they need an explicit `boards` list:
+Paste a link to any page of the site after `:` (or in Settings › Sites › Add a site, or
+"add a site…" in the home screen's `.` menu). ck asks the site's APIs what it runs (jschan,
+LynxChan, FoolFuuka, vichan or makaba, one request a second like any other), and shows
+what it found with a name for it, which you can change: it's what you type after `:`
+(`somechan/b`) and what favorites are saved under. `enter` adds it to the config as a
+`[[site]]`, and from `:` goes on to the link.
+
+vichan sites have no board list to ask for, so a vichan site starts with the board of the
+link you pasted. Pasting a link to another of its boards in Settings › Sites › Add a site
+adds that board too (once ck has checked its catalog is there).
+
+Settings › Sites › Your sites lists the `[[site]]` tables in your config; `x` twice takes
+one out.
+
+The built-in sites are always there, whatever your config holds, so new ones (and fixes to
+them) come with new versions of ck. A `[[site]]` with a built-in site's name replaces it
+(`ck --print-sites` prints them all, to copy one and change it), and
+`default_sites = false` leaves out every built-in site. By hand, a site looks like this:
 
 ```toml
 [[site]]
@@ -569,6 +589,10 @@ thumb_ext = "png"   # only if the site renders every thumbnail as png (vichan's 
 
 A site can name a FoolFuuka archive with `archive = "desuarchive"`. When one of its
 threads 404s, ck offers to open it there (`a`).
+
+Config files from earlier versions of ck hold a copy of every built-in site (ck used to read
+only the sites in the file). Those copies still work (each replaces the built-in site of its name); delete
+the ones you never changed to get the built-in versions.
 
 ## Tests
 

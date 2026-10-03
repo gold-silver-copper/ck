@@ -1,5 +1,6 @@
 ---
 source: src/ui_tests.rs
+assertion_line: 340
 expression: snapshot(&mut a)
 ---
  ck  Settings
@@ -20,15 +21,15 @@ expression: snapshot(&mut a)
     Watc    md5       ·                                                                     s
     Noti  Sites       4chan                                                                 s to…
           Boards      g
-  Downlo  On          yes
-    Fold
+  Sites   On          yes
+    Add                                                                                     inds…
+    Your                                                                                     you…
+          Not a valid pattern: unclosed group
+  Downlo
+    Folder            ~/Downloads/ck/{site}/{board}/{…  Where saved files and pages go
 
-  Startu  Not a valid pattern: unclosed group
-    Last                                                                                    rts …
+  Startup
+    Last place        restored                          Start where you left off (ck URL starts …
 
   Keys
-    Key bindings      defaults                          Rebind any command
-
-  There's no config file to save to (no home directory); changes last until ck quits.
-
  enter change   esc back   , settings   ? help

@@ -1,5 +1,6 @@
 ---
 source: src/ui_tests.rs
+assertion_line: 227
 expression: snapshot(&mut a)
 ---
  ck  Sites                                                                                 23 sites
@@ -18,17 +19,17 @@ expression: snapshot(&mut a)
        2ch               Home screen
        smuglo.li           1-9 / *            open / favorite a board
        kissu               x                  unfavorite, hide a site
-       tvch
-       sushigirl         Watched, History, Saved
-       leftypol            x                  remove the entry (Saved: asks
-       8kun                T / F              new tab / follow general
-       alogs               y / Y              copy subject+link / link
-       trashchan
-       ptchan            Image viewer
-       erischan            h / l, ← / →       previous / next file
-       junkuchan           space              pause an animated GIF
-       nukechan            + / - / 0          zoom in / out / fit
-       palanq              i                  open externally
-       b4k                 y / Y              copy file URL / post link
+       tvch                : link             add a site (any page of it)
+       sushigirl
+       leftypol          Watched, History, Saved
+       8kun                x                  remove the entry (Saved: asks
+       alogs               T / F              new tab / follow general
+       trashchan           y / Y              copy subject+link / link
+       ptchan
+       erischan          Image viewer
+       junkuchan           h / l, ← / →       previous / next file
+       nukechan            space              pause an animated GIF
+       palanq              + / - / 0          zoom in / out / fit
+       b4k                 i                  open externally
 
  enter open   . more   / filter   o browser   r reload   , settings   ? help

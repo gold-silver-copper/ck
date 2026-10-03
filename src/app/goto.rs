@@ -27,6 +27,8 @@ impl App {
         let board = self.tab.board.as_ref().map(|b| b.uri.clone());
         match route::resolve(input, &self.site_infos(), (self.tab.site, board.as_deref())) {
             Ok(target) => self.go(target),
+            // A link to a site ck doesn't have: ask it what it runs, to add it.
+            Err(_) if crate::backend::detect::link(input).is_some() => self.add_site_from(input, true),
             Err(e) => self.error(e),
         }
     }
@@ -84,6 +86,9 @@ impl App {
     /// Text pasted into the terminal: into the input being typed, or a URL to go to.
     pub fn paste(&mut self, text: &str) {
         let text = text.trim().replace(['\n', '\r'], " ");
+        if self.paste_adding(&text) {
+            return;
+        }
         if let Some(g) = &mut self.goto {
             g.push_str(&text);
         } else if let Some(a) = &mut self.filter_add {

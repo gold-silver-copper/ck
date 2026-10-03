@@ -1,5 +1,10 @@
 # ck configuration. Copy to ~/.config/ck/config.toml and edit.
 #
+# The built-in sites are always there (`ck --print-sites` prints them). To add another,
+# paste a link to it after `:` or in Settings › Sites, and ck works out the rest; or add a
+# [[site]] table here. A [[site]] with a built-in site's name replaces it, and
+# `default_sites = false` leaves out every built-in one.
+#
 # Each [[site]] needs a `name` and a `kind`:
 #   kind = "4chan"     the official 4chan API (no url needed)
 #   kind = "vichan"    vichan / tinyboard / infinity engines (lainchan, wizchan, ...).
@@ -46,8 +51,8 @@ color = "auto"
 refresh_thread_secs = 10
 refresh_watched_secs = 60
 
-# Watched threads are saved as they refresh, and kept when they die; E (export) saves one
-# too. They open from the Saved row on the home screen, offline. Past this many megabytes,
+# Watched threads are saved as they refresh, and kept when they die; saving a thread as a
+# page (the . menu) saves one too. They open from the Saved row on the home screen, offline. Past this many megabytes,
 # the oldest copies of dead threads you no longer watch are removed (0 keeps everything).
 saved_max_mb = 500
 
@@ -76,7 +81,7 @@ restore_session = true
 # that board's own (and `s` its sort), kept in the data directory.
 catalog_layout = "cards"
 
-# Where `d` / `D` save files. {site}, {board} and {thread} are filled in, and {downloads}
+# Where saved files and pages go. {site}, {board} and {thread} are filled in, and {downloads}
 # is your Downloads folder. "~/" works too.
 # download_dir = "{downloads}/ck/{site}/{board}/{thread}"
 
@@ -319,8 +324,8 @@ url = "https://arch.b4k.dev"
 #               image_search = "R", open_file = "i",
 #               replies = "b", jump_back = "u", unread = "U",
 #               preview = "p", next_match = "n", prev_match = "N", spoiler = "s",
-#               all_spoilers = "S", download = "d", download_thread = "D", export = "E",
-#               archive = "a"
+#               all_spoilers = "S", download = "d", archive = "a",
+#               download_post, download_thread, export: no key (in the . menu)
 #   catalog, thread, Watched/History: new_tab = "T", follow = "F"
 #   home screen, Boards: favorite = "*"; remove = "x" takes a favorite off
 #   Watched/History/Saved: remove = "x"

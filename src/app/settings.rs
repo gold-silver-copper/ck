@@ -26,6 +26,8 @@ pub enum Item {
     DownloadDir,
     Restore,
     Keys,
+    AddSite,
+    MySites,
 }
 
 /// A setting with its label and hint.
@@ -48,6 +50,10 @@ pub const SECTIONS: &[(&str, &[Row])] = &[
         (Item::RefreshThread, "Open thread", "How often the open thread updates"),
         (Item::RefreshWatched, "Watched threads", "How often each watched thread updates"),
         (Item::Notify, "Notifications", "New posts in watched threads, replies to yours (m)"),
+    ]),
+    ("Sites", &[
+        (Item::AddSite, "Add a site", "Paste a link to any page of it; ck finds out what it runs"),
+        (Item::MySites, "Your sites", "The ones you added, or built-in ones you changed"),
     ]),
     ("Downloads", &[(Item::DownloadDir, "Folder", "Where saved files and pages go")]),
     ("Startup", &[(Item::Restore, "Last place", "Start where you left off (ck URL starts elsewhere)")]),
@@ -91,6 +97,8 @@ pub enum Popup {
     /// The key editor, over `key_rows()`; `capture` is waiting for a key to bind
     /// (`Some(true)`: add it to the action's keys).
     Keys { list: ListState, capture: Option<bool> },
+    /// The config's `[[site]]` tables.
+    Sites(super::MySites),
     /// The `[[filter]]` list, with how many posts and threads each catches on screen now.
     Filters { list: ListState, counts: Vec<(usize, usize)> },
     /// One filter being edited (`index`: none for a new one), on row `row` of `EDIT_ROWS`;
@@ -187,6 +195,18 @@ impl App {
                 0 => "defaults".into(),
                 n => format!("{n} changed"),
             },
+            Item::AddSite => format!("{} sites so far", self.sites.len() - self.removed_sites.len()),
+            Item::MySites => {
+                let builtin = config::builtin_sites();
+                let added = self.sites.iter().filter(|s| !builtin.iter().any(|b| b.name.eq_ignore_ascii_case(&s.cfg.name))).count();
+                let changed = self.sites.iter().filter(|s| builtin.iter().any(|b| b.name.eq_ignore_ascii_case(&s.cfg.name) && *b != s.cfg)).count();
+                match (added, changed) {
+                    (0, 0) => "only the built-in ones".into(),
+                    (a, 0) => format!("{a} added"),
+                    (0, c) => format!("{c} built-in changed"),
+                    (a, c) => format!("{a} added, {c} built-in changed"),
+                }
+            }
         }
     }
 
@@ -255,6 +275,8 @@ impl App {
                 let list = ListState::default().with_selected(key_rows().iter().position(Result::is_ok));
                 self.settings_popup = Some(Popup::Keys { list, capture: None });
             }
+            Item::AddSite => self.adding = Some(super::Adding::Typing(String::new())),
+            Item::MySites => self.settings_popup = self.my_sites().map(Popup::Sites),
         }
     }
 
@@ -357,6 +379,7 @@ impl App {
                 }
             },
             Popup::Filters { list, counts } => self.on_filter_list_key(key, list, counts),
+            Popup::Sites(m) => self.on_my_sites_key(key, m).map(Popup::Sites),
             Popup::FilterEdit { index, draft, row, typing } => self.on_filter_edit_key(key, index, draft, row, typing),
             Popup::Folder { mut value } => match key.code {
                 KeyCode::Esc => None,

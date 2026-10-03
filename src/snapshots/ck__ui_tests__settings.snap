@@ -21,6 +21,10 @@ expression: snapshot(&mut a)
     Watched threads   every 60s                         How often each watched thread updates
     Notifications     auto (terminal bell)              New posts in watched threads, replies to…
 
+  Sites
+    Add a site        23 sites so far                   Paste a link to any page of it; ck finds…
+    Your sites        only the built-in ones            The ones you added, or built-in ones you…
+
   Downloads
     Folder            ~/Downloads/ck/{site}/{board}/{…  Where saved files and pages go
 
@@ -28,8 +32,4 @@ expression: snapshot(&mut a)
     Last place        restored                          Start where you left off (ck URL starts …
 
   Keys
-    Key bindings      defaults                          Rebind any command
-
-  There's no config file to save to (no home directory); changes last until ck quits.
-
  enter change   esc back   , settings   ? help

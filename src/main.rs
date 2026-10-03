@@ -21,7 +21,11 @@ fn main() -> Result<()> {
     match args.iter().map(String::as_str).collect::<Vec<_>>().as_slice() {
         [] => {}
         ["--print-config"] => {
-            print!("{}", config::DEFAULT_CONFIG);
+            print!("{}", config::fresh());
+            return Ok(());
+        }
+        ["--print-sites"] => {
+            print!("{}", config::builtin_sites_text());
             return Ok(());
         }
         ["-h" | "--help"] => {
@@ -76,6 +80,7 @@ usage: ck                  start
        ck URL              start at a board or thread: a URL, or a short form like
                            4chan/g, 4chan/g/123 or lainchan/λ/42#43
        ck --print-config   print the default config (a starting point for your own)
+       ck --print-sites    print the built-in sites (copy one into your config to change it)
        ck --help           this help
 
 config:  {}{config_state}

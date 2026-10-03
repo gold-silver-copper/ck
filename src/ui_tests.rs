@@ -1104,3 +1104,26 @@ fn long_folders_wrap_at_slashes() {
     assert_eq!(crate::ui::wrap_path("abcdefghij", 4), ["abcd", "efgh", "ij"]);
     assert_eq!(crate::ui::wrap_path("日本語のフォルダ", 6), ["日本語", "のフォ", "ルダ"]);
 }
+
+#[test]
+fn adding_a_site() {
+    use crate::app::Adding;
+    use crate::config::{BoardConfig, SiteConfig, SiteKind};
+    let mut a = app(false);
+    a.adding = Some(Adding::Typing("somechan.org/b/".into()));
+    let text = render(&mut a).0;
+    assert!(text.contains("Link  somechan.org/b/▏") && text.contains("enter look · esc cancel"), "{text}");
+    a.adding = Some(Adding::Looking { id: 1, host: "somechan.org".into(), open: None });
+    assert!(render(&mut a).0.contains("Asking somechan.org what it runs…"));
+    let site = SiteConfig {
+        name: "somechan".into(),
+        kind: SiteKind::Vichan,
+        url: Some("https://somechan.org".into()),
+        boards: Some(vec![BoardConfig::Uri("b".into())]),
+        thumb_ext: None,
+        archive: None,
+        media_url: None,
+    };
+    a.adding = Some(Adding::Site { site, name: "somechan".into(), open: None });
+    insta::assert_snapshot!(snapshot(&mut a));
+}
