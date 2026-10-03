@@ -541,10 +541,16 @@ Nothing here leaves the machine: fake sites answer on `*.invalid` hosts or on 12
   whose answers arrive in any order. After every step it draws a frame and checks the
   tabs, threads, layouts and popups; nothing may stay loading, no worker thread may panic,
   nothing may be fetched in the background twice within 10s, and the saved data must load
-  again. A failure prints the seed that replays it and the fewest steps that still fail.
+  again. Threads die for good now and then: a watched thread that was ever loaded must
+  keep its saved copy, and a dead thread's copy being read is never fetched. A filter
+  added from a post must catch it, and after any filter change the marks and the config
+  agree with the filters in use. A conversation shows exactly its posts. A failure prints
+  the seed that replays it and the fewest steps that still fail (`FUZZ_TRACE=1` prints the
+  state after each step).
 - **The rest** (`src/fuzz.rs`): every engine's parsers on mangled responses, the markup
   parser and wrapping, routes, the rate limiter and the cache against a model, broken data
-  directories (nothing the user had may be lost), broken configs, and broken images.
+  directories and saved threads (nothing the user had may be lost), broken configs and
+  filter edits through the config writer, and broken images.
 - **Coverage-guided** (`fuzz/`, [cargo-fuzz](https://github.com/rust-fuzz/cargo-fuzz),
   nightly): targets for markup, routes, API JSON, the config, data files and images.
 - **End to end** (`src/e2e.rs`): the release binary in tmux, against local servers that

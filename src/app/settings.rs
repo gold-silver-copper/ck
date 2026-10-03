@@ -153,7 +153,8 @@ impl App {
                 let hidden: usize = self.store.hidden.values().map(Vec::len).sum();
                 let off = self.filter_cfgs.iter().filter(|f| !f.enabled).count();
                 let off = if off > 0 { format!(" ({off} off)") } else { String::new() };
-                format!("{} filters{off}, {hidden} hidden by hand", self.filter_cfgs.len())
+                let n = self.filter_cfgs.len();
+                format!("{n} filter{}{off}, {hidden} hidden by hand", if n == 1 { "" } else { "s" })
             }
             Item::RefreshThread => format!("every {}s", self.refresh_thread.as_secs()),
             Item::RefreshWatched => format!("every {}s", self.refresh_watched.as_secs()),
