@@ -637,7 +637,10 @@ Nothing here leaves the machine: fake sites answer on `*.invalid` hosts or on 12
   for `E2E_SECS`. It must stay up, quit cleanly, keep its memory flat and leave data that
   loads, and what's on screen must be exactly what ck drew. `CK_NO_EXTERNAL=1` keeps ck
   from opening a browser or player, writing the clipboard or notifying; `CK_FRAME_DUMP=file`
-  writes each frame as ck means it to look (to compare with the screen when something's off).
+  writes each frame as ck means it to look (to compare with the screen when something's off),
+  and `CK_INPUT_LOG=file` writes a timed line for every input event as it's read and as it's
+  handled, and for every frame drawn (to see what happened to a key). The soak also checks
+  that the first key after starting is acted on.
 
 `FUZZ_SEED`, `FUZZ_RUNS` or `FUZZ_SECS`, and `FUZZ_STEPS` steer the runs. CI runs the tests
 on every push; the fuzzers run nightly.
