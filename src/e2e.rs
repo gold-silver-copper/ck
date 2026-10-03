@@ -55,6 +55,7 @@ fn respond(mut stream: TcpStream, port: u16, answer: &(dyn Fn(&str, Option<&str>
         let mut r = crate::http::lock(rng);
         (Duration::from_millis(*r.pick(&[0, 0, 0, 50, 300, 1500]) as u64), r.chance(2), r.below(10), r.chance(15), r.chance(50))
     };
+    let long_post = crate::http::lock(rng).chance(30);
     std::thread::sleep(delay);
     if drop {
         return;
@@ -70,12 +71,32 @@ fn respond(mut stream: TcpStream, port: u16, answer: &(dyn Fn(&str, Option<&str>
         (200, "image/png", bytes)
     } else {
         let raw = answer(&format!("http://127.0.0.1:{port}{path}"), None);
-        (raw.status, "application/json", local_urls(&raw.body, port).into_bytes())
+        let mut body = local_urls(&raw.body, port);
+        // Now and then a post far taller than the screen.
+        if long_post && !path.contains("catalog") {
+            body = make_long_post(&body);
+        }
+        (raw.status, "application/json", body.into_bytes())
     };
     let modified = if kind == "application/json" && status == 200 { format!("Last-Modified: {MODIFIED}\r\n") } else { String::new() };
     let head = format!("HTTP/1.1 {status} X\r\nContent-Type: {kind}\r\n{modified}Content-Length: {}\r\nConnection: close\r\n\r\n", body.len());
     let _ = stream.write_all(head.as_bytes());
     let _ = stream.write_all(&body);
+}
+
+/// The first comment in an answer (whichever engine's field it's in) made a few hundred
+/// lines long.
+fn make_long_post(body: &str) -> String {
+    let lines = "a long post, line after line<br>".repeat(300);
+    let plain = "a long post, line after line\\n".repeat(300);
+    for field in ["\"com\":\"", "\"comment\":\"", "\"message\":\"", "\"markdown\":\""] {
+        if let Some(at) = body.find(field) {
+            let at = at + field.len();
+            let insert = if field.contains("message") { &plain } else { &lines };
+            return format!("{}{insert}{}", body.get(..at).unwrap_or_default(), body.get(at..).unwrap_or_default());
+        }
+    }
+    body.to_string()
 }
 
 /// Every absolute URL in an answer, pointed at this server instead.
