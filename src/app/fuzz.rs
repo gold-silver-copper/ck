@@ -829,6 +829,7 @@ fn replay(seed: u64, acts: &[Act]) -> Result<(), (String, String)> {
             let (w, h) = world.size;
             draw(&mut world.app, w, h);
             check(&world.app);
+            check_layout(&mut world.app);
             let calls = if Arc::ptr_eq(&gate, &world.gate) { world.gate.log_since(before.log) } else { Vec::new() };
             if std::env::var_os("FUZZ_TRACE").is_some() {
                 let a = &world.app;
@@ -1079,6 +1080,36 @@ impl Before {
     }
 }
 
+/// The thread on screen is laid out where it's seen, and what's laid out is what a full
+/// layout would give.
+fn check_layout(app: &mut App) {
+    let clock = app.clock;
+    let drawn = app.tab.view == View::Thread && app.tab.gallery.is_none() && app.tab.viewer.is_none();
+    let Some(t) = app.tab.thread.as_mut().filter(|_| drawn) else { return };
+    let Some((width, thumbs)) = t.layout.as_ref().map(|l| (l.width, l.thumbs_on)) else { return };
+    let full = crate::ui::layout_all(t, width, thumbs, clock);
+    let Some(l) = t.layout.as_ref() else { return };
+    if let Some(e) = (0..l.blocks.len()).find(|&e| l.exact[e] && l.blocks[e] != full.blocks[e]) {
+        let text = |b: &[ratatui::text::Line]| b.iter().map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect::<String>()).collect::<Vec<_>>();
+        let (have, want) = (text(&l.blocks[e]), text(&full.blocks[e]));
+        let k = (0..have.len().max(want.len())).find(|&k| have.get(k) != want.get(k) || l.blocks[e].get(k) != full.blocks[e].get(k)).unwrap_or(0);
+        panic!(
+            "entry {e} laid out differently than a full layout would, at line {k}:\n  have {:?}\n  want {:?}\n  styles {:?}\n  vs     {:?}",
+            have.get(k),
+            want.get(k),
+            l.blocks[e].get(k).map(|l| l.spans.iter().map(|s| s.style).collect::<Vec<_>>()),
+            full.blocks[e].get(k).map(|l| l.spans.iter().map(|s| s.style).collect::<Vec<_>>())
+        );
+    }
+    if l.blocks.is_empty() || t.viewport == 0 {
+        return;
+    }
+    let (top, bottom) = (l.entry_at(t.scroll), l.entry_at(t.scroll + t.viewport - 1));
+    if let Some(e) = (top..=bottom).find(|&e| !l.exact[e]) {
+        panic!("entry {e} is on screen but not laid out (scroll {}, view {})", t.scroll, t.viewport);
+    }
+}
+
 /// After the filters change, the open catalog's and thread's marks are what they say.
 fn check_marks(app: &App, before: &Before) {
     if app.filter_cfgs == before.filters {
@@ -1114,7 +1145,9 @@ fn check_marks(app: &App, before: &Before) {
 fn check_saved(app: &App, before: &Before, calls: &[String], removed: &mut HashSet<ThreadKey>) {
     for (key, prunable) in &before.saved {
         if app.store.saved(key).is_none() {
-            assert!(before.in_saved_view || *prunable, "the saved copy of {key:?} vanished outside the Saved view");
+            // (A step can go back into the Saved view and press x twice there.)
+            let in_saved = before.in_saved_view || app.tab.view == View::Saved;
+            assert!(in_saved || *prunable, "the saved copy of {key:?} vanished outside the Saved view");
             removed.insert(key.clone());
         }
     }

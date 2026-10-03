@@ -357,6 +357,91 @@ fn thread_from_its_last_copy() {
     insta::assert_snapshot!(snapshot(&mut a));
 }
 
+/// A long thread: posts of different lengths, every one numbered in its text.
+fn long_thread_app(n: u64) -> App {
+    let mut a = app(false);
+    a.tab.view = View::Thread;
+    let posts: Vec<Post> = (0..n).map(|k| post(2000 + k, HOUR, None, &format!("post {k}<br>{}", "and a line<br>".repeat((k % 7) as usize)))).collect();
+    a.tab.thread = Some(ThreadView::new("g".into(), 2000, posts));
+    a
+}
+
+/// Laid out entries are what a full layout gives them, and everything on screen is laid out.
+fn assert_layout_exact(a: &mut App) {
+    let clock = a.clock;
+    let t = a.tab.thread.as_mut().unwrap();
+    let (width, thumbs) = t.layout.as_ref().map(|l| (l.width, l.thumbs_on)).unwrap();
+    let full = crate::ui::layout_all(t, width, thumbs, clock);
+    let l = t.layout.as_ref().unwrap();
+    for e in (0..l.blocks.len()).filter(|&e| l.exact[e]) {
+        assert_eq!(l.blocks[e], full.blocks[e], "entry {e}");
+    }
+    let (top, bottom) = (l.entry_at(t.scroll), l.entry_at(t.scroll + t.viewport - 1));
+    assert!((top..=bottom).all(|e| l.exact[e]), "not laid out on screen: {top}..={bottom}");
+}
+
+#[test]
+fn long_threads_are_laid_out_near_the_view_only() {
+    use ratatui::crossterm::event::{KeyCode, KeyEvent};
+    let mut a = long_thread_app(400);
+    render(&mut a);
+    let laid_out = |a: &App| a.tab.thread.as_ref().unwrap().layout.as_ref().unwrap().exact.iter().filter(|&&x| x).count();
+    assert!(laid_out(&a) < 40, "{}", laid_out(&a));
+    assert_layout_exact(&mut a);
+    // G: the last post, placed exactly and shown whole.
+    a.on_key(KeyEvent::from(KeyCode::Char('G')));
+    let (text, _) = render(&mut a);
+    assert!(text.contains("post 399") && text.contains("No.2399"), "{text}");
+    assert_layout_exact(&mut a);
+    insta::assert_snapshot!("long_thread_end", snapshot(&mut a));
+    // Scrolling up lays out what comes into view; coming back shows the same screen.
+    let before = render(&mut a).0;
+    for _ in 0..40 {
+        a.on_key(KeyEvent::from(KeyCode::Char('K')));
+        render(&mut a);
+    }
+    for _ in 0..40 {
+        a.on_key(KeyEvent::from(KeyCode::Char('J')));
+        render(&mut a);
+    }
+    assert_eq!(render(&mut a).0, before);
+    // A jump to a far post lands on it.
+    let t = a.tab.thread.as_mut().unwrap();
+    assert!(t.jump_to(2150));
+    let (text, _) = render(&mut a);
+    assert!(text.contains("No.2150"), "{text}");
+    assert_layout_exact(&mut a);
+    // A click on a post's line selects that post.
+    let row = text.lines().position(|l| l.contains("No.2151")).unwrap() as u16;
+    a.on_mouse(ratatui::crossterm::event::MouseEvent { kind: ratatui::crossterm::event::MouseEventKind::Down(ratatui::crossterm::event::MouseButton::Left), column: 10, row, modifiers: ratatui::crossterm::event::KeyModifiers::NONE }, std::time::Instant::now());
+    assert_eq!(a.tab.thread.as_ref().unwrap().current().unwrap().no, 2151);
+    // A resize keeps the selection on screen.
+    let (text, _) = render_at(&mut a, 70, 20);
+    assert!(text.contains("No.2151"), "{text}");
+    assert_layout_exact(&mut a);
+    // Search: matches are found everywhere, and n goes to them exactly.
+    a.tab.thread.as_mut().unwrap().set_search("post 37".into());
+    assert_eq!(a.tab.thread.as_ref().unwrap().matches.len(), 11);
+    a.on_key(KeyEvent::from(KeyCode::Char('n')));
+    let (text, _) = render(&mut a);
+    let no = a.tab.thread.as_ref().unwrap().current().unwrap().no;
+    assert!(text.contains(&format!("No.{no}")), "{text}");
+    // Reading on through everything, the estimates all turn exact, and agree with a full
+    // layout to the line.
+    a.tab.thread.as_mut().unwrap().set_search(String::new());
+    a.on_key(KeyEvent::from(KeyCode::Char('g')));
+    for _ in 0..400 {
+        a.on_key(KeyEvent::from(KeyCode::Char('j')));
+        render(&mut a);
+    }
+    assert_eq!(laid_out(&a), 400);
+    let clock = a.clock;
+    let t = a.tab.thread.as_mut().unwrap();
+    let l = t.layout.as_ref().map(|l| (l.width, l.thumbs_on)).unwrap();
+    let full = crate::ui::layout_all(t, l.0, l.1, clock);
+    assert_eq!(t.layout.as_ref().unwrap().starts, full.starts);
+}
+
 #[test]
 fn history() {
     let mut a = app(false);
@@ -662,6 +747,15 @@ fn thread_lines_are_cached_but_never_stale() {
     render(&mut a);
     let after = blocks(&a);
     assert!(std::rc::Rc::ptr_eq(&before[1], &after[1]) && !std::rc::Rc::ptr_eq(&before[3], &after[3]));
+    // A post that comes back changed (its file deleted) is laid out again (found by fuzzing).
+    let mut posts = a.tab.thread.as_ref().unwrap().posts.clone();
+    posts[0].files.clear();
+    let mut t = crate::app::ThreadView::new("g".into(), 1000, posts);
+    t.cache = std::mem::take(&mut a.tab.thread.as_mut().unwrap().cache);
+    a.tab.thread = Some(t);
+    let (text, _) = render(&mut a);
+    assert!(!text.contains("op.png") && !std::rc::Rc::ptr_eq(&after[0], &blocks(&a)[0]), "{text}");
+    let after = blocks(&a);
     // A new theme lays everything out again.
     a.set_theme(crate::theme::BUILTIN[1].1);
     render(&mut a);

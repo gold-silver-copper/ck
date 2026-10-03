@@ -67,7 +67,7 @@ fn mouse_click_selects_thread_post() {
     let mut t = ThreadView::new("g".into(), 1, vec![post(1), post(2), post(3)]);
     // Each post: header, two lines, a blank.
     let block: Rc<[Line]> = vec![Line::raw(""); 4].into();
-    t.layout = Some(ThreadLayout { width: 40, blocks: vec![block.clone(), block.clone(), block], starts: vec![0, 4, 8, 12], thumbs: vec![], spots: vec![Rc::from([]); 3] });
+    t.layout = Some(ThreadLayout::of_blocks(40, vec![block.clone(), block.clone(), block]));
     t.viewport = 10;
     app.tab.thread = Some(t);
     app.tab.view = View::Thread;
@@ -952,7 +952,7 @@ fn background_changes_are_saved_together() {
 #[test]
 fn tab_switches_keep_layouts_and_theme_changes_redo_them_all() {
     let mut app = local_app();
-    let layout = || Some(ThreadLayout { width: 40, blocks: Vec::new(), starts: vec![0, 0], thumbs: Vec::new(), spots: Vec::new() });
+    let layout = || Some(ThreadLayout::of_blocks(40, Vec::new()));
     app.tab.thread = Some(ThreadView::new("x".into(), 1, vec![Post { no: 1, ..Default::default() }]));
     app.tab.thread.as_mut().unwrap().layout = layout();
     app.tabs.push(Tab::new(0, Instant::now()));
