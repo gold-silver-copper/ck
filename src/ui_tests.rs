@@ -545,6 +545,115 @@ fn inside_a_tall_post() {
     insta::assert_snapshot!(snapshot(&mut a));
 }
 
+/// The selected entry's first line, relative to the top of the screen.
+fn selected_row(a: &App) -> isize {
+    let t = a.tab.thread.as_ref().unwrap();
+    let l = t.layout.as_ref().unwrap();
+    l.starts[t.entry()] as isize - t.scroll as isize
+}
+
+#[test]
+fn the_selected_post_sits_at_the_margin_while_reading() {
+    use ratatui::crossterm::event::{KeyCode, KeyEvent};
+    for margin in [0.0f32, 0.3, 0.5] {
+        let mut a = long_thread_app(120);
+        a.tab.thread.as_mut().unwrap().margin = margin;
+        render(&mut a);
+        let view = a.tab.thread.as_ref().unwrap().viewport as isize;
+        let m = ((view as f32 * margin) as isize).min((view - 1) / 2);
+        // Reading down: once it scrolls, the selected post's top is at the margin (or, at
+        // margin 0, its bottom at the screen's bottom), until the end of the thread.
+        let mut scrolls = 0;
+        for _ in 0..100 {
+            let before = a.tab.thread.as_ref().unwrap().scroll;
+            a.on_key(KeyEvent::from(KeyCode::Char('j')));
+            render(&mut a);
+            let t = a.tab.thread.as_ref().unwrap();
+            let row = selected_row(&a);
+            let l = t.layout.as_ref().unwrap();
+            let at_end = t.scroll >= l.len().saturating_sub(view as usize);
+            assert!(row >= 0 && row < view, "margin {margin}: row {row}");
+            // Each time it scrolls: the post's top at the margin (margin 0: bottom-aligned).
+            if t.scroll != before && !at_end {
+                scrolls += 1;
+                if margin > 0.0 {
+                    assert_eq!(row, m, "margin {margin}");
+                }
+            }
+        }
+        assert!(scrolls > 3, "margin {margin}: {scrolls}");
+        // Reading back up mirrors it: each time it scrolls, the post's bottom at the margin
+        // from the screen's bottom (its top, for a post too tall for that).
+        for _ in 0..40 {
+            let before = a.tab.thread.as_ref().unwrap().scroll;
+            a.on_key(KeyEvent::from(KeyCode::Char('k')));
+            render(&mut a);
+            let t = a.tab.thread.as_ref().unwrap();
+            let l = t.layout.as_ref().unwrap();
+            let bottom = (l.starts[t.entry() + 1] as isize) - t.scroll as isize;
+            assert!(selected_row(&a) >= 0, "margin {margin}");
+            if t.scroll != before && t.scroll > 0 && margin > 0.0 {
+                assert!(bottom == view - m || selected_row(&a) == 0, "margin {margin}: bottom {bottom}");
+            }
+        }
+        // A jump to a far post (up) lands with its top at the margin.
+        assert!(a.tab.thread.as_mut().unwrap().jump_to(2030));
+        render(&mut a);
+        if margin > 0.0 {
+            assert_eq!(selected_row(&a), m, "margin {margin}");
+        } else {
+            assert!(selected_row(&a) >= 0);
+        }
+        // The start of the thread: it can't scroll above, so the selection goes to the top.
+        a.on_key(KeyEvent::from(KeyCode::Char('g')));
+        render(&mut a);
+        assert_eq!((selected_row(&a), a.tab.thread.as_ref().unwrap().scroll), (0, 0));
+    }
+}
+
+#[test]
+fn margin_zero_scrolls_as_before_and_small_screens_dont_loop() {
+    use ratatui::crossterm::event::{KeyCode, KeyEvent};
+    // Margin 0: each j scrolls as little as shows the post (its bottom at the screen's).
+    let mut a = long_thread_app(60);
+    render(&mut a);
+    for _ in 0..40 {
+        let before = a.tab.thread.as_ref().unwrap().scroll;
+        a.on_key(KeyEvent::from(KeyCode::Char('j')));
+        render(&mut a);
+        let t = a.tab.thread.as_ref().unwrap();
+        let l = t.layout.as_ref().unwrap();
+        let (start, end) = (l.starts[t.entry()], l.starts[t.entry() + 1]);
+        let want = if end > before + t.viewport { start.min(end - t.viewport) } else { before };
+        assert_eq!(t.scroll, want);
+    }
+    // A screen of two lines, margin 0.5: j still reaches the end.
+    let mut a = long_thread_app(30);
+    a.tab.thread.as_mut().unwrap().margin = 0.5;
+    render_at(&mut a, 60, 6);
+    for _ in 0..2000 {
+        a.on_key(KeyEvent::from(KeyCode::Char('j')));
+        render_at(&mut a, 60, 6);
+        if a.tab.thread.as_ref().unwrap().current().unwrap().no == 2029 {
+            return;
+        }
+    }
+    panic!("j didn't get to the end on a small screen");
+}
+
+#[test]
+fn reading_mid_thread() {
+    use ratatui::crossterm::event::{KeyCode, KeyEvent};
+    let mut a = long_thread_app(60);
+    a.tab.thread.as_mut().unwrap().margin = 0.3;
+    render(&mut a);
+    for _ in 0..12 {
+        a.on_key(KeyEvent::from(KeyCode::Char('j')));
+        render(&mut a);
+    }
+    insta::assert_snapshot!(snapshot(&mut a));
+}
+
 #[test]
 fn history() {
     let mut a = app(false);

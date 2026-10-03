@@ -8,6 +8,7 @@ expression: snapshot(&mut a)
     Theme             material                          Live preview while choosing
     Colors            as the theme has them             Change any color of the current theme
     Color depth       auto (24-bit)                     24-bit color, or the nearest of 256
+    Reading position  30% from the edges                How far from the edges the selected post…
 
   Catalog
     Default layout    cards                             c in a catalog sets a board's own
@@ -29,6 +30,5 @@ expression: snapshot(&mut a)
     Key bindings      defaults                          Rebind any command
 
   There's no config file to save to (no home directory); changes last until ck quits.
-
 
  enter change   esc back   , settings   ? help

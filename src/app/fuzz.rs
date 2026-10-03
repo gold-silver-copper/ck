@@ -1137,6 +1137,9 @@ fn check_layout(app: &mut App) {
     if let Some(e) = (top..=bottom).find(|&e| !l.exact[e]) {
         panic!("entry {e} is on screen but not laid out (scroll {}, view {})", t.scroll, t.viewport);
     }
+    if t.scroll > l.len().saturating_sub(t.viewport) {
+        panic!("scrolled to line {} of {} (view {})", t.scroll, l.len(), t.viewport);
+    }
     // The selected post is on screen, at least partly.
     let cursor = t.entry();
     if cursor < top || cursor > bottom {

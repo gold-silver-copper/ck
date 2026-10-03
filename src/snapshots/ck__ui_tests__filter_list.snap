@@ -8,10 +8,10 @@ expression: snapshot(&mut a)
     Theme             material                          Live preview while choosing
     Colors            as the theme has them             Change any color of the current theme
     Color depth       auto (24-bit)                     24-bit color, or the nearest of 256
+    Reading position  30% from the edges                How far from the edges the selected post…
 
   Catalog
     Default layout    cards                             c in a catalog sets a board's own
-    Images            on                                Thumbnails and the image viewer (after a…
     Filters                             enter edit · space on/off · a add · x remove · esc close
 
      hide        crypto                subject+comment   everywhere          (?i)…  nothing here
@@ -21,6 +21,7 @@ expression: snapshot(&mut a)
 
     Counts are for the open catalog and thread. Kept in the config as [[filter]] tables.
 
+    Folder            ~/Downloads/ck/{site}/{board}/{…  Where d / D save files
 
   Startup
     Last place        restored                          Start where you left off (ck URL starts …
@@ -29,6 +30,5 @@ expression: snapshot(&mut a)
     Key bindings      defaults                          Rebind any command
 
   There's no config file to save to (no home directory); changes last until ck quits.
-
 
  enter change   esc back   , settings   ? help

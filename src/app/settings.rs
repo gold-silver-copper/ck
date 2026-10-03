@@ -18,6 +18,7 @@ pub enum Item {
     ColorDepth,
     Compact,
     Images,
+    ScrollMargin,
     Filters,
     RefreshThread,
     RefreshWatched,
@@ -36,6 +37,7 @@ pub const SECTIONS: &[(&str, &[Row])] = &[
         (Item::Theme, "Theme", "Live preview while choosing"),
         (Item::Colors, "Colors", "Change any color of the current theme"),
         (Item::ColorDepth, "Color depth", "24-bit color, or the nearest of 256"),
+        (Item::ScrollMargin, "Reading position", "How far from the edges the selected post stays"),
     ]),
     ("Catalog", &[
         (Item::Compact, "Default layout", "c in a catalog sets a board's own"),
@@ -53,6 +55,8 @@ pub const SECTIONS: &[(&str, &[Row])] = &[
 ];
 
 const REFRESH_THREAD: &[u64] = &[10, 15, 30, 60, 120];
+/// The scroll margins Settings cycles through (a fraction of the screen).
+const SCROLL_MARGINS: &[f32] = &[0.0, 0.2, 0.3, 0.5];
 const REFRESH_WATCHED: &[u64] = &[60, 120, 300, 600, 1800];
 
 pub fn items() -> Vec<Item> {
@@ -145,6 +149,11 @@ impl App {
                 m => m.as_str().into(),
             },
             Item::Compact => self.default_layout.as_str().into(),
+            Item::ScrollMargin => match self.scroll_margin {
+                m if m <= 0.0 => "at the edge (no margin)".into(),
+                m if m >= 0.5 => "centered".into(),
+                m => format!("{}% from the edges", (m * 100.0).round()),
+            },
             Item::Images => match self.images_mode {
                 ImagesMode::Auto if self.images.enabled() => format!("on ({})", self.images.protocol_name()),
                 ImagesMode::Auto => "on".into(),
@@ -202,6 +211,15 @@ impl App {
                 self.save_config(&format!("color depth {mode}"), |d| d["color"] = toml_edit::value(mode));
             }
             Item::Compact => self.cycle_default_layout(),
+            Item::ScrollMargin => {
+                let next = SCROLL_MARGINS.iter().copied().find(|&m| m > self.scroll_margin + 0.01).unwrap_or(0.0);
+                self.scroll_margin = next;
+                // Every tab's thread reads with it from now on.
+                for t in std::iter::once(&mut self.tab).chain(self.tabs.iter_mut()).filter_map(|t| t.thread.as_mut()) {
+                    t.margin = next;
+                }
+                self.save_config(&format!("scroll_margin = {next}"), |d| d["scroll_margin"] = toml_edit::value(f64::from(next)));
+            }
             Item::Images => {
                 self.images_mode = self.images_mode.next();
                 let mode = self.images_mode.as_str();

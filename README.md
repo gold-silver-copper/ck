@@ -165,6 +165,16 @@ the action name is in brackets. The `?` help lists the same, with your keys.
 | `a`  | after a 404: open the thread in the site's archive [`archive`] |
 | `y` / `Y` | copy the post's text (a focused part: its URL) / the post's link [`copy`, `copy_link`] |
 
+### Where the selected post sits
+
+While you read down a thread with `j`, the selected post doesn't creep to the bottom edge:
+once it would come within `scroll_margin` of it (a fraction of the screen, 0.3 by default),
+the thread scrolls so the post starts about a third of the way down, with what came before
+it above and what comes next below. Reading up with `k` does the same at the top. Jumps
+(following a quote, `u`, `U`, `n`, a search hit, a hint) land there too. `scroll_margin =
+0.5` keeps the selected post centered, and `0` lets it reach the edges (scrolling as little
+as possible, as before); Settings › Reading position cycles through them.
+
 ### Long posts
 
 A post taller than the screen is read whole: `j` scrolls on through it, a screen at a time

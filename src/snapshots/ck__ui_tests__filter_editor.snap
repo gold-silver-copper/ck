@@ -8,27 +8,27 @@ expression: snapshot(&mut a)
     Theme             material                          Live preview while choosing
     Colors            as the theme has them             Change any color of the current theme
     Color depth       auto (24-bit)                     24-bit color, or the nearest of 256
-          Filter: Named !Trip                                      enter keep · esc cancel
-  Catalo
-    Defa  Pattern     ^Named (!Trip▏
-    Imag  Label       Named !Trip                                                           er a…
-    Filt  Action      highlight                                                              one…
-            subject   ·
-  Backgr    comment   ·
-    Open    name      ✓ looked at
-    Watc    filename  ·                                                                     s
-    Noti    md5       ·                                                                     s to…
-          Sites       4chan
-  Downlo  Boards      g
-    Fold  On          yes
+    Read  Filter: Named !Trip                                      enter keep · esc cancel  post…
 
-  Startu
-    Last  Not a valid pattern: unclosed group                                               rts …
+  Catalo  Pattern     ^Named (!Trip▏
+    Defa  Label       Named !Trip
+    Imag  Action      highlight                                                             er a…
+    Filt    subject   ·                                                                      one…
+            comment   ·
+  Backgr    name      ✓ looked at
+    Open    filename  ·
+    Watc    md5       ·                                                                     s
+    Noti  Sites       4chan                                                                 s to…
+          Boards      g
+  Downlo  On          yes
+    Fold
+
+  Startu  Not a valid pattern: unclosed group
+    Last                                                                                    rts …
 
   Keys
     Key bindings      defaults                          Rebind any command
 
   There's no config file to save to (no home directory); changes last until ck quits.
-
 
  enter change   esc back   , settings   ? help
