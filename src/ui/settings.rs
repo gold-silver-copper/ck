@@ -150,6 +150,7 @@ pub(super) fn draw_settings_popup(f: &mut Frame, app: &App) {
         Some(SettingsPopup::Filters { list, counts }) => draw_filter_list(f, app, list, counts),
         Some(SettingsPopup::Sites(m)) => draw_my_sites(f, m),
         Some(SettingsPopup::BoardImages { list }) => draw_board_images(f, app, list),
+        Some(SettingsPopup::HiddenWords { list, typing }) => draw_hidden_words(f, app, list, typing.as_deref()),
         Some(SettingsPopup::FilterEdit { index, draft, row, typing }) => draw_filter_edit(f, app, *index, draft, *row, typing.as_deref()),
         Some(SettingsPopup::Folder { value }) => {
             let inner = panel(f, 90, 7, "Download folder", "enter save · esc cancel");
@@ -187,6 +188,33 @@ fn counts_text((posts, threads): (usize, usize)) -> String {
 }
 
 /// Settings › Filters: every `[[filter]]`, with what it catches on screen now.
+/// Settings › Catalog › Hidden words.
+fn draw_hidden_words(f: &mut Frame, app: &App, list: &ListState, typing: Option<&str>) {
+    let t = theme();
+    let words = &app.hidden_words;
+    let hint = if typing.is_some() { "enter add · esc cancel" } else { "a add · x remove · esc close" };
+    let h = (words.len().max(1) as u16 + 6).min(f.area().height.saturating_sub(4));
+    let inner = panel(f, 70, h, "Hidden words", hint);
+    let sel = list.selected().unwrap_or(0);
+    let view = inner.height.saturating_sub(3) as usize;
+    let first = (sel + 1).saturating_sub(view);
+    if words.is_empty() && typing.is_none() {
+        put(f, inner.x, inner.y, inner.width, Line::styled("None yet. a adds one; so does w in a post's X.", dim()));
+    }
+    for (k, w) in words.iter().enumerate().skip(first).take(view) {
+        let y = inner.y + (k - first) as u16;
+        paint_row(f, Rect::new(inner.x - 2, y, inner.width + 4, 1), None, k == sel && typing.is_none(), false);
+        put(f, inner.x, y, inner.width, Line::styled(w.clone(), Style::new().fg(t.text)));
+    }
+    let y = inner.bottom().saturating_sub(2);
+    if let Some(text) = typing {
+        let line = Line::from(vec![Span::styled("New  ", dim()), Span::styled(text.to_string(), bold(t.text)), Span::styled("▏", Style::new().fg(t.primary))]);
+        put(f, inner.x, y, inner.width, line);
+    }
+    let note = "Whole words, any case. Kept in the config as hidden_words.";
+    put(f, inner.x, inner.bottom().saturating_sub(1), inner.width, Line::styled(note, dim()));
+}
+
 /// Settings › Catalog › Board images: boards with their own image setting.
 fn draw_board_images(f: &mut Frame, app: &App, list: &ListState) {
     let t = theme();

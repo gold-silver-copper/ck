@@ -344,6 +344,11 @@ url = "https://arch.b4k.dev"
 # watch = "W"
 # help = ["?", "f1"]
 
+# Hidden words: any post or thread with one of these words is hidden, everywhere. Plain
+# words in any case, whole words ("cat" isn't "concatenate"); also in Settings and from a
+# post's X (w).
+# hidden_words = ["crypto", "free money"]
+
 # Filters hide (or highlight) threads and posts whose text matches a regex. `field` is
 # "subject", "comment", "name", "filename" or "md5" (a file's base64 MD5, compared
 # exactly), or a list; the default is subject and comment. Optional `sites` and `boards`

@@ -1,5 +1,6 @@
 ---
 source: src/ui_tests.rs
+assertion_line: 309
 expression: snapshot(&mut a)
 ---
  ck  4chan  ›  /g/  ›  Snapshot thread                                            5 posts  ·  2 new
@@ -20,7 +21,7 @@ expression: snapshot(&mut a)
                 Do      hide them                               a: highlight instead
     >>1000 (OP  Where   all of 4chan                                       s: change
     >implying   Label   Named !Trip                                          e: edit
-
+                                                                  w: a word from it…
     Replies  >  Saved in the config as a [[filter]]; u right after takes it back.
 
 

@@ -39,6 +39,12 @@ pub struct Candidate {
     pub label: String,
 }
 
+/// What `u` right after takes back: a filter added (at its place), or a hidden word.
+pub enum Undo {
+    Filter(usize, FilterConfig),
+    Word(String),
+}
+
 /// `X`: a filter like the selected post, being made.
 pub struct AddFilter {
     /// The post (or catalog thread) it's made from.
@@ -52,6 +58,8 @@ pub struct AddFilter {
     /// The label, once changed by hand; `typing` while it's being edited.
     pub label: Option<String>,
     pub typing: Option<String>,
+    /// `w`: a word from it to hide everywhere, being typed.
+    pub word: Option<String>,
 }
 
 impl AddFilter {
@@ -252,10 +260,8 @@ impl App {
     pub fn open_add_filter(&mut self) {
         let Some(Source { post: p, board, file, is_op, usual }) = self.filter_source() else { return };
         let candidates = candidates(p, file, is_op, usual.as_deref());
-        if candidates.is_empty() {
-            self.info("Nothing to filter by here: no name, file or subject (filters can be written in Settings › Filters)");
-            return;
-        }
+        // Nothing else to go by: a word from it, straight away.
+        let word = candidates.is_empty().then(|| self.tab.thread.as_ref().map(|t| t.search.clone()).unwrap_or_default());
         // A focused file: its MD5 first.
         let first = if file.is_some() { candidates.iter().position(|c| c.field == Field::Md5).unwrap_or(0) } else { 0 };
         self.filter_add = Some(AddFilter {
@@ -268,11 +274,26 @@ impl App {
             reach: Reach::Board,
             label: None,
             typing: None,
+            word,
         });
     }
 
     pub fn on_add_filter_key(&mut self, key: KeyEvent) {
         let Some(mut a) = self.filter_add.take() else { return };
+        if let Some(mut word) = a.word.take() {
+            match key.code {
+                // Back to the choices, or out when there are none.
+                KeyCode::Esc if a.candidates.is_empty() => return,
+                KeyCode::Esc => {}
+                KeyCode::Enter => return self.add_hidden_word(&word),
+                code => {
+                    edit_text(&mut word, code);
+                    a.word = Some(word);
+                }
+            }
+            self.filter_add = Some(a);
+            return;
+        }
         if let Some(mut text) = a.typing.take() {
             match key.code {
                 KeyCode::Esc => {}
@@ -301,6 +322,8 @@ impl App {
             }
             KeyCode::Char('s') => a.reach = a.reach.next(),
             KeyCode::Char('e') => a.typing = Some(a.label()),
+            // A word from it: the thread's search, if there's one, to start with.
+            KeyCode::Char('w') => a.word = Some(self.tab.thread.as_ref().map(|t| t.search.clone()).unwrap_or_default()),
             code => {
                 let cur = a.list.selected().unwrap_or(0);
                 if let Some(to) = list_move(code, cur, a.candidates.len()) {
@@ -337,12 +360,66 @@ impl App {
             Err(e) => format!("u undoes; not saved: {e:#}"),
         };
         self.info(format!("{verb} {}{here} · {note}", f.label()));
-        self.filter_undo = Some((self.filter_cfgs.len() - 1, f));
+        self.filter_undo = Some(Undo::Filter(self.filter_cfgs.len() - 1, f));
     }
 
-    /// `u` right after adding a filter: remove it again.
+    /// Hide posts with `word`, everywhere; `u` right after takes it back.
+    pub(super) fn add_hidden_word(&mut self, word: &str) {
+        let word = word.split_whitespace().collect::<Vec<_>>().join(" ");
+        if crate::filter::word_pattern(&word).is_none() {
+            return self.error("A hidden word needs a letter or two");
+        }
+        if self.hidden_words.iter().any(|w| w.eq_ignore_ascii_case(&word)) {
+            return self.info(format!("\"{word}\" is already hidden"));
+        }
+        self.hidden_words.push(word.clone());
+        let saved = self.write_hidden_words();
+        self.apply_filters();
+        let label = format!("hidden word: {word}");
+        let posts = self.tab.thread.as_ref().map_or(0, |t| t.marks.iter().filter(|m| m.hidden.as_deref() == Some(&label)).count());
+        let threads = self.tab.catalog_marks.iter().filter(|m| m.hidden.as_deref() == Some(&label)).count();
+        let here = match (posts, threads) {
+            (0, 0) => String::new(),
+            (p, 0) => format!(" ({p} here)"),
+            (0, t) => format!(" ({t} here)"),
+            (p, t) => format!(" ({p} posts, {t} threads here)"),
+        };
+        let note = match saved {
+            Ok(()) => "u undoes; Settings › Filters › Hidden words lists them".to_string(),
+            Err(e) => format!("u undoes; not saved: {e:#}"),
+        };
+        self.info(format!("Hiding posts with \"{word}\"{here} · {note}"));
+        self.filter_undo = Some(Undo::Word(word));
+    }
+
+    /// Stop hiding posts with a word.
+    pub(super) fn remove_hidden_word(&mut self, word: &str) {
+        let before = self.hidden_words.len();
+        self.hidden_words.retain(|w| w != word);
+        if self.hidden_words.len() == before {
+            return;
+        }
+        let saved = self.write_hidden_words();
+        self.apply_filters();
+        match saved {
+            Ok(()) => self.info(format!("Posts with \"{word}\" aren't hidden now")),
+            Err(e) => self.error(format!("Posts with \"{word}\" aren't hidden for now; couldn't save it: {e:#}")),
+        }
+    }
+
+    fn write_hidden_words(&self) -> anyhow::Result<()> {
+        let path = self.config_path.as_ref().ok_or_else(|| anyhow::anyhow!("no config file"))?;
+        let words = self.hidden_words.clone();
+        crate::config::edit_at(path, |d| crate::config::set_hidden_words(d, &words))
+    }
+
+    /// `u` right after adding a filter or a hidden word: take it back.
     pub fn undo_filter(&mut self) {
-        let Some((i, f)) = self.filter_undo.take() else { return };
+        let (i, f) = match self.filter_undo.take() {
+            Some(Undo::Filter(i, f)) => (i, f),
+            Some(Undo::Word(w)) => return self.remove_hidden_word(&w),
+            None => return,
+        };
         if self.filter_cfgs.get(i) != Some(&f) {
             return;
         }
@@ -364,7 +441,7 @@ impl App {
 
     /// The filters changed: rebuild them, and mark the catalog and thread again.
     pub(super) fn apply_filters(&mut self) {
-        match Filters::new(&self.filter_cfgs) {
+        match Filters::new(&self.filter_cfgs).and_then(|f| f.with_words(&self.hidden_words)) {
             Ok(f) => self.filters = f,
             Err(e) => self.error(format!("{e:#}")),
         }
@@ -604,6 +681,7 @@ mod tests {
             reach: Reach::Board,
             label: None,
             typing: None,
+            word: None,
         };
         let f = a.config().unwrap();
         assert_eq!((f.sites.as_slice(), f.boards.as_slice(), f.label.as_deref()), (&["4chan".to_string()][..], &["g".to_string()][..], Some("Named")));

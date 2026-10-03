@@ -594,6 +594,9 @@ impl World {
         if rng.chance(40) {
             doc["nsfw_images"] = toml_edit::value("off");
         }
+        if rng.chance(30) {
+            doc["hidden_words"] = toml_edit::value(toml_edit::Array::from_iter(["the", "c++", "free money", "λ"]));
+        }
         let mut text = doc.to_string();
         if rng.chance(50) {
             text.push_str(FILTERS);
@@ -1171,9 +1174,12 @@ fn check_follow(app: &App, before: &Before) {
         let (start, end) = (l.starts[e], l.starts[e + 1]);
         assert!(start < t.scroll + t.viewport && end > t.scroll, "following: the selected post (lines {start}..{end}) isn't on screen (scroll {}, {} rows)", t.scroll, t.viewport);
     } else if t.index.contains_key(top) {
-        // (A post deleted by the refresh can't stay at the top.)
+        // The same post at the top (a post deleted by the refresh can't stay there), unless
+        // keeping the selected post on screen moved it: posts above it can grow, with replies.
         let now = t.entries.get(l.entry_at(t.scroll)).map(|x| t.posts[x.post].no);
-        assert_eq!(now, Some(*top), "not following: the post at the top changed after a refresh (still there: {}, scroll {}, len {}, view {})", t.index.contains_key(top), t.scroll, l.len(), t.viewport);
+        let (start, end) = (l.starts[e], l.starts[e + 1]);
+        let selected_shown = start < t.scroll + t.viewport && end > t.scroll;
+        assert!(now == Some(*top) || selected_shown, "not following: the post at the top changed after a refresh, and the selected one isn't on screen (scroll {}, len {}, view {})", t.scroll, l.len(), t.viewport);
     }
 }
 
