@@ -165,6 +165,16 @@ the action name is in brackets. The `?` help lists the same, with your keys.
 | `a`  | after a 404: open the thread in the site's archive [`archive`] |
 | `y` / `Y` | copy the post's text (a focused part: its URL) / the post's link [`copy`, `copy_link`] |
 
+### Long posts
+
+A post taller than the screen is read whole: `j` scrolls on through it, a screen at a time
+(keeping two lines from the screen before), and goes to the next post once its end is on
+screen. `k` reads back up through it the same way, and coming up into a long post from
+below starts at its end. While a post goes on below the screen, "↓ more" shows at the
+bottom right ("↑" at the top when it started above), and the top bar says which screen of
+it you're on, like "No.123 (2/5)". `J`/`K`, space and the mouse wheel still scroll by lines
+and pages.
+
 ### Conversations
 
 `c` on a post shows just its conversation: the post, what it quotes in the thread (and
