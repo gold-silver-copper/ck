@@ -1167,3 +1167,20 @@ fn saved_search_results() {
     a.tab.view = View::Search;
     insta::assert_snapshot!(snapshot(&mut a));
 }
+
+#[test]
+fn updating_a_built_in_sites_boards() {
+    use crate::app::Adding;
+    use crate::app::BoardsUpdate;
+    use crate::config::BoardConfig;
+    let mut a = app(false);
+    let lain = a.sites.iter().position(|s| s.cfg.name == "lainchan").unwrap();
+    let list = a.sites[lain].cfg.boards.clone().unwrap();
+    let mut bar = list.clone();
+    bar.push(BoardConfig::Full { uri: "mega".into(), title: "Overboard".into() });
+    bar.remove(0);
+    a.adding = Some(Adding::Boards { site: lain, update: BoardsUpdate::new(&list, bar), drop: false });
+    let text = render(&mut a).0;
+    assert!(text.contains("Update lainchan's boards?") && text.contains("New: /mega/"), "{text}");
+    assert!(text.contains("kept (d drops them)") && text.contains("lainchan is built in: this saves it as one of your sites"), "{text}");
+}

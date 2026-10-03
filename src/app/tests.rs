@@ -2353,3 +2353,64 @@ fn searching_saved_threads_with_none_saved() {
     app.goto_str("saved");
     assert_eq!(app.tab.view, View::Saved);
 }
+
+#[test]
+fn a_board_list_update_is_what_the_bar_says() {
+    use crate::app::BoardsUpdate;
+    use crate::config::BoardConfig;
+    let full = |u: &str, t: &str| BoardConfig::Full { uri: u.into(), title: t.into() };
+    let list = vec![full("wiz", "Wizardry"), full("old", "Old board"), BoardConfig::Uri("dep".into())];
+    let bar = vec![full("wiz", "Wizards"), full("dep", "Depression"), full("new", "New board")];
+    let u = BoardsUpdate::new(&list, bar);
+    assert_eq!(u.added, [full("new", "New board")]);
+    assert_eq!(u.missing, [full("old", "Old board")]);
+    // A title where there was none counts; so does a changed one.
+    assert_eq!(u.renamed, [("wiz".into(), "Wizardry".into(), "Wizards".into()), ("dep".into(), String::new(), "Depression".into())]);
+    let uris = |l: Vec<BoardConfig>| l.iter().map(|b| b.uri().to_string()).collect::<Vec<_>>();
+    assert_eq!(uris(u.list(false)), ["wiz", "dep", "new", "old"]);
+    assert_eq!(uris(u.list(true)), ["wiz", "dep", "new"]);
+    assert!(BoardsUpdate::new(&u.bar, u.bar.clone()).is_empty());
+}
+
+#[test]
+fn updating_a_vichan_sites_boards() {
+    use crate::backend::detect::tests::serve_text;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    let site = "[[site]]\nname = \"vb\"\nkind = \"vichan\"\nurl = \"https://vb.invalid\"\n# my boards\nboards = [{ uri = \"wiz\", title = \"Wizardry\" }, \"gone\"]\n";
+    std::fs::write(&path, format!("# my config\n{site}")).unwrap();
+    let mut app = app_with(site);
+    app.config_path = Some(path.clone());
+    let bar = r#"<div class="boardlist">[ <a href="/wiz/index.html" title="Wizardry">wiz</a> / <a href="/dep/index.html" title="Depression">dep</a> ]</div>"#;
+    serve_text("vb.invalid", vec![("/", bar.into())]);
+    // Settings › Your sites › r.
+    app.open_settings();
+    let mine = settings::items().iter().position(|&it| it == settings::Item::MySites).unwrap();
+    app.settings_list.state.select(Some(mine));
+    app.activate_setting();
+    app.on_key(KeyEvent::from(KeyCode::Char('r')));
+    settle_until(&mut app, |a| matches!(a.adding, Some(Adding::Boards { .. })));
+    let Some(Adding::Boards { update, drop: false, .. }) = &app.adding else { panic!("{:?}", app.status) };
+    assert_eq!((update.added.len(), update.missing.len()), (1, 1));
+    // d drops what the bar doesn't have; enter writes it, comments kept, and it's in use.
+    app.on_key(KeyEvent::from(KeyCode::Char('d')));
+    app.on_key(KeyEvent::from(KeyCode::Enter));
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(text.starts_with("# my config\n") && text.contains("# my boards"), "{text}");
+    let saved: Config = toml::from_str(&text).unwrap();
+    let uris: Vec<String> = saved.sites[0].boards.as_ref().unwrap().iter().map(|b| b.uri().to_string()).collect();
+    assert_eq!(uris, ["wiz", "dep"]);
+    assert_eq!(app.sites[0].cfg.boards, saved.sites[0].boards);
+    // Again: nothing to change.
+    app.refresh_board_list(0);
+    settle_until(&mut app, |a| a.adding.is_none());
+    assert_eq!(app.status.as_ref().unwrap().text, "vb's board list is up to date");
+    // Pages without a bar: said, nothing changes.
+    serve_text("vb.invalid", vec![("/", "<html></html>".into())]);
+    crate::http::forget_host("vb.invalid");
+    app.refresh_board_list(0);
+    settle_until(&mut app, |a| a.adding.is_none());
+    assert!(app.status.as_ref().unwrap().text.contains("have no board list to read"));
+    assert_eq!(app.sites[0].cfg.boards, saved.sites[0].boards);
+    crate::http::serve_test_host("vb.invalid", None);
+}

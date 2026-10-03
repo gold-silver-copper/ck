@@ -615,7 +615,11 @@ pages are drawn in the browser), it asks for one thumbnail from the board's cata
 couple of formats (at most three small requests). The popup says what it found.
 
 Settings › Sites › Your sites lists the `[[site]]` tables in your config; `x` twice takes
-one out.
+one out, and `r` on a vichan site reads its board bar again (so does "update the board
+list…" in its Boards list's `.` menu). It shows what changed (new boards, new titles, and
+boards no longer in the bar, which are kept unless `d` drops them; some boards are left
+out of the bar on purpose) and `enter` writes the new list. A built-in site updated this
+way becomes one of your sites, with that list.
 
 The built-in sites are always there, whatever your config holds, so new ones (and fixes to
 them) come with new versions of ck. A `[[site]]` with a built-in site's name replaces it
