@@ -220,6 +220,14 @@ pub struct ThreadView {
     pub mine: HashSet<u64>,
     /// The part of the selected post that has focus (`tab`); `None`: the post itself.
     pub focus: Option<Part>,
+    /// The selection moved: scroll it into view at the next draw, once it's laid out.
+    pub reveal: bool,
+    /// The width the line cache is for.
+    pub cache_width: u16,
+    /// Estimated heights of entries not laid out yet, by the same key as the line cache.
+    pub estimates: HashMap<(u64, u16, bool), usize>,
+    /// Each post's searchable text, once searched (spoilers hidden; revealed ones aren't kept).
+    search_texts: Vec<Option<String>>,
     /// Showing one post's conversation instead of the whole thread.
     pub conversation: Option<Conversation>,
     /// Scroll the focused part into view at the next draw.
@@ -264,6 +272,8 @@ pub struct Spot {
     pub width: u16,
 }
 
+/// A thread laid out: entries near the view exactly, the rest only by an estimate of their
+/// height (blank lines), until they come near.
 pub struct ThreadLayout {
     pub width: u16,
     /// Each entry's lines: padding, the post, padding, and the gap below it.
@@ -274,9 +284,52 @@ pub struct ThreadLayout {
     pub thumbs: Vec<(usize, usize)>,
     /// Where each entry's parts are, in its block.
     pub spots: Vec<Rc<[Spot]>>,
+    /// Which entries are laid out (the rest are estimates).
+    pub exact: Vec<bool>,
+    /// Which entries have a thumbnail.
+    pub has_thumb: Vec<bool>,
+    /// Whether thumbnails are shown at all, as laid out.
+    pub thumbs_on: bool,
+    /// The time (Unix seconds) it was laid out at: "3h ago" moves on.
+    pub at: i64,
 }
 
 impl ThreadLayout {
+    /// A layout of these blocks, all exact (tests).
+    #[cfg(test)]
+    pub fn of_blocks(width: u16, blocks: Vec<Rc<[Line<'static>]>>) -> Self {
+        let n = blocks.len();
+        let mut l = ThreadLayout {
+            width,
+            blocks,
+            starts: Vec::new(),
+            thumbs: Vec::new(),
+            spots: vec![Rc::from([]); n],
+            exact: vec![true; n],
+            has_thumb: vec![false; n],
+            thumbs_on: false,
+            at: 0,
+        };
+        l.restart();
+        l
+    }
+
+    /// Work out where each entry starts (and its thumbnail), after heights changed.
+    pub fn restart(&mut self) {
+        self.starts.clear();
+        let mut len = 0;
+        for b in &self.blocks {
+            self.starts.push(len);
+            len += b.len();
+        }
+        self.starts.push(len);
+        self.thumbs = (0..self.blocks.len()).filter(|&e| self.has_thumb[e]).map(|e| (self.starts[e] + 1, e)).collect();
+    }
+
+    /// The entry line `i` is in.
+    pub fn entry_at(&self, i: usize) -> usize {
+        self.starts.partition_point(|&s| s <= i).saturating_sub(1).min(self.blocks.len().saturating_sub(1))
+    }
     pub fn len(&self) -> usize {
         self.starts.last().copied().unwrap_or(0)
     }
@@ -336,7 +389,17 @@ impl ThreadView {
         self.matches = if needle.is_empty() {
             Vec::new()
         } else {
-            (0..self.posts.len()).filter(|&i| self.in_view(i) && self.post_text(i).contains(&needle)).collect()
+            let mut texts = std::mem::take(&mut self.search_texts);
+            texts.resize(self.posts.len(), None);
+            let mut found = |i: usize| {
+                if self.is_revealed(i) {
+                    return self.post_text(i).contains(&needle);
+                }
+                texts[i].get_or_insert_with(|| self.post_text(i)).contains(&needle)
+            };
+            let m = (0..self.posts.len()).filter(|&i| self.in_view(i) && found(i)).collect();
+            self.search_texts = texts;
+            m
         };
         self.search = query;
         self.layout = None;
@@ -567,6 +630,8 @@ impl ThreadView {
     fn select_entry(&mut self, e: usize) {
         self.set_cursor(e.min(self.entries.len().saturating_sub(1)));
         self.scroll_to_selected();
+        // Placed by estimates so far; exactly once it's laid out.
+        self.reveal = true;
     }
 
     /// Adjust scroll so the selected entry is visible (its top, if it's taller than the view).
@@ -595,7 +660,7 @@ impl ThreadView {
         self.set_cursor(e);
     }
 
-    fn jump_to(&mut self, no: u64) -> bool {
+    pub(crate) fn jump_to(&mut self, no: u64) -> bool {
         let Some(&i) = self.index.get(&no) else { return false };
         self.jumps.push(self.selected);
         self.select(i);
@@ -1619,6 +1684,8 @@ impl App {
                 tv.scroll = old.scroll;
                 tv.viewport = old.viewport;
                 tv.cache = old.cache;
+                tv.cache_width = old.cache_width;
+                tv.estimates = old.estimates;
                 tv.jumps = old.jumps;
                 tv.new_after = old.new_after;
                 // Revealed spoilers by post number, since indices can shift.

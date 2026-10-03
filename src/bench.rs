@@ -84,6 +84,31 @@ fn bench_thread() {
         a.on_key(ratatui::crossterm::event::KeyEvent::from(ratatui::crossterm::event::KeyCode::Char('e')));
         draw(&mut t, &mut a)
     });
+    // The same on ten times the thread: the cost should be the screen's, not the thread's.
+    let big = scale(&posts, 10_000);
+    let mut b = app();
+    b.tab.view = View::Thread;
+    b.tab.thread = Some(ThreadView::new("g".into(), big[0].no, big.clone()));
+    eprintln!("\n== thread, {} posts ==", big.len());
+    draw(&mut t, &mut b);
+    time("10k: frame, layout cached", 200, || draw(&mut t, &mut b));
+    time("10k: frame with full layout rebuild", 30, || {
+        b.tab.thread.as_mut().unwrap().layout = None;
+        draw(&mut t, &mut b)
+    });
+    let mut q = 0;
+    time("10k: search keystroke, then a frame (most posts match)", 30, || {
+        q += 1;
+        b.tab.thread.as_mut().unwrap().set_search(["the", "they"][q % 2].into());
+        draw(&mut t, &mut b)
+    });
+    b.tab.thread.as_mut().unwrap().set_search(String::new());
+    let mut end = false;
+    time("10k: G / g (to the end and back), then a frame", 30, || {
+        end = !end;
+        b.on_key(ratatui::crossterm::event::KeyEvent::from(ratatui::crossterm::event::KeyCode::Char(if end { 'G' } else { 'g' })));
+        draw(&mut t, &mut b)
+    });
     // The conversation of the most-replied post, and of the OP (everything, capped).
     let th = a.tab.thread.as_ref().unwrap();
     let n = crate::app::conversation_of(&th.posts, &th.index, &th.backlinks, most).0.len();

@@ -17,6 +17,8 @@ use crate::app::{
     App, Clock, Hit, LineCache, LinkItem, Part, SETTING_SECTIONS, Spot, SettingsPopup, SiteRow, Sort, Status, ThreadLayout, ThreadView, View, key_rows,
     setting_rows,
 };
+use std::collections::HashMap;
+
 use crate::http;
 use crate::images::{Images, Kind, State};
 use crate::keys::{self, Action, KeyMap};
@@ -1129,19 +1131,42 @@ fn draw_thread(f: &mut Frame, app: &mut App, area: Rect) {
     t.viewport = area.height as usize;
     app.hit = Some(Hit::Thread { area });
     let thumbs = app.images.enabled() && area.width >= MIN_THUMB_WIDTH;
-    if t.layout.as_ref().is_none_or(|l| l.width != area.width) {
-        let l = layout_thread(t, area.width, thumbs, app.clock);
+    let clock = app.clock;
+    if t.layout.as_ref().is_none_or(|l| l.width != area.width || l.thumbs_on != thumbs) {
+        // Lines cached at another width won't be used again.
+        if t.cache_width != 0 && t.cache_width != area.width {
+            t.cache.clear();
+            t.estimates.clear();
+            t.cache_width = area.width;
+        }
+        t.layout = Some(layout_thread(t, area.width, thumbs));
         // After a refresh, keep the same post at the top even if lines above it changed.
         if let Some((i, off)) = t.anchor.take() {
-            t.scroll = (l.starts[i] + off).min(l.len().saturating_sub(t.viewport));
+            lay_out_entries(t, [i], clock);
+            if let Some(l) = &t.layout {
+                t.scroll = (l.starts.get(i).copied().unwrap_or(0) + off).min(l.len().saturating_sub(t.viewport));
+            }
         }
-        t.layout = Some(l);
-        t.scroll_to_selected();
+        t.reveal = true;
     }
-    let Some(l) = t.layout.as_ref() else { return };
+    // Time moved on: what's laid out is laid out again (the line cache keeps what didn't
+    // change), in place.
+    if let Some(l) = t.layout.as_mut().filter(|l| l.at != clock.now()) {
+        l.at = clock.now();
+        l.exact.iter_mut().for_each(|x| *x = false);
+    }
+    settle(t, clock);
+    // The selection moved (or everything was laid out again): into view, placed exactly.
+    if std::mem::take(&mut t.reveal) {
+        lay_out_entries(t, [t.entry()], clock);
+        t.scroll_to_selected();
+        settle(t, clock);
+    }
     let cursor = t.entry();
     // A part just focused is scrolled into view (the post itself: its top).
-    if std::mem::take(&mut t.follow_focus) {
+    if std::mem::take(&mut t.follow_focus)
+        && let Some(l) = t.layout.as_ref()
+    {
         let at = l.spots.get(cursor).and_then(|s| s.iter().find(|s| Some(&s.part) == t.focus.as_ref()));
         let line = l.starts[cursor] + at.map_or(0, |s| s.line);
         if line < t.scroll {
@@ -1149,7 +1174,9 @@ fn draw_thread(f: &mut Frame, app: &mut App, area: Rect) {
         } else if line >= t.scroll + t.viewport {
             t.scroll = (line + 2).saturating_sub(t.viewport).min(l.len().saturating_sub(t.viewport));
         }
+        settle(t, clock);
     }
+    let Some(l) = t.layout.as_ref() else { return };
     for row in 0..area.height {
         let i = t.scroll + row as usize;
         let Some((e, line)) = l.line(i) else { break };
@@ -1208,65 +1235,178 @@ fn draw_thread(f: &mut Frame, app: &mut App, area: Rect) {
     }
 }
 
-/// Lay out every entry (post, or reply shown inline) as a card of wrapped lines: a padding
-/// line above and below the content, then a gap line. Posts with files get a thumbnail
-/// tile on the left.
-fn layout_thread(t: &mut ThreadView, width: u16, thumbs: bool, clock: Clock) -> ThreadLayout {
-    let old = std::mem::take(&mut t.cache);
-    let mut cache = LineCache::new();
+/// The width of an entry's text: what's left of `width` after its indent and padding.
+fn text_width_of(width: u16, depth: u8) -> usize {
+    width.saturating_sub(PAD + 2 + INDENT * depth as u16).max(10) as usize
+}
+
+/// Whether a post is drawn with a thumbnail tile beside its text.
+fn with_thumb(thumbs: bool, p: &Post, text_width: usize) -> bool {
+    thumbs && !p.files.is_empty() && text_width > THUMB.width as usize + 12
+}
+
+/// A thread's layout with every entry estimated (none laid out yet): see `lay_out_entries`.
+fn layout_thread(t: &mut ThreadView, width: u16, thumbs: bool) -> ThreadLayout {
     let n = t.entries.len();
-    let (mut blocks, mut spots, mut starts, mut thumb_at) = (Vec::with_capacity(n), Vec::with_capacity(n), Vec::with_capacity(n + 1), Vec::new());
-    let cursor = t.entry();
-    let mut len = 0;
-    for (e, entry) in t.entries.iter().enumerate() {
-        let (i, p) = (entry.post, &t.posts[entry.post]);
-        let text_width = width.saturating_sub(PAD + 2 + INDENT * entry.depth as u16).max(10) as usize;
-        let thumb = thumbs && !p.files.is_empty() && text_width > THUMB.width as usize + 12;
-        starts.push(len);
-        let (block, at): (Rc<[Line<'static>]>, Rc<[Spot]>) = if t.is_collapsed(i) {
-            // A hidden post is one line, so replies to it still make sense.
-            let why = t.marks.get(i).and_then(|m| m.hidden.as_deref()).filter(|l| !l.is_empty());
-            let why = why.map_or("hidden".to_string(), |l| format!("hidden by the filter \"{l}\""));
-            (vec![Line::styled(format!("No.{}  {why}", p.no), Style::new().fg(theme().text_dim)), Line::raw("")].into(), Rc::from([]))
-        } else {
-            let mut ctx = post_ctx(t, i, clock);
-            ctx.focus = t.focus.as_ref().filter(|_| e == cursor);
-            let key = (p.no, text_width as u16, thumb);
-            let shows = shown_with(t, i, p, &ctx);
-            let (block, at) = match cache.get(&key).or(old.get(&key)).filter(|(h, ..)| *h == shows) {
-                Some((_, block, at)) => (block.clone(), at.clone()),
-                None => {
-                    // A padding line above: the spots are a line further down.
-                    let mut lines = vec![Line::raw("")];
-                    let (text, mut at) = if thumb {
-                        let (text, at) = post_lines(p, &ctx, text_width - THUMB.width as usize - 2);
-                        let mut text = beside_tile(text, THUMB.width + 2);
-                        text.resize(text.len().max(THUMB.height as usize), Line::raw(""));
-                        (text, at.into_iter().map(|s| Spot { col: s.col + THUMB.width + 2, ..s }).collect())
-                    } else {
-                        post_lines(p, &ctx, text_width)
-                    };
-                    lines.extend(text);
-                    lines.extend([Line::raw(""), Line::raw("")]);
-                    for s in &mut at {
-                        s.line += 1;
-                    }
-                    (Rc::from(lines), Rc::from(at))
-                }
-            };
-            cache.insert(key, (shows, block.clone(), at.clone()));
-            if thumb {
-                thumb_at.push((len + 1, e));
-            }
-            (block, at)
-        };
-        len += block.len();
-        blocks.push(block);
-        spots.push(at);
+    let mut estimates = std::mem::take(&mut t.estimates);
+    let blocks = (0..n).map(|e| blank(estimate(t, &mut estimates, e, width, thumbs))).collect();
+    t.estimates = estimates;
+    let mut l = ThreadLayout {
+        width,
+        blocks,
+        starts: Vec::with_capacity(n + 1),
+        thumbs: Vec::new(),
+        spots: vec![Rc::from([]); n],
+        exact: vec![false; n],
+        has_thumb: vec![false; n],
+        thumbs_on: thumbs,
+        at: 0,
+    };
+    l.restart();
+    l
+}
+
+thread_local! {
+    /// Blank blocks by height, shared: what an entry not laid out yet holds.
+    static BLANKS: std::cell::RefCell<HashMap<usize, Rc<[Line<'static>]>>> = Default::default();
+}
+
+fn blank(height: usize) -> Rc<[Line<'static>]> {
+    BLANKS.with(|b| b.borrow_mut().entry(height).or_insert_with(|| vec![Line::raw(""); height].into()).clone())
+}
+
+/// How tall an entry will be: exactly, if it was laid out at this width before (the line
+/// cache has it), else from the length of its text (remembered in `estimates`).
+fn estimate(t: &ThreadView, estimates: &mut HashMap<(u64, u16, bool), usize>, e: usize, width: u16, thumbs: bool) -> usize {
+    let Some(entry) = t.entries.get(e) else { return 0 };
+    let p = &t.posts[entry.post];
+    if t.is_collapsed(entry.post) {
+        return 2;
     }
-    starts.push(len);
+    let text_width = text_width_of(width, entry.depth);
+    let thumb = with_thumb(thumbs, p, text_width);
+    let key = (p.no, text_width as u16, thumb);
+    if let Some((_, block, _)) = t.cache.get(&key) {
+        return block.len();
+    }
+    if let Some(&n) = estimates.get(&key) {
+        return n;
+    }
+    let w = if thumb { text_width - THUMB.width as usize - 2 } else { text_width }.max(1);
+    let rows = |width: usize| width.div_ceil(w).max(1);
+    let mut n = 2 + p.files.len();
+    if let Some(s) = &p.subject {
+        n += rows(s.width());
+    }
+    if !p.body.is_empty() {
+        n += 1 + p.body.iter().map(|l| rows(l.spans.iter().map(|s| s.content.width()).sum())).sum::<usize>();
+    }
+    if !t.backlinks[entry.post].is_empty() {
+        n += 2;
+    }
+    n += 2;
+    let n = if thumb { n.max(THUMB.height as usize + 3) } else { n };
+    estimates.insert(key, n);
+    n
+}
+
+/// Lay out entry `e` (a post, or a reply shown inline) as a card of wrapped lines: a padding
+/// line above and below the content, then a gap line. Posts with files get a thumbnail tile
+/// on the left. Unchanged posts come from the line cache. Returns its lines, where its parts
+/// are, and whether it has a thumbnail.
+fn lay_out(t: &ThreadView, cache: &mut LineCache, e: usize, width: u16, thumbs: bool, clock: Clock) -> (Rc<[Line<'static>]>, Rc<[Spot]>, bool) {
+    let entry = &t.entries[e];
+    let (i, p) = (entry.post, &t.posts[entry.post]);
+    if t.is_collapsed(i) {
+        // A hidden post is one line, so replies to it still make sense.
+        let why = t.marks.get(i).and_then(|m| m.hidden.as_deref()).filter(|l| !l.is_empty());
+        let why = why.map_or("hidden".to_string(), |l| format!("hidden by the filter \"{l}\""));
+        let block = vec![Line::styled(format!("No.{}  {why}", p.no), Style::new().fg(theme().text_dim)), Line::raw("")];
+        return (block.into(), Rc::from([]), false);
+    }
+    let text_width = text_width_of(width, entry.depth);
+    let thumb = with_thumb(thumbs, p, text_width);
+    let mut ctx = post_ctx(t, i, clock);
+    ctx.focus = t.focus.as_ref().filter(|_| e == t.entry());
+    let key = (p.no, text_width as u16, thumb);
+    let shows = shown_with(t, i, p, &ctx);
+    if let Some((_, block, at)) = cache.get(&key).filter(|(h, ..)| *h == shows) {
+        return (block.clone(), at.clone(), thumb);
+    }
+    // A padding line above: the spots are a line further down.
+    let mut lines = vec![Line::raw("")];
+    let (text, mut at) = if thumb {
+        let (text, at) = post_lines(p, &ctx, text_width - THUMB.width as usize - 2);
+        let mut text = beside_tile(text, THUMB.width + 2);
+        text.resize(text.len().max(THUMB.height as usize), Line::raw(""));
+        (text, at.into_iter().map(|s| Spot { col: s.col + THUMB.width + 2, ..s }).collect())
+    } else {
+        post_lines(p, &ctx, text_width)
+    };
+    lines.extend(text);
+    lines.extend([Line::raw(""), Line::raw("")]);
+    for s in &mut at {
+        s.line += 1;
+    }
+    let (block, at): (Rc<[Line<'static>]>, Rc<[Spot]>) = (Rc::from(lines), Rc::from(at));
+    cache.insert(key, (shows, block.clone(), at.clone()));
+    (block, at, thumb)
+}
+
+/// Lay out these entries (those not laid out yet). Returns whether any was.
+fn lay_out_entries(t: &mut ThreadView, entries: impl IntoIterator<Item = usize>, clock: Clock) -> bool {
+    let Some(mut l) = t.layout.take() else { return false };
+    let mut cache = std::mem::take(&mut t.cache);
+    let mut any = false;
+    for e in entries {
+        if e >= l.blocks.len() || l.exact[e] {
+            continue;
+        }
+        let (block, at, thumb) = lay_out(t, &mut cache, e, l.width, l.thumbs_on, clock);
+        (l.blocks[e], l.spots[e], l.has_thumb[e], l.exact[e]) = (block, at, thumb, true);
+        any = true;
+    }
+    if any {
+        l.restart();
+    }
     t.cache = cache;
-    ThreadLayout { width, blocks, starts, thumbs: thumb_at, spots }
+    t.layout = Some(l);
+    any
+}
+
+/// Lay out what's on screen, and a screen above and below (and the selected entry), keeping
+/// the entry at the top where it is as estimates turn exact.
+fn settle(t: &mut ThreadView, clock: Clock) {
+    for _ in 0..8 {
+        let Some(l) = &t.layout else { return };
+        if l.blocks.is_empty() {
+            return;
+        }
+        let view = t.viewport.max(1);
+        t.scroll = t.scroll.min(l.len().saturating_sub(view));
+        let top = l.entry_at(t.scroll);
+        let off = t.scroll - l.starts[top];
+        let (lo, hi) = (l.entry_at(t.scroll.saturating_sub(view)), l.entry_at(t.scroll + 2 * view));
+        let cursor = t.entry();
+        if !lay_out_entries(t, (lo..=hi).chain([cursor]), clock) {
+            return;
+        }
+        let Some(l) = &t.layout else { return };
+        t.scroll = (l.starts[top] + off).min(l.len().saturating_sub(view));
+    }
+}
+
+/// Every entry laid out, as a full layout would (checks and benchmarks).
+#[cfg(test)]
+pub fn layout_all(t: &mut ThreadView, width: u16, thumbs: bool, clock: Clock) -> ThreadLayout {
+    let mut cache = LineCache::new();
+    let mut l = layout_thread(t, width, thumbs);
+    for e in 0..t.entries.len() {
+        let (block, at, thumb) = lay_out(t, &mut cache, e, width, thumbs, clock);
+        (l.blocks[e], l.spots[e], l.has_thumb[e], l.exact[e]) = (block, at, thumb, true);
+    }
+    l.restart();
+    l
 }
 
 /// A hash of what a post's lines show besides the post itself, for the line cache: its
@@ -1275,13 +1415,29 @@ fn layout_thread(t: &mut ThreadView, width: u16, thumbs: bool, clock: Clock) -> 
 fn shown_with(t: &ThreadView, i: usize, p: &Post, ctx: &PostCtx) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut h = std::collections::hash_map::DefaultHasher::new();
-    let quotes_marked = p.quotes.iter().any(|q| *q == ctx.op_no || ctx.mine.contains(q));
+    // The quotes drawn with " (OP)" or " (You)", found as drawing finds them (by the quote's
+    // text, which may name a post the parser didn't count as a quote here).
+    let marked: Vec<(u64, bool, bool)> = p
+        .body
+        .iter()
+        .flat_map(|l| &l.spans)
+        .filter(|s| markup::is_quote_link(s.style))
+        .filter_map(|s| markup::quote_target(&s.content))
+        .map(|n| (n, n == ctx.op_no, ctx.mine.contains(&n)))
+        .filter(|&(_, op, mine)| op || mine)
+        .collect();
+    let quotes_marked = !marked.is_empty();
     // Matches are found in the post's own text; the " (OP)" / " (You)" added to quotes can
     // only be highlighted by a search for (part of) them.
     let s = ctx.search.as_str();
     let in_added = !s.is_empty() && (s.contains(['(', ')']) || " (op)".contains(s) || " (you)".contains(s));
     let highlighted = t.matches.binary_search(&i).is_ok() || (quotes_marked && in_added);
-    (ago(p.time, ctx.clock), ctx.is_op, ctx.is_new, ctx.reveal, ctx.mark, ctx.mine.contains(&p.no), quotes_marked, ctx.backlinks).hash(&mut h);
+    (ago(p.time, ctx.clock), ctx.is_op, ctx.is_new, ctx.reveal, ctx.mark, ctx.mine.contains(&p.no), &marked, ctx.backlinks).hash(&mut h);
+    // The post itself, which a refresh may bring changed (a file deleted, say).
+    (&p.name, &p.subject, p.plain_text(), p.body.len()).hash(&mut h);
+    for f in &p.files {
+        (&f.url, &f.filename, f.width, f.height, f.size).hash(&mut h);
+    }
     (ctx.focus, ctx.anchor).hash(&mut h);
     if highlighted {
         ctx.search.hash(&mut h);
