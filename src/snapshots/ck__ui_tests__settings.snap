@@ -14,6 +14,8 @@ expression: snapshot(&mut a)
   Catalog
     Default layout    cards                             c in a catalog sets a board's own
     Images            on                                Thumbnails and the image viewer (after a…
+    NSFW boards       images shown                      Images on boards the site marks NSFW
+    Board images      none                              Boards with their own image setting (. m…
     Filters           0 filters, 0 hidden by hand       Hide or highlight by pattern; X adds one…
 
   Background refresh
@@ -30,6 +32,4 @@ expression: snapshot(&mut a)
     Folder            ~/Downloads/ck/{site}/{board}/{…  Where saved files and pages go
 
   Startup
-    Last place        restored                          Start where you left off (ck URL starts …
-
  enter change   esc back   , settings   ? help

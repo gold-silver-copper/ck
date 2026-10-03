@@ -24,6 +24,8 @@ pub enum Item {
     RefreshWatched,
     Notify,
     FollowNew,
+    NsfwImages,
+    BoardImages,
     DownloadDir,
     Restore,
     Keys,
@@ -45,6 +47,8 @@ pub const SECTIONS: &[(&str, &[Row])] = &[
     ("Catalog", &[
         (Item::Compact, "Default layout", "c in a catalog sets a board's own"),
         (Item::Images, "Images", "Thumbnails and the image viewer (after a restart)"),
+        (Item::NsfwImages, "NSFW boards", "Images on boards the site marks NSFW"),
+        (Item::BoardImages, "Board images", "Boards with their own image setting (. menu on a board)"),
         (Item::Filters, "Filters", "Hide or highlight by pattern; X adds one from a post"),
     ]),
     ("Background refresh", &[
@@ -101,6 +105,8 @@ pub enum Popup {
     Keys { list: ListState, capture: Option<bool> },
     /// The config's `[[site]]` tables.
     Sites(super::MySites),
+    /// Boards with their own image setting.
+    BoardImages { list: ListState },
     /// The `[[filter]]` list, with how many posts and threads each catches on screen now.
     Filters { list: ListState, counts: Vec<(usize, usize)> },
     /// One filter being edited (`index`: none for a new one), on row `row` of `EDIT_ROWS`;
@@ -193,6 +199,15 @@ impl App {
             }
             Item::DownloadDir => self.download_dir.clone().unwrap_or_else(|| "~/Downloads/ck/{site}/{board}/{thread}".into()),
             Item::Restore => if self.restore_session { "restored" } else { "not restored" }.into(),
+            Item::NsfwImages => match self.nsfw_images {
+                crate::config::NsfwImages::Show => "images shown".into(),
+                crate::config::NsfwImages::Off => "images off".into(),
+            },
+            Item::BoardImages => match self.boards_with_images_set().len() {
+                0 => "none".into(),
+                1 => "1 board".into(),
+                n => format!("{n} boards"),
+            },
             Item::FollowNew => if self.follow_new_posts { "new posts come into view" } else { "nothing moves" }.into(),
             Item::Keys => match ACTIONS.iter().filter(|e| !self.keys.is_default(e.0)).count() {
                 0 => "defaults".into(),
@@ -267,6 +282,12 @@ impl App {
             Item::DownloadDir => {
                 self.settings_popup = Some(Popup::Folder { value: self.download_dir.clone().unwrap_or_default() });
             }
+            Item::NsfwImages => {
+                self.nsfw_images = self.nsfw_images.next();
+                let mode = self.nsfw_images.as_str();
+                self.save_config(&format!("nsfw_images = \"{mode}\""), |d| d["nsfw_images"] = toml_edit::value(mode));
+            }
+            Item::BoardImages => self.settings_popup = Some(Popup::BoardImages { list: ListState::default().with_selected(Some(0)) }),
             Item::FollowNew => {
                 self.follow_new_posts = !self.follow_new_posts;
                 let on = self.follow_new_posts;
@@ -390,6 +411,24 @@ impl App {
             },
             Popup::Filters { list, counts } => self.on_filter_list_key(key, list, counts),
             Popup::Sites(m) => self.on_my_sites_key(key, m).map(Popup::Sites),
+            Popup::BoardImages { mut list } => {
+                let boards = self.boards_with_images_set();
+                let cur = list.selected().unwrap_or(0);
+                match key.code {
+                    KeyCode::Esc | KeyCode::Char('q' | 'h') | KeyCode::Left => None,
+                    KeyCode::Char('x') | KeyCode::Delete => {
+                        if let Some((k, _)) = boards.get(cur) {
+                            self.reset_board_images(&k.clone());
+                        }
+                        list.select(Some(cur.min(boards.len().saturating_sub(2))));
+                        Some(Popup::BoardImages { list })
+                    }
+                    code => {
+                        list.select(Some(list_move(code, cur, boards.len()).unwrap_or(cur)));
+                        Some(Popup::BoardImages { list })
+                    }
+                }
+            }
             Popup::FilterEdit { index, draft, row, typing } => self.on_filter_edit_key(key, index, draft, row, typing),
             Popup::Folder { mut value } => match key.code {
                 KeyCode::Esc => None,

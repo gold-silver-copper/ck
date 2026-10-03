@@ -41,6 +41,9 @@ pub struct Config {
     /// Start where the last run left off.
     #[serde(default = "default_true")]
     pub restore_session: bool,
+    /// Images on boards the site marks NSFW (a board's own setting comes first).
+    #[serde(default)]
+    pub nsfw_images: NsfwImages,
     /// Reading the end of a thread, new posts from a refresh come into view.
     #[serde(default = "default_true")]
     pub follow_new_posts: bool,
@@ -180,6 +183,17 @@ pub enum ImagesMode {
 }
 
 cycle!(ImagesMode { Auto => "auto", Halfblocks => "halfblocks", Sixel => "sixel", Kitty => "kitty", Iterm2 => "iterm2", Off => "off" });
+
+/// Images on boards the site marks NSFW, unless a board has its own setting.
+#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum NsfwImages {
+    #[default]
+    Show,
+    Off,
+}
+
+cycle!(NsfwImages { Show => "show", Off => "off" });
 
 /// Color depth: 24-bit if the terminal says it supports it, or forced either way.
 #[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]

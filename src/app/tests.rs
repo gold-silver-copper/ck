@@ -876,7 +876,7 @@ fn boards_remember_their_sort_and_layout() {
     // Back on the first: its own again (also after a restart, from the data directory).
     app.goto_str("a/x");
     assert_eq!((app.tab.catalog_sort, app.layout()), (Sort::Replies, CatalogLayout::Compact));
-    assert_eq!(app.store.board_prefs["a/x"], crate::store::BoardPrefs { sort: Some(Sort::Replies), layout: Some(CatalogLayout::Compact) });
+    assert_eq!(app.store.board_prefs["a/x"], crate::store::BoardPrefs { sort: Some(Sort::Replies), layout: Some(CatalogLayout::Compact), images: None });
     // The default (Settings) applies to boards without their own.
     app.default_layout = CatalogLayout::Grid;
     app.goto_str("a/xy");
@@ -2154,4 +2154,135 @@ fn following_a_tall_last_post_waits_for_its_end() {
     app.set_thread(more(&posts));
     draw_at(&mut app, 100, 30);
     assert_eq!(app.tab.thread.as_ref().unwrap().current().unwrap().no, 11);
+}
+
+/// A site whose board list marks /x/ NSFW and /xy/ not; /z/ isn't in it.
+fn nsfw_app() -> App {
+    let mut app = local_app();
+    app.images = Images::offline();
+    app.sites[0].boards = Some(vec![
+        Board { uri: "x".into(), title: String::new(), nsfw: Some(true) },
+        Board { uri: "xy".into(), title: String::new(), nsfw: Some(false) },
+    ]);
+    app
+}
+
+fn with_file(no: u64, board: Option<&str>) -> Post {
+    let file = Attachment { filename: format!("{no}.png"), url: format!("http://127.0.0.1:3/src/{no}.png"), thumb: Some(format!("http://127.0.0.1:3/thumb/{no}.png")), ..Default::default() };
+    Post { no, files: vec![file], board: board.map(String::from), body: vec![Line::from("text")], ..Default::default() }
+}
+
+#[test]
+fn which_image_setting_applies_to_a_board() {
+    use crate::config::NsfwImages;
+    let mut app = nsfw_app();
+    // The default shows everything.
+    assert!(app.images_on(0, "x") && app.images_on(0, "xy") && app.images_on(0, "z"));
+    // NSFW boards off: only the board the site marks; one it says nothing of is safe.
+    app.nsfw_images = NsfwImages::Off;
+    assert!(!app.images_on(0, "x") && app.images_on(0, "xy") && app.images_on(0, "z"));
+    // A board's own setting comes first, either way.
+    app.store.board_prefs.entry("a/x".into()).or_default().images = Some(true);
+    app.store.board_prefs.entry("a/xy".into()).or_default().images = Some(false);
+    assert!(app.images_on(0, "x") && !app.images_on(0, "xy"));
+    // The other site's boards of the same name are their own.
+    assert!(app.images_on(1, "xy"));
+}
+
+#[test]
+fn the_menu_switch_sets_and_resets_a_boards_own_setting() {
+    use crate::config::NsfwImages;
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = nsfw_app();
+    app.store = Store::load(Some(dir.path().to_path_buf())).0;
+    app.sites[0].boards = nsfw_app().sites[0].boards.clone();
+    app.goto_str("a/xy");
+    run_menu_row(&mut app, "images on this board: on → off");
+    assert!(!app.images_on(0, "xy"));
+    assert_eq!(app.store.board_prefs["a/xy"].images, Some(false));
+    run_menu_row(&mut app, "images on this board: off → on");
+    // Back to what the default gives: no setting of its own.
+    assert_eq!(app.store.board_prefs["a/xy"].images, None);
+    // On an NSFW board with NSFW boards off, turning images on is its own setting.
+    app.nsfw_images = NsfwImages::Off;
+    app.goto_str("a/x");
+    run_menu_row(&mut app, "images on this board: off → on");
+    assert_eq!(app.store.board_prefs["a/x"].images, Some(true));
+    assert_eq!(app.boards_with_images_set(), [("a/x".to_string(), true)]);
+    // Kept in the data directory; older files without it load.
+    app.save_now();
+    assert_eq!(Store::load(Some(dir.path().to_path_buf())).0.board_prefs["a/x"].images, Some(true));
+    let old: crate::store::BoardPrefs = serde_json::from_str(r#"{"sort": "newest"}"#).unwrap();
+    assert_eq!(old.images, None);
+}
+
+#[test]
+fn no_images_are_asked_for_on_a_board_with_images_off() {
+    use crate::config::NsfwImages;
+    let mut app = nsfw_app();
+    app.nsfw_images = NsfwImages::Off;
+    app.tab.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: Some(true) });
+    app.tab.view = View::Thread;
+    app.set_thread((1..=60).map(|no| with_file(no, None)).collect());
+    draw_at(&mut app, 100, 30);
+    // Nothing on screen, nothing prefetched below it, nothing in the gallery.
+    assert_eq!(app.images.queued_urls(), Vec::<String>::new());
+    app.act(Action::Gallery);
+    draw_at(&mut app, 100, 30);
+    assert!(app.images.queued_urls().is_empty());
+    // The viewer says why instead of opening.
+    app.on_key(KeyEvent::from(KeyCode::Enter));
+    assert!(app.tab.viewer.is_none() && app.status.as_ref().unwrap().text.starts_with("Images are off on /x/"));
+    // The same thread on a board with images: asked for.
+    app.tab.gallery = None;
+    app.tab.board = Some(Board { uri: "xy".into(), title: String::new(), nsfw: Some(false) });
+    app.tab.thread = None;
+    app.set_thread((1..=60).map(|no| with_file(no, None)).collect());
+    app.tab.thread.as_mut().unwrap().board = "xy".into();
+    draw_at(&mut app, 100, 30);
+    assert!(!app.images.queued_urls().is_empty());
+}
+
+#[test]
+fn an_overboard_follows_each_threads_board() {
+    use crate::config::NsfwImages;
+    let mut app = nsfw_app();
+    app.nsfw_images = NsfwImages::Off;
+    app.tab.view = View::Catalog;
+    app.tab.catalog_site = 0;
+    app.tab.catalog_board = "all".into();
+    app.tab.catalog = (1..=6).map(|no| with_file(no, Some(if no % 2 == 0 { "x" } else { "xy" }))).collect();
+    app.tab.catalog_marks = vec![Default::default(); 6];
+    app.tab.catalog_list.state.select(Some(0));
+    draw_at(&mut app, 100, 40);
+    let asked = app.images.queued_urls();
+    assert!(!asked.is_empty());
+    assert!(asked.iter().all(|u| ["1", "3", "5"].iter().any(|n| u.ends_with(&format!("/{n}.png")))), "{asked:?}");
+    // The overboard's own setting covers all of it.
+    app.store.board_prefs.entry("a/all".into()).or_default().images = Some(false);
+    let mut fresh = nsfw_app();
+    std::mem::swap(&mut fresh.images, &mut app.images);
+    draw_at(&mut app, 100, 40);
+    assert!(app.images.queued_urls().is_empty());
+}
+
+#[test]
+fn an_unknown_nsfw_flag_loads_the_board_list_once() {
+    use crate::config::NsfwImages;
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = local_app();
+    app.store = Store::load(Some(dir.path().to_path_buf())).0;
+    // Showing NSFW boards: nothing is loaded for this.
+    app.know_nsfw(0);
+    assert!(app.boards_refreshing.is_empty());
+    // Off: the saved list if there is one, else the site's list, once.
+    app.nsfw_images = NsfwImages::Off;
+    app.know_nsfw(0);
+    assert_eq!(app.boards_refreshing.len(), 1);
+    app.boards_refreshing.clear();
+    app.know_nsfw(0);
+    assert!(app.boards_refreshing.is_empty());
+    app.store.save_boards("b", &[Board { uri: "y".into(), title: String::new(), nsfw: Some(true) }], 5).unwrap();
+    app.know_nsfw(1);
+    assert!(app.boards_refreshing.is_empty() && !app.images_on(1, "y"));
 }

@@ -1,0 +1,35 @@
+---
+source: src/ui_tests.rs
+assertion_line: 1146
+expression: snapshot(&mut a)
+---
+ ck  4chan  ›  /g/  ›  Snapshot thread                             5 posts  ·  2 new  ·  images off
+
+
+                      Anonymous   OP  2026-09-21 09:13 · 5h ago  No.1000
+                      Snapshot thread
+                      op.png  800x600 · 121 KB
+
+       image off      A thread for snapshot tests.
+                      It has a few replies.
+
+                      Replies  >>1001
+
+
+
+    Anonymous  2026-09-21 10:13 · 4h ago  No.1001
+
+    >>1000 (OP)
+    >implying
+
+    Replies  >>1003
+
+
+
+    Anonymous  2026-09-21 11:13 · 3h ago  No.1002
+
+    Code:
+    fn main() {
+        println!("snapshot");
+    }
+ j/k post   tab images & links   f hints   . more   enter quote   c conversation   u back   / search

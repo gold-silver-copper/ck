@@ -79,6 +79,9 @@ pub struct BoardPrefs {
     pub sort: Option<crate::config::Sort>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub layout: Option<crate::config::CatalogLayout>,
+    /// Images on this board: its own setting, if it has one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub images: Option<bool>,
 }
 
 /// Threads gone from the catalog this long are forgotten.

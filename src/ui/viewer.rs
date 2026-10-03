@@ -5,6 +5,7 @@ use super::*;
 /// The thread's files (`V`): thumbnails with their post number and type.
 pub(super) fn draw_gallery(f: &mut Frame, app: &mut App, area: Rect) {
     let t = theme();
+    let off = app.tab.thread.as_ref().is_some_and(|t| !app.images_on(app.tab.site, &t.board));
     let Some(g) = &mut app.tab.gallery else { return };
     let (card_w, card_h) = (THUMB.width + 4, THUMB.height + 1);
     let (cell_w, cell_h) = (card_w + 2, card_h + 1);
@@ -21,13 +22,13 @@ pub(super) fn draw_gallery(f: &mut Frame, app: &mut App, area: Rect) {
         let (x, y) = (area.x + c as u16 * cell_w, area.y + r as u16 * cell_h);
         let card = Rect::new(x, y, card_w, card_h).intersection(area);
         if card.is_empty() {
-            if let Some(url) = file.thumb.as_ref().filter(|u| http::is_media_host(u)) {
+            if let Some(url) = file.thumb.as_ref().filter(|u| !off && http::is_media_host(u)) {
                 app.images.want(url, Kind::Thumb);
             }
             continue;
         }
         paint_row(f, card, Some(t.surface), k == sel, false);
-        draw_tile(f, &mut app.images, file, 1, Rect::new(x + PAD, y, THUMB.width, THUMB.height), area);
+        draw_tile(f, &mut app.images, file, 1, off, Rect::new(x + PAD, y, THUMB.width, THUMB.height), area);
         let no = posts.and_then(|p| p.get(*post)).map_or(0, |p| p.no);
         let kind = file.ext().to_uppercase();
         let label = Line::from(vec![Span::styled(format!("No.{no}"), Style::new().fg(t.text)), Span::styled(format!("  {kind}"), dim())]);

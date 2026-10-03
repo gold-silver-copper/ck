@@ -456,6 +456,23 @@ the detected protocol is wrong for your setup, name one: `images = "halfblocks"`
 next start). To turn images off entirely (no image requests at all), put `images = "off"`
 at the top of your config.
 
+### Images on or off per board
+
+"images on this board: on → off" in the `.` menu of a catalog, a thread or the Boards list
+turns a board's images off (or back on; the action is `board_images`, without a key until
+you give it one). With images off on a board, ck asks for none of its images: thumbnails
+show "image off" in their place, the layout stays the same, `v` says images are off instead
+of opening the viewer, and the top bar says "images off". Opening a file with `i`, links,
+copying and downloads still work. On an overboard each thread follows its own board,
+unless the overboard has a setting of its own.
+
+`nsfw_images = "off"` turns images off on every board the site marks NSFW (4chan, jschan,
+LynxChan and makaba say which; vichan sites don't, so their boards count as worksafe),
+including boards you haven't opened yet. A board's own setting comes first, and
+`images = "off"` still turns everything off. Settings › Catalog has both: "NSFW boards",
+and "Board images", which lists the boards with their own setting (`x` takes one away).
+Boards' settings are kept in the data directory with their sort and layout.
+
 ### Reverse image search
 
 `R` lists search engines for the selected post's images (for videos, their thumbnail) or

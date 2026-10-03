@@ -379,6 +379,7 @@ impl App {
             Action::NewTab => self.new_tab(),
             Action::Favorite => self.toggle_favorite(),
             Action::AddSite => self.adding = Some(super::Adding::Typing(String::new())),
+            Action::BoardImages => self.toggle_board_images(),
             Action::Follow => self.toggle_follow(),
             Action::NextTab => self.cycle_tab(true),
             Action::PrevTab => self.cycle_tab(false),

@@ -591,13 +591,22 @@ impl World {
         if rng.chance(30) {
             doc["hidden_sites"] = toml_edit::value(toml_edit::Array::from_iter(["kissu", "8kun"]));
         }
+        if rng.chance(40) {
+            doc["nsfw_images"] = toml_edit::value("off");
+        }
         let mut text = doc.to_string();
         if rng.chance(50) {
             text.push_str(FILTERS);
         }
         let cfg: Config = toml::from_str(&text).unwrap();
         std::fs::write(dir.join("config.toml"), &text).unwrap();
-        let store = Store::load(Some(dir.join("data"))).0;
+        let mut store = Store::load(Some(dir.join("data"))).0;
+        // Some boards with images off (or on) of their own.
+        for board in ["4chan/g", "4chan/b", "lainchan/λ", "zzzchan/b", "4chan/all"] {
+            if rng.chance(25) {
+                store.board_prefs.entry(board.into()).or_default().images = Some(rng.chance(30));
+            }
+        }
         let mut app = App::new(cfg, KeyMap::default(), None, store);
         app.config_path = Some(dir.join("config.toml"));
         app.download_dir = Some(dir.join("downloads").display().to_string());
@@ -852,7 +861,9 @@ fn replay(seed: u64, acts: &[Act]) -> Result<(), (String, String)> {
             world.app.poll();
             world.app.quit = false;
             let (w, h) = world.size;
+            let asked_before = world.app.images.queued_urls();
             draw(&mut world.app, w, h);
+            check_images(&world.app, &asked_before);
             if std::env::var_os("FUZZ_TRACE").is_some() {
                 let a = &world.app;
                 let hid: Vec<String> = a.store.hidden.iter().map(|(k, v)| format!("{k}:{}", v.len())).collect();
@@ -1117,6 +1128,34 @@ impl Before {
             Some((app.active, t.board.clone(), t.no, t.posts.len(), t.at_end(), top))
         });
         Before { saved, in_saved_view: app.tab.view == View::Saved, offline_dead, log: gate.log_len(), filters: app.filter_cfgs.clone(), reading }
+    }
+}
+
+/// Nothing drawn asked for a thumbnail of a post on a board with images off.
+fn check_images(app: &App, before: &[String]) {
+    let after = app.images.queued_urls();
+    let asked: Vec<&String> = after.iter().filter(|u| !before.contains(u)).collect();
+    if asked.is_empty() {
+        return;
+    }
+    let off_thumbs: Vec<&str> = match app.tab.view {
+        View::Thread => app
+            .tab
+            .thread
+            .as_ref()
+            .filter(|t| !app.images_on(app.tab.site, &t.board))
+            .map(|t| t.posts.iter().flat_map(|p| p.files.iter().filter_map(|f| f.thumb.as_deref())).collect())
+            .unwrap_or_default(),
+        View::Catalog => app.tab.catalog.iter().filter(|p| !app.catalog_images_on(p)).flat_map(|p| p.files.iter().filter_map(|f| f.thumb.as_deref())).collect(),
+        _ => Vec::new(),
+    };
+    // A thumbnail shared with a post on a board that shows images can be asked for.
+    let shared = |u: &str| match app.tab.view {
+        View::Catalog => app.tab.catalog.iter().filter(|p| app.catalog_images_on(p)).any(|p| p.files.iter().any(|f| f.thumb.as_deref() == Some(u))),
+        _ => false,
+    };
+    for u in asked {
+        assert!(!off_thumbs.contains(&u.as_str()) || shared(u) || app.tab.viewer.is_some(), "{u} was asked for on a board with images off");
     }
 }
 
