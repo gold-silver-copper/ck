@@ -115,8 +115,9 @@ the action name is in brackets. The `?` help lists the same, with your keys.
 
 | key  | action |
 |------|--------|
-| `h`/`l`, arrows | previous / next file (animated GIFs play) |
+| `h`/`l`, arrows | previous / next file (animated GIFs play); from a thread, every file in it (or in the conversation shown) |
 | space | pause an animated GIF |
+| `+` / `-` / `0` | zoom in / out (up to 800%) / fit again; zoomed in, `h`/`j`/`k`/`l` and the arrows move around, page up / down change file, `esc` fits |
 | `i`  | open the file externally |
 | `y` / `Y` | copy the file's URL / the post's link [`copy`, `copy_link`] |
 | `R`  | reverse image search [`image_search`] |
@@ -152,7 +153,7 @@ the action name is in brackets. The `?` help lists the same, with your keys.
 | `s` / `S` | show spoilers in the post / the whole thread [`spoiler`, `all_spoilers`] |
 | `e`  | show / hide the post's replies under it, indented; again on a reply goes a level deeper (up to 4) [`expand`] |
 | `c`  | the post's conversation alone: what it replies to and the replies to it; `esc` (or `c`) shows the whole thread again [`conversation`] |
-| `v` / `V` | image viewer for the post's files / gallery of every file in the thread [`view`, `gallery`] |
+| `v` / `V` | image viewer from the post's files on through the thread's / gallery of every file in the thread [`view`, `gallery`] |
 | `i` / `R` | open the post's file (videos in mpv if it's installed) / reverse image search [`open_file`, `image_search`] |
 | `O`  | the post's links: quotes of other threads, web links, files; `enter` opens, `y` copies [`links`] |
 | `d` / `D` / `E` | save the post's files / all the thread's files / the thread as a page [`download`, `download_thread`, `export`] |

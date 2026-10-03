@@ -31,4 +31,4 @@ expression: snapshot(&mut a)
 
 
 
- h/l previous / next   i open externally   esc close
+ h/l previous / next   +/- zoom   i open externally   esc close

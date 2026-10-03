@@ -686,12 +686,22 @@ pub struct Preview {
     pub scroll: u16,
 }
 
-/// Full-screen viewer over one post's files.
+/// Full-screen viewer over a post's files, or a thread's.
 pub struct Viewer {
     pub files: Vec<Attachment>,
     pub index: usize,
-    /// Link to the post the files are from.
+    /// Link to the post the files are from (one post's).
     pub link: Option<String>,
+    /// The post each file is from, when they're a thread's (else empty).
+    pub posts: Vec<u64>,
+    /// How far it's zoomed in, and where.
+    pub crop: crate::images::Crop,
+}
+
+impl Viewer {
+    pub fn new(files: Vec<Attachment>, index: usize, link: Option<String>) -> Self {
+        Viewer { files, index, link, posts: Vec::new(), crop: crate::images::Crop::FIT }
+    }
 }
 
 enum Msg {
@@ -2150,7 +2160,11 @@ impl App {
         }
         let link = self.selected_link();
         match self.selected_post().map(|p| p.files.clone()) {
-            Some(files) if !files.is_empty() => self.tab.viewer = Some(Viewer { files, index: 0, link }),
+            Some(files) if !files.is_empty() => {
+                if !self.thread_viewer(0) {
+                    self.tab.viewer = Some(Viewer::new(files, 0, link));
+                }
+            }
             _ => self.info("Post has no file"),
         }
     }
@@ -2360,7 +2374,7 @@ impl App {
     /// Copy the selected thing's text (or file URL in the viewer), or with `link` its URL.
     fn copy(&mut self, link: bool) {
         let what = if let Some(v) = &self.tab.viewer {
-            let post_link = v.link.clone().or_else(|| self.gallery_link(v.index));
+            let post_link = v.link.clone().or_else(|| self.viewer_post_link()).or_else(|| self.gallery_link(v.index));
             if link { post_link.map(|l| ("link", l)) } else { Some(("file URL", v.files[v.index].url.clone())) }
         } else if link {
             self.selected_link().map(|l| ("link", l))

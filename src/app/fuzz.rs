@@ -458,6 +458,9 @@ fn hot_keys() -> Vec<KeyEvent> {
             KeyCode::Home,
             KeyCode::End,
             KeyCode::F(5),
+            KeyCode::Char('+'),
+            KeyCode::Char('-'),
+            KeyCode::Char('0'),
         ]
         .map(KeyEvent::from),
     );

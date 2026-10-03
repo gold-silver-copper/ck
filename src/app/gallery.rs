@@ -3,7 +3,7 @@
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 use ratatui::widgets::ListState;
 
-use super::{App, Viewer};
+use super::{App, View, Viewer};
 use crate::download;
 use crate::keys::{Action, Scope};
 use crate::model::Attachment;
@@ -89,7 +89,35 @@ impl App {
             return;
         }
         let files = g.files.iter().map(|(_, f)| f.clone()).collect();
-        self.tab.viewer = Some(Viewer { files, index: k, link: None });
+        let posts = g.files.iter().map(|(i, _)| self.tab.thread.as_ref().and_then(|t| t.posts.get(*i)).map_or(0, |p| p.no)).collect();
+        self.tab.viewer = Some(Viewer { posts, ..Viewer::new(files, k, None) });
+    }
+
+    /// `v` in a thread: the viewer over every file in it (or in the conversation shown,
+    /// leaving out hidden posts), from the selected post's file `k`. False if that file
+    /// isn't among them.
+    pub(super) fn thread_viewer(&mut self, k: usize) -> bool {
+        let Some(t) = self.tab.thread.as_ref().filter(|_| self.tab.view == View::Thread) else { return false };
+        let (mut files, mut posts, mut start) = (Vec::new(), Vec::new(), None);
+        for (i, p) in t.posts.iter().enumerate().filter(|&(i, _)| t.in_view(i) && (i == t.selected || !t.is_collapsed(i))) {
+            for (j, f) in p.files.iter().enumerate() {
+                if i == t.selected && j == k {
+                    start = Some(files.len());
+                }
+                files.push(f.clone());
+                posts.push(p.no);
+            }
+        }
+        let Some(start) = start else { return false };
+        self.tab.viewer = Some(Viewer { posts, ..Viewer::new(files, start, None) });
+        true
+    }
+
+    /// The link to the post the viewer's file is from, when it knows.
+    pub(super) fn viewer_post_link(&self) -> Option<String> {
+        let (v, t, b) = (self.tab.viewer.as_ref()?, self.tab.thread.as_ref()?, self.tab.board.as_ref()?);
+        let no = *v.posts.get(v.index)?;
+        self.thread_link(&self.key(&b.uri, t.no), Some(no))
     }
 
     /// The link to the post a gallery file is from.

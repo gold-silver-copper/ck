@@ -1569,3 +1569,46 @@ fn back_to_a_catalog_of_the_same_board_name_on_another_site_loads_it() {
     assert_eq!((app.tab.view, app.tab.site, app.tab.catalog_site), (View::Catalog, 1, 1));
     assert!(app.tab.catalog.is_empty() && app.tab.loading.is_some());
 }
+
+#[test]
+fn the_viewer_goes_through_the_whole_thread_and_zooms() {
+    use crate::images::Crop;
+    let mut app = local_app();
+    app.images = crate::images::Images::offline();
+    app.goto_str("a/x/1");
+    let file = |name: &str| Attachment { filename: name.into(), url: format!("http://127.0.0.1:9/{name}"), ..Default::default() };
+    let post = |no, files: Vec<Attachment>| Post { no, files, ..Default::default() };
+    app.handle(Msg::Thread(app.tab.req, Ok(vec![post(1, vec![file("a.png")]), post(2, vec![]), post(3, vec![file("b.png"), file("c.png")]), post(4, vec![file("d.png")])])));
+    app.tab.thread.as_mut().unwrap().select(2);
+    // v: every file of the thread, from the selected post's.
+    app.act(Action::View);
+    let v = app.tab.viewer.as_ref().unwrap();
+    assert_eq!((v.files.len(), v.index, v.posts.clone()), (4, 1, vec![1, 3, 3, 4]));
+    let key = |app: &mut App, c: KeyCode| app.on_key(KeyEvent::from(c));
+    key(&mut app, KeyCode::Char('l'));
+    key(&mut app, KeyCode::Char('l'));
+    assert_eq!(app.tab.viewer.as_ref().unwrap().index, 3);
+    // Zoomed, h/j/k/l move instead; page down is the next file (fitted again).
+    key(&mut app, KeyCode::Char('+'));
+    key(&mut app, KeyCode::Char('='));
+    key(&mut app, KeyCode::Char('l'));
+    let v = app.tab.viewer.as_ref().unwrap();
+    assert_eq!((v.index, v.crop.zoom), (3, 200));
+    assert!(v.crop.x > 500);
+    key(&mut app, KeyCode::Char('-'));
+    assert_eq!(app.tab.viewer.as_ref().unwrap().crop.zoom, 150);
+    // esc fits first, then closes, on the post of the file last viewed.
+    key(&mut app, KeyCode::Esc);
+    assert_eq!(app.tab.viewer.as_ref().unwrap().crop, Crop::FIT);
+    key(&mut app, KeyCode::PageDown);
+    assert_eq!(app.tab.viewer.as_ref().unwrap().index, 0);
+    key(&mut app, KeyCode::Esc);
+    assert!(app.tab.viewer.is_none());
+    assert_eq!(app.tab.thread.as_ref().unwrap().current().unwrap().no, 1);
+    // In a catalog, it's still the one thread's files.
+    app.goto_str("a/x");
+    app.handle(Msg::Catalog(app.tab.req, Ok(vec![post(1, vec![file("a.png"), file("e.png")])])));
+    app.act(Action::View);
+    let v = app.tab.viewer.as_ref().unwrap();
+    assert!(v.files.len() == 2 && v.posts.is_empty());
+}
