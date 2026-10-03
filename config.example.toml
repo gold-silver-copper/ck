@@ -67,6 +67,11 @@ page_cache_mb = 100
 # 0 lets it reach the edge. Also in Settings.
 scroll_margin = 0.3
 
+# Reading the last post of a thread, posts a refresh brings come into view: the first new one
+# is selected, as `j` would. Elsewhere in the thread nothing moves, and the top bar says how
+# many new posts are below. Also in Settings.
+follow_new_posts = true
+
 # Favorite boards, shown at the top of the home screen (1-9 open them). * on a board adds
 # or removes one, and saves the list here.
 favorites = []

@@ -178,6 +178,16 @@ it above and what comes next below. Reading up with `k` does the same at the top
 0.5` keeps the selected post centered, and `0` lets it reach the edges (scrolling as little
 as possible, as before); Settings › Reading position cycles through them.
 
+### Reading the end of a thread
+
+While you read the last post of a thread (it's selected and the end of the thread is on
+screen), posts a refresh brings come into view: the first new one is selected, placed as
+`j` would place it, and `j` reads on through the rest. Hidden posts are passed over, and in
+a conversation only new posts that belong to it count. Reading anywhere else, nothing
+moves; the top bar says how many new posts are below ("3 new, 2 below ↓"), and `U` goes to
+the first. `follow_new_posts = false` (or Settings › Background refresh › Reading the end)
+turns it off. A thread in another tab follows when you come back to it and it refreshes.
+
 ### Long posts
 
 A post taller than the screen is read whole: `j` scrolls on through it, a screen at a time

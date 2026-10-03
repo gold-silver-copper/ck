@@ -271,8 +271,10 @@ fn location(app: &App) -> (Vec<String>, Vec<Span<'static>>) {
             if let Some(th) = th {
                 meta.push(plural(th.posts.len(), "post"));
                 let new = (0..th.posts.len()).filter(|&i| th.is_new(i)).count();
-                if new > 0 {
-                    meta.push(format!("{new} new"));
+                match th.new_below() {
+                    0 if new > 0 => meta.push(format!("{new} new")),
+                    0 => {}
+                    below => meta.push(format!("{new} new, {below} below ↓")),
                 }
                 if th.reveal_all {
                     meta.push("spoilers shown".into());

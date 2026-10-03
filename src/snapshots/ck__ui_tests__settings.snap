@@ -20,6 +20,7 @@ expression: snapshot(&mut a)
     Open thread       every 10s                         How often the open thread updates
     Watched threads   every 60s                         How often each watched thread updates
     Notifications     auto (terminal bell)              New posts in watched threads, replies to…
+    Reading the end   new posts come into view          New posts come into view while you read …
 
   Sites
     Add a site        23 sites so far                   Paste a link to any page of it; ck finds…
@@ -31,5 +32,4 @@ expression: snapshot(&mut a)
   Startup
     Last place        restored                          Start where you left off (ck URL starts …
 
-  Keys
  enter change   esc back   , settings   ? help

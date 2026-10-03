@@ -20,9 +20,10 @@ expression: snapshot(&mut a)
     Open thread       ev  gruvbox                                           hread updates
     Watched threads   ev  catppuccin                                        ed thread updates
     Notifications     au  tokyo-night                                        threads, replies to…
-                          solarized-light
-  Sites                   terminal
-    Add a site        23                                                    page of it; ck finds…
+    Reading the end   ne  solarized-light                                   view while you read …
+                          terminal
+  Sites
+    Add a site        23 sites so far                   Paste a link to any page of it; ck finds…
     Your sites        only the built-in ones            The ones you added, or built-in ones you…
 
   Downloads
@@ -31,5 +32,4 @@ expression: snapshot(&mut a)
   Startup
     Last place        restored                          Start where you left off (ck URL starts …
 
-  Keys
  enter change   esc back   , settings   ? help

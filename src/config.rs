@@ -41,6 +41,9 @@ pub struct Config {
     /// Start where the last run left off.
     #[serde(default = "default_true")]
     pub restore_session: bool,
+    /// Reading the end of a thread, new posts from a refresh come into view.
+    #[serde(default = "default_true")]
+    pub follow_new_posts: bool,
     /// Catalog layout (cycled with `c`).
     #[serde(default)]
     pub catalog_layout: Option<CatalogLayout>,

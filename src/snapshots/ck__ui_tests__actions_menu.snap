@@ -3,7 +3,7 @@ source: src/ui_tests.rs
 assertion_line: 1032
 expression: snapshot(&mut a)
 ---
- ck  4chan  ›  /g/  ›  Snapshot thread                                            5 posts  ·  2 new
+ ck  4chan  ›  /g/  ›  Snapshot thread                                 5 posts  ·  2 new, 2 below ↓
                              No.1001             enter run · esc close
 
     Anonymous   OP  2026-09  enter  go to the post it quotes
