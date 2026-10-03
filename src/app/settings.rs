@@ -49,7 +49,7 @@ pub const SECTIONS: &[(&str, &[Row])] = &[
         (Item::RefreshWatched, "Watched threads", "How often each watched thread updates"),
         (Item::Notify, "Notifications", "New posts in watched threads, replies to yours (m)"),
     ]),
-    ("Downloads", &[(Item::DownloadDir, "Folder", "Where d / D save files")]),
+    ("Downloads", &[(Item::DownloadDir, "Folder", "Where saved files and pages go")]),
     ("Startup", &[(Item::Restore, "Last place", "Start where you left off (ck URL starts elsewhere)")]),
     ("Keys", &[(Item::Keys, "Key bindings", "Rebind any command")]),
 ];
@@ -334,6 +334,11 @@ impl App {
                 KeyCode::Esc | KeyCode::Char('q' | 'h') | KeyCode::Left => None,
                 KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right => Some(Popup::Keys { list, capture: Some(false) }),
                 KeyCode::Char('a') => Some(Popup::Keys { list, capture: Some(true) }),
+                // No key: the action is left to the menu.
+                KeyCode::Char('u') => {
+                    self.unbind_key(&list);
+                    Some(Popup::Keys { list, capture: None })
+                }
                 KeyCode::Char('x') | KeyCode::Delete => {
                     self.bind_key(&list, None);
                     Some(Popup::Keys { list, capture: None })
@@ -394,6 +399,20 @@ impl App {
                 self.save_config(&what, |d| config::set_key(d, name, binding.as_ref()));
             }
             Err(e) => self.error(e),
+        }
+    }
+
+    /// Take every key away from the action selected in the key editor.
+    fn unbind_key(&mut self, list: &ListState) {
+        let Some(Ok(i)) = list.selected().and_then(|r| key_rows().get(r).copied()) else { return };
+        let (action, name, ..) = ACTIONS[i];
+        if self.keys.keys(action).is_empty() {
+            return self.info(format!("{name} has no key (it's in the menu)"));
+        }
+        if let Ok(map) = self.keys.with(action, Some(Vec::new())) {
+            self.keys = map;
+            let binding = self.keys.binding(action);
+            self.save_config(&format!("{name} = [] (in the menu)"), |d| config::set_key(d, name, binding.as_ref()));
         }
     }
 

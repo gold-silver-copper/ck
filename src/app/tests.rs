@@ -1270,7 +1270,10 @@ fn export_saves_a_copy() {
     app.download_dir = Some(dir.path().join("dl").display().to_string());
     app.goto_str("a/x/1");
     app.handle(Msg::Thread(app.tab.req, Ok(nos(&[1, 2]))));
+    // It asks first; enter saves.
     app.act(Action::Export);
+    assert!(!dir.path().join("dl/thread.json").exists());
+    app.on_key(KeyEvent::from(KeyCode::Enter));
     assert!(dir.path().join("dl/thread.json").exists());
     let key = ThreadKey { site: "a".into(), board: "x".into(), no: 1 };
     assert_eq!(app.store.saved(&key).unwrap().posts, 2);
@@ -1763,4 +1766,102 @@ fn catalogs_open_from_their_last_copy_keeping_the_selection() {
     assert_eq!(app.selected_index().map(|i| app.tab.catalog[i].no), picked);
     assert_eq!(site.asked().len(), 2);
     crate::http::serve_test_host(host, None);
+}
+
+/// Run the menu row labeled `label`.
+fn run_menu_row(app: &mut App, label: &str) {
+    app.on_key(KeyEvent::from(KeyCode::Char('.')));
+    let m = app.menu.as_mut().expect("a menu");
+    let labels: Vec<String> = m.items.iter().map(|it| match it {
+        MenuItem::Enter(l) | MenuItem::Act(_, l) => l.clone(),
+    }).collect();
+    let i = labels.iter().position(|l| l == label).unwrap_or_else(|| panic!("no {label:?} in {labels:?}"));
+    m.list.select(Some(i));
+    app.on_key(KeyEvent::from(KeyCode::Enter));
+}
+
+#[test]
+fn saving_needs_a_target_or_asks_first() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = local_app();
+    app.download_dir = Some(dir.path().display().to_string());
+    app.images = Images::offline();
+    app.goto_str("a/x/1");
+    let file = |name: &str| Attachment { filename: name.into(), url: format!("http://127.0.0.1:3/x/src/{name}"), size: Some(1 << 20), ..Default::default() };
+    let posts = vec![
+        Post { no: 1, files: vec![file("a.png")], ..Default::default() },
+        Post { no: 2, files: vec![file("b.png"), file("c.png")], ..Default::default() },
+        Post { no: 3, ..Default::default() },
+    ];
+    app.handle(Msg::Thread(app.tab.req, Ok(posts)));
+    let press = |app: &mut App, c: char| app.on_key(KeyEvent::from(KeyCode::Char(c)));
+    let total = |app: &App| app.downloads.total;
+    // d on a post with nothing focused saves nothing, and says how.
+    press(&mut app, 'd');
+    assert_eq!(total(&app), 0);
+    assert!(app.status.as_ref().unwrap().text.starts_with("tab to a file, then d saves it (the . menu saves"), "{:?}", app.status);
+    // D and E aren't keys any more.
+    press(&mut app, 'D');
+    press(&mut app, 'E');
+    assert!(app.confirm.is_none() && total(&app) == 0);
+    // Focused, d saves the file.
+    app.on_key(KeyEvent::from(KeyCode::Tab));
+    press(&mut app, 'd');
+    assert_eq!(total(&app), 1);
+    app.on_key(KeyEvent::from(KeyCode::Esc));
+    // All the thread's files: from the menu, which asks, saying what and where.
+    run_menu_row(&mut app, "save all the thread's files…");
+    let c = app.confirm.as_ref().unwrap();
+    assert_eq!(c.lines[0], "3 files (3.0 MB in all)");
+    assert!(c.lines[1].starts_with("to ") && c.lines[1].ends_with(&dir.path().display().to_string()));
+    // Anything but enter cancels.
+    press(&mut app, 'j');
+    assert!(app.confirm.is_none() && total(&app) == 1);
+    assert_eq!(app.status.as_ref().unwrap().text, "Not saved");
+    // So does a click.
+    run_menu_row(&mut app, "save all the thread's files…");
+    app.on_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 0, 0), Instant::now());
+    assert!(app.confirm.is_none() && total(&app) == 1);
+    run_menu_row(&mut app, "save all the thread's files…");
+    app.on_key(KeyEvent::from(KeyCode::Enter));
+    assert!(app.confirm.is_none() && total(&app) == 4);
+    // One post's files, from the menu: no question.
+    app.tab.thread.as_mut().unwrap().select(1);
+    run_menu_row(&mut app, "save the post's files");
+    assert_eq!(total(&app), 6);
+    // In the viewer, d saves the file shown.
+    press(&mut app, 'v');
+    assert!(app.tab.viewer.is_some());
+    press(&mut app, 'd');
+    assert_eq!(total(&app), 7);
+    run_menu_row(&mut app, "save it");
+    assert_eq!(total(&app), 8);
+}
+
+#[test]
+fn an_action_without_a_key_is_in_the_menu() {
+    let dir = tempfile::tempdir().unwrap();
+    let overrides = HashMap::from([
+        ("download".to_string(), crate::keys::Binding::Many(vec![])),
+        ("export".to_string(), crate::keys::Binding::One("E".into())),
+    ]);
+    let mut app = local_app();
+    app.keys = KeyMap::new(&overrides).unwrap();
+    app.download_dir = Some(dir.path().display().to_string());
+    app.goto_str("a/x/1");
+    let file = Attachment { filename: "a.png".into(), url: "http://127.0.0.1:3/x/src/a.png".into(), ..Default::default() };
+    app.handle(Msg::Thread(app.tab.req, Ok(vec![Post { no: 1, files: vec![file], ..Default::default() }])));
+    app.on_key(KeyEvent::from(KeyCode::Tab));
+    app.on_key(KeyEvent::from(KeyCode::Char('d')));
+    assert_eq!(app.downloads.total, 0);
+    // The menu still runs it, with no key shown.
+    app.on_key(KeyEvent::from(KeyCode::Char('.')));
+    let row = app.menu.as_ref().unwrap().items.iter().find(|it| matches!(it, MenuItem::Act(Action::Download, _))).cloned().unwrap();
+    assert_eq!(app.menu_key(&row), "");
+    app.on_key(KeyEvent::from(KeyCode::Esc));
+    run_menu_row(&mut app, "save this file");
+    assert_eq!(app.downloads.total, 1);
+    // A key given back still asks first.
+    app.on_key(KeyEvent::from(KeyCode::Char('E')));
+    assert!(app.confirm.is_some());
 }

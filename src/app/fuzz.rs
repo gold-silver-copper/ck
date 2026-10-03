@@ -440,7 +440,7 @@ impl std::fmt::Display for Act {
 
 /// Keys that do something somewhere, so they come up often.
 fn hot_keys() -> Vec<KeyEvent> {
-    let mut keys: Vec<KeyEvent> = crate::keys::ACTIONS.iter().map(|&(_, _, k, ..)| KeyEvent::new(k.code, k.mods)).collect();
+    let mut keys: Vec<KeyEvent> = crate::keys::ACTIONS.iter().filter_map(|&(_, _, k, ..)| k).map(|k| KeyEvent::new(k.code, k.mods)).collect();
     keys.extend(
         [
             KeyCode::Char('j'),

@@ -214,6 +214,7 @@ impl App {
         if let Some(v) = &self.tab.viewer {
             title = v.files.get(v.index).map(|f| f.filename.clone()).unwrap_or_default();
             items.push(act(A::OpenFile, "open it outside ck"));
+            items.push(act(A::Download, "save it"));
             items.push(act(A::ImageSearch, "search for this image"));
             items.push(act(A::Copy, "copy the file's URL"));
             items.push(act(A::CopyLink, "copy the post's link"));
@@ -257,7 +258,7 @@ impl App {
                         if !p.files.is_empty() {
                             items.push(act(A::View, "view the post's images"));
                             if !matches!(focus, Some(Part::File(_))) {
-                                items.push(act(A::Download, "save the post's files"));
+                                items.push(act(A::DownloadPost, if p.files.len() == 1 { "save the post's file" } else { "save the post's files" }));
                             }
                         }
                         if focus.is_none() {
@@ -294,7 +295,7 @@ impl App {
                         items.push(act(A::Follow, "follow the thread as a general"));
                         if t.posts.iter().any(|p| !p.files.is_empty()) {
                             items.push(act(A::Gallery, "all the thread's files"));
-                            items.push(act(A::DownloadThread, "save all the thread's files"));
+                            items.push(act(A::DownloadThread, "save all the thread's files…"));
                         }
                         if !t.jumps.is_empty() || !self.tab.trail.is_empty() {
                             items.push(act(A::JumpBack, "go back"));
@@ -310,7 +311,7 @@ impl App {
                         }
                         items.push(act(A::Search, "search the thread"));
                         items.push(act(A::Hints, "pick a link or post by its label"));
-                        items.push(act(A::Export, "save the thread as HTML and JSON"));
+                        items.push(act(A::Export, "save the thread as a page…"));
                         match self.tab.offline {
                             Some(o) if o.dead => {}
                             Some(_) => items.push(act(A::Reload, "open the live thread")),
@@ -470,18 +471,14 @@ impl App {
         }
     }
 
-    /// Run row `i`, as if its key were pressed with the menu closed.
+    /// Run row `i`, as its key would with the menu closed (also when it has none).
     fn run_menu_item(&mut self, i: usize) {
         let Some(m) = self.menu.take() else { return };
-        let key = match m.items.get(i) {
-            Some(MenuItem::Enter(_)) => KeyEvent::from(KeyCode::Enter),
-            Some(MenuItem::Act(a, _)) => match self.keys.keys(*a).first() {
-                Some(k) => KeyEvent::new(k.code, k.mods),
-                None => return,
-            },
-            None => return,
-        };
-        self.on_key(key);
+        match m.items.get(i) {
+            Some(MenuItem::Enter(_)) => self.on_key(KeyEvent::from(KeyCode::Enter)),
+            Some(&MenuItem::Act(a, _)) => self.run_action(a),
+            None => {}
+        }
     }
 
     /// A click on a row runs it; anywhere else closes the menu.

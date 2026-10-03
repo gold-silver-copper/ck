@@ -5,6 +5,7 @@ use super::*;
 /// A popup or input box that takes the keys (see `App::modal`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Modal {
+    Confirm,
     Settings,
     AddFilter,
     Help,
@@ -62,7 +63,8 @@ impl App {
         let app_wide = matches!(
             self.modal(),
             Some(
-                Modal::Settings
+                Modal::Confirm
+                    | Modal::Settings
                     | Modal::AddFilter
                     | Modal::Help
                     | Modal::Menu
@@ -86,8 +88,9 @@ impl App {
             }
             Some(Modal::Links) => return self.on_links_click(ev.column, ev.row, now),
             Some(Modal::ImageSearch) => return self.on_image_search_click(ev.column, ev.row),
-            Some(Modal::Help | Modal::Preview | Modal::AddFilter) => {
-                // Clicking anywhere closes a popup.
+            Some(Modal::Help | Modal::Preview | Modal::AddFilter | Modal::Confirm) => {
+                // Clicking anywhere closes a popup (a save that asks isn't made).
+                self.confirm = None;
                 self.show_help = false;
                 self.tab.preview = None;
                 self.filter_add = None;
@@ -141,6 +144,7 @@ impl App {
     /// image search over the viewer). It gets every key; clicks go to it or close it.
     fn modal(&self) -> Option<Modal> {
         let open = [
+            (self.confirm.is_some(), Modal::Confirm),
             (self.settings_popup.is_some(), Modal::Settings),
             (self.filter_add.is_some(), Modal::AddFilter),
             (self.show_help, Modal::Help),
@@ -217,6 +221,7 @@ impl App {
         }
         if let Some(modal) = self.modal() {
             match modal {
+                Modal::Confirm => self.on_confirm_key(key),
                 Modal::Settings => self.on_settings_popup_key(key),
                 Modal::AddFilter => self.on_add_filter_key(key),
                 Modal::Menu => self.on_menu_key(key),
@@ -317,6 +322,16 @@ impl App {
         }
     }
 
+    /// Run a command as its key would where you are (the menu runs its rows this way).
+    pub(super) fn run_action(&mut self, action: Action) {
+        match self.modal() {
+            // The viewer's own `i` opens its file.
+            Some(Modal::Viewer) if action == Action::OpenFile => self.on_viewer_key(KeyCode::Char('i')),
+            Some(Modal::Gallery) => self.gallery_action(action),
+            _ => self.act(action),
+        }
+    }
+
     /// Run a (remappable) command.
     pub(super) fn act(&mut self, action: Action) {
         match action {
@@ -353,7 +368,7 @@ impl App {
             Action::Hide => self.toggle_hidden(),
             Action::Mine => self.toggle_mine(),
             Action::Gallery => self.open_gallery(),
-            Action::Export => self.export_thread(),
+            Action::Export => self.ask_to_save(Saving::Page),
             Action::ArchiveSearch => self.start_archive_search(),
             Action::ImageSearch => self.open_image_search(),
             Action::NewTab => self.new_tab(),
@@ -386,12 +401,9 @@ impl App {
                 self.info(format!("Sorted by {}", self.tab.catalog_sort.as_str()));
             }
             Action::Compact => self.cycle_layout(),
-            Action::Download => {
-                if !self.download_focused() {
-                    self.download(false);
-                }
-            }
-            Action::DownloadThread => self.download(true),
+            Action::Download => self.save_here(),
+            Action::DownloadPost => self.download(false),
+            Action::DownloadThread => self.ask_to_save(Saving::Files),
             Action::Archive => match self.tab.archive_offer.take() {
                 Some(key) => {
                     self.open_key(key);

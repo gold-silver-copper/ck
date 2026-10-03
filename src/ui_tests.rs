@@ -1079,3 +1079,28 @@ fn clicking_a_part_focuses_it() {
     a.on_mouse(MouseEvent { kind: MouseEventKind::Down(MouseButton::Right), ..click }, std::time::Instant::now());
     assert!(a.menu.as_ref().is_some_and(|m| m.items.iter().any(|i| matches!(i, crate::app::MenuItem::Enter(l) if l == "go to >>1000"))));
 }
+
+#[test]
+fn saving_the_thread_asks_first() {
+    use ratatui::crossterm::event::{KeyCode, KeyEvent};
+    let mut a = thread_app(false);
+    a.download_dir = Some("/saves/{board}/{thread}".into());
+    render(&mut a);
+    a.on_key(KeyEvent::from(KeyCode::Char('.')));
+    let m = a.menu.as_mut().unwrap();
+    let row = m.items.iter().position(|it| matches!(it, crate::app::MenuItem::Act(_, l) if l == "save the thread as a page…"));
+    m.list.select(row);
+    a.on_key(KeyEvent::from(KeyCode::Enter));
+    insta::assert_snapshot!(snapshot(&mut a));
+    a.on_key(KeyEvent::from(KeyCode::Esc));
+    assert!(a.confirm.is_none() && !render(&mut a).0.contains("thread.html"));
+}
+
+#[test]
+fn long_folders_wrap_at_slashes() {
+    assert_eq!(crate::ui::wrap_path("to /a/bb/ccc", 20), ["to /a/bb/ccc"]);
+    assert_eq!(crate::ui::wrap_path("to /aaaa/bbbb/cccc/dddd", 12), ["to /aaaa/", "bbbb/cccc/", "dddd"]);
+    // No slash to break at: by width.
+    assert_eq!(crate::ui::wrap_path("abcdefghij", 4), ["abcd", "efgh", "ij"]);
+    assert_eq!(crate::ui::wrap_path("日本語のフォルダ", 6), ["日本語", "のフォ", "ルダ"]);
+}
