@@ -655,6 +655,25 @@ fn reading_mid_thread() {
 }
 
 #[test]
+fn hint_labels_from_before_a_refresh_dont_focus_what_is_gone() {
+    use crate::app::{HintTo, Part};
+    use ratatui::crossterm::event::{KeyCode, KeyEvent};
+    let mut a = thread_app(false);
+    render(&mut a);
+    a.on_key(KeyEvent::from(KeyCode::Char('f')));
+    render(&mut a);
+    let label = a.hints.as_ref().unwrap().targets.iter().find(|t| matches!(t.to, HintTo::Thread(_, Some(Part::Replies)))).unwrap().label.clone();
+    // The thread comes back without any replies (found by fuzzing).
+    let posts: Vec<Post> = thread().posts.into_iter().map(|p| Post { quotes: Vec::new(), ..p }).collect();
+    a.tab.thread = Some(ThreadView::new("g".into(), 1000, posts));
+    for c in label.chars() {
+        a.on_key(KeyEvent::from(KeyCode::Char(c)));
+    }
+    assert!(a.tab.thread.as_ref().unwrap().focus.is_none());
+    assert!(a.status.as_ref().unwrap().text.contains("changed since the labels went up"));
+}
+
+#[test]
 fn history() {
     let mut a = app(false);
     a.tab.view = View::History;
