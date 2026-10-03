@@ -19,6 +19,54 @@ pub enum Adding {
     Site { site: SiteConfig, name: String, open: Option<String> },
     /// A board of a vichan site you have, which its list doesn't have.
     Board { site: usize, board: String, open: Option<String> },
+    /// A vichan site's board list read again: what changes. Boards gone from the bar are
+    /// kept unless `drop`.
+    Boards { site: usize, update: BoardsUpdate, drop: bool },
+}
+
+/// How a vichan site's board bar differs from its list.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BoardsUpdate {
+    /// In the bar, not the list.
+    pub added: Vec<BoardConfig>,
+    /// In the list, not the bar.
+    pub missing: Vec<BoardConfig>,
+    /// In both, with another title in the bar: (uri, the list's title, the bar's).
+    pub renamed: Vec<(String, String, String)>,
+    /// The bar, in its order.
+    pub bar: Vec<BoardConfig>,
+}
+
+impl BoardsUpdate {
+    pub fn new(list: &[BoardConfig], bar: Vec<BoardConfig>) -> Self {
+        let title = |b: &BoardConfig| match b {
+            BoardConfig::Full { title, .. } => title.clone(),
+            BoardConfig::Uri(_) => String::new(),
+        };
+        let added = bar.iter().filter(|b| !list.iter().any(|l| l.uri() == b.uri())).cloned().collect();
+        let missing = list.iter().filter(|l| !bar.iter().any(|b| b.uri() == l.uri())).cloned().collect();
+        let renamed = bar
+            .iter()
+            .filter_map(|b| {
+                let old = list.iter().find(|l| l.uri() == b.uri())?;
+                (title(old) != title(b) && !title(b).is_empty()).then(|| (b.uri().to_string(), title(old), title(b)))
+            })
+            .collect();
+        BoardsUpdate { added, missing, renamed, bar }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.added.is_empty() && self.missing.is_empty() && self.renamed.is_empty()
+    }
+
+    /// The new list: the bar's, in its order, then the boards it doesn't have (unless dropped).
+    pub fn list(&self, drop: bool) -> Vec<BoardConfig> {
+        let mut out = self.bar.clone();
+        if !drop {
+            out.extend(self.missing.iter().cloned());
+        }
+        out
+    }
 }
 
 /// What asking a site found.
@@ -26,6 +74,8 @@ pub enum Detected {
     Site(SiteConfig),
     /// That this site (by index) has this board.
     Board(usize, String),
+    /// A vichan site's (by index) board bar.
+    Bar(usize, Vec<BoardConfig>),
 }
 
 /// Your config's `[[site]]` tables, as Settings › Sites lists them.
@@ -103,6 +153,17 @@ impl App {
         self.adding = match res {
             Ok(Detected::Site(site)) => Some(Adding::Site { name: self.free_name(&site.name), site, open }),
             Ok(Detected::Board(site, board)) => Some(Adding::Board { site, board, open }),
+            Ok(Detected::Bar(site, bar)) => {
+                let list = self.sites.get(site).and_then(|s| s.cfg.boards.clone()).unwrap_or_default();
+                let update = BoardsUpdate::new(&list, bar);
+                if update.is_empty() {
+                    let name = self.sites.get(site).map_or(String::new(), |s| s.cfg.name.clone());
+                    self.info(format!("{name}'s board list is up to date"));
+                    None
+                } else {
+                    Some(Adding::Boards { site, update, drop: false })
+                }
+            }
             Err(e) => {
                 self.error(e);
                 None
@@ -155,6 +216,8 @@ impl App {
                 Some(Adding::Site { site, name, open })
             }
             (Adding::Board { site, board, open }, KeyCode::Enter) => return self.add_board(site, board, open),
+            (Adding::Boards { site, update, drop }, KeyCode::Enter) => return self.update_boards(site, &update, drop),
+            (Adding::Boards { site, update, drop }, KeyCode::Char('d')) => Some(Adding::Boards { site, update, drop: !drop }),
             (other, _) => Some(other),
         };
     }
@@ -195,6 +258,47 @@ impl App {
             Some(o) => self.goto_str(&o),
             None if saved => self.info(format!("Added {what}")),
             None => {}
+        }
+    }
+
+    /// Read a vichan site's board bar again (one page: its front page, or its first board's
+    /// if that has none), to update its list.
+    pub(super) fn refresh_board_list(&mut self, site: usize) {
+        let Some(s) = self.sites.get(site) else { return };
+        let (Some(list), Some(base)) = (s.cfg.boards.clone(), s.cfg.url.clone()) else {
+            return self.info(format!("{} gets its boards from the site", s.cfg.name));
+        };
+        if s.cfg.kind != SiteKind::Vichan {
+            return self.info(format!("{} gets its boards from the site", s.cfg.name));
+        }
+        let base = base.trim_end_matches('/').to_string();
+        let host = crate::http::host(&base).to_string();
+        self.adding = Some(Adding::Looking { id: self.next_request(), host: host.clone(), open: None });
+        let (id, tx) = (self.next_id, self.tx.clone());
+        let first = list.first().map(|b| b.uri().to_string());
+        std::thread::spawn(move || {
+            let bar = |path: &str| crate::http::get_text(&format!("{base}{path}")).map(|html| detect::boardlist(&html, &host)).unwrap_or_default();
+            let mut found = bar("/");
+            if found.is_empty()
+                && let Some(b) = first
+            {
+                found = bar(&format!("/{}/index.html", crate::http::encode_segment(&b)));
+            }
+            let res = if found.is_empty() { Err(anyhow::anyhow!("{host}'s pages have no board list to read")) } else { Ok(Detected::Bar(site, found)) };
+            let _ = tx.send(Msg::Detected(id, res));
+        });
+    }
+
+    fn update_boards(&mut self, i: usize, update: &BoardsUpdate, drop: bool) {
+        let Some(s) = self.sites.get(i) else { return };
+        let before = s.cfg.clone();
+        let boards = update.list(drop);
+        let what = format!("{}'s board list", before.name);
+        let saved = self.try_save_config(&what, |d| config::set_site_boards(d, &before, &boards));
+        let cfg = SiteConfig { boards: Some(boards), ..before };
+        self.sites[i] = Site { backend: backend::build(&cfg), cfg, boards: None };
+        if saved {
+            self.info(format!("Updated {what}"));
         }
     }
 
@@ -245,6 +349,17 @@ impl App {
             KeyCode::Char('a') => {
                 self.adding = Some(Adding::Typing(String::new()));
                 None
+            }
+            // A vichan site: read its board list again.
+            KeyCode::Char('r') => {
+                let name = m.sites.get(cur).map(|s| s.name.clone()).unwrap_or_default();
+                match self.sites.iter().position(|s| s.cfg.name.eq_ignore_ascii_case(&name)) {
+                    Some(i) => {
+                        self.refresh_board_list(i);
+                        None
+                    }
+                    None => Some(m),
+                }
             }
             KeyCode::Char('x') | KeyCode::Delete if m.armed == Some(cur) => {
                 let Some(old) = m.sites.get(cur).cloned() else { return Some(m) };

@@ -48,7 +48,7 @@ pub use home::BoardRef;
 pub use links::{ImageSearchPanel, LinkItem, LinksPanel};
 pub use saving::{Confirm, Saving};
 pub use search::{SavedSearch, Search};
-pub use sites::{Adding, MySites, origin as site_origin};
+pub use sites::{Adding, BoardsUpdate, MySites, origin as site_origin};
 pub use tabs::{MAX_TABS, Offline, Tab};
 pub use settings::{Popup as SettingsPopup, SECTIONS as SETTING_SECTIONS, key_rows, rows as setting_rows, tilde};
 

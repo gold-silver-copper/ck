@@ -63,6 +63,28 @@ pub(super) fn draw_adding(f: &mut Frame, app: &App) {
             ]);
             (format!("Add {host}?"), "enter add · esc cancel", lines)
         }
+        Adding::Boards { site, update, drop } => {
+            let s = app.sites.get(*site);
+            let name = s.map_or("", |s| s.cfg.name.as_str());
+            let uris = |b: &[crate::config::BoardConfig]| b.iter().map(|b| format!("/{}/", b.uri())).collect::<Vec<_>>().join(" ");
+            let mut lines = Vec::new();
+            if !update.added.is_empty() {
+                lines.push(text(format!("New: {}", truncate(&uris(&update.added), 80))));
+            }
+            if !update.renamed.is_empty() {
+                let r: Vec<String> = update.renamed.iter().map(|(u, _, new)| format!("/{u}/ is now \"{new}\"")).collect();
+                lines.push(text(truncate(&r.join(", "), 90)));
+            }
+            if !update.missing.is_empty() {
+                let what = if *drop { "dropped" } else { "kept (d drops them)" };
+                lines.push(text(format!("Not in its list now: {}, {what}", truncate(&uris(&update.missing), 60))));
+            }
+            if s.is_some_and(|s| crate::config::builtin_sites().iter().any(|b| b.name.eq_ignore_ascii_case(&s.cfg.name))) {
+                lines.push(Line::default());
+                lines.push(Line::styled(format!("{name} is built in: this saves it as one of your sites, with this list."), dim()));
+            }
+            (format!("Update {name}'s boards?"), "enter update · esc cancel", lines)
+        }
         Adding::Board { site, board, .. } => {
             let name = app.sites.get(*site).map_or("", |s| s.cfg.name.as_str());
             (format!("Add /{board}/ to {name}?"), "enter add · esc cancel", vec![text(format!("{name} doesn't list /{board}/ yet; the site has it."))])

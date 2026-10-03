@@ -214,7 +214,7 @@ fn draw_board_images(f: &mut Frame, app: &App, list: &ListState) {
 fn draw_my_sites(f: &mut Frame, m: &crate::app::MySites) {
     let t = theme();
     let h = (m.sites.len().max(1) as u16 + 6).min(f.area().height.saturating_sub(4));
-    let inner = panel(f, 100, h, "Your sites", "a add · x remove · esc close");
+    let inner = panel(f, 100, h, "Your sites", "a add · r update a vichan site's boards · x remove · esc close");
     let view = inner.height.saturating_sub(2) as usize;
     let sel = m.list.selected().unwrap_or(0);
     let first = (sel + 1).saturating_sub(view);

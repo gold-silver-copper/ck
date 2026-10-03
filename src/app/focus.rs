@@ -402,6 +402,10 @@ impl App {
                     }
                     items.push(act(A::Search, "filter the boards"));
                     items.push(act(A::Hints, "pick a board by its label"));
+                    let site = &self.current_site().cfg;
+                    if site.kind == crate::config::SiteKind::Vichan && site.boards.is_some() && site.url.is_some() {
+                        items.push(act(A::UpdateBoards, "update the board list…"));
+                    }
                     items.push(act(A::Reload, "reload"));
                 }
                 View::Watched | View::History => {

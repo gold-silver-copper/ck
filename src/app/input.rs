@@ -380,6 +380,8 @@ impl App {
             Action::Favorite => self.toggle_favorite(),
             Action::AddSite => self.adding = Some(super::Adding::Typing(String::new())),
             Action::BoardImages => self.toggle_board_images(),
+            Action::UpdateBoards if self.tab.view == View::Boards => self.refresh_board_list(self.tab.site),
+            Action::UpdateBoards => {}
             Action::SearchSaved => self.goto = Some("saved ".into()),
             Action::Follow => self.toggle_follow(),
             Action::NextTab => self.cycle_tab(true),
