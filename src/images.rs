@@ -17,7 +17,7 @@ use image::DynamicImage;
 use image::imageops::FilterType;
 use ratatui::layout::Size;
 use ratatui_image::Resize;
-use ratatui_image::picker::Picker;
+use ratatui_image::picker::{Picker, ProtocolType};
 use ratatui_image::protocol::Protocol;
 
 use crate::disk_cache::DiskCache;
@@ -136,6 +136,22 @@ enum Done {
 enum EncodeJob {
     One(String, Size, Arc<DynamicImage>),
     Frames(String, Size, Frames),
+}
+
+/// The image protocol to use: the one `images` names, or what the terminal said it can
+/// show. Zellij answers for the terminal it runs in, and says sixel whatever that terminal
+/// is (most can't show it, and then nothing would show at all): there, half-blocks, unless
+/// `images = "sixel"` says otherwise.
+pub fn choose_protocol(mode: crate::config::ImagesMode, detected: ProtocolType, in_zellij: bool) -> ProtocolType {
+    use crate::config::ImagesMode;
+    match mode {
+        ImagesMode::Halfblocks => ProtocolType::Halfblocks,
+        ImagesMode::Sixel => ProtocolType::Sixel,
+        ImagesMode::Kitty => ProtocolType::Kitty,
+        ImagesMode::Iterm2 => ProtocolType::Iterm2,
+        ImagesMode::Auto | ImagesMode::Off if in_zellij && detected == ProtocolType::Sixel => ProtocolType::Halfblocks,
+        ImagesMode::Auto | ImagesMode::Off => detected,
+    }
 }
 
 /// Called by workers after each result, to wake the UI's main loop.
@@ -575,6 +591,21 @@ pub(crate) fn decode(bytes: &[u8]) -> Result<DynamicImage, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn protocols_forced_or_detected_and_zellij_isnt_believed_about_sixel() {
+        use crate::config::ImagesMode;
+        assert_eq!(choose_protocol(ImagesMode::Auto, ProtocolType::Sixel, false), ProtocolType::Sixel);
+        assert_eq!(choose_protocol(ImagesMode::Auto, ProtocolType::Sixel, true), ProtocolType::Halfblocks);
+        assert_eq!(choose_protocol(ImagesMode::Auto, ProtocolType::Kitty, true), ProtocolType::Kitty);
+        assert_eq!(choose_protocol(ImagesMode::Sixel, ProtocolType::Halfblocks, true), ProtocolType::Sixel);
+        assert_eq!(choose_protocol(ImagesMode::Halfblocks, ProtocolType::Kitty, false), ProtocolType::Halfblocks);
+        // Each is a setting the config takes.
+        for (text, mode) in [("halfblocks", ImagesMode::Halfblocks), ("sixel", ImagesMode::Sixel), ("kitty", ImagesMode::Kitty), ("iterm2", ImagesMode::Iterm2)] {
+            let cfg: crate::config::Config = toml::from_str(&format!("images = \"{text}\"\n{}", crate::config::DEFAULT_CONFIG.replace("images = \"auto\"", ""))).unwrap();
+            assert_eq!((cfg.images, mode.as_str()), (mode, text));
+        }
+    }
 
     #[test]
     fn off_makes_no_requests() {
