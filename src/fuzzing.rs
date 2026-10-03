@@ -56,6 +56,7 @@ pub fn config(data: &[u8]) {
     let _ = crate::keys::KeyMap::new(&cfg.keys);
     let _ = crate::filter::Filters::new(&cfg.filters).and_then(|f| f.with_words(&cfg.hidden_words));
     let _ = crate::theme::from_config(cfg.theme.as_ref(), &cfg.themes);
+    let _ = cfg.with_builtin_sites();
 }
 
 /// A file from the data directory, as each kind of data file.

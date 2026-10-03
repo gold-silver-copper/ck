@@ -108,7 +108,7 @@ impl App {
                 self.generals_searching.insert(key.clone());
             }
             std::thread::spawn(move || {
-                let res = crate::http::background(|| backend.catalog(&board, &|_| {}));
+                let res = crate::http::background_at(now, || backend.catalog(&board, &|_| {}));
                 for key in keys {
                     let res = res.as_ref().map(Vec::clone).map_err(|e| anyhow::anyhow!("{e:#}"));
                     let _ = tx.send(Msg::GeneralCatalog(key, res));

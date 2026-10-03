@@ -855,8 +855,9 @@ fn config_once(seed: u64) {
     if rng.chance(10) {
         text = String::from_utf8_lossy(&break_bytes(&mut rng, text.as_bytes())).into_owned();
     }
-    // As main does: each check may refuse the config, none may panic.
-    let Ok(cfg) = toml::from_str::<crate::config::Config>(&text) else { return };
+    // As main does (and Config::load, which adds the built-in sites): each check may refuse
+    // the config, none may panic.
+    let Ok(cfg) = toml::from_str::<crate::config::Config>(&text).map_err(anyhow::Error::from).and_then(crate::config::Config::with_builtin_sites) else { return };
     let Ok(keys) = crate::keys::KeyMap::new(&cfg.keys) else { return };
     if crate::filter::Filters::new(&cfg.filters).and_then(|f| f.with_words(&cfg.hidden_words)).is_err() || crate::theme::from_config(cfg.theme.as_ref(), &cfg.themes).is_err() {
         return;

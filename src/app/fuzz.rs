@@ -68,7 +68,8 @@ impl Gate {
         let ticket = s.next;
         s.next += 1;
         if crate::http::is_background() {
-            let now = s.now.unwrap_or_else(Instant::now);
+            // When the app decided on it: its thread can get here a few steps later.
+            let now = crate::http::asked_at().or(s.now).unwrap_or_else(Instant::now);
             s.background.push((what.clone(), now));
         }
         s.log.push(what.clone());

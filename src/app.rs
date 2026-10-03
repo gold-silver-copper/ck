@@ -1652,7 +1652,7 @@ impl App {
         let backend = self.sites[site].backend.clone();
         let tx = self.tx.clone();
         std::thread::spawn(move || {
-            let res = http::background(|| backend.boards(&|_| {}));
+            let res = http::background_at(now, || backend.boards(&|_| {}));
             let _ = tx.send(Msg::BoardsRefreshed(site, res));
         });
     }
@@ -2069,9 +2069,9 @@ impl App {
         self.refreshing.insert(key.clone());
         // The open thread's copy is kept up to date too (a watched one's is its saved copy).
         let pages = self.pages.clone().filter(|_| self.store.watched(&key).is_none());
-        let now = self.clock.now();
+        let (now, asked) = (self.clock.now(), self.clock.instant());
         std::thread::spawn(move || {
-            let (res, copies) = http::recording(|| http::background(|| backend.thread(&key.board, key.no)));
+            let (res, copies) = http::recording(|| http::background_at(asked, || backend.thread(&key.board, key.no)));
             if let (Ok(posts), Some(p)) = (&res, &pages)
                 && !posts.is_empty()
             {

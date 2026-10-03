@@ -42,6 +42,8 @@ thread_local! {
     static CACHED_AGE: Cell<Option<Duration>> = const { Cell::new(None) };
     /// Priority of `get_json` calls on this thread.
     static PRIORITY: Cell<Priority> = const { Cell::new(Priority::User) };
+    /// When the background request being made on this thread was decided on.
+    static ASKED_AT: Cell<Option<Instant>> = const { Cell::new(None) };
     /// While set, `get_json` on this thread answers from these copies only (no requests).
     static COPIES: std::cell::RefCell<Option<HashMap<String, Value>>> = const { std::cell::RefCell::new(None) };
     /// While set, `get_json` on this thread notes each response it used.
@@ -143,6 +145,22 @@ pub fn background<T>(f: impl FnOnce() -> T) -> T {
     let r = f();
     PRIORITY.set(Priority::User);
     r
+}
+
+/// `background`, for a request decided on at `at` (the app's clock), which can be a while
+/// before the thread it runs on gets to it.
+pub fn background_at<T>(at: Instant, f: impl FnOnce() -> T) -> T {
+    ASKED_AT.set(Some(at));
+    let r = background(f);
+    ASKED_AT.set(None);
+    r
+}
+
+/// When the background request this thread is making was decided on (tests: the fuzzer's
+/// etiquette check goes by it).
+#[cfg(test)]
+pub fn asked_at() -> Option<Instant> {
+    ASKED_AT.get()
 }
 
 /// Lock a mutex, even if a thread panicked while holding it (the data is still usable).
