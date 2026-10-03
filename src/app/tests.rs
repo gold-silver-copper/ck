@@ -1297,3 +1297,155 @@ fn watching_a_saved_copy_keeps_it_under_its_own_number() {
     assert!(app.store.watched(&key(9)).is_some_and(|w| w.last_seen > 0));
     assert_eq!(app.store.saved(&key(9)).unwrap().posts, 2);
 }
+
+// ----- filters from where you are -----
+
+const FILTER_CONFIG: &str = "# my config\n[[site]]\nname = \"a\"\nkind = \"vichan\"\nurl = \"http://127.0.0.1:3\"\nboards = [\"x\"]\n\n\
+    # spam goes\n[[filter]]\npattern = \"(?i)spam\" # case-insensitive\nlabel = \"spam\"\n";
+
+/// The local app over a config file with a commented filter, on a thread of named posts.
+fn filter_app(dir: &std::path::Path) -> App {
+    let path = dir.join("config.toml");
+    std::fs::write(&path, FILTER_CONFIG).unwrap();
+    let mut app = app_with(FILTER_CONFIG);
+    app.config_path = Some(path);
+    app.goto_str("a/x/1");
+    let named = |no, name: &str| Post { no, name: name.into(), ..Default::default() };
+    app.handle(Msg::Thread(app.tab.req, Ok(vec![named(1, "Anonymous"), named(2, "Named !Trip"), named(3, "Anonymous"), named(4, "Named !Trip")])));
+    app
+}
+
+fn config_text(app: &App) -> String {
+    std::fs::read_to_string(app.config_path.as_ref().unwrap()).unwrap()
+}
+
+#[test]
+fn x_filters_posts_like_the_selected_one() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = filter_app(dir.path());
+    app.tab.thread.as_mut().unwrap().selected = 1;
+    app.act(Action::Filter);
+    let a = app.filter_add.as_ref().unwrap();
+    assert_eq!(a.candidates[0].what, "posts by Named !Trip");
+    app.on_key(KeyEvent::from(KeyCode::Enter));
+    // Written to the config, the rest kept as it was.
+    let text = config_text(&app);
+    assert!(text.starts_with(FILTER_CONFIG), "{text}");
+    let added = "[[filter]]\npattern = \"^Named !Trip$\"\nfield = \"name\"\naction = \"hide\"\nlabel = \"Named !Trip\"\nsites = [\"a\"]\nboards = [\"x\"]\n";
+    assert!(text.ends_with(added), "{text}");
+    // Applied at once: both posts by the name collapse.
+    let t = app.tab.thread.as_ref().unwrap();
+    assert!(t.marks[1].hidden.is_some() && t.marks[3].hidden.is_some() && t.marks[2].hidden.is_none());
+    assert!(app.status.as_ref().unwrap().text.contains("Hiding Named !Trip (2 here) · u undoes"));
+    // u takes it back, from the file too.
+    app.on_key(KeyEvent::from(KeyCode::Char('u')));
+    assert_eq!(config_text(&app), FILTER_CONFIG);
+    assert!(app.tab.thread.as_ref().unwrap().marks[1].hidden.is_none() && app.filter_cfgs.len() == 1);
+    // Highlight, everywhere, with a label of its own; u isn't undo after another key.
+    app.act(Action::Filter);
+    for k in ['a', 's', 's', 'e'] {
+        app.on_key(KeyEvent::from(KeyCode::Char(k)));
+    }
+    for _ in 0.."Named !Trip".len() {
+        app.on_key(KeyEvent::from(KeyCode::Backspace));
+    }
+    // Pasted into the label.
+    app.paste("him");
+    assert!(app.goto.is_none());
+    app.on_key(KeyEvent::from(KeyCode::Enter));
+    app.on_key(KeyEvent::from(KeyCode::Enter));
+    let f = app.filter_cfgs.last().unwrap();
+    assert_eq!((f.action, f.sites.len(), f.boards.len(), f.label.as_deref()), (crate::filter::FilterAction::Highlight, 0, 0, Some("him")));
+    assert_eq!(app.tab.thread.as_ref().unwrap().marks[3].highlight.as_deref(), Some("him"));
+    app.on_key(KeyEvent::from(KeyCode::Char('j')));
+    app.on_key(KeyEvent::from(KeyCode::Char('u')));
+    assert_eq!(app.filter_cfgs.len(), 2);
+    // The anonymous name isn't offered: nothing to filter post 1 by.
+    app.tab.thread.as_mut().unwrap().selected = 0;
+    app.act(Action::Filter);
+    assert!(app.filter_add.is_none() && app.status.as_ref().unwrap().text.starts_with("Nothing to filter by here"));
+}
+
+#[test]
+fn filters_from_a_catalog_by_subject_and_image() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = filter_app(dir.path());
+    app.goto_str("a/x");
+    let file = Attachment { filename: "cat.png".into(), md5: Some("q1w2e3==".into()), ..Default::default() };
+    let op = |no, subject: &str| Post { no, subject: Some(subject.into()), name: "Anonymous".into(), files: vec![file.clone()], ..Default::default() };
+    app.handle(Msg::Catalog(app.tab.req, Ok(vec![op(1, "Daily (thread)"), op(2, "Other"), op(3, "Daily (thread)")])));
+    app.act(Action::Filter);
+    let a = app.filter_add.as_ref().unwrap();
+    let fields: Vec<_> = a.candidates.iter().map(|c| c.field).collect();
+    assert_eq!(fields, [crate::filter::Field::Md5, crate::filter::Field::Filename, crate::filter::Field::Subject]);
+    app.on_key(KeyEvent::from(KeyCode::Char('G')));
+    app.on_key(KeyEvent::from(KeyCode::Enter));
+    // Both threads with the subject are hidden; the selection stays on one that's shown.
+    assert_eq!(app.visible_catalog(), [1]);
+    assert_eq!(app.selected_index(), Some(1));
+    // By the image: everything goes.
+    app.act(Action::Filter);
+    app.on_key(KeyEvent::from(KeyCode::Enter));
+    assert!(app.visible_catalog().is_empty());
+    assert!(config_text(&app).contains("pattern = \"q1w2e3==\"\nfield = \"md5\""));
+}
+
+#[test]
+fn the_filter_list_edits_turns_off_and_removes() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = filter_app(dir.path());
+    app.open_settings();
+    app.settings_list.state.select(settings::items().iter().position(|&i| i == settings::Item::Filters));
+    app.enter();
+    let Some(settings::Popup::Filters { counts, .. }) = &app.settings_popup else { panic!("no list") };
+    assert_eq!(counts, &[(0, 0)]);
+    // a: a new one, typing its pattern; a bad regex is refused, and isn't saved.
+    app.on_key(KeyEvent::from(KeyCode::Char('a')));
+    app.paste("(Named");
+    app.on_key(KeyEvent::from(KeyCode::Enter));
+    assert!(app.status.as_ref().unwrap().error && app.filter_cfgs.len() == 1);
+    app.on_key(KeyEvent::from(KeyCode::Home));
+    for _ in 0..7 {
+        app.on_key(KeyEvent::from(KeyCode::Backspace));
+    }
+    for c in "Named".chars() {
+        app.on_key(KeyEvent::from(KeyCode::Char(c)));
+    }
+    app.on_key(KeyEvent::from(KeyCode::Enter));
+    assert_eq!(app.filter_cfgs.len(), 2);
+    assert!(config_text(&app).ends_with("[[filter]]\npattern = \"Named\"\naction = \"hide\"\n"), "{}", config_text(&app));
+    // Fields: the name too (row 5), then not the subject or comment (rows 3, 4).
+    for (row, _) in [(5, ()), (3, ()), (4, ())] {
+        if let Some(settings::Popup::FilterEdit { row: r, .. }) = &mut app.settings_popup {
+            *r = row;
+        }
+        app.on_key(KeyEvent::from(KeyCode::Enter));
+    }
+    assert_eq!(app.filter_cfgs[1].fields(), [crate::filter::Field::Name]);
+    assert!(app.tab.thread.as_ref().unwrap().marks[1].hidden.is_some());
+    // The last field can't go.
+    app.on_key(KeyEvent::from(KeyCode::Up));
+    app.on_key(KeyEvent::from(KeyCode::Down));
+    if let Some(settings::Popup::FilterEdit { row: r, .. }) = &mut app.settings_popup {
+        *r = 5;
+    }
+    app.on_key(KeyEvent::from(KeyCode::Enter));
+    assert_eq!(app.status.as_ref().unwrap().text, "A filter needs at least one field");
+    // Back to the list: it counts what it catches; space turns it off (kept in the file).
+    app.on_key(KeyEvent::from(KeyCode::Esc));
+    let Some(settings::Popup::Filters { counts, list }) = &app.settings_popup else { panic!("not the list") };
+    assert_eq!((counts[1], list.selected()), ((2, 0), Some(1)));
+    app.on_key(KeyEvent::from(KeyCode::Char(' ')));
+    assert!(config_text(&app).contains("enabled = false"));
+    assert!(app.tab.thread.as_ref().unwrap().marks[1].hidden.is_none());
+    let reloaded: Config = toml::from_str(&config_text(&app)).unwrap();
+    assert!(!reloaded.filters[1].enabled && reloaded.filters[0].enabled);
+    // x removes it; the first filter and its comments are as they were.
+    app.on_key(KeyEvent::from(KeyCode::Char('x')));
+    assert_eq!(config_text(&app), FILTER_CONFIG);
+    // A filter changed in the file meanwhile isn't overwritten.
+    std::fs::write(app.config_path.as_ref().unwrap(), FILTER_CONFIG.replace("(?i)spam", "eggs")).unwrap();
+    app.on_key(KeyEvent::from(KeyCode::Char(' ')));
+    assert!(app.status.as_ref().unwrap().text.contains("changed since ck read it"));
+    assert!(config_text(&app).contains("eggs") && !config_text(&app).contains("enabled"));
+}

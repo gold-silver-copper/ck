@@ -401,6 +401,10 @@ enum Act {
     Pick(usize),
     /// Open the Saved view and a copy in it.
     Saved(usize),
+    /// `X` on what's selected: candidate #k, hide or highlight, a scope, and enter.
+    Filter(usize, u8),
+    /// Settings › Filters, and keys in it.
+    FilterList(u64),
 }
 
 impl std::fmt::Display for Act {
@@ -417,6 +421,8 @@ impl std::fmt::Display for Act {
             Act::Restart(_) => write!(f, "restart"),
             Act::Pick(k) => write!(f, "pick row #{k} and enter"),
             Act::Saved(k) => write!(f, "open saved copy #{k}"),
+            Act::Filter(k, opts) => write!(f, "filter like this: candidate #{k}, options {opts:03b}"),
+            Act::FilterList(_) => write!(f, "keys in Settings › Filters"),
         }
     }
 }
@@ -515,6 +521,8 @@ fn random_act(rng: &mut Rng, hot: &[KeyEvent]) -> Act {
         87..92 => Act::Wait(Duration::from_secs(*rng.pick(&[1, 3, 9, 11, 30, 61, 300, 3600]))),
         92..93 => Act::Restart(rng.next()),
         93..95 => Act::Saved(rng.below(1000)),
+        95..97 => Act::Filter(rng.below(1000), rng.below(8) as u8),
+        97..98 => Act::FilterList(rng.next()),
         _ => Act::Pick(rng.below(1000)),
     }
 }
@@ -660,6 +668,43 @@ impl World {
                 }
                 app.on_key(KeyEvent::from(KeyCode::Enter));
             }
+            Act::Filter(k, opts) => {
+                app.on_key(KeyEvent::from(KeyCode::Char('X')));
+                let Some((n, post)) = app.filter_add.as_ref().map(|a| (a.candidates.len(), a.post)) else { return };
+                for _ in 0..k % n.max(1) {
+                    app.on_key(KeyEvent::from(KeyCode::Char('j')));
+                }
+                for (bit, key) in [(1, 'a'), (2, 's'), (4, 's')] {
+                    if opts & bit != 0 {
+                        app.on_key(KeyEvent::from(KeyCode::Char(key)));
+                    }
+                }
+                let before = app.filter_cfgs.len();
+                app.on_key(KeyEvent::from(KeyCode::Enter));
+                // A filter made from a post catches that post, at once.
+                if app.filter_cfgs.len() == before + 1 {
+                    let mark = match app.tab.view {
+                        View::Thread => app.tab.thread.as_ref().and_then(|t| t.marks.get(*t.index.get(&post)?).cloned()),
+                        _ => app.tab.catalog.iter().position(|p| p.no == post).and_then(|i| app.tab.catalog_marks.get(i).cloned()),
+                    };
+                    let caught = mark.is_some_and(|m| m.hidden.is_some() || m.highlight.is_some());
+                    assert!(caught, "the filter {:?} added from post {post} doesn't catch it", app.filter_cfgs.last());
+                }
+            }
+            Act::FilterList(seed) => {
+                let mut rng = Rng::new(*seed);
+                app.on_key(KeyEvent::from(KeyCode::Char(',')));
+                if app.tab.view != View::Settings || app.settings_popup.is_some() {
+                    return;
+                }
+                app.settings_list.state.select(settings::items().iter().position(|&i| i == settings::Item::Filters));
+                app.on_key(KeyEvent::from(KeyCode::Enter));
+                let keys = [' ', 'x', 'a', 'j', 'k', 'l', 'h', '(', 'w', '|', '日'];
+                for _ in 0..rng.below(16) {
+                    let key = if rng.chance(25) { *rng.pick(&[KeyCode::Enter, KeyCode::Esc, KeyCode::Backspace, KeyCode::Down]) } else { KeyCode::Char(*rng.pick(&keys)) };
+                    app.on_key(KeyEvent::from(key));
+                }
+            }
             Act::Saved(k) => {
                 app.on_key(KeyEvent::from(KeyCode::Char(':')));
                 if app.goto.is_some() {
@@ -770,6 +815,7 @@ fn replay(seed: u64, acts: &[Act]) -> Result<(), (String, String)> {
             check(&world.app);
             let calls = if Arc::ptr_eq(&gate, &world.gate) { world.gate.log_since(before.log) } else { Vec::new() };
             check_saved(&world.app, &before, &calls, &mut removed);
+            check_marks(&world.app, &before);
             // A step asks a handful of things at most (a few refreshes may fall due at once).
             let asked = world.gate.calls() - if Arc::ptr_eq(&gate, &world.gate) { calls_before } else { 0 };
             assert!(asked <= 12, "{asked} requests from one step");
@@ -966,6 +1012,7 @@ struct Before {
     /// The open tab's saved copy of a thread that's gone (and not watched alive).
     offline_dead: Option<(usize, ThreadKey)>,
     log: usize,
+    filters: Vec<crate::filter::FilterConfig>,
 }
 
 impl Before {
@@ -978,7 +1025,26 @@ impl Before {
             }
             _ => None,
         };
-        Before { saved, in_saved_view: app.tab.view == View::Saved, offline_dead, log: gate.log_len() }
+        Before { saved, in_saved_view: app.tab.view == View::Saved, offline_dead, log: gate.log_len(), filters: app.filter_cfgs.clone() }
+    }
+}
+
+/// After the filters change, the open catalog's and thread's marks are what they say.
+fn check_marks(app: &App, before: &Before) {
+    if app.filter_cfgs == before.filters {
+        return;
+    }
+    let tab = &app.tab;
+    if !tab.catalog.is_empty() {
+        assert!(app.marks(&tab.catalog, |p| app.board_of(p)) == tab.catalog_marks, "catalog marks don't match the filters");
+    }
+    if let Some(t) = &tab.thread {
+        assert!(app.marks(&t.posts, |_| t.board.clone()) == t.marks, "thread marks don't match the filters");
+    }
+    // And they're what's in the config file.
+    if let Some(path) = &app.config_path {
+        let cfg: Config = toml::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        assert!(cfg.filters == app.filter_cfgs, "the config's filters aren't the ones in use");
     }
 }
 

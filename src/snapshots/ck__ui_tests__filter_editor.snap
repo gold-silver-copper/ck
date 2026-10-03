@@ -1,0 +1,34 @@
+---
+source: src/ui_tests.rs
+expression: snapshot(&mut a)
+---
+ ck  Settings
+
+  Appearance
+    Theme             material                          Live preview while choosing
+    Colors            as the theme has them             Change any color of the current theme
+    Color depth       auto (24-bit)                     24-bit color, or the nearest of 256
+          Filter: Named !Trip                                      enter keep · esc cancel
+  Catalo
+    Defa  Pattern     ^Named (!Trip▏
+    Imag  Label       Named !Trip                                                           er a…
+    Filt  Action      highlight                                                              one…
+            subject   ·
+  Backgr    comment   ·
+    Open    name      ✓ looked at
+    Watc    filename  ·                                                                     s
+    Noti    md5       ·                                                                     s to…
+          Sites       4chan
+  Downlo  Boards      g
+    Fold  On          yes
+
+  Startu
+    Last  Not a valid pattern: unclosed group                                               rts …
+
+  Keys
+    Key bindings      defaults                          Rebind any command
+
+  There's no config file to save to (no home directory); changes last until ck quits.
+
+
+ enter change   esc back   , settings   ? help

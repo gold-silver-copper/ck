@@ -40,7 +40,7 @@ pub const SECTIONS: &[(&str, &[Row])] = &[
     ("Catalog", &[
         (Item::Compact, "Default layout", "c in a catalog sets a board's own"),
         (Item::Images, "Images", "Thumbnails and the image viewer (after a restart)"),
-        (Item::Filters, "Filters", "[[filter]] in the config; H hides by hand, Z shows hidden"),
+        (Item::Filters, "Filters", "Hide or highlight by pattern; X adds one from a post"),
     ]),
     ("Background refresh", &[
         (Item::RefreshThread, "Open thread", "How often the open thread updates"),
@@ -87,6 +87,11 @@ pub enum Popup {
     /// The key editor, over `key_rows()`; `capture` is waiting for a key to bind
     /// (`Some(true)`: add it to the action's keys).
     Keys { list: ListState, capture: Option<bool> },
+    /// The `[[filter]]` list, with how many posts and threads each catches on screen now.
+    Filters { list: ListState, counts: Vec<(usize, usize)> },
+    /// One filter being edited (`index`: none for a new one), on row `row` of `EDIT_ROWS`;
+    /// `typing` holds a text row being typed.
+    FilterEdit { index: Option<usize>, draft: crate::filter::FilterConfig, row: usize, typing: Option<String> },
 }
 
 /// The key editor's rows: `Err(title)` for groups (by an action's first scope),
@@ -146,7 +151,9 @@ impl App {
             },
             Item::Filters => {
                 let hidden: usize = self.store.hidden.values().map(Vec::len).sum();
-                format!("{} filters, {hidden} hidden by hand", self.filters.len())
+                let off = self.filter_cfgs.iter().filter(|f| !f.enabled).count();
+                let off = if off > 0 { format!(" ({off} off)") } else { String::new() };
+                format!("{} filters{off}, {hidden} hidden by hand", self.filter_cfgs.len())
             }
             Item::RefreshThread => format!("every {}s", self.refresh_thread.as_secs()),
             Item::RefreshWatched => format!("every {}s", self.refresh_watched.as_secs()),
@@ -198,10 +205,7 @@ impl App {
                 let mode = self.images_mode.as_str();
                 self.save_config("images (from the next start)", |d| d["images"] = toml_edit::value(mode));
             }
-            Item::Filters => {
-                let path = self.config_path.as_ref().map_or("the config".into(), |p| tilde(&p.display().to_string()));
-                self.info(format!("Filters are [[filter]] tables in {path} (see the README); they apply from the next start"));
-            }
+            Item::Filters => self.settings_popup = Some(self.filter_list(0)),
             Item::RefreshThread => {
                 let secs = next(REFRESH_THREAD, self.refresh_thread.as_secs());
                 self.refresh_thread = Duration::from_secs(secs);
@@ -327,6 +331,8 @@ impl App {
                     Some(Popup::Keys { list, capture: None })
                 }
             },
+            Popup::Filters { list, counts } => self.on_filter_list_key(key, list, counts),
+            Popup::FilterEdit { index, draft, row, typing } => self.on_filter_edit_key(key, index, draft, row, typing),
             Popup::Folder { mut value } => match key.code {
                 KeyCode::Esc => None,
                 KeyCode::Enter => {

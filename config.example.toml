@@ -299,9 +299,9 @@ url = "https://arch.b4k.dev"
 #               goto = ":", next_tab = "]", prev_tab = "[", close_tab = "ctrl-w", menu = "."
 #   everywhere but the image viewer: hints = "f"
 #   catalog:    view = "v", watch = "w", sort = "s", compact = "c", links = "O", hide = "H",
-#               show_hidden = "Z", archive_search = "A"
+#               show_hidden = "Z", filter = "X", archive_search = "A"
 #   thread:     next_part = "tab", prev_part = "shift-tab",
-#               view, watch, links, hide, show_hidden, mine = "m", expand = "e", gallery = "V",
+#               view, watch, links, hide, show_hidden, filter, mine = "m", expand = "e", gallery = "V",
 #               image_search = "R", open_file = "i",
 #               replies = "b", jump_back = "u", unread = "U",
 #               preview = "p", next_match = "n", prev_match = "N", spoiler = "s",
@@ -309,8 +309,8 @@ url = "https://arch.b4k.dev"
 #               archive = "a"
 #   catalog, thread, Watched/History: new_tab = "T", follow = "F"
 #   home screen, Boards: favorite = "*"; remove = "x" takes a favorite off
-#   Watched/History: remove = "x"
-#   catalog, thread, Watched/History, image viewer: copy = "y", copy_link = "Y"
+#   Watched/History/Saved: remove = "x"
+#   catalog, thread, Watched/History/Saved, image viewer: copy = "y", copy_link = "Y"
 [keys]
 # watch = "W"
 # help = ["?", "f1"]
@@ -318,7 +318,9 @@ url = "https://arch.b4k.dev"
 # Filters hide (or highlight) threads and posts whose text matches a regex. `field` is
 # "subject", "comment", "name", "filename" or "md5" (a file's base64 MD5, compared
 # exactly), or a list; the default is subject and comment. Optional `sites` and `boards`
-# limit where a filter applies; `label` is what's shown on what it catches.
+# limit where a filter applies; `label` is what's shown on what it catches; `enabled =
+# false` keeps a filter here without applying it. X on a post (or thread) adds one like
+# it, and Settings › Filters lists, edits and removes them (comments here are kept).
 #
 # [[filter]]
 # pattern = "(?i)crypto|nft"
@@ -328,6 +330,7 @@ url = "https://arch.b4k.dev"
 # pattern = "(?i)rust"
 # action = "highlight"
 # boards = ["g"]
+# enabled = false
 
 # Reverse image search engines for R ({url} becomes the image's address). Without any,
 # ck offers SauceNAO, Google Lens, Yandex and IQDB.

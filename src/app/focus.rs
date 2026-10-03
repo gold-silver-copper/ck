@@ -281,6 +281,7 @@ impl App {
                         items.push(act(A::Mine, if t.mine.contains(&p.no) { "it's not yours" } else { "mark it as yours" }));
                         let hidden = t.marks.get(t.selected).is_some_and(|m| m.hidden.is_some());
                         items.push(act(A::Hide, if hidden { "unhide it" } else { "hide it" }));
+                        items.push(act(A::Filter, "hide or highlight posts like it…"));
                         items.push(act(A::Watch, if watching(t.no) { "stop watching the thread" } else { "watch the thread" }));
                         items.push(act(A::Follow, "follow the thread as a general"));
                         if t.posts.iter().any(|p| !p.files.is_empty()) {
@@ -320,6 +321,7 @@ impl App {
                         items.push(act(A::Watch, if watching(p.no) { "stop watching it" } else { "watch it" }));
                         items.push(act(A::Follow, "follow it as a general"));
                         items.push(act(A::Hide, "hide it (or unhide)"));
+                        items.push(act(A::Filter, "hide or highlight threads like it…"));
                         if !p.anchors.is_empty() || !p.files.is_empty() {
                             items.push(act(A::Links, "list its links and files"));
                         }

@@ -6,7 +6,7 @@ use serde::Deserialize;
 
 use crate::model::Post;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Field {
     Subject,
@@ -25,7 +25,7 @@ pub enum FilterAction {
     Highlight,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(untagged)]
 pub enum Fields {
     One(Field),
@@ -33,7 +33,7 @@ pub enum Fields {
 }
 
 /// One `[[filter]]` table.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FilterConfig {
     pub pattern: String,
@@ -48,6 +48,119 @@ pub struct FilterConfig {
     pub action: FilterAction,
     #[serde(default)]
     pub label: Option<String>,
+    /// `false` keeps the filter in the config without applying it.
+    #[serde(default = "yes")]
+    pub enabled: bool,
+}
+
+fn yes() -> bool {
+    true
+}
+
+impl Field {
+    pub const ALL: [Field; 5] = [Field::Subject, Field::Comment, Field::Name, Field::Filename, Field::Md5];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Field::Subject => "subject",
+            Field::Comment => "comment",
+            Field::Name => "name",
+            Field::Filename => "filename",
+            Field::Md5 => "md5",
+        }
+    }
+}
+
+impl FilterAction {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            FilterAction::Hide => "hide",
+            FilterAction::Highlight => "highlight",
+        }
+    }
+}
+
+impl FilterConfig {
+    pub fn new(pattern: String, fields: &[Field]) -> Self {
+        let mut c = FilterConfig { pattern, field: None, sites: Vec::new(), boards: Vec::new(), action: FilterAction::Hide, label: None, enabled: true };
+        c.set_fields(fields);
+        c
+    }
+
+    /// The fields it looks at (subject and comment unless it says).
+    pub fn fields(&self) -> Vec<Field> {
+        match &self.field {
+            None => vec![Field::Subject, Field::Comment],
+            Some(Fields::One(f)) => vec![*f],
+            Some(Fields::Many(v)) => v.clone(),
+        }
+    }
+
+    /// Set the fields: the default left unsaid, one as a string, more as a list.
+    pub fn set_fields(&mut self, fields: &[Field]) {
+        self.field = match fields {
+            [Field::Subject, Field::Comment] => None,
+            [f] => Some(Fields::One(*f)),
+            v => Some(Fields::Many(v.to_vec())),
+        };
+    }
+
+    /// The label shown on what it marks.
+    pub fn label(&self) -> &str {
+        self.label.as_deref().unwrap_or(&self.pattern)
+    }
+
+    /// Whether it's a filter ck can use (its pattern compiles, it has fields).
+    pub fn check(&self) -> Result<()> {
+        Filters::new(std::slice::from_ref(&FilterConfig { enabled: true, ..self.clone() })).map(|_| ())
+    }
+
+    /// Write it into a `[[filter]]` table: only what differs from `old` (the table as it
+    /// was), so the rest keeps its comments and layout.
+    pub fn write(&self, t: &mut toml_edit::Table, old: Option<&FilterConfig>) {
+        use toml_edit::{Array, value};
+        let list = |v: &[String]| value(v.iter().map(String::as_str).collect::<Array>());
+        let changed = |f: &dyn Fn(&FilterConfig) -> bool| old.is_none_or(|o| !f(o));
+        if changed(&|o| o.pattern == self.pattern) {
+            t["pattern"] = value(self.pattern.as_str());
+        }
+        if changed(&|o| o.field == self.field) {
+            match &self.field {
+                None => {
+                    t.remove("field");
+                }
+                Some(Fields::One(f)) => t["field"] = value(f.as_str()),
+                Some(Fields::Many(v)) => t["field"] = value(v.iter().map(|f| f.as_str()).collect::<Array>()),
+            }
+        }
+        if changed(&|o| o.action == self.action) {
+            t["action"] = value(self.action.as_str());
+        }
+        if changed(&|o| o.label == self.label) {
+            match &self.label {
+                Some(l) => t["label"] = value(l.as_str()),
+                None => {
+                    t.remove("label");
+                }
+            }
+        }
+        for (key, now, before) in [("sites", &self.sites, old.map(|o| &o.sites)), ("boards", &self.boards, old.map(|o| &o.boards))] {
+            if before != Some(now) {
+                if now.is_empty() {
+                    t.remove(key);
+                } else {
+                    t[key] = list(now);
+                }
+            }
+        }
+        if changed(&|o| o.enabled == self.enabled) {
+            if self.enabled {
+                t.remove("enabled");
+            } else {
+                t["enabled"] = value(false);
+            }
+        }
+    }
 }
 
 struct Filter {
@@ -72,6 +185,7 @@ pub struct Mark {
 pub struct Filters(Vec<Filter>);
 
 impl Filters {
+    /// The enabled filters (every one is checked, enabled or not).
     pub fn new(cfgs: &[FilterConfig]) -> Result<Self> {
         let mut out = Vec::new();
         for (i, c) in cfgs.iter().enumerate() {
@@ -86,6 +200,9 @@ impl Filters {
             } else {
                 None
             };
+            if !c.enabled {
+                continue;
+            }
             out.push(Filter {
                 re,
                 pattern: c.pattern.clone(),
@@ -216,6 +333,36 @@ pub mod tests {
         assert!(filters("[[filter]]\npattern = \"x\"\nfield = \"nope\"").is_err());
         assert!(filters("[[filter]]\npattern = \"x\"\nfield = []").is_err());
         assert!(filters("[[filter]]\npatern = \"x\"").is_err());
+    }
+
+    #[test]
+    fn disabled_filters_are_kept_but_not_applied() {
+        let f = filters("[[filter]]\npattern = \"crypto\"\nenabled = false\n[[filter]]\npattern = \"x\"").unwrap();
+        assert_eq!(f.len(), 1);
+        assert!(f.check("4chan", "g", &post("crypto", "")).hidden.is_none());
+        // A disabled filter must still be a valid one.
+        assert!(filters("[[filter]]\npattern = \"(\"\nenabled = false").is_err());
+    }
+
+    #[test]
+    fn written_tables_read_back() {
+        let mut every = FilterConfig::new("a.b".into(), &[Field::Name, Field::Md5]);
+        every.action = FilterAction::Highlight;
+        every.label = Some("lbl".into());
+        every.sites = vec!["4chan".into()];
+        every.boards = vec!["g".into(), "v".into()];
+        every.enabled = false;
+        for c in [FilterConfig::new("p".into(), &[Field::Subject, Field::Comment]), FilterConfig::new("q".into(), &[Field::Filename]), every.clone()] {
+            let mut t = toml_edit::Table::new();
+            c.write(&mut t, None);
+            let back: FilterConfig = toml::from_str(&toml_edit::DocumentMut::from(t.clone()).to_string()).unwrap();
+            assert_eq!(back, c);
+            // Changed back to the plain one: only what differs is touched, and it reads back.
+            let plain = FilterConfig::new("p".into(), &[Field::Subject, Field::Comment]);
+            plain.write(&mut t, Some(&c));
+            let back: FilterConfig = toml::from_str(&toml_edit::DocumentMut::from(t).to_string()).unwrap();
+            assert_eq!(back, plain);
+        }
     }
 
     #[test]

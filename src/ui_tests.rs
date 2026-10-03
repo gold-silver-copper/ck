@@ -298,6 +298,49 @@ fn thread_gone_offers_the_saved_copy() {
 }
 
 #[test]
+fn add_filter_popup() {
+    use ratatui::crossterm::event::{KeyCode, KeyEvent};
+    let mut a = thread_app(false);
+    let t = a.tab.thread.as_mut().unwrap();
+    t.posts[0].name = "Named !Trip".into();
+    t.posts[0].files[0].md5 = Some("u8Vh17KxaDvUJ6bBcmE/eg==".into());
+    a.on_key(KeyEvent::from(KeyCode::Char('X')));
+    a.on_key(KeyEvent::from(KeyCode::Char('s')));
+    insta::assert_snapshot!(snapshot(&mut a));
+}
+
+fn some_filters() -> Vec<crate::filter::FilterConfig> {
+    let cfgs = "[[filter]]\npattern = \"(?i)crypto|nft\"\nlabel = \"crypto\"\n\
+        [[filter]]\npattern = \"^Named !Trip$\"\nfield = \"name\"\naction = \"highlight\"\nlabel = \"Named !Trip\"\nsites = [\"4chan\"]\nboards = [\"g\"]\n\
+        [[filter]]\npattern = \"implying\"\nfield = \"comment\"\nenabled = false\n";
+    #[derive(serde::Deserialize)]
+    struct C {
+        filter: Vec<crate::filter::FilterConfig>,
+    }
+    toml::from_str::<C>(cfgs).unwrap().filter
+}
+
+#[test]
+fn filter_list() {
+    let mut a = thread_app(false);
+    a.filter_cfgs = some_filters();
+    a.tab.thread.as_mut().unwrap().posts[2].name = "Named !Trip".into();
+    a.open_settings();
+    a.settings_popup = Some(a.filter_list(1));
+    insta::assert_snapshot!(snapshot(&mut a));
+}
+
+#[test]
+fn filter_editor() {
+    let mut a = thread_app(false);
+    a.filter_cfgs = some_filters();
+    a.open_settings();
+    let draft = a.filter_cfgs[1].clone();
+    a.settings_popup = Some(SettingsPopup::FilterEdit { index: Some(1), draft, row: 0, typing: Some("^Named (!Trip".into()) });
+    insta::assert_snapshot!(snapshot(&mut a));
+}
+
+#[test]
 fn history() {
     let mut a = app(false);
     a.tab.view = View::History;
