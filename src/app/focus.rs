@@ -83,8 +83,11 @@ impl App {
         if !self.images.enabled() {
             return self.open_file(&file);
         }
+        if self.thread_viewer(k) {
+            return;
+        }
         let link = self.selected_link();
-        self.tab.viewer = Some(Viewer { files, index: k, link });
+        self.tab.viewer = Some(Viewer::new(files, k, link));
     }
 
     /// A quote link: the post, when it's in this thread (`u` comes back); else where it leads.

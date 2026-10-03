@@ -606,13 +606,39 @@ impl App {
     }
 
     fn on_viewer_key(&mut self, code: KeyCode) {
+        use crate::images::Crop;
         let Some(v) = &mut self.tab.viewer else { return };
         let n = v.files.len();
+        let zoomed = !v.crop.is_fit();
         match code {
+            // Zoom: + and - (= is + without shift), 0 fits it again. Zoomed in, the arrows
+            // and h/j/k/l move around, page up / down go to the other files, and esc fits.
+            KeyCode::Char('+' | '=') => v.crop = v.crop.zoomed(true),
+            KeyCode::Char('-') => v.crop = v.crop.zoomed(false),
+            KeyCode::Char('0') => v.crop = Crop::FIT,
+            KeyCode::Esc if zoomed => v.crop = Crop::FIT,
+            KeyCode::Char('h') | KeyCode::Left if zoomed => v.crop = v.crop.moved(-1, 0),
+            KeyCode::Char('l') | KeyCode::Right if zoomed => v.crop = v.crop.moved(1, 0),
+            KeyCode::Char('k') | KeyCode::Up if zoomed => v.crop = v.crop.moved(0, -1),
+            KeyCode::Char('j') | KeyCode::Down if zoomed => v.crop = v.crop.moved(0, 1),
+            KeyCode::PageUp => {
+                v.index = (v.index + n - 1) % n;
+                v.crop = Crop::FIT;
+            }
+            KeyCode::PageDown => {
+                v.index = (v.index + 1) % n;
+                v.crop = Crop::FIT;
+            }
             KeyCode::Esc | KeyCode::Char('q' | 'v') => {
-                // Back in the gallery, on the file last viewed.
+                // Back in the gallery, on the file last viewed; or in the thread, on its post.
                 if let Some(g) = &mut self.tab.gallery {
                     g.state.select(Some(v.index));
+                } else if let Some(&no) = v.posts.get(v.index)
+                    && let Some(t) = &mut self.tab.thread
+                    && let Some(&i) = t.index.get(&no)
+                    && i != t.selected
+                {
+                    t.select(i);
                 }
                 self.tab.viewer = None;
             }

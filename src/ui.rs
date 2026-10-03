@@ -1653,6 +1653,7 @@ fn help_sections(keys: &KeyMap) -> Vec<(&'static str, Vec<(String, &'static str)
             vec![
                 ("h / l, ← / →".into(), "previous / next file"),
                 ("space".into(), "pause an animated GIF"),
+                ("+ / - / 0".into(), "zoom in / out / fit"),
                 ("i".into(), "open externally"),
                 (pair(Action::Copy, Action::CopyLink), "copy file URL / post link"),
                 (k(Action::ImageSearch), "reverse image search"),
@@ -2049,7 +2050,14 @@ fn draw_viewer(f: &mut Frame, app: &mut App) {
     ])
     .areas(f.area());
     let mut meta = file_facts(file);
+    if let Some(no) = v.posts.get(v.index) {
+        meta.push(format!("No.{no}"));
+    }
     meta.push(format!("{} of {}", v.index + 1, v.files.len()));
+    if !v.crop.is_fit() {
+        meta.push(format!("{}%", v.crop.zoom));
+    }
+    let crop = v.crop;
     fill(f, top, t.bar);
     let line = Line::from(vec![
         Span::styled(" ck ", bold(t.on_primary).bg(t.primary)),
@@ -2062,7 +2070,12 @@ fn draw_viewer(f: &mut Frame, app: &mut App) {
     if let Some(s) = &app.status {
         hints.extend(status_spans(s, t));
     } else {
-        for (k, label) in [("h/l", "previous / next"), ("i", "open externally"), ("esc", "close")] {
+        let keys: &[(&str, &str)] = if crop.is_fit() {
+            &[("h/l", "previous / next"), ("+/-", "zoom"), ("i", "open externally"), ("esc", "close")]
+        } else {
+            &[("h/j/k/l", "move"), ("+/-", "zoom"), ("pgup/pgdn", "previous / next"), ("0, esc", "fit")]
+        };
+        for &(k, label) in keys {
             hints.extend([Span::styled(k, bold(t.primary)), Span::styled(format!(" {label}   "), dim())]);
         }
     }
@@ -2088,7 +2101,7 @@ fn draw_viewer(f: &mut Frame, app: &mut App) {
     // Terminal graphics would cover a panel on top.
     let Some((url, kind)) = source.filter(|_| app.image_search_panel.is_none()) else { return };
     let spinner = SPINNER[app.tick % SPINNER.len()];
-    match app.images.get(&url, Size::new(inner.width, inner.height), kind) {
+    match app.images.get_crop(&url, Size::new(inner.width, inner.height), kind, crop) {
         State::Ready(p) => {
             let s = p.size();
             let r = Rect::new(

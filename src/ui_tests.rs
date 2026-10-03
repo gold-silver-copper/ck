@@ -359,8 +359,12 @@ fn history() {
 #[test]
 fn image_viewer_placeholder() {
     let mut a = thread_app(true);
-    a.tab.viewer = Some(Viewer { files: vec![file("op.png"), file("clip.webm")], index: 0, link: None });
+    a.tab.viewer = Some(Viewer::new(vec![file("op.png"), file("clip.webm")], 0, None));
     insta::assert_snapshot!(snapshot(&mut a));
+    // Zoomed: how far, and the keys that move around.
+    a.tab.viewer.as_mut().unwrap().crop = crate::images::Crop::FIT.zoomed(true).zoomed(true);
+    let text = snapshot(&mut a);
+    assert!(text.contains("1 of 2  ·  200%") && text.contains("h/j/k/l move") && text.contains("0, esc fit"), "{text}");
 }
 
 #[test]

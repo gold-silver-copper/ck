@@ -27,8 +27,8 @@ expression: snapshot(&mut a)
        ptchan            Image viewer
        erischan            h / l, ← / →       previous / next file
        junkuchan           space              pause an animated GIF
-       nukechan            i                  open externally
-       palanq              y / Y              copy file URL / post link
-       b4k                 R                  reverse image search
+       nukechan            + / - / 0          zoom in / out / fit
+       palanq              i                  open externally
+       b4k                 y / Y              copy file URL / post link
 
  enter open   . more   / filter   o browser   r reload   , settings   ? help

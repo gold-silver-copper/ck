@@ -239,7 +239,7 @@ fn fixed(scope: Scope) -> Vec<Key> {
     keys.push(Key::ctrl('c'));
     let chars: &[char] = match scope {
         Scope::Thread => &['j', 'k', 'g', 'G', 'h', 'l', 'J', 'K', ' '],
-        Scope::Viewer => &['j', 'k', 'h', 'l', 'i', 'q', 'v', ' '],
+        Scope::Viewer => &['j', 'k', 'h', 'l', 'i', 'q', 'v', ' ', '+', '=', '-', '0'],
         // The home screen opens favorites with 1-9.
         Scope::Lists => &['j', 'k', 'g', 'G', 'h', 'l', '1', '2', '3', '4', '5', '6', '7', '8', '9'],
         _ => &['j', 'k', 'g', 'G', 'h', 'l'],
