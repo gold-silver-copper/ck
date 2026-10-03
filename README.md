@@ -309,7 +309,7 @@ first one.
 
 Watched threads are saved as they refresh: each time new posts arrive, the thread's last
 good copy is written to the data directory (`threads/<site>/<board>/<no>.json`, only when
-something changed). When a watched thread 404s, its copy is kept and marked dead, so the
+something changed, and in the background so ck never waits on it). When a watched thread 404s, its copy is kept and marked dead, so the
 thread isn't lost. `E` saves a copy too, of any thread.
 
 "Saved" on the home screen (or `:saved`) lists the copies, newest first, with "dead" on

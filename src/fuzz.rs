@@ -640,12 +640,13 @@ fn data_dir_once(seed: u64) {
         let html = format!("<span class=\"quote\">&gt;{i}</span><br><a href=\"#p{}\" class=\"quotelink\">&gt;&gt;{}</a> <s>spoiler</s>", key.no, key.no);
         let parsed = crate::markup::parse_html(&html, crate::markup::Flavor::Fourchan);
         let posts: Vec<crate::model::Post> = (0..3).map(|k| crate::model::Post { no: key.no + k, body: parsed.lines.clone(), anchors: parsed.anchors.clone(), ..Default::default() }).collect();
-        store.keep_thread(&key, &format!("thread {i}"), "u", &posts, START + i as i64).unwrap();
+        store.keep_thread(&key, &format!("thread {i}"), "u", &posts, START + i as i64);
         if rng.chance(50) {
             store.saved_dead(&key);
         }
     }
     store.recent_boards = vec!["4chan/g".into(), "lainchan/λ".into(), "x".into()];
+    assert!(store.flush(Duration::from_secs(10)).is_empty());
     store.save().unwrap();
     let place = |view: &str| Place { view: view.into(), site: "4chan".into(), board: Some("g".into()), thread: Some(100), ..Default::default() };
     store.save_session(&Session { tabs: vec![place("thread"), place("catalog"), place("watched"), place("saved")], active: rng.below(5) }).unwrap();

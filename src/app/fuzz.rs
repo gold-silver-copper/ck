@@ -657,6 +657,8 @@ impl World {
             Act::Restart(seed) => {
                 settle(&mut self.app, &self.gate);
                 check_etiquette(&self.gate.take_background());
+                // As quitting does.
+                self.app.flush_writes();
                 self.app.save_now();
                 // A gate of its own for the new app: anything the old one still asks just goes.
                 self.gate.open();
@@ -844,6 +846,7 @@ fn replay(seed: u64, acts: &[Act]) -> Result<(), (String, String)> {
         check_etiquette(&world.gate.take_background());
         assert_eq!(WORKER_PANICS.load(Ordering::SeqCst), workers, "a worker thread panicked");
         // What was saved loads again, without complaint.
+        world.app.flush_writes();
         world.app.save_now();
         let (_, warnings) = Store::load(Some(world.dir.path().join("data")));
         assert!(warnings.is_empty(), "the saved data doesn't load cleanly: {warnings:?}");

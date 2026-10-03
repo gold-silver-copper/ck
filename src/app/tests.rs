@@ -1129,15 +1129,18 @@ fn watched_threads_are_saved_as_posts_arrive() {
     assert!(!file(1).exists());
     // Watching a loaded thread saves it at once; refreshes save the changes only.
     app.act(Action::Watch);
+    app.flush_writes();
     assert!(file(1).exists());
     std::fs::remove_file(file(1)).unwrap();
     app.set_thread(nos(&[1, 2]));
+    app.flush_writes();
     assert!(!file(1).exists());
     app.set_thread(nos(&[1, 2, 3]));
     assert_eq!(app.store.saved(&key(1)).unwrap().posts, 3);
     // A watched thread refreshed in the background, too.
     app.store.toggle_watch(key(7), "seven".into(), 1, 7);
     app.refreshed(key(7), Ok(nos(&[7, 8])));
+    app.flush_writes();
     assert!(file(7).exists());
     // The index is written with the rest of the data.
     app.save_now();
@@ -1150,7 +1153,7 @@ fn a_dead_thread_offers_its_saved_copy() {
     let mut app = saving_app(dir.path(), 10_000);
     let key = ThreadKey { site: "a".into(), board: "x".into(), no: 1 };
     app.store.toggle_watch(key.clone(), "one".into(), 2, 2);
-    app.store.keep_thread(&key, "one", "u", &nos(&[1, 2]), 10_000 - 7200).unwrap();
+    app.store.keep_thread(&key, "one", "u", &nos(&[1, 2]), 10_000 - 7200);
     // Opened, and gone: the copy is offered (and the thread marked dead, copy and all).
     app.goto_str("a/x/1");
     app.handle(Msg::Thread(app.tab.req, Err(gone())));
@@ -1198,7 +1201,7 @@ fn a_saved_copy_of_a_live_thread_goes_live_with_r() {
     let dir = tempfile::tempdir().unwrap();
     let mut app = saving_app(dir.path(), 1000);
     let key = ThreadKey { site: "a".into(), board: "x".into(), no: 1 };
-    app.store.keep_thread(&key, "one", "u", &nos(&[1, 2]), 900).unwrap();
+    app.store.keep_thread(&key, "one", "u", &nos(&[1, 2]), 900);
     app.tab.view = View::Saved;
     app.saved_list.state.select(Some(0));
     app.enter();
@@ -1221,7 +1224,7 @@ fn the_saved_view_lists_and_removes_after_asking() {
     let mut app = saving_app(dir.path(), 1000);
     let key = |no| ThreadKey { site: "a".into(), board: "x".into(), no };
     for (no, at) in [(1, 100), (2, 300), (3, 200)] {
-        app.store.keep_thread(&key(no), &format!("thread {no}"), "u", &nos(&[no]), at).unwrap();
+        app.store.keep_thread(&key(no), &format!("thread {no}"), "u", &nos(&[no]), at);
     }
     app.tab.view = View::Sites;
     app.site_list.state.select(Some(2));
@@ -1270,7 +1273,7 @@ fn a_saved_copy_is_remembered_in_the_session() {
     let dir = tempfile::tempdir().unwrap();
     let mut app = saving_app(dir.path(), 1000);
     let key = ThreadKey { site: "b".into(), board: "y".into(), no: 5 };
-    app.store.keep_thread(&key, "five", "u", &nos(&[5, 6]), 900).unwrap();
+    app.store.keep_thread(&key, "five", "u", &nos(&[5, 6]), 900);
     app.open_saved(key);
     app.tab.thread.as_mut().unwrap().selected = 1;
     let place = app.place();
@@ -1291,7 +1294,7 @@ fn watching_a_saved_copy_keeps_it_under_its_own_number() {
     let dir = tempfile::tempdir().unwrap();
     let mut app = saving_app(dir.path(), 1000);
     let key = |no| ThreadKey { site: "a".into(), board: "x".into(), no };
-    app.store.keep_thread(&key(5), "five", "u", &nos(&[9, 10]), 900).unwrap();
+    app.store.keep_thread(&key(5), "five", "u", &nos(&[9, 10]), 900);
     app.open_saved(key(5));
     assert_eq!(app.tab.thread.as_ref().unwrap().no, 9);
     app.act(Action::Watch);
