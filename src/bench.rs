@@ -169,6 +169,32 @@ fn bench_catalog() {
     time("frame", 200, || draw(&mut t, &mut a));
 }
 
+/// Encoding on the encoder thread: how long until a decoded image can be shown, for each
+/// protocol, at the default cell size and at a large real one (25x51 px, as a big font on a
+/// high-density screen reports).
+#[test]
+#[ignore]
+fn bench_encoding() {
+    use crate::images::Crop;
+    use ratatui::layout::Size;
+    eprintln!("\n== images: encoding (the encoder thread) ==");
+    // A photo-like image (encoders and filters do more with detail than with flat color).
+    let photo = DynamicImage::ImageRgb8(image::RgbImage::from_fn(2048, 2048, |x, y| image::Rgb([(x ^ y) as u8, (x * 3 + y) as u8, (y * 7) as u8])));
+    let thumb = photo.thumbnail(250, 250);
+    let zoom = Crop::FIT.zoomed(true).zoomed(true);
+    for proto in [ProtocolType::Halfblocks, ProtocolType::Sixel, ProtocolType::Kitty] {
+        for (cells, font) in [("10x20", (10u16, 20u16)), ("25x51", (25, 51))] {
+            #[allow(deprecated)]
+            let mut p = Picker::from_fontsize(font.into());
+            p.set_protocol_type(proto);
+            let n = if proto == ProtocolType::Halfblocks { 10 } else { 3 };
+            time(&format!("{proto:?}, cells {cells}: a 2048px image in the viewer"), n, || crate::images::encode_crop(&p, &photo, Size::new(117, 30), Crop::FIT));
+            time(&format!("{proto:?}, cells {cells}: a thumbnail tile"), n, || crate::images::encode_crop(&p, &thumb, Size::new(16, 8), Crop::FIT));
+            time(&format!("{proto:?}, cells {cells}: the viewer zoomed to 200%"), n, || crate::images::encode_crop(&p, &photo, Size::new(117, 30), zoom));
+        }
+    }
+}
+
 fn picker(proto: ProtocolType) -> Picker {
     let mut p = Picker::halfblocks();
     p.set_protocol_type(proto);
