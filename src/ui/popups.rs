@@ -31,6 +31,18 @@ pub(super) fn draw_adding(f: &mut Frame, app: &App) {
         Adding::Site { site, name, .. } => {
             let host = crate::http::host(site.url.as_deref().unwrap_or_default()).to_string();
             let mut lines = vec![text(format!("It runs {}.", site.kind.label()))];
+            // Where its files are, when that isn't the usual.
+            let files: Vec<String> = [site.thumb_ext.as_ref().map(|e| format!("thumbnails are .{e}")), site.media_url.as_ref().map(|m| format!("files on {}", crate::http::host(m)))]
+                .into_iter()
+                .flatten()
+                .collect();
+            if !files.is_empty() {
+                let mut what = files.join(", ");
+                if let Some(c) = what.get(..1).map(str::to_uppercase) {
+                    what.replace_range(..1, &c);
+                }
+                lines.push(text(format!("{what}.")));
+            }
             match site.boards.as_deref() {
                 Some([b]) => {
                     lines.push(text(format!("Its boards: /{}/ so far. vichan has no board list: Settings › Sites", b.uri())));

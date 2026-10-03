@@ -433,6 +433,19 @@ pub fn get_text(url: &str) -> Result<String> {
     }
 }
 
+/// Whether something is at `url` (a HEAD request, at low priority, through the rate limiter).
+pub fn exists(url: &str) -> bool {
+    #[cfg(test)]
+    if host(url).ends_with(".invalid") {
+        let answer = lock(&TEST_HOSTS).get(host(url)).cloned();
+        return answer.is_some_and(|a| a(url, None).status == 200);
+    }
+    if throttle(url, Priority::Low).is_err() {
+        return false;
+    }
+    AGENT.head(url).call().is_ok_and(|r| r.status().as_u16() == 200)
+}
+
 /// GET raw bytes (images, downloads) at low priority through the rate limiter. Not cached.
 pub fn get_bytes(url: &str, limit: u64) -> Result<Vec<u8>> {
     throttle(url, Priority::Low)?;
