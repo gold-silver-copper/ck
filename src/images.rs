@@ -561,24 +561,79 @@ fn encoder(picker: &Picker, jobs: &Receiver<EncodeJob>, tx: &Sender<Done>, wake:
 
 /// Encode the part `crop` of `img` to fit in `size` cells: scaled up to fill them (that's
 /// zooming in), unless it's the whole image.
-fn encode_crop(picker: &Picker, img: &DynamicImage, size: Size, crop: Crop) -> Result<Protocol, String> {
+pub(crate) fn encode_crop(picker: &Picker, img: &DynamicImage, size: Size, crop: Crop) -> Result<Protocol, String> {
     if crop.is_fit() {
         return encode(picker, img, size);
     }
+    let (x, y, cw, ch) = crop.region(img.width(), img.height());
+    let part = img.crop_imm(x, y, cw, ch);
+    if picker.protocol_type() == ProtocolType::Halfblocks {
+        return halfblocks(&part, size, picker.font_size(), true);
+    }
     let font = picker.font_size();
     let (w, h) = (size.width as u32 * font.width as u32, size.height as u32 * font.height as u32);
-    let (x, y, cw, ch) = crop.region(img.width(), img.height());
-    let part = img.crop_imm(x, y, cw, ch).resize(w.max(1), h.max(1), FilterType::Triangle);
-    picker.new_protocol(part, size, Resize::Fit(None)).map_err(|e| e.to_string())
+    picker.new_protocol(shrink(&part, w, h, true), size, Resize::Fit(None)).map_err(|e| e.to_string())
 }
 
 /// Encode `img` to fit in `size` cells. Large images are scaled down from the shared copy
 /// first, so the full-size image is never cloned.
 fn encode(picker: &Picker, img: &DynamicImage, size: Size) -> Result<Protocol, String> {
+    if picker.protocol_type() == ProtocolType::Halfblocks {
+        return halfblocks(img, size, picker.font_size(), false);
+    }
     let font = picker.font_size();
     let (w, h) = (size.width as u32 * font.width as u32, size.height as u32 * font.height as u32);
-    let small = if img.width() > w || img.height() > h { img.resize(w, h, FilterType::Triangle) } else { img.clone() };
-    picker.new_protocol(small, size, Resize::Fit(None)).map_err(|e| e.to_string())
+    picker.new_protocol(shrink(img, w, h, false), size, Resize::Fit(None)).map_err(|e| e.to_string())
+}
+
+/// `img` fitted into `w` x `h` pixels (keeping its shape): scaled down with the fast
+/// area-averaging resize when it's much bigger (a high-quality filter over a large image costs
+/// tens of milliseconds, and the terminal shows no difference), and only scaled up with
+/// `grow` (a zoomed part fills the area).
+fn shrink(img: &DynamicImage, w: u32, h: u32, grow: bool) -> DynamicImage {
+    let (w, h) = (w.max(1), h.max(1));
+    if img.width() > w || img.height() > h {
+        img.thumbnail(w, h)
+    } else if grow {
+        img.resize(w, h, FilterType::Triangle)
+    } else {
+        img.clone()
+    }
+}
+
+/// Half-blocks (two "pixels" per cell, one above the other) for `img` in `size` cells. The
+/// image takes the cells it would at the terminal's cell size (`font`): as many as its pixels
+/// cover, fewer if they don't fit, or (with `fill`) all it can. It's scaled once, straight to
+/// two pixels per cell, rather than to the screen's full pixel size first (which, at a large
+/// cell size, made the viewer cost a tenth of a second per image).
+fn halfblocks(img: &DynamicImage, size: Size, font: ratatui_image::FontSize, fill: bool) -> Result<Protocol, String> {
+    use ratatui_image::protocol::halfblocks::Halfblocks;
+    let (fw, fh) = (u32::from(font.width).max(1), u32::from(font.height).max(1));
+    let (area_w, area_h) = (u32::from(size.width) * fw, u32::from(size.height) * fh);
+    let (iw, ih) = (img.width().max(1), img.height().max(1));
+    // Its size on screen, in pixels: as it is if it fits (and isn't to fill), else fitted.
+    let (pw, ph) = if !fill && iw <= area_w && ih <= area_h {
+        (iw, ih)
+    } else {
+        let ratio = f64::min(f64::from(area_w) / f64::from(iw), f64::from(area_h) / f64::from(ih));
+        (((f64::from(iw) * ratio).round() as u32).clamp(1, area_w.max(1)), ((f64::from(ih) * ratio).round() as u32).clamp(1, area_h.max(1)))
+    };
+    let cells = Size::new(pw.div_ceil(fw).max(1) as u16, ph.div_ceil(fh).max(1) as u16);
+    // The image in half-block pixels: a cell's width, half its height.
+    // (Rounded: pw / fw wide, ph * 2 / fh tall.)
+    let cw = ((pw * 2 + fw) / (2 * fw)).clamp(1, u32::from(cells.width));
+    let ch = ((ph * 4 + fh) / (2 * fh)).clamp(1, u32::from(cells.height) * 2);
+    let scaled = if iw > cw * 2 || ih > ch * 2 { img.thumbnail_exact(cw, ch) } else { img.resize_exact(cw, ch, FilterType::Triangle) };
+    // Padded to whole cells like the library pads (transparent, shown black).
+    let (gw, gh) = (u32::from(cells.width), u32::from(cells.height) * 2);
+    let image = if (cw, ch) == (gw, gh) {
+        scaled
+    } else {
+        let mut bg = DynamicImage::ImageRgba8(image::RgbaImage::new(gw, gh));
+        image::imageops::overlay(&mut bg, &scaled, 0, 0);
+        bg
+    };
+    Halfblocks::new(image, cells).map(Protocol::Halfblocks).map_err(|e| e.to_string())
 }
 
 /// Whether a job can start now: cached thumbnails and media hosts always; hosts that share
@@ -682,6 +737,57 @@ mod tests {
             let cfg: crate::config::Config = toml::from_str(&format!("images = \"{text}\"\n{}", crate::config::DEFAULT_CONFIG.replace("images = \"auto\"", ""))).unwrap();
             assert_eq!((cfg.images, mode.as_str()), (mode, text));
         }
+    }
+
+    /// How the library alone would size an image (the old way): fitted at the cell size.
+    fn library_size(picker: &Picker, img: &DynamicImage, size: Size, fill: bool) -> Size {
+        let font = picker.font_size();
+        let (w, h) = (size.width as u32 * font.width as u32, size.height as u32 * font.height as u32);
+        let img = if fill || img.width() > w || img.height() > h { img.resize(w, h, FilterType::Triangle) } else { img.clone() };
+        picker.new_protocol(img, size, Resize::Fit(None)).unwrap().size()
+    }
+
+    #[test]
+    fn halfblocks_take_the_cells_the_library_would_give_them() {
+        let zoom = Crop::FIT.zoomed(true).zoomed(true);
+        for font in [(10u16, 20u16), (25, 51), (8, 17), (1, 2)] {
+            #[allow(deprecated)]
+            let mut picker = Picker::from_fontsize(font.into());
+            picker.set_protocol_type(ProtocolType::Halfblocks);
+            for (iw, ih) in [(1200, 1200), (1200, 350), (300, 1300), (250, 250), (40, 30), (1, 1), (2500, 3)] {
+                let img = DynamicImage::new_rgb8(iw, ih);
+                for size in [Size::new(117, 30), Size::new(16, 8), Size::new(3, 1)] {
+                    let ours = encode_crop(&picker, &img, size, Crop::FIT).unwrap().size();
+                    assert_eq!(ours, library_size(&picker, &img, size, false), "font {font:?}, image {iw}x{ih}, area {size:?}");
+                }
+                // Zoomed: the part fills the area as it did.
+                let size = Size::new(40, 12);
+                let (x, y, cw, ch) = zoom.region(iw, ih);
+                let part = img.crop_imm(x, y, cw, ch);
+                let ours = encode_crop(&picker, &img, size, zoom).unwrap().size();
+                assert_eq!(ours, library_size(&picker, &part, size, true), "zoomed: font {font:?}, image {iw}x{ih}");
+            }
+        }
+    }
+
+    #[test]
+    fn halfblocks_show_the_image() {
+        // Left half red, right half blue, top white: on screen as such.
+        let img = DynamicImage::ImageRgb8(image::RgbImage::from_fn(800, 400, |x, y| {
+            if y < 100 { image::Rgb([255, 255, 255]) } else if x < 400 { image::Rgb([255, 0, 0]) } else { image::Rgb([0, 0, 255]) }
+        }));
+        #[allow(deprecated)]
+        let mut picker = Picker::from_fontsize((25, 51).into());
+        picker.set_protocol_type(ProtocolType::Halfblocks);
+        let p = encode_crop(&picker, &img, Size::new(20, 10), Crop::FIT).unwrap();
+        let s = p.size();
+        let mut buf = ratatui::buffer::Buffer::empty(ratatui::layout::Rect::new(0, 0, s.width, s.height));
+        ratatui::widgets::Widget::render(ratatui_image::Image::new(&p), buf.area, &mut buf);
+        let cell = |x: u16, y: u16| buf[(x, y)].clone();
+        let colors = |c: &ratatui::buffer::Cell| [c.fg, c.bg];
+        assert!(colors(&cell(1, s.height - 1)).contains(&ratatui::style::Color::Rgb(255, 0, 0)), "{:?}", cell(1, s.height - 1));
+        assert!(colors(&cell(s.width - 2, s.height - 1)).contains(&ratatui::style::Color::Rgb(0, 0, 255)));
+        assert!(colors(&cell(s.width / 2 - 3, 0)).contains(&ratatui::style::Color::Rgb(255, 255, 255)));
     }
 
     #[test]
