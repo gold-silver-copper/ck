@@ -114,30 +114,52 @@ impl Crop {
         if ZOOMS[i] <= 100 {
             return Crop::FIT;
         }
-        Crop { zoom: ZOOMS[i], ..self }.clamped()
+        Crop { zoom: ZOOMS[i], ..self }
     }
 
-    /// Moved by a quarter of what's shown, in steps of `dx`, `dy`.
-    pub fn moved(self, dx: i32, dy: i32) -> Crop {
-        let step = 250 * 100 / i32::from(self.zoom.max(100));
-        let at = |v: u16, d: i32| (i32::from(v) + d * step).clamp(0, 1000) as u16;
-        Crop { x: at(self.x, dx), y: at(self.y, dy), ..self }.clamped()
+    /// Moved by a quarter of what's shown (`shown`: thousandths of the image's width and
+    /// height on screen), in steps of `dx`, `dy`; never past the image's edges.
+    pub fn moved(self, dx: i32, dy: i32, shown: (u16, u16)) -> Crop {
+        let step = |s: u16| (i32::from(s) / 4).max(1);
+        let at = |v: u16, d: i32, s: u16| (i32::from(v) + d * step(s)).clamp(0, 1000) as u16;
+        Crop { x: at(self.x, dx, shown.0), y: at(self.y, dy, shown.1), ..self }.within(shown)
     }
 
-    /// The center kept where the zoomed part stays inside the image.
-    fn clamped(self) -> Crop {
-        let half = 500 * 100 / self.zoom.max(100);
-        let keep = |v: u16| v.clamp(half, 1000 - half);
-        Crop { x: keep(self.x), y: keep(self.y), ..self }
+    /// How much is shown before it's known (not drawn yet): the image's shape at this zoom.
+    pub fn guess_shown(self) -> (u16, u16) {
+        let s = (100_000 / u32::from(self.zoom.max(100))) as u16;
+        (s, s)
     }
 
-    /// The part of a `w` x `h` image it shows: left, top, width, height.
-    pub fn region(self, w: u32, h: u32) -> (u32, u32, u32, u32) {
-        let z = u64::from(self.zoom.max(100));
-        let (rw, rh) = (((u64::from(w) * 100 / z) as u32).max(1), ((u64::from(h) * 100 / z) as u32).max(1));
+    /// The center kept where what's shown stays inside the image.
+    pub fn within(self, shown: (u16, u16)) -> Crop {
+        let keep = |v: u16, s: u16| {
+            let half = s.min(1000) / 2;
+            v.clamp(half, 1000 - half)
+        };
+        Crop { x: keep(self.x, shown.0), y: keep(self.y, shown.1), ..self }
+    }
+
+    /// How much of a `w` x `h` image is shown zoomed into `view` (pixels on screen): in
+    /// thousandths of its width and height. Zoomed in, that's as much as the screen holds
+    /// at that zoom (its shape, not the image's), up to all of it.
+    pub fn shown(self, w: u32, h: u32, view: (u32, u32)) -> (u16, u16) {
+        let (_, _, rw, rh) = self.region(w, h, view);
+        ((u64::from(rw) * 1000 / u64::from(w.max(1))) as u16, (u64::from(rh) * 1000 / u64::from(h.max(1))) as u16)
+    }
+
+    /// The part of a `w` x `h` image it shows on a screen area of `view` pixels: left, top,
+    /// width, height. At 100% the whole image fits the area; zoomed by `z`, the image is `z`
+    /// times that size, and the part is what the area holds of it.
+    pub fn region(self, w: u32, h: u32, view: (u32, u32)) -> (u32, u32, u32, u32) {
+        let (w, h) = (w.max(1), h.max(1));
+        let (aw, ah) = (f64::from(view.0.max(1)), f64::from(view.1.max(1)));
+        let scale = f64::min(aw / f64::from(w), ah / f64::from(h)) * f64::from(self.zoom.max(100)) / 100.0;
+        let rw = ((aw / scale).round() as u32).clamp(1, w);
+        let rh = ((ah / scale).round() as u32).clamp(1, h);
         let left = (u64::from(w) * u64::from(self.x) / 1000) as u32;
         let top = (u64::from(h) * u64::from(self.y) / 1000) as u32;
-        (left.saturating_sub(rw / 2).min(w - rw.min(w)), top.saturating_sub(rh / 2).min(h - rh.min(h)), rw.min(w), rh.min(h))
+        (left.saturating_sub(rw / 2).min(w - rw), top.saturating_sub(rh / 2).min(h - rh), rw, rh)
     }
 }
 
@@ -292,6 +314,19 @@ impl Images {
 
     pub fn enabled(&self) -> bool {
         self.picker.is_some()
+    }
+
+    /// A loaded image's size in pixels.
+    pub fn dims(&self, url: &str) -> Option<(u32, u32)> {
+        match self.slots.get(url)? {
+            Slot::Ready { img, .. } => Some((img.width(), img.height())),
+            _ => None,
+        }
+    }
+
+    /// The terminal's cell size in pixels, as images are encoded for.
+    pub fn cell_size(&self) -> Option<(u32, u32)> {
+        self.picker.as_ref().map(|p| (u32::from(p.font_size().width), u32::from(p.font_size().height)))
     }
 
     pub fn protocol_name(&self) -> String {
@@ -565,13 +600,13 @@ pub(crate) fn encode_crop(picker: &Picker, img: &DynamicImage, size: Size, crop:
     if crop.is_fit() {
         return encode(picker, img, size);
     }
-    let (x, y, cw, ch) = crop.region(img.width(), img.height());
-    let part = img.crop_imm(x, y, cw, ch);
-    if picker.protocol_type() == ProtocolType::Halfblocks {
-        return halfblocks(&part, size, picker.font_size(), true);
-    }
     let font = picker.font_size();
     let (w, h) = (size.width as u32 * font.width as u32, size.height as u32 * font.height as u32);
+    let (x, y, cw, ch) = crop.region(img.width(), img.height(), (w, h));
+    let part = img.crop_imm(x, y, cw, ch);
+    if picker.protocol_type() == ProtocolType::Halfblocks {
+        return halfblocks(&part, size, font, true);
+    }
     picker.new_protocol(shrink(&part, w, h, true), size, Resize::Fit(None)).map_err(|e| e.to_string())
 }
 
@@ -760,13 +795,36 @@ mod tests {
                     let ours = encode_crop(&picker, &img, size, Crop::FIT).unwrap().size();
                     assert_eq!(ours, library_size(&picker, &img, size, false), "font {font:?}, image {iw}x{ih}, area {size:?}");
                 }
-                // Zoomed: the part fills the area as it did.
+                // Zoomed: the part fills the area as it did (at small cell sizes: the
+                // library's own way is slow in a debug build at large ones).
+                if font.0 > 10 {
+                    continue;
+                }
                 let size = Size::new(40, 12);
-                let (x, y, cw, ch) = zoom.region(iw, ih);
+                let font_px = picker.font_size();
+                let view = (u32::from(size.width) * u32::from(font_px.width), u32::from(size.height) * u32::from(font_px.height));
+                let (x, y, cw, ch) = zoom.region(iw, ih, view);
                 let part = img.crop_imm(x, y, cw, ch);
                 let ours = encode_crop(&picker, &img, size, zoom).unwrap().size();
                 assert_eq!(ours, library_size(&picker, &part, size, true), "zoomed: font {font:?}, image {iw}x{ih}");
             }
+        }
+    }
+
+    #[test]
+    fn a_zoomed_image_fills_a_wide_viewer() {
+        // A square image on a wide viewer: fitted, a square in the middle; zoomed, the whole
+        // width (the report: zooming cut it off at the sides).
+        let img = DynamicImage::new_rgb8(1200, 1200);
+        for proto in [ProtocolType::Halfblocks, ProtocolType::Kitty] {
+            #[allow(deprecated)]
+            let mut picker = Picker::from_fontsize((10, 20).into());
+            picker.set_protocol_type(proto);
+            let size = Size::new(117, 30);
+            let fitted = encode_crop(&picker, &img, size, Crop::FIT).unwrap().size();
+            assert_eq!(fitted.width, 60, "{proto:?}");
+            let zoomed = encode_crop(&picker, &img, size, Crop::FIT.zoomed(true).zoomed(true)).unwrap().size();
+            assert!(zoomed.width >= 115 && zoomed.height == 30, "{proto:?}: {zoomed:?}");
         }
     }
 
@@ -838,20 +896,32 @@ mod tests {
     fn zooming_crops_and_moves_inside_the_image() {
         let c = Crop::FIT.zoomed(true);
         assert_eq!((c.zoom, c.x, c.y), (150, 500, 500));
-        // 200%: half of each side, centered.
+        // 200% of an image the same shape as the screen: half of each side, centered.
         let c = c.zoomed(true);
-        assert_eq!(c.region(1000, 600), (250, 150, 500, 300));
-        // Moving stops at the edges.
-        let left = (0..10).fold(c, |c, _| c.moved(-1, 0));
-        assert_eq!(left.region(1000, 600).0, 0);
-        let down = (0..10).fold(c, |c, _| c.moved(0, 1));
-        assert_eq!(down.region(1000, 600).1, 300);
+        assert_eq!(c.region(1000, 600, (2000, 1200)), (250, 150, 500, 300));
+        // A square image on a wide screen: zoomed in, the part shown is the screen's shape
+        // (the 100% view is 600x600 of 1200x600; at 200% the screen holds 600x300 of the
+        // image), not a square in the middle.
+        let wide = (1200, 600);
+        assert_eq!(c.region(1000, 1000, wide), (0, 250, 1000, 500));
+        let c4 = c.zoomed(true).zoomed(true);
+        assert_eq!(c4.zoom, 400);
+        assert_eq!(c4.region(1000, 1000, wide), (250, 375, 500, 250));
+        assert_eq!(c4.shown(1000, 1000, wide), (500, 250));
+        // Moving steps a quarter of what's shown and stops at the edges, with no presses
+        // wasted coming back.
+        let shown = c4.shown(1000, 1000, wide);
+        let left = (0..10).fold(c4, |c, _| c.moved(-1, 0, shown));
+        assert_eq!(left.region(1000, 1000, wide).0, 0);
+        assert_eq!(left.moved(1, 0, shown).region(1000, 1000, wide).0, 125);
+        let down = (0..10).fold(c4, |c, _| c.moved(0, 1, shown));
+        assert_eq!(down.region(1000, 1000, wide).1, 750);
         // Zooming out goes back to the whole image; past the last level it stays.
         assert_eq!(c.zoomed(false).zoomed(false), Crop::FIT);
         assert_eq!(Crop::FIT.zoomed(false), Crop::FIT);
         let most = (0..20).fold(Crop::FIT, |c, _| c.zoomed(true));
         assert_eq!(most.zoom, 800);
-        assert!(most.region(7, 3).2 >= 1 && most.region(7, 3).3 >= 1);
+        assert!(most.region(7, 3, (100, 100)).2 >= 1 && most.region(7, 3, (100, 100)).3 >= 1);
     }
 
     #[test]

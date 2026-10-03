@@ -623,10 +623,10 @@ impl App {
             KeyCode::Char('-') => v.crop = v.crop.zoomed(false),
             KeyCode::Char('0') => v.crop = Crop::FIT,
             KeyCode::Esc if zoomed => v.crop = Crop::FIT,
-            KeyCode::Char('h') | KeyCode::Left if zoomed => v.crop = v.crop.moved(-1, 0),
-            KeyCode::Char('l') | KeyCode::Right if zoomed => v.crop = v.crop.moved(1, 0),
-            KeyCode::Char('k') | KeyCode::Up if zoomed => v.crop = v.crop.moved(0, -1),
-            KeyCode::Char('j') | KeyCode::Down if zoomed => v.crop = v.crop.moved(0, 1),
+            KeyCode::Char('h') | KeyCode::Left if zoomed => v.crop = v.crop.moved(-1, 0, v.shown.unwrap_or(v.crop.guess_shown())),
+            KeyCode::Char('l') | KeyCode::Right if zoomed => v.crop = v.crop.moved(1, 0, v.shown.unwrap_or(v.crop.guess_shown())),
+            KeyCode::Char('k') | KeyCode::Up if zoomed => v.crop = v.crop.moved(0, -1, v.shown.unwrap_or(v.crop.guess_shown())),
+            KeyCode::Char('j') | KeyCode::Down if zoomed => v.crop = v.crop.moved(0, 1, v.shown.unwrap_or(v.crop.guess_shown())),
             KeyCode::PageUp => {
                 v.index = (v.index + n - 1) % n;
                 v.crop = Crop::FIT;
