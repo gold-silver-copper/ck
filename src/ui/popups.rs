@@ -431,6 +431,16 @@ pub(super) fn draw_add_filter(f: &mut Frame, app: &App) {
         Some(text) => row(f, 2, "Label", vec![Span::styled(text.clone(), bold(t.text)), Span::styled("▏", Style::new().fg(t.primary))], "enter: keep"),
         None => row(f, 2, "Label", vec![Span::styled(a.label(), bold(t.text))], "e: edit"),
     }
-    let note = "Saved in the config as a [[filter]]; u right after takes it back.";
+    let note = match &a.word {
+        // `w`: a word to hide everywhere instead.
+        Some(word) => {
+            row(f, 3, "Word", vec![Span::styled(word.clone(), bold(t.text)), Span::styled("▏", Style::new().fg(t.primary))], "enter: hide it everywhere");
+            "Any post with it is hidden, on every board (Settings › Filters › Hidden words)."
+        }
+        None => {
+            row(f, 3, "", Vec::new(), "w: a word from it…");
+            "Saved in the config as a [[filter]]; u right after takes it back."
+        }
+    };
     put(f, inner.x, y + 4, inner.width, Line::styled(note, dim()));
 }

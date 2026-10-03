@@ -76,6 +76,9 @@ pub struct Config {
     /// `[[image_search]]`: reverse image search engines for `R` (default: a few well-known ones).
     #[serde(default, rename = "image_search")]
     pub image_search: Vec<ImageSearch>,
+    /// Posts and threads with any of these words are hidden, everywhere.
+    #[serde(default)]
+    pub hidden_words: Vec<String>,
     /// `[[filter]]`: hide or highlight threads and posts.
     #[serde(default, rename = "filter")]
     pub filters: Vec<crate::filter::FilterConfig>,
@@ -594,6 +597,15 @@ pub fn sites_in(path: &Path) -> Result<Vec<SiteConfig>> {
         Ok(text) => Ok(toml::from_str::<Config>(&text).with_context(|| format!("parsing {}", path.display()))?.sites),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
         Err(e) => Err(e).with_context(|| format!("reading {}", path.display())),
+    }
+}
+
+/// Set `hidden_words` (taken out when there are none).
+pub fn set_hidden_words(doc: &mut DocumentMut, words: &[String]) {
+    if words.is_empty() {
+        doc.remove("hidden_words");
+    } else {
+        doc["hidden_words"] = value(words.iter().map(String::as_str).collect::<toml_edit::Array>());
     }
 }
 

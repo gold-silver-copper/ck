@@ -22,6 +22,7 @@ expression: snapshot(&mut a)
 
     Counts are for the open catalog and thread. Kept in the config as [[filter]] tables.
 
+    Notifications     auto (terminal bell)              New posts in watched threads, replies to…
     Reading the end   new posts come into view          New posts come into view while you read …
 
   Sites
@@ -31,5 +32,4 @@ expression: snapshot(&mut a)
   Downloads
     Folder            ~/Downloads/ck/{site}/{board}/{…  Where saved files and pages go
 
-  Startup
  enter change   esc back   , settings   ? help

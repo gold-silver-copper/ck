@@ -794,7 +794,8 @@ fn config_once(seed: u64) {
     let mut doc: toml_edit::DocumentMut = crate::config::DEFAULT_CONFIG.parse().unwrap();
     const KEYS: &[&str] = &[
         "theme", "color", "images", "notify", "notify_command", "catalog_layout", "compact_catalog", "refresh_thread_secs",
-        "refresh_watched_secs", "restore_session", "download_dir", "favorites", "hidden_sites",
+        "refresh_watched_secs", "restore_session", "download_dir", "favorites", "hidden_sites", "hidden_words", "nsfw_images",
+        "follow_new_posts",
     ];
     for _ in 0..1 + rng.below(5) {
         match rng.below(8) {
@@ -857,7 +858,7 @@ fn config_once(seed: u64) {
     // As main does: each check may refuse the config, none may panic.
     let Ok(cfg) = toml::from_str::<crate::config::Config>(&text) else { return };
     let Ok(keys) = crate::keys::KeyMap::new(&cfg.keys) else { return };
-    if crate::filter::Filters::new(&cfg.filters).is_err() || crate::theme::from_config(cfg.theme.as_ref(), &cfg.themes).is_err() {
+    if crate::filter::Filters::new(&cfg.filters).and_then(|f| f.with_words(&cfg.hidden_words)).is_err() || crate::theme::from_config(cfg.theme.as_ref(), &cfg.themes).is_err() {
         return;
     }
     // Editing its filters changes just the one, and what's written reads back.

@@ -302,3 +302,36 @@ fn bench_saved_search() {
         report(&format!("saved search, {label}: every copy"), start.elapsed());
     }
 }
+
+/// Hidden words: marking a 1000-post thread, a frame, and a search keystroke, with 50 words
+/// against none.
+#[test]
+#[ignore]
+fn bench_hidden_words() {
+    eprintln!("== hidden words, thread of 1000 posts ==");
+    let posts = Futaba::fourchan(None).parse_thread("g", &fixture("4chan_thread.json"));
+    let posts = scale(&posts, 1000);
+    let words: Vec<String> = (0..50).map(|i| format!("word{i}")).chain(["the end".into(), "c++".into()]).take(50).collect();
+    for (label, words) in [("no hidden words", Vec::new()), ("50 hidden words", words)] {
+        let mut a = app();
+        a.tab.view = View::Thread;
+        a.filters = crate::filter::Filters::new(&[]).unwrap().with_words(&words).unwrap();
+        a.tab.thread = Some(ThreadView::new("g".into(), posts[0].no, posts.clone()));
+        let mut t = term();
+        time(&format!("{label}: marking the thread"), 20, || a.remark_thread());
+        time(&format!("{label}: frame with full layout rebuild"), 50, || {
+            if let Some(th) = &mut a.tab.thread {
+                th.layout = None;
+            }
+            draw(&mut t, &mut a);
+        });
+        let mut k = 0;
+        time(&format!("{label}: search keystroke, then a frame"), 50, || {
+            k += 1;
+            if let Some(th) = &mut a.tab.thread {
+                th.set_search(if k % 2 == 0 { "th".into() } else { "the".into() });
+            }
+            draw(&mut t, &mut a);
+        });
+    }
+}

@@ -1385,10 +1385,14 @@ fn x_filters_posts_like_the_selected_one() {
     app.on_key(KeyEvent::from(KeyCode::Char('j')));
     app.on_key(KeyEvent::from(KeyCode::Char('u')));
     assert_eq!(app.filter_cfgs.len(), 2);
-    // The anonymous name isn't offered: nothing to filter post 1 by.
+    // The anonymous name isn't offered: nothing to filter post 1 by but a word from it, which
+    // it asks for straight away (esc: out).
     app.tab.thread.as_mut().unwrap().selected = 0;
     app.act(Action::Filter);
-    assert!(app.filter_add.is_none() && app.status.as_ref().unwrap().text.starts_with("Nothing to filter by here"));
+    let a = app.filter_add.as_ref().unwrap();
+    assert!(a.candidates.is_empty() && a.word.as_deref() == Some(""));
+    app.on_key(KeyEvent::from(KeyCode::Esc));
+    assert!(app.filter_add.is_none());
 }
 
 #[test]
@@ -2413,4 +2417,59 @@ fn updating_a_vichan_sites_boards() {
     assert!(app.status.as_ref().unwrap().text.contains("have no board list to read"));
     assert_eq!(app.sites[0].cfg.boards, saved.sites[0].boards);
     crate::http::serve_test_host("vb.invalid", None);
+}
+
+#[test]
+fn hidden_words_hide_posts_everywhere() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    std::fs::write(&path, "# my config\nnotify = \"off\" # quiet\n").unwrap();
+    let mut app = local_app();
+    app.config_path = Some(path.clone());
+    app.tab.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
+    app.tab.view = View::Thread;
+    app.set_thread(posts_saying(&[(1, "op"), (2, "free crypto here"), (3, "I like Crypto"), (4, "cryptography")]));
+    // Settings › Filters › Hidden words: a, type, enter.
+    app.open_settings();
+    let at = settings::items().iter().position(|&it| it == settings::Item::HiddenWords).unwrap();
+    app.settings_list.state.select(Some(at));
+    app.activate_setting();
+    app.on_key(KeyEvent::from(KeyCode::Char('a')));
+    type_text(&mut app, "crypto");
+    app.on_key(KeyEvent::from(KeyCode::Enter));
+    assert!(app.status.as_ref().unwrap().text.starts_with("Hiding posts with \"crypto\" (2 here)"), "{:?}", app.status);
+    let hidden = |app: &App| app.tab.thread.as_ref().unwrap().marks.iter().map(|m| m.hidden.clone()).collect::<Vec<_>>();
+    let label = Some("hidden word: crypto".to_string());
+    assert_eq!(hidden(&app), [None, label.clone(), label.clone(), None]);
+    // Saved, the file's comments kept; a config without it loads as before.
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(text.contains("# my config") && text.contains("# quiet") && text.contains("hidden_words = [\"crypto\"]"), "{text}");
+    assert!(toml::from_str::<Config>("[[site]]\nname = \"s\"\nkind = \"4chan\"\n").unwrap().hidden_words.is_empty());
+    // x in the list takes it out.
+    app.on_key(KeyEvent::from(KeyCode::Char('x')));
+    assert!(app.hidden_words.is_empty() && hidden(&app).iter().all(Option::is_none));
+    assert!(!std::fs::read_to_string(&path).unwrap().contains("hidden_words"));
+    app.settings_popup = None;
+    app.tab.view = View::Thread;
+    // From a post's X: w, the thread's search to start with; u right after takes it back.
+    app.tab.thread.as_mut().unwrap().posts[1].name = "Satoshi".into();
+    app.tab.thread.as_mut().unwrap().set_search("free".into());
+    app.tab.thread.as_mut().unwrap().select(1);
+    app.open_add_filter();
+    assert!(app.filter_add.as_ref().is_some_and(|a| !a.candidates.is_empty() && a.word.is_none()));
+    app.on_key(KeyEvent::from(KeyCode::Char('w')));
+    assert_eq!(app.filter_add.as_ref().unwrap().word.as_deref(), Some("free"));
+    app.on_key(KeyEvent::from(KeyCode::Enter));
+    assert!(app.filter_add.is_none());
+    assert_eq!(app.hidden_words, ["free"]);
+    assert_eq!(hidden(&app)[1], Some("hidden word: free".into()));
+    app.on_key(KeyEvent::from(KeyCode::Char('u')));
+    assert!(app.hidden_words.is_empty() && hidden(&app)[1].is_none());
+    // Catalogs too.
+    app.hidden_words = vec!["crypto".into()];
+    app.apply_filters();
+    app.tab.catalog = posts_saying(&[(10, "crypto thread"), (11, "a thread")]);
+    app.tab.catalog_board = "x".into();
+    app.remark_catalog();
+    assert_eq!(app.tab.catalog_marks.iter().map(|m| m.hidden.clone()).collect::<Vec<_>>(), [label, None]);
 }

@@ -181,8 +181,24 @@ pub struct Mark {
     pub highlight: Option<String>,
 }
 
+/// Hidden words: one case-insensitive pattern, a group per word (to say which caught a post).
+struct Words {
+    re: Regex,
+    words: Vec<String>,
+}
+
+/// A hidden word as a pattern: as typed, any case, as a whole word where it starts or ends
+/// with a letter or digit (`cat`, not "concatenate"; `c++` as it is), any spaces between
+/// the words of a phrase. `None` for nothing but spaces.
+pub fn word_pattern(word: &str) -> Option<String> {
+    let pieces: Vec<String> = word.split_whitespace().map(regex::escape).collect();
+    let (first, last) = (word.trim().chars().next()?, word.trim().chars().last()?);
+    let edge = |c: char| if c.is_alphanumeric() || c == '_' { r"\b" } else { "" };
+    Some(format!("{}{}{}", edge(first), pieces.join(r"\s+"), edge(last)))
+}
+
 #[derive(Default)]
-pub struct Filters(Vec<Filter>);
+pub struct Filters(Vec<Filter>, Option<Words>);
 
 impl Filters {
     /// The enabled filters (every one is checked, enabled or not).
@@ -213,7 +229,20 @@ impl Filters {
                 label: c.label.clone().unwrap_or_else(|| c.pattern.clone()),
             });
         }
-        Ok(Self(out))
+        Ok(Self(out, None))
+    }
+
+    /// With `hidden_words` too: any post with one of them is hidden, everywhere.
+    pub fn with_words(mut self, words: &[String]) -> Result<Self> {
+        let words: Vec<String> = words.iter().filter(|w| !w.trim().is_empty()).cloned().collect();
+        if words.is_empty() {
+            self.1 = None;
+            return Ok(self);
+        }
+        let groups: Vec<String> = words.iter().filter_map(|w| word_pattern(w)).map(|p| format!("({p})")).collect();
+        let re = Regex::new(&format!("(?i){}", groups.join("|"))).context("hidden_words")?;
+        self.1 = Some(Words { re, words });
+        Ok(self)
     }
 
     pub fn len(&self) -> usize {
@@ -254,6 +283,23 @@ impl Filters {
             });
             if hit {
                 *slot = Some(f.label.clone());
+            }
+        }
+        if mark.hidden.is_none()
+            && let Some(w) = &self.1
+        {
+            let comment = comment.get_or_insert_with(|| {
+                p.body.iter().map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect::<String>()).collect::<Vec<_>>().join("\n")
+            });
+            let texts = p.subject.iter().map(String::as_str).chain([p.name.as_str(), comment.as_str()]).chain(p.files.iter().map(|f| f.filename.as_str()));
+            // Which word: the group that matched (asked only of a text that matches).
+            for text in texts.filter(|t| w.re.is_match(t)) {
+                if let Some(c) = w.re.captures(text)
+                    && let Some(i) = (1..c.len()).find(|&i| c.get(i).is_some())
+                {
+                    mark.hidden = Some(format!("hidden word: {}", w.words.get(i - 1).map_or("", String::as_str)));
+                    break;
+                }
             }
         }
         mark
@@ -379,5 +425,95 @@ pub mod tests {
         // Run once per load, not per frame. About 1.3ms in a release build; debug is far slower.
         let limit = if cfg!(debug_assertions) { 3000 } else { 50 };
         assert!(took < std::time::Duration::from_millis(limit), "{took:?}");
+    }
+}
+
+#[cfg(test)]
+mod word_tests {
+    use ratatui::text::Line;
+
+    use super::*;
+    use crate::model::Attachment;
+
+    fn words(w: &[&str]) -> Filters {
+        Filters::new(&[]).unwrap().with_words(&w.iter().map(|s| s.to_string()).collect::<Vec<_>>()).unwrap()
+    }
+
+    fn says(body: &str) -> Post {
+        Post { no: 1, name: "Anonymous".into(), body: body.lines().map(|l| Line::raw(l.to_string())).collect(), ..Default::default() }
+    }
+
+    fn hidden(f: &Filters, p: &Post) -> Option<String> {
+        f.check("s", "b", p).hidden
+    }
+
+    #[test]
+    fn whole_words_any_case() {
+        let f = words(&["cat", "c++", ":^)", "free money", "λ", "привет"]);
+        let label = |w: &str| Some(format!("hidden word: {w}"));
+        assert_eq!(hidden(&f, &says("Cat pics")), label("cat"));
+        assert_eq!(hidden(&f, &says("concatenate the cats")), None);
+        assert_eq!(hidden(&f, &says("I write C++ daily")), label("c++"));
+        assert_eq!(hidden(&f, &says("nice :^)")), label(":^)"));
+        assert_eq!(hidden(&f, &says("FREE\n   MONEY now")), label("free money"));
+        assert_eq!(hidden(&f, &says("freemoney")), None);
+        assert_eq!(hidden(&f, &says("the λ calculus")), label("λ"));
+        assert_eq!(hidden(&f, &says("ПРИВЕТ всем")), label("привет"));
+        assert_eq!(hidden(&f, &says("приветствую")), None);
+        // Each field: subject, name, file names.
+        let p = Post { subject: Some("about CAT".into()), ..says("x") };
+        assert_eq!(hidden(&f, &p), label("cat"));
+        let p = Post { name: "cat !trip".into(), ..says("x") };
+        assert_eq!(hidden(&f, &p), label("cat"));
+        let p = Post { files: vec![Attachment { filename: "my cat.png".into(), ..Default::default() }], ..says("x") };
+        assert_eq!(hidden(&f, &p), label("cat"));
+        // A filter that hides it says first.
+        let both = Filters::new(&[FilterConfig::new("pics".into(), &[Field::Comment])]).unwrap().with_words(&["cat".into()]).unwrap();
+        assert_eq!(hidden(&both, &says("cat pics")), Some("pics".into()));
+        // Blank words are nothing.
+        assert!(word_pattern("   ").is_none());
+        assert_eq!(hidden(&words(&["  "]), &says("anything")), None);
+    }
+
+    /// Against a brute-force matcher: a word is found where its letters are, any case, with
+    /// no letter or digit right before (after) it when it starts (ends) with one.
+    #[test]
+    fn random_posts_against_brute_force() {
+        use crate::fuzz::Rng;
+        let vocab = ["cat", "Cat", "concat", "c++", "rust", "RUST", "trust", "λ", "λx", "a b", "a  b", "ab", ":^)", "x", "über", "Über"];
+        let brute = |text: &str, word: &str| -> bool {
+            let pieces: Vec<String> = word.split_whitespace().map(str::to_lowercase).collect();
+            let lower: Vec<char> = text.to_lowercase().chars().collect();
+            let wordy = |c: char| c.is_alphanumeric() || c == '_';
+            let (first, last) = (word.trim().chars().next().unwrap(), word.trim().chars().last().unwrap());
+            (0..lower.len()).any(|start| {
+                // Match the pieces with runs of spaces between them.
+                let mut at = start;
+                for (k, piece) in pieces.iter().enumerate() {
+                    if k > 0 {
+                        let ws = lower[at..].iter().take_while(|c| c.is_whitespace()).count();
+                        if ws == 0 {
+                            return false;
+                        }
+                        at += ws;
+                    }
+                    let pc: Vec<char> = piece.chars().collect();
+                    if lower.len() < at + pc.len() || lower[at..at + pc.len()] != pc[..] {
+                        return false;
+                    }
+                    at += pc.len();
+                }
+                let before_ok = !wordy(first) || start == 0 || !wordy(lower[start - 1]);
+                let after_ok = !wordy(last) || at == lower.len() || !wordy(lower[at]);
+                before_ok && after_ok
+            })
+        };
+        for seed in 0..300 {
+            let mut rng = Rng::new(seed);
+            let text: String = (0..1 + rng.below(8)).map(|_| *rng.pick(&vocab)).collect::<Vec<_>>().join(*rng.pick(&[" ", "", ", ", "\n"]));
+            let word = *rng.pick(&vocab);
+            let f = words(&[word]);
+            assert_eq!(hidden(&f, &says(&text)).is_some(), brute(&text, word), "seed {seed}: {word:?} in {text:?}");
+        }
     }
 }

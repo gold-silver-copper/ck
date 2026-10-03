@@ -20,6 +20,7 @@ pub enum Item {
     Images,
     ScrollMargin,
     Filters,
+    HiddenWords,
     RefreshThread,
     RefreshWatched,
     Notify,
@@ -50,6 +51,7 @@ pub const SECTIONS: &[(&str, &[Row])] = &[
         (Item::NsfwImages, "NSFW boards", "Images on boards the site marks NSFW"),
         (Item::BoardImages, "Board images", "Boards with their own image setting (. menu on a board)"),
         (Item::Filters, "Filters", "Hide or highlight by pattern; X adds one from a post"),
+        (Item::HiddenWords, "Hidden words", "Posts with any of these words are hidden, everywhere"),
     ]),
     ("Background refresh", &[
         (Item::RefreshThread, "Open thread", "How often the open thread updates"),
@@ -107,6 +109,8 @@ pub enum Popup {
     Sites(super::MySites),
     /// Boards with their own image setting.
     BoardImages { list: ListState },
+    /// `hidden_words`; `typing` holds one being added.
+    HiddenWords { list: ListState, typing: Option<String> },
     /// The `[[filter]]` list, with how many posts and threads each catches on screen now.
     Filters { list: ListState, counts: Vec<(usize, usize)> },
     /// One filter being edited (`index`: none for a new one), on row `row` of `EDIT_ROWS`;
@@ -199,6 +203,11 @@ impl App {
             }
             Item::DownloadDir => self.download_dir.clone().unwrap_or_else(|| "~/Downloads/ck/{site}/{board}/{thread}".into()),
             Item::Restore => if self.restore_session { "restored" } else { "not restored" }.into(),
+            Item::HiddenWords => match self.hidden_words.len() {
+                0 => "none".into(),
+                1 => "1 word".into(),
+                n => format!("{n} words"),
+            },
             Item::NsfwImages => match self.nsfw_images {
                 crate::config::NsfwImages::Show => "images shown".into(),
                 crate::config::NsfwImages::Off => "images off".into(),
@@ -282,6 +291,7 @@ impl App {
             Item::DownloadDir => {
                 self.settings_popup = Some(Popup::Folder { value: self.download_dir.clone().unwrap_or_default() });
             }
+            Item::HiddenWords => self.settings_popup = Some(Popup::HiddenWords { list: ListState::default().with_selected(Some(0)), typing: None }),
             Item::NsfwImages => {
                 self.nsfw_images = self.nsfw_images.next();
                 let mode = self.nsfw_images.as_str();
@@ -411,6 +421,36 @@ impl App {
             },
             Popup::Filters { list, counts } => self.on_filter_list_key(key, list, counts),
             Popup::Sites(m) => self.on_my_sites_key(key, m).map(Popup::Sites),
+            Popup::HiddenWords { list, typing: Some(mut text) } => match key.code {
+                KeyCode::Esc => Some(Popup::HiddenWords { list, typing: None }),
+                KeyCode::Enter => {
+                    self.add_hidden_word(&text);
+                    let last = self.hidden_words.len().saturating_sub(1);
+                    Some(Popup::HiddenWords { list: ListState::default().with_selected(Some(last)), typing: None })
+                }
+                code => {
+                    edit_text(&mut text, code);
+                    Some(Popup::HiddenWords { list, typing: Some(text) })
+                }
+            },
+            Popup::HiddenWords { mut list, typing: None } => {
+                let cur = list.selected().unwrap_or(0);
+                match key.code {
+                    KeyCode::Esc | KeyCode::Char('q' | 'h') | KeyCode::Left => None,
+                    KeyCode::Char('a') => Some(Popup::HiddenWords { list, typing: Some(String::new()) }),
+                    KeyCode::Char('x') | KeyCode::Delete => {
+                        if let Some(w) = self.hidden_words.get(cur).cloned() {
+                            self.remove_hidden_word(&w);
+                        }
+                        list.select(Some(cur.min(self.hidden_words.len().saturating_sub(1))));
+                        Some(Popup::HiddenWords { list, typing: None })
+                    }
+                    code => {
+                        list.select(Some(list_move(code, cur, self.hidden_words.len()).unwrap_or(cur)));
+                        Some(Popup::HiddenWords { list, typing: None })
+                    }
+                }
+            }
             Popup::BoardImages { mut list } => {
                 let boards = self.boards_with_images_set();
                 let cur = list.selected().unwrap_or(0);

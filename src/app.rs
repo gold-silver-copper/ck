@@ -1002,10 +1002,12 @@ pub struct App {
     pub scroll_margin: f32,
     /// The config's `[[filter]]` tables, as last read or written (`filters` is made from them).
     pub filter_cfgs: Vec<crate::filter::FilterConfig>,
+    /// `hidden_words`: posts with one are hidden everywhere.
+    pub hidden_words: Vec<String>,
     /// `X`: a filter being made from the selected post.
     pub filter_add: Option<AddFilter>,
     /// The filter just added (and where): `u` as the next key takes it back.
-    pub filter_undo: Option<(usize, crate::filter::FilterConfig)>,
+    pub filter_undo: Option<filters::Undo>,
     /// Show hidden threads and posts (dimmed) instead of leaving them out.
     pub show_hidden: bool,
     /// True while typing into the filter.
@@ -1145,7 +1147,8 @@ impl App {
             notified: Vec::new(),
             boards_refreshing: HashSet::new(),
             boards_tried: HashMap::new(),
-            filters: Filters::new(&cfg.filters).unwrap_or_default(),
+            filters: Filters::new(&cfg.filters).and_then(|f| f.with_words(&cfg.hidden_words)).unwrap_or_default(),
+            hidden_words: cfg.hidden_words.clone(),
             filter_cfgs: cfg.filters.clone(),
             scroll_margin: if cfg.scroll_margin.is_finite() { cfg.scroll_margin.clamp(0.0, 0.5) } else { 0.3 },
             pages: crate::pages::Pages::default_dir()

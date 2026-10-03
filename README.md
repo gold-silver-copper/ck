@@ -327,6 +327,18 @@ pattern = "u8Vh17KxaDvUJ6bBcmE/eg=="   # field = "md5": a file's MD5 (base64, as
 field = "md5"
 ```
 
+### Hidden words
+
+`hidden_words = ["crypto", "free money"]` hides every post and thread with one of the
+words, on every site and board: plain words (no regex), in any case, as whole words
+(`cat` hides "Cat pics", not "concatenate"; `c++` and `:^)` work as typed), with any spaces
+between the words of a phrase. They're looked for in the subject, the comment (spoilers
+too), the name and file names. What they hide is hidden like anything else: collapsed to a
+line, shown by `Z` as "hidden word: crypto", counted in the catalog's header. Settings ›
+Filters › Hidden words lists them (`a` adds one, `x` removes one), and `w` in a post's `X`
+adds a word from it (the thread's search to start with). Either way it's saved at once, and
+`u` right after takes it back.
+
 Highlighted threads and posts get the label as a chip and an accent stripe; the catalog's
 header says how many are hidden. A bad pattern is reported at startup with its filter's
 number.
