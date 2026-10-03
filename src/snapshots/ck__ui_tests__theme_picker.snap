@@ -8,19 +8,20 @@ expression: snapshot(&mut a)
     Theme             material                          Live preview while choosing
     Colors            as the theme has them             Change any color of the current theme
     Color depth       auto (24-bit)                     24-bit color, or the nearest of 256
+    Reading position  30% from the edges                How far from the edges the selected post…
 
   Catalog
-    Default layout    cards                             c in a catalog sets a board's own
-    Images            on  Theme                    enter keep · esc cancel  mage viewer (after a…
-    Filters           0                                                      pattern; X adds one…
-                          material
-  Background refresh      material-light
-    Open thread       ev  nord                                              hread updates
-    Watched threads   ev  gruvbox                                           ed thread updates
-    Notifications     au  catppuccin                                         threads, replies to…
-                          tokyo-night
-  Downloads               solarized-light
-    Folder            ~/  terminal                                          es
+    Default layout    ca  Theme                    enter keep · esc cancel  a board's own
+    Images            on                                                    mage viewer (after a…
+    Filters           0   material                                           pattern; X adds one…
+                          material-light
+  Background refresh      nord
+    Open thread       ev  gruvbox                                           hread updates
+    Watched threads   ev  catppuccin                                        ed thread updates
+    Notifications     au  tokyo-night                                        threads, replies to…
+                          solarized-light
+  Downloads               terminal
+    Folder            ~/                                                    es
 
   Startup
     Last place        restored                          Start where you left off (ck URL starts …
@@ -29,6 +30,5 @@ expression: snapshot(&mut a)
     Key bindings      defaults                          Rebind any command
 
   There's no config file to save to (no home directory); changes last until ck quits.
-
 
  enter change   esc back   , settings   ? help

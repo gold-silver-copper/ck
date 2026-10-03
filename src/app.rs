@@ -220,10 +220,11 @@ pub struct ThreadView {
     pub mine: HashSet<u64>,
     /// The part of the selected post that has focus (`tab`); `None`: the post itself.
     pub focus: Option<Part>,
-    /// The selection moved: scroll it into view at the next draw, once it's laid out.
-    pub reveal: bool,
-    /// ...from below (`k` into a post taller than the screen: its last screenful).
-    pub reveal_end: bool,
+    /// The selection moved: scroll it into view at the next draw (once it's laid out), so.
+    pub reveal: Option<Reveal>,
+    /// How far from the top and bottom of the screen the selected post is kept while
+    /// reading on: a fraction of the screen (`scroll_margin`).
+    pub margin: f32,
     /// The width the line cache is for.
     pub cache_width: u16,
     /// Estimated heights of entries not laid out yet, by the same key as the line cache.
@@ -234,6 +235,19 @@ pub struct ThreadView {
     pub conversation: Option<Conversation>,
     /// Scroll the focused part into view at the next draw.
     pub follow_focus: bool,
+}
+
+/// How the selection comes into view.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Reveal {
+    /// Just into view, scrolling as little as possible (after laying out again).
+    Visible,
+    /// `j` / `k`: kept away from the screen's edges by the margin.
+    Step,
+    /// A jump (a quote, `n`, `U`, ...): its top at the margin from the top.
+    Jump,
+    /// `k` into a post taller than the screen: its last screenful.
+    End,
 }
 
 /// A part of a post that can take focus, be clicked or get a hint.
@@ -626,7 +640,9 @@ impl ThreadView {
             self.leave_conversation();
         }
         let e = self.entries.iter().position(|e| e.path.len() == 1 && e.post == i).unwrap_or(0);
-        self.select_entry(e);
+        self.set_cursor(e.min(self.entries.len().saturating_sub(1)));
+        self.scroll_to(Reveal::Jump);
+        self.reveal = Some(Reveal::Jump);
     }
 
     /// `j` / `k`: within a post taller than the screen, on to its next (or previous)
@@ -653,7 +669,7 @@ impl ThreadView {
             self.select_entry(e + 1);
         } else if e > 0 {
             self.select_entry(e - 1);
-            self.reveal_end = true;
+            self.reveal = Some(Reveal::End);
         }
     }
 
@@ -675,23 +691,49 @@ impl ThreadView {
 
     fn select_entry(&mut self, e: usize) {
         self.set_cursor(e.min(self.entries.len().saturating_sub(1)));
-        self.scroll_to_selected();
+        self.scroll_to(Reveal::Step);
         // Placed by estimates so far; exactly once it's laid out.
-        self.reveal = true;
+        self.reveal = Some(Reveal::Step);
+    }
+
+    /// The scroll margin in lines: at most what leaves a line between the two.
+    fn margin_lines(&self) -> usize {
+        let view = self.viewport;
+        ((view as f32 * self.margin.clamp(0.0, 0.5)) as usize).min(view.saturating_sub(1) / 2)
     }
 
     /// Adjust scroll so the selected entry is visible (its top, if it's taller than the view).
     pub fn scroll_to_selected(&mut self) {
+        self.scroll_to(Reveal::Visible);
+    }
+
+    /// Scroll the selected entry into view, `how`.
+    pub fn scroll_to(&mut self, how: Reveal) {
         let e = self.entry();
-        let Some((&start, &end)) = self.layout.as_ref().and_then(|l| l.starts.get(e).zip(l.starts.get(e + 1))) else { return };
-        // Come to from below, a post taller than the screen shows its end.
-        if std::mem::take(&mut self.reveal_end) && end - start > self.viewport {
-            self.scroll = end.saturating_sub(1 + self.viewport);
-        } else if start < self.scroll {
-            self.scroll = start;
-        } else if end > self.scroll + self.viewport {
-            self.scroll = start.min(end.saturating_sub(self.viewport));
+        let Some((&start, &end, len)) = self.layout.as_ref().and_then(|l| Some((l.starts.get(e)?, l.starts.get(e + 1)?, l.len()))) else { return };
+        let view = self.viewport;
+        let m = if how == Reveal::Visible { 0 } else { self.margin_lines() };
+        match how {
+            // Come to from below, a post taller than the screen shows its end.
+            Reveal::End if end - start > view => self.scroll = end.saturating_sub(1 + view),
+            // A jump lands with the target's top at the margin, unless it's well in view.
+            Reveal::Jump if m > 0 => {
+                if start < self.scroll + m || end > self.scroll + view - m {
+                    self.scroll = start.saturating_sub(m);
+                }
+            }
+            // Up past the top margin: the post's bottom goes to the margin from the bottom
+            // (its top, if it's too tall for that).
+            _ if start < self.scroll + m => {
+                self.scroll = if m == 0 { start } else { (end + m).saturating_sub(view).min(start) };
+            }
+            // Down past the bottom margin: the post's top goes to the margin from the top.
+            _ if end + m > self.scroll + view => {
+                self.scroll = if m == 0 { start.min(end.saturating_sub(view)) } else { start.saturating_sub(m) };
+            }
+            _ => {}
         }
+        self.scroll = self.scroll.min(len.saturating_sub(view));
     }
 
     /// Scroll by lines, then select the entry at the top of the view.
@@ -924,6 +966,8 @@ pub struct App {
     pub filters: Filters,
     /// The last copies of catalogs and threads, to open them at once (none in tests).
     pub pages: Option<crate::pages::Pages>,
+    /// `scroll_margin`: where the selected post sits while reading (a fraction of the screen).
+    pub scroll_margin: f32,
     /// The config's `[[filter]]` tables, as last read or written (`filters` is made from them).
     pub filter_cfgs: Vec<crate::filter::FilterConfig>,
     /// `X`: a filter being made from the selected post.
@@ -1059,6 +1103,7 @@ impl App {
             boards_tried: HashMap::new(),
             filters: Filters::new(&cfg.filters).unwrap_or_default(),
             filter_cfgs: cfg.filters.clone(),
+            scroll_margin: if cfg.scroll_margin.is_finite() { cfg.scroll_margin.clamp(0.0, 0.5) } else { 0.3 },
             pages: crate::pages::Pages::default_dir()
                 .filter(|_| !cfg!(test) && cfg.page_cache_mb > 0)
                 .map(|d| crate::pages::Pages::new(d, cfg.page_cache_mb.saturating_mul(1024 * 1024))),
@@ -1712,6 +1757,7 @@ impl App {
         let no = posts.first().map(|p| p.no).unwrap_or(0);
         let key = self.key(&board, no);
         let mut tv = ThreadView::new(board, no, posts);
+        tv.margin = self.scroll_margin;
         // On a refresh, the newest post already shown.
         let mut shown_max = None;
         match self.tab.thread.take().filter(|t| t.no == no && t.board == tv.board) {

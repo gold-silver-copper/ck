@@ -57,6 +57,11 @@ saved_max_mb = 500
 # oldest out first; 0 keeps none.
 page_cache_mb = 100
 
+# While you read down a thread, the selected post is kept this far from the top and bottom
+# of the screen (a fraction of it): 0.3 keeps it about a third of the way down, 0.5 centered,
+# 0 lets it reach the edge. Also in Settings.
+scroll_margin = 0.3
+
 # Favorite boards, shown at the top of the home screen (1-9 open them). * on a board adds
 # or removes one, and saves the list here.
 favorites = []

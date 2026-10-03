@@ -28,6 +28,10 @@ pub struct Config {
     /// show at once next time, up to this many megabytes. 0 keeps none.
     #[serde(default = "default_page_cache_mb")]
     pub page_cache_mb: u64,
+    /// While reading down a thread, the selected post is kept this far (a fraction of the
+    /// screen, 0 to 0.5) from the screen's top and bottom.
+    #[serde(default = "default_scroll_margin")]
+    pub scroll_margin: f32,
     /// Sites left off the home screen (by name).
     #[serde(default)]
     pub hidden_sites: Vec<String>,
@@ -91,6 +95,10 @@ fn default_saved_max_mb() -> u64 {
 
 fn default_page_cache_mb() -> u64 {
     100
+}
+
+fn default_scroll_margin() -> f32 {
+    0.3
 }
 
 /// Catalog sort orders, cycled with `s`. Saved under their labels.

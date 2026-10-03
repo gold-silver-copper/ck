@@ -14,7 +14,7 @@ use ratatui_image::Image;
 use unicode_width::UnicodeWidthStr;
 
 use crate::app::{
-    App, Clock, Hit, LineCache, LinkItem, Part, SETTING_SECTIONS, Spot, SettingsPopup, SiteRow, Sort, Status, ThreadLayout, ThreadView, View, key_rows,
+    App, Clock, Hit, LineCache, LinkItem, Part, Reveal, SETTING_SECTIONS, Spot, SettingsPopup, SiteRow, Sort, Status, ThreadLayout, ThreadView, View, key_rows,
     setting_rows,
 };
 use std::collections::HashMap;
@@ -1132,7 +1132,11 @@ fn draw_thread(f: &mut Frame, app: &mut App, area: Rect) {
         return;
     };
     let th = theme();
-    t.viewport = area.height as usize;
+    // A taller or shorter screen: the selection stays in view.
+    if t.viewport != area.height as usize {
+        t.viewport = area.height as usize;
+        t.reveal.get_or_insert(Reveal::Visible);
+    }
     app.hit = Some(Hit::Thread { area });
     let thumbs = app.images.enabled() && area.width >= MIN_THUMB_WIDTH;
     let clock = app.clock;
@@ -1151,7 +1155,7 @@ fn draw_thread(f: &mut Frame, app: &mut App, area: Rect) {
                 t.scroll = (l.starts.get(i).copied().unwrap_or(0) + off).min(l.len().saturating_sub(t.viewport));
             }
         }
-        t.reveal = true;
+        t.reveal.get_or_insert(Reveal::Visible);
     }
     // Time moved on: what's laid out is laid out again (the line cache keeps what didn't
     // change), in place.
@@ -1163,19 +1167,16 @@ fn draw_thread(f: &mut Frame, app: &mut App, area: Rect) {
     // The selection moved (or everything was laid out again): into view, placed exactly.
     // Laying out what's around it can move it (estimates above it turning exact), so again,
     // until it stays.
-    if std::mem::take(&mut t.reveal) {
-        let end_first = t.reveal_end;
+    if let Some(how) = t.reveal.take() {
         for _ in 0..4 {
             lay_out_entries(t, [t.entry()], clock);
-            t.reveal_end = end_first;
             let before = t.scroll;
-            t.scroll_to_selected();
+            t.scroll_to(how);
             settle(t, clock);
             if t.scroll == before {
                 break;
             }
         }
-        t.reveal_end = false;
     }
     let cursor = t.entry();
     // A part just focused is scrolled into view (the post itself: its top).
