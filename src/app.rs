@@ -222,6 +222,8 @@ pub struct ThreadView {
     pub focus: Option<Part>,
     /// The selection moved: scroll it into view at the next draw, once it's laid out.
     pub reveal: bool,
+    /// ...from below (`k` into a post taller than the screen: its last screenful).
+    pub reveal_end: bool,
     /// The width the line cache is for.
     pub cache_width: u16,
     /// Estimated heights of entries not laid out yet, by the same key as the line cache.
@@ -627,6 +629,50 @@ impl ThreadView {
         self.select_entry(e);
     }
 
+    /// `j` / `k`: within a post taller than the screen, on to its next (or previous)
+    /// screenful, keeping two lines; past its end (or top), the next (or previous) post.
+    pub fn step(&mut self, down: bool) {
+        let e = self.entry();
+        let view = self.viewport.max(1);
+        if let Some(l) = self.layout.as_ref().filter(|l| l.exact.get(e) == Some(&true)) {
+            let (start, end) = (l.starts[e], l.starts[e + 1]);
+            // The last line is the gap before the next post: it's past the end that matters.
+            let last = end.saturating_sub(1);
+            let page = view.saturating_sub(2).max(1);
+            let on_screen = start < self.scroll + view && last > self.scroll;
+            if down && on_screen && last > self.scroll + view {
+                self.scroll = (self.scroll + page).min(last.saturating_sub(view)).min(l.len().saturating_sub(view));
+                return;
+            }
+            if !down && on_screen && start < self.scroll {
+                self.scroll = self.scroll.saturating_sub(page).max(start);
+                return;
+            }
+        }
+        if down {
+            self.select_entry(e + 1);
+        } else if e > 0 {
+            self.select_entry(e - 1);
+            self.reveal_end = true;
+        }
+    }
+
+    /// The selected post's place when it's taller than the screen: which screenful is
+    /// shown, of how many; and whether it goes on above and below the screen.
+    pub fn tall(&self) -> Option<((usize, usize), bool, bool)> {
+        let l = self.layout.as_ref()?;
+        let e = self.entry();
+        let view = self.viewport.max(1);
+        let (start, last) = (*l.starts.get(e)?, l.starts.get(e + 1)?.saturating_sub(1));
+        if last - start <= view || !l.exact.get(e).copied().unwrap_or(false) {
+            return None;
+        }
+        let page = view.saturating_sub(2).max(1);
+        let pages = (last - start - view).div_ceil(page) + 1;
+        let at = ((self.scroll.saturating_sub(start)).div_ceil(page) + 1).min(pages);
+        Some(((at, pages), start < self.scroll, last > self.scroll + view))
+    }
+
     fn select_entry(&mut self, e: usize) {
         self.set_cursor(e.min(self.entries.len().saturating_sub(1)));
         self.scroll_to_selected();
@@ -638,7 +684,10 @@ impl ThreadView {
     pub fn scroll_to_selected(&mut self) {
         let e = self.entry();
         let Some((&start, &end)) = self.layout.as_ref().and_then(|l| l.starts.get(e).zip(l.starts.get(e + 1))) else { return };
-        if start < self.scroll {
+        // Come to from below, a post taller than the screen shows its end.
+        if std::mem::take(&mut self.reveal_end) && end - start > self.viewport {
+            self.scroll = end.saturating_sub(1 + self.viewport);
+        } else if start < self.scroll {
             self.scroll = start;
         } else if end > self.scroll + self.viewport {
             self.scroll = start.min(end.saturating_sub(self.viewport));

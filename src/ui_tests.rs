@@ -442,6 +442,109 @@ fn long_threads_are_laid_out_near_the_view_only() {
     assert_eq!(t.layout.as_ref().unwrap().starts, full.starts);
 }
 
+/// A thread with a post three screens tall between short ones (the last quotes it).
+fn tall_app() -> App {
+    let mut a = app(false);
+    a.tab.view = View::Thread;
+    let lines: String = (1..=70).map(|k| format!("line {k}<br>")).collect();
+    let posts = vec![
+        post(3000, HOUR, Some("Tall"), "first"),
+        post(3001, HOUR, None, &format!("<a href=\"#p3000\" class=\"quotelink\">&gt;&gt;3000</a><br>tall start<br>{lines}tall end")),
+        post(3002, HOUR, None, "<a href=\"#p3001\" class=\"quotelink\">&gt;&gt;3001</a><br>after"),
+    ];
+    a.tab.thread = Some(ThreadView::new("g".into(), 3000, posts));
+    a
+}
+
+#[test]
+fn j_and_k_read_tall_posts_whole() {
+    use ratatui::crossterm::event::{KeyCode, KeyEvent};
+    let mut a = tall_app();
+    render(&mut a);
+    let key = |a: &mut App, c: char| {
+        a.on_key(KeyEvent::from(KeyCode::Char(c)));
+        render(a).0
+    };
+    let selected = |a: &App| a.tab.thread.as_ref().unwrap().current().unwrap().no;
+    // j onto the tall post: its top, with "more" below.
+    let text = key(&mut a, 'j');
+    assert_eq!(selected(&a), 3001);
+    assert!(text.contains("tall start") && text.contains("↓ more") && !text.contains("↑") && text.contains("No.3001 (1/"), "{text}");
+    // j again and again: on through it, every line seen, the same post selected.
+    let numbers = |text: &str| text.lines().filter_map(|l| l.trim().strip_prefix("line ")?.split_whitespace().next()?.parse::<u32>().ok()).collect::<Vec<_>>();
+    let mut seen: std::collections::BTreeSet<u32> = numbers(&text).into_iter().collect();
+    let mut screens = 1;
+    while render(&mut a).0.contains("↓ more") {
+        let text = key(&mut a, 'j');
+        assert_eq!(selected(&a), 3001, "{text}");
+        seen.extend(numbers(&text));
+        screens += 1;
+        assert!(screens < 10);
+    }
+    let text = render(&mut a).0;
+    assert!(text.contains("↑") && text.contains("tall end"), "{text}");
+    assert!((1..=70).all(|k| seen.contains(&k)), "{seen:?}");
+    assert!(text.contains(&format!("({screens}/{screens})")), "{text}");
+    // Then the next post.
+    key(&mut a, 'j');
+    assert_eq!(selected(&a), 3002);
+    // k comes back up into it at its end, and reads it backwards to its top.
+    let text = key(&mut a, 'k');
+    assert!(selected(&a) == 3001 && text.contains("tall end"), "{text}");
+    let mut ups = 0;
+    while render(&mut a).0.contains("↑") {
+        key(&mut a, 'k');
+        assert_eq!(selected(&a), 3001);
+        ups += 1;
+        assert!(ups < 10);
+    }
+    key(&mut a, 'k');
+    assert_eq!(selected(&a), 3000);
+    // In a conversation too.
+    key(&mut a, 'j');
+    key(&mut a, 'c');
+    assert!(a.tab.thread.as_ref().unwrap().conversation.is_some());
+    let text = key(&mut a, 'j');
+    assert!(selected(&a) == 3001 && text.contains("↓ more") || text.contains("↑"), "{text}");
+}
+
+#[test]
+fn a_post_exactly_a_screen_tall_needs_no_paging() {
+    use ratatui::crossterm::event::{KeyCode, KeyEvent};
+    let mut a = tall_app();
+    render(&mut a);
+    let view = a.tab.thread.as_ref().unwrap().viewport;
+    // As many lines as make post 3001 exactly the screen's height.
+    let posts = a.tab.thread.as_ref().unwrap().posts.clone();
+    let fits = (1..view).find(|&n| {
+        let lines: String = (1..=n).map(|k| format!("line {k}<br>")).collect();
+        let mut p = posts.clone();
+        p[1] = post(3001, HOUR, None, &format!("{lines}end"));
+        a.tab.thread = Some(ThreadView::new("g".into(), 3000, p));
+        render(&mut a);
+        let l = a.tab.thread.as_ref().unwrap().layout.as_ref().unwrap();
+        l.starts[2] - 1 - l.starts[1] == view
+    });
+    assert!(fits.is_some());
+    a.on_key(KeyEvent::from(KeyCode::Char('j')));
+    let text = render(&mut a).0;
+    assert!(!text.contains("↓ more") && text.contains("end"), "{text}");
+    a.on_key(KeyEvent::from(KeyCode::Char('j')));
+    assert_eq!(a.tab.thread.as_ref().unwrap().current().unwrap().no, 3002);
+}
+
+#[test]
+fn inside_a_tall_post() {
+    use ratatui::crossterm::event::{KeyCode, KeyEvent};
+    let mut a = tall_app();
+    render(&mut a);
+    for _ in 0..2 {
+        a.on_key(KeyEvent::from(KeyCode::Char('j')));
+        render(&mut a);
+    }
+    insta::assert_snapshot!(snapshot(&mut a));
+}
+
 #[test]
 fn history() {
     let mut a = app(false);

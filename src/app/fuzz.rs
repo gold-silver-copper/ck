@@ -413,6 +413,8 @@ enum Act {
     Filter(usize, u8),
     /// Settings › Filters, and keys in it.
     FilterList(u64),
+    /// `j` until the end of the thread (drawing each time): it must get there.
+    ReadToEnd,
 }
 
 impl std::fmt::Display for Act {
@@ -431,6 +433,7 @@ impl std::fmt::Display for Act {
             Act::Saved(k) => write!(f, "open saved copy #{k}"),
             Act::Filter(k, opts) => write!(f, "filter like this: candidate #{k}, options {opts:03b}"),
             Act::FilterList(_) => write!(f, "keys in Settings › Filters"),
+            Act::ReadToEnd => write!(f, "j to the end of the thread"),
         }
     }
 }
@@ -534,6 +537,7 @@ fn random_act(rng: &mut Rng, hot: &[KeyEvent]) -> Act {
         93..95 => Act::Saved(rng.below(1000)),
         95..97 => Act::Filter(rng.below(1000), rng.below(8) as u8),
         97..98 => Act::FilterList(rng.next()),
+        98..99 => Act::ReadToEnd,
         _ => Act::Pick(rng.below(1000)),
     }
 }
@@ -707,6 +711,27 @@ impl World {
                     assert!(caught, "the filter {:?} added from post {post} doesn't catch it", app.filter_cfgs.last());
                 }
             }
+            Act::ReadToEnd => {
+                let reading = |app: &App| app.tab.view == View::Thread && app.modal_open().is_none() && app.tab.thread.is_some();
+                if !reading(app) {
+                    return;
+                }
+                // Each j moves on (the selection, or the scroll within a tall post) until the
+                // end: it can't go round in circles.
+                let mut last = None;
+                for _ in 0..100_000 {
+                    draw(app, w, h);
+                    let Some(t) = app.tab.thread.as_ref().filter(|_| reading(app)) else { return };
+                    if t.entry() + 1 >= t.entries.len() && t.tall().is_none_or(|(_, _, below)| !below) {
+                        return;
+                    }
+                    let at = (t.entry(), t.scroll);
+                    assert!(last.is_none_or(|l| at > l), "j didn't move on: entry {} at line {} (was {last:?})", at.0, at.1);
+                    last = Some(at);
+                    app.on_key(KeyEvent::from(KeyCode::Char('j')));
+                }
+                panic!("j never reached the end of the thread");
+            }
             Act::FilterList(seed) => {
                 let mut rng = Rng::new(*seed);
                 app.on_key(KeyEvent::from(KeyCode::Char(',')));
@@ -828,9 +853,6 @@ fn replay(seed: u64, acts: &[Act]) -> Result<(), (String, String)> {
             world.app.quit = false;
             let (w, h) = world.size;
             draw(&mut world.app, w, h);
-            check(&world.app);
-            check_layout(&mut world.app);
-            let calls = if Arc::ptr_eq(&gate, &world.gate) { world.gate.log_since(before.log) } else { Vec::new() };
             if std::env::var_os("FUZZ_TRACE").is_some() {
                 let a = &world.app;
                 let hid: Vec<String> = a.store.hidden.iter().map(|(k, v)| format!("{k}:{}", v.len())).collect();
@@ -839,7 +861,14 @@ fn replay(seed: u64, acts: &[Act]) -> Result<(), (String, String)> {
                 let w: Vec<String> = a.store.watched.iter().map(|w| format!("{}/{}/{} dead={} seen={}", w.key.site, w.key.board, w.key.no, w.dead, w.last_seen)).collect();
                 let sv: Vec<String> = a.store.saved.iter().map(|m| format!("{}/{}/{}", m.key.site, m.key.board, m.key.no)).collect();
                 eprintln!("TRACE   watched {w:?} saved {sv:?} status {:?}", a.status.as_ref().map(|s| &s.text));
+                if let Some(t) = &a.tab.thread {
+                    let l = t.layout.as_ref().map(|l| (l.starts.clone(), l.exact.clone()));
+                    eprintln!("TRACE   thread entry {} selected {} scroll {} view {} entries {} layout {l:?}", t.entry(), t.selected, t.scroll, t.viewport, t.entries.len());
+                }
             }
+            check(&world.app);
+            check_layout(&mut world.app);
+            let calls = if Arc::ptr_eq(&gate, &world.gate) { world.gate.log_since(before.log) } else { Vec::new() };
             check_saved(&world.app, &before, &calls, &mut removed);
             check_marks(&world.app, &before);
             // A step asks a handful of things at most (a few refreshes may fall due at once).
@@ -1107,6 +1136,11 @@ fn check_layout(app: &mut App) {
     let (top, bottom) = (l.entry_at(t.scroll), l.entry_at(t.scroll + t.viewport - 1));
     if let Some(e) = (top..=bottom).find(|&e| !l.exact[e]) {
         panic!("entry {e} is on screen but not laid out (scroll {}, view {})", t.scroll, t.viewport);
+    }
+    // The selected post is on screen, at least partly.
+    let cursor = t.entry();
+    if cursor < top || cursor > bottom {
+        panic!("the selected entry {cursor} is off screen ({top}..={bottom} shown)");
     }
 }
 

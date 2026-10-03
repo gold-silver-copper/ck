@@ -253,6 +253,10 @@ fn location(app: &App) -> (Vec<String>, Vec<Span<'static>>) {
                 if th.reveal_all {
                     meta.push("spoilers shown".into());
                 }
+                // Which screenful of a post taller than the screen.
+                if let (Some(((at, n), ..)), Some(p)) = (th.tall(), th.current()) {
+                    meta.insert(0, format!("No.{} ({at}/{n})", p.no));
+                }
             }
             let uri = app.tab.board.as_ref().map(|b| format!("/{}/", b.uri)).unwrap_or_default();
             if let Some(c) = th.and_then(|th| th.conversation.as_ref()).filter(|_| app.tab.gallery.is_none()) {
@@ -1157,10 +1161,21 @@ fn draw_thread(f: &mut Frame, app: &mut App, area: Rect) {
     }
     settle(t, clock);
     // The selection moved (or everything was laid out again): into view, placed exactly.
+    // Laying out what's around it can move it (estimates above it turning exact), so again,
+    // until it stays.
     if std::mem::take(&mut t.reveal) {
-        lay_out_entries(t, [t.entry()], clock);
-        t.scroll_to_selected();
-        settle(t, clock);
+        let end_first = t.reveal_end;
+        for _ in 0..4 {
+            lay_out_entries(t, [t.entry()], clock);
+            t.reveal_end = end_first;
+            let before = t.scroll;
+            t.scroll_to_selected();
+            settle(t, clock);
+            if t.scroll == before {
+                break;
+            }
+        }
+        t.reveal_end = false;
     }
     let cursor = t.entry();
     // A part just focused is scrolled into view (the post itself: its top).
@@ -1197,6 +1212,21 @@ fn draw_thread(f: &mut Frame, app: &mut App, area: Rect) {
             fill(f, Rect::new(code_x, y, area.right().saturating_sub(code_x + 1), 1), th.code_bg);
         }
         put(f, x + PAD, y, width.saturating_sub(PAD + 2), Line::from(line.spans.clone()));
+    }
+
+    // In a post taller than the screen: whether it goes on below, or started above.
+    if let Some((_, above, below)) = t.tall() {
+        let mark = |f: &mut Frame, y: u16, text: &str| {
+            let w = text.width() as u16 + 2;
+            let x = area.right().saturating_sub(w + 1);
+            put(f, x, y, w, Line::from(Span::styled(format!(" {text} "), Style::new().fg(th.text_dim).bg(th.surface_high))));
+        };
+        if above {
+            mark(f, area.y, "↑");
+        }
+        if below {
+            mark(f, area.bottom().saturating_sub(1), "↓ more");
+        }
     }
 
     // Tiles: images only when fully on screen, so they never draw outside the thread area.

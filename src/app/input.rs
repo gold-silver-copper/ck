@@ -131,6 +131,12 @@ impl App {
         }
     }
 
+    /// Whether a popup or input is taking the keys (the fuzzer asks).
+    #[cfg(test)]
+    pub(super) fn modal_open(&self) -> Option<()> {
+        self.modal().map(|_| ())
+    }
+
     /// What's capturing input, topmost first (the viewer can be open over the gallery, and
     /// image search over the viewer). It gets every key; clicks go to it or close it.
     fn modal(&self) -> Option<Modal> {
@@ -451,8 +457,8 @@ impl App {
         let Some(t) = &mut self.tab.thread else { return };
         let half = (t.viewport / 2).max(1) as isize;
         match code {
-            KeyCode::Char('j') | KeyCode::Down => t.select_entry(t.entry() + 1),
-            KeyCode::Char('k') | KeyCode::Up => t.select_entry(t.entry().saturating_sub(1)),
+            KeyCode::Char('j') | KeyCode::Down => t.step(true),
+            KeyCode::Char('k') | KeyCode::Up => t.step(false),
             KeyCode::Char('J') => t.scroll_lines(1),
             KeyCode::Char('K') => t.scroll_lines(-1),
             KeyCode::Char('d') if ctrl => t.scroll_lines(half),
