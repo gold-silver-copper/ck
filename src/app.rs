@@ -852,11 +852,14 @@ pub struct Viewer {
     pub posts: Vec<u64>,
     /// How far it's zoomed in, and where.
     pub crop: crate::images::Crop,
+    /// How much of the image is on screen (thousandths of its width and height), as last
+    /// drawn: what moving around steps by.
+    pub shown: Option<(u16, u16)>,
 }
 
 impl Viewer {
     pub fn new(files: Vec<Attachment>, index: usize, link: Option<String>) -> Self {
-        Viewer { files, index, link, posts: Vec::new(), crop: crate::images::Crop::FIT }
+        Viewer { files, index, link, posts: Vec::new(), crop: crate::images::Crop::FIT, shown: None }
     }
 }
 
