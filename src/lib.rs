@@ -55,6 +55,8 @@ pub mod route;
 pub mod saved;
 pub mod saved_search;
 pub mod store;
+#[cfg(test)]
+mod test_fixtures;
 pub mod theme;
 pub mod ui;
 pub mod writer;

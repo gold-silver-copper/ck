@@ -1,22 +1,18 @@
 //! Snapshot tests: every view rendered with fixed data and a fixed clock.
 
-use ratatui::Terminal;
-use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
 
 use crate::app::{App, Clock, Part, Popup, Preview, SettingsPopup, ThreadView, View, Viewer};
 use crate::images::Images;
-use crate::markup::{Flavor, parse_html};
-use crate::model::{Attachment, Board, Post};
+use crate::model::{Board, Post};
 use crate::store::{ThreadKey, Visit, Watched};
+use crate::test_fixtures::*;
 use crate::theme::theme;
 
-/// 2026-09-21 14:13:20 UTC.
-const NOW: i64 = 1_790_000_000;
 const HOUR: i64 = 3600;
 
 fn app(images: bool) -> App {
-    let mut app = crate::app::tests::test_app();
+    let mut app = test_app();
     let key = |board: &str, no| ThreadKey { site: "4chan".into(), board: board.into(), no };
     app.store.watched = vec![
         Watched { key: key("g", 1000), subject: "Snapshot thread".into(), posts: 5, last_seen: 1002, unread: 2, ..Default::default() },
@@ -45,29 +41,6 @@ fn app(images: bool) -> App {
     ]);
     app.tab.board = Some(Board { uri: "g".into(), title: "Technology".into(), nsfw: Some(false) });
     app
-}
-
-fn post(no: u64, age: i64, subject: Option<&str>, html: &str) -> Post {
-    let p = parse_html(html, Flavor::Fourchan);
-    Post {
-        no,
-        name: "Anonymous".into(),
-        subject: subject.map(String::from),
-        time: NOW - age,
-        ..p.into()
-    }
-}
-
-fn file(name: &str) -> Attachment {
-    Attachment {
-        filename: name.into(),
-        url: format!("https://i.example/{name}"),
-        thumb: Some(format!("https://i.example/thumb/{name}")),
-        width: Some(800),
-        height: Some(600),
-        size: Some(123_456),
-        ..Default::default()
-    }
 }
 
 /// The app on the thread fixture.
@@ -130,9 +103,7 @@ fn render(app: &mut App) -> (String, Buffer) {
 }
 
 fn render_at(app: &mut App, w: u16, h: u16) -> (String, Buffer) {
-    let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
-    term.draw(|f| crate::ui::draw(f, app)).unwrap();
-    let buf = term.backend().buffer().clone();
+    let buf = draw_at(app, w, h);
     let mut text = String::new();
     for y in 0..buf.area.height {
         let row: String = (0..buf.area.width).map(|x| buf[(x, y)].symbol()).collect();
@@ -545,13 +516,6 @@ fn inside_a_tall_post() {
     insta::assert_snapshot!(snapshot(&mut a));
 }
 
-/// The selected entry's first line, relative to the top of the screen.
-fn selected_row(a: &App) -> isize {
-    let t = a.tab.thread.as_ref().unwrap();
-    let l = t.layout.as_ref().unwrap();
-    l.starts[t.entry()] as isize - t.scroll as isize
-}
-
 #[test]
 fn the_selected_post_sits_at_the_margin_while_reading() {
     use ratatui::crossterm::event::{KeyCode, KeyEvent};
@@ -666,9 +630,7 @@ fn hint_labels_from_before_a_refresh_dont_focus_what_is_gone() {
     // The thread comes back without any replies (found by fuzzing).
     let posts: Vec<Post> = thread().posts.into_iter().map(|p| Post { quotes: Vec::new(), ..p }).collect();
     a.tab.thread = Some(ThreadView::new("g".into(), 1000, posts));
-    for c in label.chars() {
-        a.on_key(KeyEvent::from(KeyCode::Char(c)));
-    }
+    type_text(&mut a, &label);
     assert!(a.tab.thread.as_ref().unwrap().focus.is_none());
     assert!(a.status.as_ref().unwrap().text.contains("changed since the labels went up"));
 }
@@ -1048,9 +1010,7 @@ fn link_hints() {
     // A label picks its target: here, post 1001's quote of the OP, which jumps there.
     let h = a.hints().unwrap();
     let label = h.targets.iter().find(|x| matches!(&x.to, crate::app::HintTo::Thread(1, Some(_)))).unwrap().label.clone();
-    for c in label.chars() {
-        a.on_key(KeyEvent::from(KeyCode::Char(c)));
-    }
+    type_text(&mut a, &label);
     assert!(a.hints().is_none());
     assert_eq!(a.tab.thread.as_ref().unwrap().selected, 0);
     // In a catalog: a label per thread; picking one opens it.

@@ -681,7 +681,7 @@ fn data_dir_once(seed: u64) {
         }
     }
     // The app starts on it, restores the session, draws and saves.
-    let mut app = crate::app::tests::test_app();
+    let mut app = crate::test_fixtures::test_app();
     let cfg: crate::config::Config = toml::from_str(crate::config::DEFAULT_CONFIG).unwrap();
     app = crate::app::App::new(cfg, app.keys.clone(), None, store);
     app.config_path = None;
@@ -690,12 +690,10 @@ fn data_dir_once(seed: u64) {
     app.goto_str("saved");
     for key in copies {
         app.open_saved(key);
-        let mut term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(60, 20)).unwrap();
-        term.draw(|f| crate::ui::draw(f, &mut app)).unwrap();
+        crate::test_fixtures::draw_at(&mut app, 60, 20);
     }
     for (w, h) in [(110, 32), (20, 5)] {
-        let mut term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(w, h)).unwrap();
-        term.draw(|f| crate::ui::draw(f, &mut app)).unwrap();
+        crate::test_fixtures::draw_at(&mut app, w, h);
     }
     app.save_now();
     let (_, warnings) = Store::load(Some(data));

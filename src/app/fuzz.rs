@@ -15,9 +15,6 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 
-use ratatui::Terminal;
-use ratatui::backend::TestBackend;
-
 use super::*;
 use crate::backend::{Partial, SearchPage};
 use crate::fuzz::{self, Rng};
@@ -565,7 +562,7 @@ impl World {
         let mut w = World {
             dir: tempfile::tempdir().unwrap(),
             gate: Arc::new(Gate::default()),
-            app: super::tests::test_app(),
+            app: crate::test_fixtures::test_app(),
             size: (110, 32),
             start: Instant::now(),
             elapsed: Duration::ZERO,
@@ -810,10 +807,8 @@ fn settle(app: &mut App, gate: &Gate) {
 }
 
 fn draw(app: &mut App, w: u16, h: u16) {
-    let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
-    term.draw(|f| crate::ui::draw(f, app)).unwrap();
+    let buf = crate::test_fixtures::draw_at(app, w, h);
     // Nothing that reaches the terminal may be a control character.
-    let buf = term.backend().buffer();
     if let Some(cell) = buf.content().iter().find(|c| c.symbol().chars().any(char::is_control)) {
         panic!("a control character drawn: {:?}", cell.symbol());
     }
