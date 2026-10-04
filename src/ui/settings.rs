@@ -11,7 +11,7 @@ pub(super) fn draw_settings(f: &mut Frame, app: &mut App, area: Rect) {
     let total = rows.len() + 2;
     let offset = if at + 1 == rows.len() { total } else { at + 2 }.saturating_sub(area.height as usize);
     app.hit = Some(Hit::Settings { area, offset });
-    let items: Vec<_> = SETTING_SECTIONS.iter().flat_map(|(_, items)| items.iter().copied()).collect();
+    let items: Vec<_> = settings().collect();
     for (row, r) in rows.into_iter().enumerate().skip(offset) {
         let y = area.y + (row - offset) as u16;
         if y >= area.bottom() {
@@ -20,9 +20,9 @@ pub(super) fn draw_settings(f: &mut Frame, app: &mut App, area: Rect) {
         match r {
             Err(title) => put(f, area.x, y, area.width, Line::styled(title.to_string(), bold(t.primary))),
             Ok(i) => {
-                let (item, label, hint) = items[i];
+                let (label, hint) = (items[i].label, items[i].hint);
                 paint_row(f, Rect::new(area.x, y, area.width, 1), None, i == selected, false);
-                let value = app.setting_value(item);
+                let value = (items[i].value)(app);
                 let hint_w = (area.width as usize).saturating_sub(PAD as usize + 1 + 18 + 34);
                 let line = Line::from(vec![
                     Span::styled(format!("{label:<18}"), Style::new().fg(t.text)),

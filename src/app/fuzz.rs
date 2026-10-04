@@ -751,7 +751,7 @@ impl World {
                 if app.tab.view != View::Settings || app.settings_popup().is_some() {
                     return;
                 }
-                app.settings_list.state.select(settings::items().iter().position(|&i| i == settings::Item::Filters));
+                app.settings_list.state.select(settings::position("Filters"));
                 app.on_key(KeyEvent::from(KeyCode::Enter));
                 let keys = [' ', 'x', 'a', 'j', 'k', 'l', 'h', '(', 'w', '|', '日'];
                 for _ in 0..rng.below(16) {
