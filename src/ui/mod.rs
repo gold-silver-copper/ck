@@ -14,8 +14,8 @@ use ratatui_image::Image;
 use unicode_width::UnicodeWidthStr;
 
 use crate::app::{
-    App, Clock, Hit, LineCache, LinkItem, Part, Popup, Reveal, TabPopup, SETTING_SECTIONS, Spot, SettingsPopup, SiteRow, Sort, Status, ThreadLayout, ThreadView, View, key_rows,
-    setting_rows,
+    App, Clock, Hit, LineCache, LinkItem, Part, Popup, Reveal, TabPopup, Spot, SettingsPopup, SiteRow, Sort, Status, ThreadLayout, ThreadView, View, key_rows,
+    setting_rows, settings,
 };
 use std::collections::HashMap;
 

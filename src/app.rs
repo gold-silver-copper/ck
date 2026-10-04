@@ -67,7 +67,7 @@ pub use saving::Downloads;
 pub use thread_view::*;
 pub use sites::{Adding, BoardsUpdate, MySites, origin as site_origin};
 pub use tabs::{MAX_TABS, Offline, Tab, TabPopup};
-pub use settings::{SettingsPopup, SECTIONS as SETTING_SECTIONS, key_rows, rows as setting_rows, tilde};
+pub use settings::{SettingsPopup, key_rows, rows as setting_rows, settings, tilde};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum View {
@@ -646,7 +646,7 @@ impl App {
             View::Watched => (self.visible_watched().len(), &mut self.watched_list),
             View::History => (self.visible_history().len(), &mut self.history_list),
             View::Saved => (self.visible_saved().len(), &mut self.saved_list),
-            View::Settings => (settings::items().len(), &mut self.settings_list),
+            View::Settings => (settings::settings().count(), &mut self.settings_list),
             View::Search => (self.tab.search.as_ref().map_or(0, |s| s.hits.len()), &mut self.tab.search_list),
             View::Thread => return None,
         })

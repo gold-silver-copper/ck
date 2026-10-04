@@ -735,7 +735,7 @@ fn other_themes_and_256_colors() {
 fn key_editor() {
     let mut a = app(false);
     a.open_settings();
-    let keys = crate::app::SETTING_SECTIONS.iter().flat_map(|(_, i)| i.iter()).count() - 1;
+    let keys = crate::app::settings().count() - 1;
     a.settings_list.state.select(Some(keys));
     a.activate_setting();
     insta::assert_snapshot!(snapshot(&mut a));
@@ -889,7 +889,7 @@ fn narrow_screens() {
     let mut a = app(false);
     // Settings scroll to the selected one.
     a.open_settings();
-    let last = crate::app::SETTING_SECTIONS.iter().flat_map(|(_, i)| i.iter()).count() - 1;
+    let last = crate::app::settings().count() - 1;
     a.settings_list.state.select(Some(last));
     let (text, _) = render_at(&mut a, 60, 20);
     assert!(text.contains("Key bindings"), "{text}");

@@ -11,61 +11,194 @@ use crate::config::{self, ColorMode, ImagesMode};
 use crate::keys::{ACTIONS, Key, Scope};
 use crate::theme::{self, ROLES, Theme, ThemeDef};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Item {
-    Theme,
-    Colors,
-    ColorDepth,
-    Compact,
-    Images,
-    ScrollMargin,
-    Filters,
-    HiddenWords,
-    RefreshThread,
-    RefreshWatched,
-    Notify,
-    FollowNew,
-    NsfwImages,
-    BoardImages,
-    DownloadDir,
-    Restore,
-    Keys,
-    AddSite,
-    MySites,
+/// One row of the settings screen: its label and hint, how its value reads, and what
+/// `enter` does.
+pub struct Setting {
+    pub label: &'static str,
+    pub hint: &'static str,
+    pub value: fn(&App) -> String,
+    pub activate: fn(&mut App),
 }
 
-/// A setting with its label and hint.
-pub type Row = (Item, &'static str, &'static str);
+const fn row(label: &'static str, hint: &'static str, value: fn(&App) -> String, activate: fn(&mut App)) -> Setting {
+    Setting { label, hint, value, activate }
+}
+
+fn open(app: &mut App, popup: SettingsPopup) {
+    app.popup = Some(Popup::Settings(popup));
+}
+
+/// `n` things: "none", "1 board", "3 boards".
+fn count(n: usize, one: &str) -> String {
+    match n {
+        0 => "none".into(),
+        1 => format!("1 {one}"),
+        n => format!("{n} {one}s"),
+    }
+}
 
 /// The settings, by section, in display order.
-pub const SECTIONS: &[(&str, &[Row])] = &[
+pub const SECTIONS: &[(&str, &[Setting])] = &[
     ("Appearance", &[
-        (Item::Theme, "Theme", "Live preview while choosing"),
-        (Item::Colors, "Colors", "Change any color of the current theme"),
-        (Item::ColorDepth, "Color depth", "24-bit color, or the nearest of 256"),
-        (Item::ScrollMargin, "Reading position", "How far from the edges the selected post stays"),
+        row("Theme", "Live preview while choosing", |a| a.theme_name.clone(), App::choose_theme_popup),
+        row(
+            "Colors",
+            "Change any color of the current theme",
+            |a| match a.themes.get(&a.theme_name) {
+                Some(def) if !def.colors.is_empty() => format!("{} changed", def.colors.len()),
+                _ => "as the theme has them".into(),
+            },
+            |a| open(a, SettingsPopup::Colors { list: ListState::default().with_selected(Some(0)), editing: None }),
+        ),
+        row(
+            "Color depth",
+            "24-bit color, or the nearest of 256",
+            |a| match a.color_mode {
+                ColorMode::Auto => format!("auto ({})", if a.truecolor { "24-bit" } else { "256" }),
+                m => m.as_str().into(),
+            },
+            |a| {
+                a.color_mode = a.color_mode.next();
+                a.truecolor = a.color_mode.truecolor();
+                let mode = a.color_mode.as_str();
+                a.save_config(&format!("color depth {mode}"), |d| d["color"] = toml_edit::value(mode));
+            },
+        ),
+        row(
+            "Reading position",
+            "How far from the edges the selected post stays",
+            |a| match a.scroll_margin {
+                m if m <= 0.0 => "at the edge (no margin)".into(),
+                m if m >= 0.5 => "centered".into(),
+                m => format!("{}% from the edges", (m * 100.0).round()),
+            },
+            App::next_scroll_margin,
+        ),
     ]),
     ("Catalog", &[
-        (Item::Compact, "Default layout", "c in a catalog sets a board's own"),
-        (Item::Images, "Images", "Thumbnails and the image viewer (after a restart)"),
-        (Item::NsfwImages, "NSFW boards", "Images on boards the site marks NSFW"),
-        (Item::BoardImages, "Board images", "Boards with their own image setting (. menu on a board)"),
-        (Item::Filters, "Filters", "Hide or highlight by pattern; X adds one from a post"),
-        (Item::HiddenWords, "Hidden words", "Posts with any of these words are hidden, everywhere"),
+        row("Default layout", "c in a catalog sets a board's own", |a| a.default_layout.as_str().into(), App::cycle_default_layout),
+        row(
+            "Images",
+            "Thumbnails and the image viewer (after a restart)",
+            |a| match a.images_mode {
+                ImagesMode::Auto if a.images.enabled() => format!("on ({})", a.images.protocol_name()),
+                ImagesMode::Auto => "on".into(),
+                m => m.as_str().into(),
+            },
+            |a| {
+                a.images_mode = a.images_mode.next();
+                let mode = a.images_mode.as_str();
+                a.save_config("images (from the next start)", |d| d["images"] = toml_edit::value(mode));
+            },
+        ),
+        row(
+            "NSFW boards",
+            "Images on boards the site marks NSFW",
+            |a| if a.nsfw_images == crate::config::NsfwImages::Show { "images shown" } else { "images off" }.into(),
+            |a| {
+                a.nsfw_images = a.nsfw_images.next();
+                let mode = a.nsfw_images.as_str();
+                a.save_config(&format!("nsfw_images = \"{mode}\""), |d| d["nsfw_images"] = toml_edit::value(mode));
+            },
+        ),
+        row(
+            "Board images",
+            "Boards with their own image setting (. menu on a board)",
+            |a| count(a.boards_with_images_set().len(), "board"),
+            |a| open(a, SettingsPopup::BoardImages { list: ListState::default().with_selected(Some(0)) }),
+        ),
+        row(
+            "Filters",
+            "Hide or highlight by pattern; X adds one from a post",
+            |a| {
+                let hidden: usize = a.store.hidden.values().map(Vec::len).sum();
+                let off = a.filter_cfgs.iter().filter(|f| !f.enabled).count();
+                let off = if off > 0 { format!(" ({off} off)") } else { String::new() };
+                let n = a.filter_cfgs.len();
+                format!("{n} filter{}{off}, {hidden} hidden by hand", if n == 1 { "" } else { "s" })
+            },
+            |a| open(a, a.filter_list(0)),
+        ),
+        row(
+            "Hidden words",
+            "Posts with any of these words are hidden, everywhere",
+            |a| count(a.hidden_words.len(), "word"),
+            |a| open(a, SettingsPopup::HiddenWords { list: ListState::default().with_selected(Some(0)), typing: None }),
+        ),
     ]),
     ("Background refresh", &[
-        (Item::RefreshThread, "Open thread", "How often the open thread updates"),
-        (Item::RefreshWatched, "Watched threads", "How often each watched thread updates"),
-        (Item::Notify, "Notifications", "New posts in watched threads, replies to yours (m)"),
-        (Item::FollowNew, "Reading the end", "New posts come into view while you read the last one"),
+        row(
+            "Open thread",
+            "How often the open thread updates",
+            |a| format!("every {}s", a.refresh_thread.as_secs()),
+            |a| {
+                let secs = next(REFRESH_THREAD, a.refresh_thread.as_secs());
+                a.refresh_thread = Duration::from_secs(secs);
+                a.save_config(&format!("refresh every {secs}s"), |d| d["refresh_thread_secs"] = toml_edit::value(secs as i64));
+            },
+        ),
+        row(
+            "Watched threads",
+            "How often each watched thread updates",
+            |a| format!("every {}s", a.refresh_watched.as_secs()),
+            |a| {
+                let secs = next(REFRESH_WATCHED, a.refresh_watched.as_secs());
+                a.refresh_watched = Duration::from_secs(secs);
+                a.save_config(&format!("refresh every {secs}s"), |d| d["refresh_watched_secs"] = toml_edit::value(secs as i64));
+            },
+        ),
+        row("Notifications", "New posts in watched threads, replies to yours (m)", App::notify_value, |a| {
+            a.notify_mode = a.notify_mode.next();
+            let mode = a.notify_mode.as_str();
+            a.save_config(&format!("notifications {mode}"), |d| d["notify"] = toml_edit::value(mode));
+        }),
+        row(
+            "Reading the end",
+            "New posts come into view while you read the last one",
+            |a| if a.follow_new_posts { "new posts come into view" } else { "nothing moves" }.into(),
+            |a| {
+                a.follow_new_posts = !a.follow_new_posts;
+                let on = a.follow_new_posts;
+                a.save_config(if on { "following new posts" } else { "not following new posts" }, |d| d["follow_new_posts"] = toml_edit::value(on));
+            },
+        ),
     ]),
     ("Sites", &[
-        (Item::AddSite, "Add a site", "Paste a link to any page of it; ck finds out what it runs"),
-        (Item::MySites, "Your sites", "The ones you added, or built-in ones you changed"),
+        row(
+            "Add a site",
+            "Paste a link to any page of it; ck finds out what it runs",
+            |a| format!("{} sites so far", a.sites.len() - a.removed_sites.len()),
+            |a| a.popup = Some(Popup::Adding(super::Adding::Typing(String::new()))),
+        ),
+        row("Your sites", "The ones you added, or built-in ones you changed", App::my_sites_value, |a| {
+            a.popup = a.my_sites().map(|m| Popup::Settings(SettingsPopup::Sites(m)))
+        }),
     ]),
-    ("Downloads", &[(Item::DownloadDir, "Folder", "Where saved files and pages go")]),
-    ("Startup", &[(Item::Restore, "Last place", "Start where you left off (ck URL starts elsewhere)")]),
-    ("Keys", &[(Item::Keys, "Key bindings", "Rebind any command")]),
+    ("Downloads", &[row(
+        "Folder",
+        "Where saved files and pages go",
+        |a| a.download_dir.clone().unwrap_or_else(|| "~/Downloads/ck/{site}/{board}/{thread}".into()),
+        |a| open(a, SettingsPopup::Folder { value: a.download_dir.clone().unwrap_or_default() }),
+    )]),
+    ("Startup", &[row(
+        "Last place",
+        "Start where you left off (ck URL starts elsewhere)",
+        |a| if a.restore_session { "restored" } else { "not restored" }.into(),
+        |a| {
+            a.restore_session = !a.restore_session;
+            let on = a.restore_session;
+            a.save_config(if on { "restoring the last place" } else { "not restoring the last place" }, |d| d["restore_session"] = toml_edit::value(on));
+        },
+    )]),
+    ("Keys", &[row(
+        "Key bindings",
+        "Rebind any command",
+        |a| match ACTIONS.iter().filter(|e| !a.keys.is_default(e.0)).count() {
+            0 => "defaults".into(),
+            n => format!("{n} changed"),
+        },
+        |a| open(a, SettingsPopup::Keys { list: ListState::default().with_selected(key_rows().iter().position(Result::is_ok)), capture: None }),
+    )]),
 ];
 
 const REFRESH_THREAD: &[u64] = &[10, 15, 30, 60, 120];
@@ -73,8 +206,15 @@ const REFRESH_THREAD: &[u64] = &[10, 15, 30, 60, 120];
 const SCROLL_MARGINS: &[f32] = &[0.0, 0.2, 0.3, 0.5];
 const REFRESH_WATCHED: &[u64] = &[60, 120, 300, 600, 1800];
 
-pub fn items() -> Vec<Item> {
-    SECTIONS.iter().flat_map(|(_, items)| items.iter().map(|&(item, ..)| item)).collect()
+/// Every setting, in display order.
+pub fn settings() -> impl Iterator<Item = &'static Setting> {
+    SECTIONS.iter().flat_map(|(_, items)| items.iter())
+}
+
+/// Where the setting with this label is (tests find rows by it).
+#[cfg(test)]
+pub fn position(label: &str) -> Option<usize> {
+    settings().position(|s| s.label == label)
 }
 
 /// The screen's rows, top to bottom: `Err(section title)` for headers, `Ok(index)` for
@@ -152,172 +292,53 @@ impl App {
         }
     }
 
-    pub fn selected_setting(&self) -> Option<Item> {
-        self.settings_list.state.selected().and_then(|i| items().get(i).copied())
-    }
-
-    /// A setting's current value, as shown.
-    pub fn setting_value(&self, item: Item) -> String {
-        match item {
-            Item::Theme => self.theme_name.clone(),
-            Item::Colors => match self.themes.get(&self.theme_name) {
-                Some(def) if !def.colors.is_empty() => format!("{} changed", def.colors.len()),
-                _ => "as the theme has them".into(),
-            },
-            Item::ColorDepth => match self.color_mode {
-                ColorMode::Auto => format!("auto ({})", if self.truecolor { "24-bit" } else { "256" }),
-                m => m.as_str().into(),
-            },
-            Item::Compact => self.default_layout.as_str().into(),
-            Item::ScrollMargin => match self.scroll_margin {
-                m if m <= 0.0 => "at the edge (no margin)".into(),
-                m if m >= 0.5 => "centered".into(),
-                m => format!("{}% from the edges", (m * 100.0).round()),
-            },
-            Item::Images => match self.images_mode {
-                ImagesMode::Auto if self.images.enabled() => format!("on ({})", self.images.protocol_name()),
-                ImagesMode::Auto => "on".into(),
-                m => m.as_str().into(),
-            },
-            Item::Filters => {
-                let hidden: usize = self.store.hidden.values().map(Vec::len).sum();
-                let off = self.filter_cfgs.iter().filter(|f| !f.enabled).count();
-                let off = if off > 0 { format!(" ({off} off)") } else { String::new() };
-                let n = self.filter_cfgs.len();
-                format!("{n} filter{}{off}, {hidden} hidden by hand", if n == 1 { "" } else { "s" })
-            }
-            Item::RefreshThread => format!("every {}s", self.refresh_thread.as_secs()),
-            Item::RefreshWatched => format!("every {}s", self.refresh_watched.as_secs()),
-            Item::Notify => {
-                let method = crate::notify::method(self.notify_mode, self.notify_command.as_deref(), &|k| std::env::var(k).ok());
-                let how = match method {
-                    crate::notify::Method::Osc9 | crate::notify::Method::Osc777 => "desktop notification",
-                    crate::notify::Method::Bell => "terminal bell",
-                    crate::notify::Method::Command(_) => "notify_command",
-                    crate::notify::Method::Off => "off",
-                };
-                match self.notify_mode {
-                    crate::notify::NotifyMode::Off => "off".into(),
-                    m => format!("{} ({how})", m.as_str()),
-                }
-            }
-            Item::DownloadDir => self.download_dir.clone().unwrap_or_else(|| "~/Downloads/ck/{site}/{board}/{thread}".into()),
-            Item::Restore => if self.restore_session { "restored" } else { "not restored" }.into(),
-            Item::HiddenWords => match self.hidden_words.len() {
-                0 => "none".into(),
-                1 => "1 word".into(),
-                n => format!("{n} words"),
-            },
-            Item::NsfwImages => match self.nsfw_images {
-                crate::config::NsfwImages::Show => "images shown".into(),
-                crate::config::NsfwImages::Off => "images off".into(),
-            },
-            Item::BoardImages => match self.boards_with_images_set().len() {
-                0 => "none".into(),
-                1 => "1 board".into(),
-                n => format!("{n} boards"),
-            },
-            Item::FollowNew => if self.follow_new_posts { "new posts come into view" } else { "nothing moves" }.into(),
-            Item::Keys => match ACTIONS.iter().filter(|e| !self.keys.is_default(e.0)).count() {
-                0 => "defaults".into(),
-                n => format!("{n} changed"),
-            },
-            Item::AddSite => format!("{} sites so far", self.sites.len() - self.removed_sites.len()),
-            Item::MySites => {
-                let builtin = config::builtin_sites();
-                let added = self.sites.iter().filter(|s| !builtin.iter().any(|b| b.name.eq_ignore_ascii_case(&s.cfg.name))).count();
-                let changed = self.sites.iter().filter(|s| builtin.iter().any(|b| b.name.eq_ignore_ascii_case(&s.cfg.name) && *b != s.cfg)).count();
-                match (added, changed) {
-                    (0, 0) => "only the built-in ones".into(),
-                    (a, 0) => format!("{a} added"),
-                    (0, c) => format!("{c} built-in changed"),
-                    (a, c) => format!("{a} added, {c} built-in changed"),
-                }
-            }
+    /// Enter on a setting.
+    pub fn activate_setting(&mut self) {
+        if let Some(s) = self.settings_list.state.selected().and_then(|i| settings().nth(i)) {
+            (s.activate)(self);
         }
     }
 
-    /// Enter on a setting.
-    pub fn activate_setting(&mut self) {
-        let Some(item) = self.selected_setting() else { return };
-        match item {
-            Item::Theme => {
-                let names = theme::names(&self.themes);
-                let list = ListState::default().with_selected(Some(names.iter().position(|n| *n == self.theme_name).unwrap_or(0)));
-                let before = (self.theme_name.clone(), theme::theme());
-                self.popup = Some(Popup::Settings(SettingsPopup::Themes { list, names, before }));
-            }
-            Item::Colors => {
-                let list = ListState::default().with_selected(Some(0));
-                self.popup = Some(Popup::Settings(SettingsPopup::Colors { list, editing: None }));
-            }
-            Item::ColorDepth => {
-                self.color_mode = self.color_mode.next();
-                self.truecolor = self.color_mode.truecolor();
-                let mode = self.color_mode.as_str();
-                self.save_config(&format!("color depth {mode}"), |d| d["color"] = toml_edit::value(mode));
-            }
-            Item::Compact => self.cycle_default_layout(),
-            Item::ScrollMargin => {
-                let next = SCROLL_MARGINS.iter().copied().find(|&m| m > self.scroll_margin + 0.01).unwrap_or(0.0);
-                self.scroll_margin = next;
-                // Every tab's thread reads with it from now on.
-                for t in std::iter::once(&mut self.tab).chain(self.tabs.iter_mut()).filter_map(|t| t.thread.as_mut()) {
-                    t.margin = next;
-                }
-                self.save_config(&format!("scroll_margin = {next}"), |d| d["scroll_margin"] = toml_edit::value(f64::from(next)));
-            }
-            Item::Images => {
-                self.images_mode = self.images_mode.next();
-                let mode = self.images_mode.as_str();
-                self.save_config("images (from the next start)", |d| d["images"] = toml_edit::value(mode));
-            }
-            Item::Filters => self.popup = Some(Popup::Settings(self.filter_list(0))),
-            Item::RefreshThread => {
-                let secs = next(REFRESH_THREAD, self.refresh_thread.as_secs());
-                self.refresh_thread = Duration::from_secs(secs);
-                self.save_config(&format!("refresh every {secs}s"), |d| d["refresh_thread_secs"] = toml_edit::value(secs as i64));
-            }
-            Item::RefreshWatched => {
-                let secs = next(REFRESH_WATCHED, self.refresh_watched.as_secs());
-                self.refresh_watched = Duration::from_secs(secs);
-                self.save_config(&format!("refresh every {secs}s"), |d| d["refresh_watched_secs"] = toml_edit::value(secs as i64));
-            }
-            Item::Notify => {
-                self.notify_mode = self.notify_mode.next();
-                let mode = self.notify_mode.as_str();
-                self.save_config(&format!("notifications {mode}"), |d| d["notify"] = toml_edit::value(mode));
-            }
-            Item::DownloadDir => {
-                self.popup = Some(Popup::Settings(SettingsPopup::Folder { value: self.download_dir.clone().unwrap_or_default() }));
-            }
-            Item::HiddenWords => self.popup = Some(Popup::Settings(SettingsPopup::HiddenWords { list: ListState::default().with_selected(Some(0)), typing: None })),
-            Item::NsfwImages => {
-                self.nsfw_images = self.nsfw_images.next();
-                let mode = self.nsfw_images.as_str();
-                self.save_config(&format!("nsfw_images = \"{mode}\""), |d| d["nsfw_images"] = toml_edit::value(mode));
-            }
-            Item::BoardImages => self.popup = Some(Popup::Settings(SettingsPopup::BoardImages { list: ListState::default().with_selected(Some(0)) })),
-            Item::FollowNew => {
-                self.follow_new_posts = !self.follow_new_posts;
-                let on = self.follow_new_posts;
-                self.save_config(if on { "following new posts" } else { "not following new posts" }, |d| {
-                    d["follow_new_posts"] = toml_edit::value(on)
-                });
-            }
-            Item::Restore => {
-                self.restore_session = !self.restore_session;
-                let on = self.restore_session;
-                self.save_config(if on { "restoring the last place" } else { "not restoring the last place" }, |d| {
-                    d["restore_session"] = toml_edit::value(on)
-                });
-            }
-            Item::Keys => {
-                let list = ListState::default().with_selected(key_rows().iter().position(Result::is_ok));
-                self.popup = Some(Popup::Settings(SettingsPopup::Keys { list, capture: None }));
-            }
-            Item::AddSite => self.popup = Some(Popup::Adding(super::Adding::Typing(String::new()))),
-            Item::MySites => self.popup = self.my_sites().map(|m| Popup::Settings(SettingsPopup::Sites(m))),
+    fn choose_theme_popup(&mut self) {
+        let names = theme::names(&self.themes);
+        let list = ListState::default().with_selected(Some(names.iter().position(|n| *n == self.theme_name).unwrap_or(0)));
+        let before = (self.theme_name.clone(), theme::theme());
+        open(self, SettingsPopup::Themes { list, names, before });
+    }
+
+    fn next_scroll_margin(&mut self) {
+        let next = SCROLL_MARGINS.iter().copied().find(|&m| m > self.scroll_margin + 0.01).unwrap_or(0.0);
+        self.scroll_margin = next;
+        // Every tab's thread reads with it from now on.
+        for t in std::iter::once(&mut self.tab).chain(self.tabs.iter_mut()).filter_map(|t| t.thread.as_mut()) {
+            t.margin = next;
+        }
+        self.save_config(&format!("scroll_margin = {next}"), |d| d["scroll_margin"] = toml_edit::value(f64::from(next)));
+    }
+
+    fn notify_value(&self) -> String {
+        let method = crate::notify::method(self.notify_mode, self.notify_command.as_deref(), &|k| std::env::var(k).ok());
+        let how = match method {
+            crate::notify::Method::Osc9 | crate::notify::Method::Osc777 => "desktop notification",
+            crate::notify::Method::Bell => "terminal bell",
+            crate::notify::Method::Command(_) => "notify_command",
+            crate::notify::Method::Off => "off",
+        };
+        match self.notify_mode {
+            crate::notify::NotifyMode::Off => "off".into(),
+            m => format!("{} ({how})", m.as_str()),
+        }
+    }
+
+    fn my_sites_value(&self) -> String {
+        let builtin = config::builtin_sites();
+        let added = self.sites.iter().filter(|s| !builtin.iter().any(|b| b.name.eq_ignore_ascii_case(&s.cfg.name))).count();
+        let changed = self.sites.iter().filter(|s| builtin.iter().any(|b| b.name.eq_ignore_ascii_case(&s.cfg.name) && *b != s.cfg)).count();
+        match (added, changed) {
+            (0, 0) => "only the built-in ones".into(),
+            (a, 0) => format!("{a} added"),
+            (0, c) => format!("{c} built-in changed"),
+            (a, c) => format!("{a} added, {c} built-in changed"),
         }
     }
 

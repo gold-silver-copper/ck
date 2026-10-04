@@ -167,7 +167,7 @@ fn key_editor_rebinds_saves_and_refuses_clashes() {
     app.config_path = Some(dir.path().join("config.toml"));
     let press = |app: &mut App, code| app.on_key(KeyEvent::from(code));
     app.open_settings();
-    app.settings_list.state.select(Some(settings::items().iter().position(|&i| i == settings::Item::Keys).unwrap()));
+    app.settings_list.state.select(Some(settings::position("Key bindings").unwrap()));
     app.activate_setting();
     // Move to `watch` and rebind it to W.
     let rows = settings::key_rows();
@@ -1424,7 +1424,7 @@ fn the_filter_list_edits_turns_off_and_removes() {
     let dir = tempfile::tempdir().unwrap();
     let mut app = filter_app(dir.path());
     app.open_settings();
-    app.settings_list.state.select(settings::items().iter().position(|&i| i == settings::Item::Filters));
+    app.settings_list.state.select(settings::position("Filters"));
     app.enter();
     let Some(SettingsPopup::Filters { counts, .. }) = app.settings_popup() else { panic!("no list") };
     assert_eq!(counts, &[(0, 0)]);
@@ -1985,7 +1985,7 @@ fn settings_add_sites_and_vichan_boards_and_remove_them() {
     assert!(app.adding().is_none());
     // Settings › Your sites lists it; x twice takes it out of the config and off the home screen.
     app.open_settings();
-    let mine = settings::items().iter().position(|&it| it == settings::Item::MySites).unwrap();
+    let mine = settings::position("Your sites").unwrap();
     app.settings_list.state.select(Some(mine));
     app.activate_setting();
     assert!(matches!(app.settings_popup(), Some(SettingsPopup::Sites(m)) if m.sites.len() == 1 && m.sites[0].name == "vi2"));
@@ -2389,7 +2389,7 @@ fn updating_a_vichan_sites_boards() {
     serve_text("vb.invalid", vec![("/", bar.into())]);
     // Settings › Your sites › r.
     app.open_settings();
-    let mine = settings::items().iter().position(|&it| it == settings::Item::MySites).unwrap();
+    let mine = settings::position("Your sites").unwrap();
     app.settings_list.state.select(Some(mine));
     app.activate_setting();
     app.on_key(KeyEvent::from(KeyCode::Char('r')));
@@ -2431,7 +2431,7 @@ fn hidden_words_hide_posts_everywhere() {
     app.set_thread(posts_saying(&[(1, "op"), (2, "free crypto here"), (3, "I like Crypto"), (4, "cryptography")]));
     // Settings › Filters › Hidden words: a, type, enter.
     app.open_settings();
-    let at = settings::items().iter().position(|&it| it == settings::Item::HiddenWords).unwrap();
+    let at = settings::position("Hidden words").unwrap();
     app.settings_list.state.select(Some(at));
     app.activate_setting();
     app.on_key(KeyEvent::from(KeyCode::Char('a')));
