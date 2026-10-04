@@ -242,6 +242,8 @@ pub struct SiteConfig {
     pub media_url: Option<String>,
 }
 
+/// The engines, described in `backend::ENGINES`. (This order is the one serde lists them in
+/// when a config names another.)
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum SiteKind {
@@ -260,26 +262,12 @@ pub enum SiteKind {
 impl SiteKind {
     /// As written in the config.
     pub fn as_str(self) -> &'static str {
-        match self {
-            SiteKind::Fourchan => "4chan",
-            SiteKind::Vichan => "vichan",
-            SiteKind::Lynxchan => "lynxchan",
-            SiteKind::Foolfuuka => "foolfuuka",
-            SiteKind::Jschan => "jschan",
-            SiteKind::Makaba => "makaba",
-        }
+        self.engine().name
     }
 
     /// The engine's name, for people.
     pub fn label(self) -> &'static str {
-        match self {
-            SiteKind::Fourchan => "4chan's API",
-            SiteKind::Vichan => "vichan",
-            SiteKind::Lynxchan => "LynxChan",
-            SiteKind::Foolfuuka => "FoolFuuka",
-            SiteKind::Jschan => "jschan",
-            SiteKind::Makaba => "makaba",
-        }
+        self.engine().label
     }
 }
 

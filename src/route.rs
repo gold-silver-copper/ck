@@ -3,7 +3,7 @@
 
 use anyhow::{Result, bail};
 
-use crate::config::{SiteConfig, SiteKind};
+use crate::config::SiteConfig;
 use crate::http;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -25,12 +25,7 @@ impl SiteInfo {
     /// `board_url` is any page URL of the site (its hosts are derived from it).
     pub fn new(cfg: &SiteConfig, board_url: &str) -> Self {
         let mut hosts = vec![bare(http::host(board_url)).to_string()];
-        let extra: &[&str] = match cfg.kind {
-            SiteKind::Fourchan => &["boards.4chan.org", "boards.4channel.org", "4chan.org", "4channel.org"],
-            SiteKind::Makaba => &["2ch.hk", "2ch.su", "2ch.life"],
-            _ => &[],
-        };
-        hosts.extend(extra.iter().map(|h| h.to_string()));
+        hosts.extend(cfg.kind.engine().hosts.iter().map(|h| h.to_string()));
         if let Some(m) = &cfg.media_url {
             hosts.push(bare(http::host(m)).to_string());
         }

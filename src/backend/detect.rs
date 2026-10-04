@@ -192,98 +192,118 @@ pub fn has_board(base: &str, board: &str) -> bool {
     get_json(&format!("{base}/{}/catalog.json", enc(board))).is_ok_and(|v| is_catalog(&v))
 }
 
-/// Ask the site's APIs, one engine after another, what it runs. A vichan site has no board
-/// list to find, so it needs the link's board; that board is its list then.
-pub fn detect(link: &Link) -> Result<SiteConfig> {
-    let base = &link.base;
-    let site = |kind, boards| SiteConfig {
-        name: name_for(&link.host),
-        kind,
-        url: Some(base.clone()),
-        boards,
-        thumb_ext: None,
-        archive: None,
-        media_url: None,
-    };
-    // Why nothing matched: no answer at all, a refusal, or answers that weren't an API.
-    let (mut unreachable, mut refused, mut answered) = (None, None, false);
-    let mut get = |path: &str| match get_json(&format!("{base}{path}")) {
-        Ok(v) => {
-            answered = true;
-            Some(v)
-        }
-        Err(e) => {
-            match e.downcast_ref::<HttpError>() {
-                Some(HttpError::Status(code @ (401 | 403 | 503), _)) => refused = Some(*code),
-                Some(_) => answered = true,
-                None if e.chain().any(|c| c.downcast_ref::<serde_json::Error>().is_some()) => answered = true,
-                None => {
-                    unreachable.get_or_insert(e);
-                }
+/// One `detect`: the link, and why nothing matched so far: no answer at all, a refusal, or
+/// answers that weren't an API.
+pub struct Asking<'a> {
+    link: &'a Link,
+    unreachable: Option<anyhow::Error>,
+    refused: Option<u16>,
+    answered: bool,
+}
+
+impl Asking<'_> {
+    fn get(&mut self, path: &str) -> Option<Value> {
+        match get_json(&format!("{}{path}", self.link.base)) {
+            Ok(v) => {
+                self.answered = true;
+                Some(v)
             }
-            None
-        }
-    };
-    // jschan has boards.json, and so do some vichan installs (4chan's format).
-    if let Some(v) = get("/boards.json") {
-        if !super::jschan::parse_boards(&v).0.is_empty() {
-            return Ok(site(SiteKind::Jschan, None));
-        }
-        let listed = super::futaba::parse_boards(&v);
-        if !listed.is_empty()
-            && let Some(board) = link.board.clone().or_else(|| listed.first().map(|b| b.uri.clone()))
-        {
-            let (thumb_ext, media_url) = vichan_files(base, &link.host, &board, None);
-            return Ok(SiteConfig { thumb_ext, media_url, ..site(SiteKind::Vichan, None) });
+            Err(e) => {
+                match e.downcast_ref::<HttpError>() {
+                    Some(HttpError::Status(code @ (401 | 403 | 503), _)) => self.refused = Some(*code),
+                    Some(_) => self.answered = true,
+                    None if e.chain().any(|c| c.downcast_ref::<serde_json::Error>().is_some()) => self.answered = true,
+                    None => {
+                        self.unreachable.get_or_insert(e);
+                    }
+                }
+                None
+            }
         }
     }
-    if let Some(v) = get("/boards.js?json=1")
-        && !super::lynxchan::parse_boards(&super::lynxchan::unwrap(v)).0.is_empty()
-    {
-        return Ok(site(SiteKind::Lynxchan, None));
+
+    fn site(&self, kind: SiteKind, boards: Option<Vec<BoardConfig>>) -> SiteConfig {
+        SiteConfig {
+            name: name_for(&self.link.host),
+            kind,
+            url: Some(self.link.base.clone()),
+            boards,
+            thumb_ext: None,
+            archive: None,
+            media_url: None,
+        }
     }
-    if let Some(v) = get("/_/api/chan/archives/")
-        && !super::foolfuuka::parse_archives(&v).is_empty()
-    {
-        return Ok(site(SiteKind::Foolfuuka, None));
+}
+
+/// jschan has boards.json, and so do some vichan installs (4chan's format).
+pub(super) fn boards_json(a: &mut Asking) -> Option<SiteConfig> {
+    let v = a.get("/boards.json")?;
+    if !super::jschan::parse_boards(&v).0.is_empty() {
+        return Some(a.site(SiteKind::Jschan, None));
     }
-    // vichan has no board list API, but its pages have the boards in a bar at the top: the
-    // link's board's page, or the front page for a link to the site.
+    let listed = super::futaba::parse_boards(&v);
+    let board = a.link.board.clone().or_else(|| listed.first().map(|b| b.uri.clone())).filter(|_| !listed.is_empty())?;
+    let (thumb_ext, media_url) = vichan_files(&a.link.base, &a.link.host, &board, None);
+    Some(SiteConfig { thumb_ext, media_url, ..a.site(SiteKind::Vichan, None) })
+}
+
+pub(super) fn lynxchan(a: &mut Asking) -> Option<SiteConfig> {
+    let v = a.get("/boards.js?json=1")?;
+    (!super::lynxchan::parse_boards(&super::lynxchan::unwrap(v)).0.is_empty()).then(|| a.site(SiteKind::Lynxchan, None))
+}
+
+pub(super) fn foolfuuka(a: &mut Asking) -> Option<SiteConfig> {
+    let v = a.get("/_/api/chan/archives/")?;
+    (!super::foolfuuka::parse_archives(&v).is_empty()).then(|| a.site(SiteKind::Foolfuuka, None))
+}
+
+/// vichan has no board list API, but its pages have the boards in a bar at the top: the
+/// link's board's page, or the front page for a link to the site.
+pub(super) fn vichan(a: &mut Asking) -> Option<SiteConfig> {
+    let (base, link) = (a.link.base.clone(), a.link);
     let page = |path: &str| get_text(&format!("{base}{path}")).unwrap_or_default();
     let mut html = String::new();
     let board = match &link.board {
-        Some(b) => Some(b.clone()),
+        Some(b) => b.clone(),
         None => {
             html = page("/");
-            boardlist(&html, &link.host).first().map(|b| b.uri().to_string())
+            boardlist(&html, &link.host).first()?.uri().to_string()
         }
     };
-    if let Some(board) = board
-        && get(&format!("/{}/catalog.json", enc(&board))).is_some_and(|v| is_catalog(&v))
-    {
-        if link.board.is_some() {
-            html = page(&format!("/{}/index.html", enc(&board)));
-        }
-        let mut listed = boardlist(&html, &link.host);
-        // The link's board, whatever the bar says.
-        if !listed.iter().any(|b| b.uri() == board) {
-            listed.insert(0, BoardConfig::Uri(board.clone()));
-        }
-        // Where files are, from the thread previews on the page, else one thumbnail asked for.
-        let (thumb_ext, media_url) = vichan_files(base, &link.host, &board, Some(html));
-        return Ok(SiteConfig { thumb_ext, media_url, ..site(SiteKind::Vichan, Some(listed)) });
+    if !a.get(&format!("/{}/catalog.json", enc(&board))).is_some_and(|v| is_catalog(&v)) {
+        return None;
     }
-    if let Some(v) = get("/api/mobile/v2/boards")
-        && !super::makaba::parse_boards(&v).is_empty()
-    {
-        return Ok(site(SiteKind::Makaba, None));
+    if link.board.is_some() {
+        html = page(&format!("/{}/index.html", enc(&board)));
+    }
+    let mut listed = boardlist(&html, &link.host);
+    // The link's board, whatever the bar says.
+    if !listed.iter().any(|b| b.uri() == board) {
+        listed.insert(0, BoardConfig::Uri(board.clone()));
+    }
+    // Where files are, from the thread previews on the page, else one thumbnail asked for.
+    let (thumb_ext, media_url) = vichan_files(&base, &link.host, &board, Some(html));
+    Some(SiteConfig { thumb_ext, media_url, ..a.site(SiteKind::Vichan, Some(listed)) })
+}
+
+pub(super) fn makaba(a: &mut Asking) -> Option<SiteConfig> {
+    let v = a.get("/api/mobile/v2/boards")?;
+    (!super::makaba::parse_boards(&v).is_empty()).then(|| a.site(SiteKind::Makaba, None))
+}
+
+/// Ask the site's APIs, one engine after another (`ENGINES`' order), what it runs. A vichan
+/// site has no board list to find, so it needs the link's board; that board is its list then.
+pub fn detect(link: &Link) -> Result<SiteConfig> {
+    let mut a = Asking { link, unreachable: None, refused: None, answered: false };
+    if let Some(site) = super::ENGINES.iter().filter_map(|e| e.probe).find_map(|probe| probe(&mut a)) {
+        return Ok(site);
     }
     let host = &link.host;
     let hint = match &link.board {
         None => " A vichan site has no board list to find: try a link to one of its boards.",
         Some(_) => "",
     };
-    match (answered, refused, unreachable) {
+    match (a.answered, a.refused, a.unreachable) {
         (false, Some(code), _) => bail!("{host} refused ck's requests (HTTP {code}); some sites let only browsers in"),
         (false, None, Some(e)) => bail!("Couldn't reach {host}: {e:#}"),
         _ => bail!("{host} doesn't answer like jschan, LynxChan, FoolFuuka, vichan or makaba.{hint} README › Adding sites shows how to add one by hand."),
