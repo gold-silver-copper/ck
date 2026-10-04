@@ -64,7 +64,6 @@ pub use links::{ImageSearchPanel, LinkItem, LinksPanel};
 pub use saving::{Confirm, Saving};
 pub use search::{SavedSearch, Search};
 pub use saving::Downloads;
-use saving::DlEvent;
 pub use thread_view::*;
 pub use sites::{Adding, BoardsUpdate, MySites, origin as site_origin};
 pub use tabs::{MAX_TABS, Offline, Tab, TabPopup};
@@ -255,30 +254,32 @@ enum Msg {
     Boards(u64, usize, Result<Vec<Board>>),
     /// The pages of a board list loaded so far; more are coming.
     BoardsPartial(u64, usize, Vec<Board>),
-    /// A saved board list refreshed in the background.
-    BoardsRefreshed(usize, Result<Vec<Board>>),
     Catalog(u64, Result<Vec<Post>>),
     CatalogPartial(u64, Vec<Post>),
     Thread(u64, Result<Vec<Post>>),
     /// The last copy kept of the catalog or thread being fetched, and when it was fetched.
     CachedCatalog(u64, Vec<Post>, i64),
     CachedThread(u64, Vec<Post>, i64),
-    /// A background refresh of a watched or open thread.
-    Refreshed(ThreadKey, Result<Vec<Post>>),
     /// A page of archive search results.
     Search(u64, u32, Result<crate::backend::SearchPage>),
-    /// The catalog of a followed general's board, to find its next thread.
-    GeneralCatalog(ThreadKey, Result<Vec<Post>>),
     /// The thread a quoted post is in: (board, post, thread).
     Found(u64, Board, u64, Result<Option<u64>>),
-    Download(DlEvent),
-    /// What a site runs, or has (for adding it).
-    Detected(u64, Result<sites::Detected>),
-    /// What a search of the saved threads found in one more copy.
-    SavedSearch(u64, search::SavedFound),
+    /// What background work found, to apply on the UI thread (see `Later`).
+    Done(Box<dyn FnOnce(&mut App) + Send>),
     Input(Event),
     /// Something else (a loaded image) needs a redraw.
     Wake,
+}
+
+/// Sends what background work found back to the UI thread, to apply there in the order sent.
+#[derive(Clone)]
+struct Later(Sender<Msg>);
+
+impl Later {
+    /// Run `apply` on the UI thread. False once the app is gone (the work can stop).
+    fn run(&self, apply: impl FnOnce(&mut App) + Send + 'static) -> bool {
+        self.0.send(Msg::Done(Box::new(apply))).is_ok()
+    }
 }
 
 impl Msg {
@@ -652,6 +653,11 @@ impl App {
         .map(|(len, p)| (p, len))
     }
 
+    /// To send what background work finds back to this thread.
+    fn later(&self) -> Later {
+        Later(self.tx.clone())
+    }
+
     pub fn current_site(&self) -> &Site {
         &self.sites[self.tab.site]
     }
@@ -798,11 +804,7 @@ impl App {
             Msg::Input(Event::Mouse(m)) => self.on_mouse(m, self.clock.instant()),
             Msg::Input(Event::Paste(text)) => self.paste(&text),
             Msg::Input(_) => {}
-            Msg::Refreshed(key, res) => self.refreshed(key, res),
-            Msg::GeneralCatalog(key, res) => self.general_catalog(key, res),
-            Msg::Download(ev) => self.download_event(ev),
-            Msg::Detected(id, res) => self.detected(id, res),
-            Msg::SavedSearch(id, found) => self.saved_found(id, found),
+            Msg::Done(apply) => apply(self),
             Msg::Found(_, board, post, res) => {
                 self.tab.loading = None;
                 match res {
@@ -843,13 +845,6 @@ impl App {
                 }
             }
             Msg::BoardsPartial(_, site, b) => self.set_boards(site, b, false),
-            Msg::BoardsRefreshed(site, res) => {
-                self.boards_refreshing.remove(&site);
-                // A failed background refresh keeps the saved list; there's nothing to say.
-                if let Ok(b) = res {
-                    self.set_boards(site, b, true);
-                }
-            }
             Msg::CachedCatalog(_, posts, fetched) => {
                 // Only before anything fetched has arrived.
                 if self.tab.catalog.is_empty() && self.tab.view == View::Catalog {

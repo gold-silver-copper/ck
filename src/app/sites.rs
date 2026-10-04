@@ -5,7 +5,7 @@
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 use ratatui::widgets::ListState;
 
-use super::{App, Msg, Popup, Site, edit_text, list_move};
+use super::{App, Popup, Site, edit_text, list_move};
 use crate::backend::{self, detect};
 use crate::config::{self, BoardConfig, SiteConfig, SiteKind};
 
@@ -106,9 +106,10 @@ impl App {
         let known = self.sites.iter().position(|s| self.site_hosts(s).iter().any(|h| *h == link.host.trim_start_matches("www.")));
         let Some(i) = known else {
             self.popup = Some(Popup::Adding(Adding::Looking { id: self.next_request(), host: link.host.clone(), open }));
-            let (id, tx) = (self.next_id, self.tx.clone());
+            let (id, later) = (self.next_id, self.later());
             std::thread::spawn(move || {
-                let _ = tx.send(Msg::Detected(id, detect::detect(&link).map(Detected::Site)));
+                let res = detect::detect(&link).map(Detected::Site);
+                later.run(move |app| app.detected(id, res));
             });
             return;
         };
@@ -127,10 +128,10 @@ impl App {
             return;
         };
         self.popup = Some(Popup::Adding(Adding::Looking { id: self.next_request(), host: link.host.clone(), open }));
-        let (id, tx, base) = (self.next_id, self.tx.clone(), link.base.clone());
+        let (id, later, base) = (self.next_id, self.later(), link.base.clone());
         std::thread::spawn(move || {
             let res = if detect::has_board(&base, &board) { Ok(Detected::Board(i, board)) } else { Err(anyhow::anyhow!("{base} has no /{board}/ (its catalog isn't there)")) };
-            let _ = tx.send(Msg::Detected(id, res));
+            later.run(move |app| app.detected(id, res));
         });
     }
 
@@ -282,7 +283,7 @@ impl App {
         let base = base.trim_end_matches('/').to_string();
         let host = crate::http::host(&base).to_string();
         self.popup = Some(Popup::Adding(Adding::Looking { id: self.next_request(), host: host.clone(), open: None }));
-        let (id, tx) = (self.next_id, self.tx.clone());
+        let (id, later) = (self.next_id, self.later());
         let first = list.first().map(|b| b.uri().to_string());
         std::thread::spawn(move || {
             let bar = |path: &str| crate::http::get_text(&format!("{base}{path}")).map(|html| detect::boardlist(&html, &host)).unwrap_or_default();
@@ -293,7 +294,7 @@ impl App {
                 found = bar(&format!("/{}/index.html", crate::http::encode_segment(&b)));
             }
             let res = if found.is_empty() { Err(anyhow::anyhow!("{host}'s pages have no board list to read")) } else { Ok(Detected::Bar(site, found)) };
-            let _ = tx.send(Msg::Detected(id, res));
+            later.run(move |app| app.detected(id, res));
         });
     }
 

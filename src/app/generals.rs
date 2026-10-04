@@ -3,7 +3,7 @@
 
 use std::time::{Duration, Instant};
 
-use super::{App, Msg, View, thread_subject};
+use super::{App, View, thread_subject};
 use crate::model::Post;
 use crate::store::{ThreadKey, Watched};
 
@@ -101,7 +101,7 @@ impl App {
             }
             let Some(s) = self.sites.iter().find(|s| s.cfg.name == site) else { continue };
             let backend = s.backend.clone();
-            let tx = self.tx.clone();
+            let later = self.later();
             self.general_boards.insert((site, board.clone()), now);
             for key in &keys {
                 self.generals_checked.insert(key.clone(), now);
@@ -111,7 +111,7 @@ impl App {
                 let res = crate::http::background_at(now, || backend.catalog(&board, &|_| {}));
                 for key in keys {
                     let res = res.as_ref().map(Vec::clone).map_err(|e| anyhow::anyhow!("{e:#}"));
-                    let _ = tx.send(Msg::GeneralCatalog(key, res));
+                    later.run(move |app| app.general_catalog(key, res));
                 }
             });
         }
