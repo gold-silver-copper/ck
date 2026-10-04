@@ -153,3 +153,116 @@ mod tests {
         assert_eq!(size(5 << 29), "2.5 GB");
     }
 }
+
+/// Progress of the files being saved.
+#[derive(Default)]
+pub struct Downloads {
+    pub total: usize,
+    pub done: usize,
+    pub skipped: usize,
+    pub failed: usize,
+    /// Download jobs still running.
+    pub running: usize,
+    pub dir: Option<std::path::PathBuf>,
+    pub last_error: Option<String>,
+}
+
+pub(super) enum DlEvent {
+    Done,
+    Skipped,
+    Failed(String),
+    Finished,
+}
+
+impl App {
+    /// Save the selected post's files, or the whole thread's.
+    pub(super) fn download(&mut self, whole_thread: bool) {
+        let Some(t) = &self.tab.thread else { return };
+        let posts: Vec<&Post> = if whole_thread { t.posts.iter().collect() } else { t.current().into_iter().collect() };
+        let dir = download::dir(self.download_dir.as_deref(), &self.current_site().cfg.name, &t.board, t.no);
+        let jobs = download::jobs(&posts, &dir);
+        self.start_download(jobs, dir, if whole_thread { "Thread has no files" } else { "Post has no file" });
+    }
+
+    /// Save the thread as thread.html and thread.json in its download folder.
+    fn export_thread(&mut self) {
+        let (Some(t), Some(b)) = (&self.tab.thread, &self.tab.board) else { return };
+        let site = self.current_site();
+        let dir = download::dir(self.download_dir.as_deref(), &site.cfg.name, &t.board, t.no);
+        let url = site.backend.thread_url(&b.uri, t.no);
+        let about = crate::export::About { site: &site.cfg.name, board: &t.board, thread: t.no, url: &url, saved: self.clock.now() };
+        let key = self.key(&t.board, t.no);
+        let posts = t.posts.clone();
+        match crate::export::save(&posts, &about, &theme::theme(), &dir) {
+            Ok(()) => {
+                // Also kept as a saved copy, to read in ck (the Saved view).
+                self.keep_copy(&key, &posts, true);
+                self.save_now();
+                self.info(format!("Saved thread.html and thread.json in {} (and in Saved)", tilde(&dir.display().to_string())));
+            }
+            Err(e) => self.error(format!("Couldn't save the thread: {e:#}")),
+        }
+    }
+
+    /// Fetch `(url, path)` jobs into `dir` in the background.
+    pub(super) fn start_download(&mut self, jobs: Vec<(String, std::path::PathBuf)>, dir: std::path::PathBuf, none: &str) {
+        if jobs.is_empty() {
+            self.info(none);
+            return;
+        }
+        if let Err(e) = std::fs::create_dir_all(&dir) {
+            self.error(format!("Couldn't create {}: {e}", dir.display()));
+            return;
+        }
+        let d = &mut self.downloads;
+        if d.running == 0 {
+            *d = Downloads::default();
+        }
+        d.total += jobs.len();
+        d.running += 1;
+        d.dir = Some(dir);
+        let tx = self.tx.clone();
+        std::thread::spawn(move || {
+            for (url, path) in jobs {
+                let ev = if path.exists() {
+                    DlEvent::Skipped
+                } else {
+                    match http::download_to(&url, &path) {
+                        Ok(()) => DlEvent::Done,
+                        Err(e) => DlEvent::Failed(format!("{e:#}")),
+                    }
+                };
+                if tx.send(Msg::Download(ev)).is_err() {
+                    return;
+                }
+            }
+            let _ = tx.send(Msg::Download(DlEvent::Finished));
+        });
+    }
+
+    pub(super) fn download_event(&mut self, ev: DlEvent) {
+        let d = &mut self.downloads;
+        match ev {
+            DlEvent::Done => d.done += 1,
+            DlEvent::Skipped => d.skipped += 1,
+            DlEvent::Failed(e) => {
+                d.failed += 1;
+                d.last_error = Some(e);
+            }
+            DlEvent::Finished => {
+                d.running -= 1;
+                if d.running == 0 {
+                    let dir = d.dir.as_ref().map(|p| p.display().to_string()).unwrap_or_default();
+                    let mut msg = format!("Downloaded {} file{} to {dir}", d.done, if d.done == 1 { "" } else { "s" });
+                    if d.skipped > 0 {
+                        msg.push_str(&format!(", {} already there", d.skipped));
+                    }
+                    if d.failed > 0 {
+                        msg.push_str(&format!(", {} failed ({})", d.failed, d.last_error.as_deref().unwrap_or("")));
+                    }
+                    self.status = Some(Status { text: msg, error: d.failed > 0 });
+                }
+            }
+        }
+    }
+}
