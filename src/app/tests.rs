@@ -2473,3 +2473,43 @@ fn hidden_words_hide_posts_everywhere() {
     app.remark_catalog();
     assert_eq!(app.tab.catalog_marks.iter().map(|m| m.hidden.clone()).collect::<Vec<_>>(), [label, None]);
 }
+
+#[test]
+fn g_shows_the_very_end_so_new_posts_follow() {
+    // A last post that doesn't fit below the scroll margin on a small screen: G still shows
+    // the end of the thread (found walking a busy thread at 60x20).
+    let mut app = local_app();
+    app.tab.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
+    app.tab.view = View::Thread;
+    let mut posts = posts_upto(8);
+    posts[7].body = (0..9).map(|k| Line::from(format!("line {k}"))).collect();
+    app.set_thread(posts.clone());
+    draw_at(&mut app, 60, 20);
+    app.on_key(KeyEvent::from(KeyCode::Char('G')));
+    draw_at(&mut app, 60, 20);
+    assert!(app.tab.thread.as_ref().unwrap().at_end());
+    posts.push(Post { no: 9, body: vec![Line::from("nine")], ..Default::default() });
+    app.set_thread(posts);
+    draw_at(&mut app, 60, 20);
+    assert_eq!(app.tab.thread.as_ref().unwrap().current().unwrap().no, 9);
+    // A last post taller than the screen: its last screenful.
+    let mut app = thread_app_of(3);
+    let mut tall = posts_upto(3);
+    tall[2].body = (0..60).map(|k| Line::from(format!("tall {k}"))).collect();
+    app.set_thread(tall);
+    draw_at(&mut app, 60, 20);
+    app.on_key(KeyEvent::from(KeyCode::Char('G')));
+    draw_at(&mut app, 60, 20);
+    let t = app.tab.thread.as_ref().unwrap();
+    assert!(t.at_end() && t.tall().is_some_and(|(_, above, below)| above && !below));
+}
+
+#[test]
+fn going_to_the_site_already_on_shows_its_boards() {
+    // The app starts on the first site; `ck a` (or `:a`) goes there: its boards show.
+    let mut app = local_app();
+    assert_eq!(app.tab.site, 0);
+    app.goto_str("a");
+    assert_eq!(app.tab.view, View::Boards);
+    assert_eq!(app.visible_boards().len(), 2);
+}

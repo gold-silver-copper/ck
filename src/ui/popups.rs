@@ -63,7 +63,7 @@ pub(super) fn draw_adding(f: &mut Frame, app: &App) {
             ]);
             (format!("Add {host}?"), "enter add · esc cancel", lines)
         }
-        Adding::Boards { site, update, drop } => {
+        Adding::Boards { site, update, drop, builtin } => {
             let s = app.sites.get(*site);
             let name = s.map_or("", |s| s.cfg.name.as_str());
             let uris = |b: &[crate::config::BoardConfig]| b.iter().map(|b| format!("/{}/", b.uri())).collect::<Vec<_>>().join(" ");
@@ -79,7 +79,7 @@ pub(super) fn draw_adding(f: &mut Frame, app: &App) {
                 let what = if *drop { "dropped" } else { "kept (d drops them)" };
                 lines.push(text(format!("Not in its list now: {}, {what}", truncate(&uris(&update.missing), 60))));
             }
-            if s.is_some_and(|s| crate::config::builtin_sites().iter().any(|b| b.name.eq_ignore_ascii_case(&s.cfg.name))) {
+            if *builtin {
                 lines.push(Line::default());
                 lines.push(Line::styled(format!("{name} is built in: this saves it as one of your sites, with this list."), dim()));
             }
