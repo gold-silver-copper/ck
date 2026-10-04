@@ -47,19 +47,132 @@ pub trait Backend: Send + Sync {
     }
 }
 
-pub fn build(cfg: &SiteConfig) -> Arc<dyn Backend> {
-    let url = cfg.url.as_deref().map(|u| u.trim_end_matches('/').to_string());
-    let boards = cfg.boards.as_ref().map(|bs| bs.iter().map(to_board).collect());
-    match cfg.kind {
-        SiteKind::Fourchan => Arc::new(futaba::Futaba::fourchan(boards)),
-        SiteKind::Vichan => {
-            Arc::new(futaba::Futaba::vichan(url.unwrap_or_default(), cfg.thumb_ext.clone(), cfg.media_url.clone(), boards))
-        }
-        SiteKind::Lynxchan => Arc::new(lynxchan::Lynxchan::new(url.unwrap_or_default(), boards)),
-        SiteKind::Foolfuuka => Arc::new(foolfuuka::Foolfuuka::new(url.unwrap_or_default(), boards)),
-        SiteKind::Jschan => Arc::new(jschan::Jschan::new(url.unwrap_or_default(), boards)),
-        SiteKind::Makaba => Arc::new(makaba::Makaba::new(url.unwrap_or_default(), cfg.media_url.clone(), boards)),
+/// An engine ck speaks.
+pub struct Engine {
+    pub kind: SiteKind,
+    /// As written in the config.
+    pub name: &'static str,
+    /// The engine's name, for people.
+    pub label: &'static str,
+    pub build: fn(&SiteConfig) -> Arc<dyn Backend>,
+    /// Hosts its pages are on besides the one its board URLs give.
+    pub hosts: &'static [&'static str],
+    /// How `detect` asks a site whether it runs this engine.
+    pub probe: Option<fn(&mut detect::Asking) -> Option<SiteConfig>>,
+    /// All its parsers on one JSON value, for fuzzing.
+    pub parse: fn(&serde_json::Value) -> Vec<Post>,
+}
+
+/// Every engine, in the order `detect` asks.
+pub const ENGINES: [Engine; 6] = [
+    Engine {
+        kind: SiteKind::Fourchan,
+        name: "4chan",
+        label: "4chan's API",
+        build: |c| Arc::new(futaba::Futaba::fourchan(boards(c))),
+        hosts: &["boards.4chan.org", "boards.4channel.org", "4chan.org", "4channel.org"],
+        probe: None,
+        parse: |v| {
+            let b = futaba::Futaba::fourchan(None);
+            [b.parse_catalog("g", v), b.parse_thread("g", v)].concat()
+        },
+    },
+    Engine {
+        kind: SiteKind::Jschan,
+        name: "jschan",
+        label: "jschan",
+        build: |c| Arc::new(jschan::Jschan::new(url(c), boards(c))),
+        hosts: &[],
+        probe: Some(detect::boards_json),
+        parse: |v| {
+            let _ = jschan::parse_boards(v);
+            [jschan::parse_overboard(FUZZ_BASE, v), jschan::parse_thread(FUZZ_BASE, v)].concat()
+        },
+    },
+    Engine {
+        kind: SiteKind::Lynxchan,
+        name: "lynxchan",
+        label: "LynxChan",
+        build: |c| Arc::new(lynxchan::Lynxchan::new(url(c), boards(c))),
+        hosts: &[],
+        probe: Some(detect::lynxchan),
+        parse: |v| {
+            let _ = (lynxchan::parse_boards(v), lynxchan::parse_overboards(v));
+            let b = lynxchan::Lynxchan::new(FUZZ_BASE.into(), None);
+            [b.parse_catalog(v), b.parse_index(v), b.parse_thread(v)].concat()
+        },
+    },
+    Engine {
+        kind: SiteKind::Foolfuuka,
+        name: "foolfuuka",
+        label: "FoolFuuka",
+        build: |c| Arc::new(foolfuuka::Foolfuuka::new(url(c), boards(c))),
+        hosts: &[],
+        probe: Some(detect::foolfuuka),
+        parse: |v| {
+            let _ = foolfuuka::parse_archives(v);
+            let search = foolfuuka::parse_search(v).map(|p| p.hits.into_iter().map(|(_, p)| p).collect::<Vec<_>>()).unwrap_or_default();
+            [foolfuuka::parse_index(v), foolfuuka::parse_thread(v), search].concat()
+        },
+    },
+    Engine {
+        kind: SiteKind::Vichan,
+        name: "vichan",
+        label: "vichan",
+        build: |c| Arc::new(futaba::Futaba::vichan(url(c), c.thumb_ext.clone(), c.media_url.clone(), boards(c))),
+        hosts: &[],
+        probe: Some(detect::vichan),
+        parse: |v| {
+            let _ = futaba::parse_boards(v);
+            let b = futaba::Futaba::vichan(FUZZ_BASE.into(), None, None, None);
+            [b.parse_catalog("g", v), b.parse_thread("g", v)].concat()
+        },
+    },
+    Engine {
+        kind: SiteKind::Makaba,
+        name: "makaba",
+        label: "makaba",
+        build: |c| Arc::new(makaba::Makaba::new(url(c), c.media_url.clone(), boards(c))),
+        hosts: &["2ch.hk", "2ch.su", "2ch.life"],
+        probe: Some(detect::makaba),
+        parse: |v| {
+            let _ = makaba::parse_boards(v);
+            let b = makaba::Makaba::new(FUZZ_BASE.into(), None, None);
+            [b.parse_catalog(v), b.parse_thread(v)].concat()
+        },
+    },
+];
+
+/// Where each `SiteKind` is in `ENGINES`, which has each once.
+const AT: [usize; ENGINES.len()] = {
+    let mut at = [ENGINES.len(); ENGINES.len()];
+    let mut i = 0;
+    while i < ENGINES.len() {
+        assert!(at[ENGINES[i].kind as usize] == ENGINES.len(), "a SiteKind is in ENGINES twice");
+        at[ENGINES[i].kind as usize] = i;
+        i += 1;
     }
+    at
+};
+
+impl SiteKind {
+    pub fn engine(self) -> &'static Engine {
+        &ENGINES[AT[self as usize]]
+    }
+}
+
+const FUZZ_BASE: &str = "https://fuzz.invalid";
+
+fn url(cfg: &SiteConfig) -> String {
+    cfg.url.as_deref().map(|u| u.trim_end_matches('/').to_string()).unwrap_or_default()
+}
+
+fn boards(cfg: &SiteConfig) -> Option<Vec<Board>> {
+    cfg.boards.as_ref().map(|bs| bs.iter().map(to_board).collect())
+}
+
+pub fn build(cfg: &SiteConfig) -> Arc<dyn Backend> {
+    (cfg.kind.engine().build)(cfg)
 }
 
 pub fn to_board(b: &BoardConfig) -> Board {
@@ -72,27 +185,7 @@ pub fn to_board(b: &BoardConfig) -> Board {
 /// Every engine's parsers on one JSON value, for fuzzing: none may panic, whatever it is.
 #[doc(hidden)]
 pub fn parse_everything(v: &serde_json::Value) -> Vec<Post> {
-    let base = "https://fuzz.invalid";
-    let (vichan, fourchan) = (futaba::Futaba::vichan(base.into(), None, None, None), futaba::Futaba::fourchan(None));
-    let lynx = lynxchan::Lynxchan::new(base.into(), None);
-    let mak = makaba::Makaba::new(base.into(), None, None);
-    let _ = (futaba::parse_boards(v), foolfuuka::parse_archives(v), jschan::parse_boards(v), lynxchan::parse_boards(v));
-    let _ = (lynxchan::parse_overboards(v), makaba::parse_boards(v));
-    let mut posts = Vec::new();
-    for b in [&vichan, &fourchan] {
-        posts.extend(b.parse_catalog("g", v));
-        posts.extend(b.parse_thread("g", v));
-    }
-    posts.extend(foolfuuka::parse_index(v));
-    posts.extend(foolfuuka::parse_thread(v));
-    posts.extend(foolfuuka::parse_search(v).map(|p| p.hits.into_iter().map(|(_, p)| p).collect::<Vec<_>>()).unwrap_or_default());
-    posts.extend(jschan::parse_overboard(base, v));
-    posts.extend(jschan::parse_thread(base, v));
-    posts.extend(lynx.parse_catalog(v));
-    posts.extend(lynx.parse_index(v));
-    posts.extend(lynx.parse_thread(v));
-    posts.extend(mak.parse_catalog(v));
-    posts.extend(mak.parse_thread(v));
+    let posts: Vec<Post> = ENGINES.iter().flat_map(|e| (e.parse)(v)).collect();
     for p in &posts {
         let _ = (p.plain_text(), p.search_text());
     }
