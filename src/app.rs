@@ -253,6 +253,8 @@ pub enum Reveal {
     Jump,
     /// `k` into a post taller than the screen: its last screenful.
     End,
+    /// `G`: the very end, the post's bottom at the screen's bottom (whatever the margin).
+    Bottom,
 }
 
 /// A part of a post that can take focus, be clicked or get a hint.
@@ -731,6 +733,7 @@ impl ThreadView {
         let view = self.viewport;
         let m = if how == Reveal::Visible { 0 } else { self.margin_lines() };
         match how {
+            Reveal::Bottom => self.scroll = end.saturating_sub(view),
             // Come to from below, a post taller than the screen shows its end.
             Reveal::End if end - start > view => self.scroll = end.saturating_sub(1 + view),
             // A jump lands with the target's top at the margin, unless it's well in view.
@@ -2437,11 +2440,11 @@ impl App {
     /// Make `site` the current one, with its board list if it's saved (else fetched in the
     /// background), so going back to Boards shows it.
     fn switch_site(&mut self, site: usize) {
-        if site == self.tab.site {
-            return;
+        if site != self.tab.site {
+            self.tab.board_list = Picker::top();
+            self.tab.site = site;
         }
-        self.tab.board_list = Picker::top();
-        self.tab.site = site;
+        // Also for the site it's on already (the first, at startup: `ck 4chan` showed none).
         if self.sites[site].boards.is_none() {
             match self.known_boards(site) {
                 Some(boards) => self.sites[site].boards = Some(boards),

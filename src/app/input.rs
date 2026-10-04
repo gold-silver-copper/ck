@@ -488,7 +488,12 @@ impl App {
             KeyCode::PageDown | KeyCode::Char(' ') => t.scroll_lines(half * 2 - 1),
             KeyCode::PageUp => t.scroll_lines(-(half * 2 - 1)),
             KeyCode::Char('g') | KeyCode::Home => t.select_entry(0),
-            KeyCode::Char('G') | KeyCode::End => t.select_entry(usize::MAX),
+            // The very end of the thread, so a refresh's new posts come into view.
+            KeyCode::Char('G') | KeyCode::End => {
+                t.select_entry(usize::MAX);
+                t.scroll_to(Reveal::Bottom);
+                t.reveal = Some(Reveal::Bottom);
+            }
             KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right if t.focus.is_some() => {
                 if let Some(part) = t.focus.clone() {
                     self.activate(part);

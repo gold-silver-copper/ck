@@ -20,8 +20,9 @@ pub enum Adding {
     /// A board of a vichan site you have, which its list doesn't have.
     Board { site: usize, board: String, open: Option<String> },
     /// A vichan site's board list read again: what changes. Boards gone from the bar are
-    /// kept unless `drop`.
-    Boards { site: usize, update: BoardsUpdate, drop: bool },
+    /// kept unless `drop`. `builtin`: a built-in site not in the config yet, which this makes
+    /// one of yours.
+    Boards { site: usize, update: BoardsUpdate, drop: bool, builtin: bool },
 }
 
 /// How a vichan site's board bar differs from its list.
@@ -161,7 +162,10 @@ impl App {
                     self.info(format!("{name}'s board list is up to date"));
                     None
                 } else {
-                    Some(Adding::Boards { site, update, drop: false })
+                    let name = self.sites.get(site).map_or(String::new(), |s| s.cfg.name.clone());
+                    let mine = self.config_path.as_ref().and_then(|p| config::sites_in(p).ok()).is_some_and(|s| s.iter().any(|s| s.name.eq_ignore_ascii_case(&name)));
+                    let builtin = !mine && config::builtin_sites().iter().any(|b| b.name.eq_ignore_ascii_case(&name));
+                    Some(Adding::Boards { site, update, drop: false, builtin })
                 }
             }
             Err(e) => {
@@ -216,8 +220,8 @@ impl App {
                 Some(Adding::Site { site, name, open })
             }
             (Adding::Board { site, board, open }, KeyCode::Enter) => return self.add_board(site, board, open),
-            (Adding::Boards { site, update, drop }, KeyCode::Enter) => return self.update_boards(site, &update, drop),
-            (Adding::Boards { site, update, drop }, KeyCode::Char('d')) => Some(Adding::Boards { site, update, drop: !drop }),
+            (Adding::Boards { site, update, drop, .. }, KeyCode::Enter) => return self.update_boards(site, &update, drop),
+            (Adding::Boards { site, update, drop, builtin }, KeyCode::Char('d')) => Some(Adding::Boards { site, update, drop: !drop, builtin }),
             (other, _) => Some(other),
         };
     }

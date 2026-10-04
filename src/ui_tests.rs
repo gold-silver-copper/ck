@@ -1179,7 +1179,7 @@ fn updating_a_built_in_sites_boards() {
     let mut bar = list.clone();
     bar.push(BoardConfig::Full { uri: "mega".into(), title: "Overboard".into() });
     bar.remove(0);
-    a.adding = Some(Adding::Boards { site: lain, update: BoardsUpdate::new(&list, bar), drop: false });
+    a.adding = Some(Adding::Boards { site: lain, update: BoardsUpdate::new(&list, bar), drop: false, builtin: true });
     let text = render(&mut a).0;
     assert!(text.contains("Update lainchan's boards?") && text.contains("New: /mega/"), "{text}");
     assert!(text.contains("kept (d drops them)") && text.contains("lainchan is built in: this saves it as one of your sites"), "{text}");
