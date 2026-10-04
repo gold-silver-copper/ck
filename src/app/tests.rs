@@ -8,20 +8,7 @@ use ratatui::text::Line;
 
 use super::*;
 use crate::keys::ACTIONS;
-
-/// An app over `config` (TOML), with an empty data directory, that never writes the real
-/// config file.
-pub fn app_with(config: &str) -> App {
-    let cfg: Config = toml::from_str(config).unwrap();
-    let mut app = App::new(cfg, KeyMap::default(), None, Store::default());
-    app.config_path = None;
-    app
-}
-
-/// An app over the default config; nothing here touches the network.
-pub fn test_app() -> App {
-    app_with(crate::config::DEFAULT_CONFIG)
-}
+use crate::test_fixtures::*;
 
 fn mouse(kind: MouseEventKind, column: u16, row: u16) -> MouseEvent {
     MouseEvent { kind, column, row, modifiers: KeyModifiers::NONE }
@@ -232,15 +219,6 @@ fn copies_text_and_links() {
     assert_eq!(app.copied.as_deref(), Some("Subj\nhello"));
     app.act(Action::CopyLink);
     assert_eq!(app.copied.as_deref(), Some("https://boards.4chan.org/g/thread/7"));
-}
-
-/// Two sites on hosts that refuse connections: nothing leaves the machine. (Their own
-/// port, so the requests don't take rate-limit slots other tests' hosts need.)
-fn local_app() -> App {
-    app_with(
-        "[[site]]\nname = \"a\"\nkind = \"vichan\"\nurl = \"http://127.0.0.1:3\"\nboards = [\"x\", \"xy\"]\n\
-         [[site]]\nname = \"b\"\nkind = \"vichan\"\nurl = \"http://localhost:3\"\nboards = [\"y\"]",
-    )
 }
 
 #[test]
@@ -1110,18 +1088,6 @@ fn the_menu_runs_what_it_lists() {
 
 // ----- saved threads -----
 
-/// The local app with a data directory, the clock fixed at `now`.
-fn saving_app(dir: &std::path::Path, now: i64) -> App {
-    let mut app = local_app();
-    app.store = Store::load(Some(dir.to_path_buf())).0;
-    app.clock = Clock { fixed: Some(now), ..Default::default() };
-    app
-}
-
-fn nos(nos: &[u64]) -> Vec<Post> {
-    nos.iter().map(|&no| Post { no, body: vec![Line::from(format!("post {no}"))], ..Default::default() }).collect()
-}
-
 fn gone() -> anyhow::Error {
     anyhow::Error::new(http::HttpError::NotFound("x".into()))
 }
@@ -1690,17 +1656,6 @@ impl PageSite {
     }
 }
 
-/// Handle messages until nothing is loading (or `until` holds).
-fn settle_until(app: &mut App, until: impl Fn(&App) -> bool) {
-    for _ in 0..500 {
-        if until(app) {
-            return;
-        }
-        app.wait(Duration::from_millis(10));
-    }
-    panic!("never settled");
-}
-
 fn page_app(host: &str, dir: &std::path::Path) -> App {
     let mut app = app_with(&format!("[[site]]\nname = \"c\"\nkind = \"vichan\"\nurl = \"http://{host}\"\nboards = [\"g\"]\n"));
     app.store = Store::load(Some(dir.join("data"))).0;
@@ -1779,18 +1734,6 @@ fn catalogs_open_from_their_last_copy_keeping_the_selection() {
     assert_eq!(app.selected_index().map(|i| app.tab.catalog[i].no), picked);
     assert_eq!(site.asked().len(), 2);
     crate::http::serve_test_host(host, None);
-}
-
-/// Run the menu row labeled `label`.
-fn run_menu_row(app: &mut App, label: &str) {
-    app.on_key(KeyEvent::from(KeyCode::Char('.')));
-    let m = app.menu_mut().expect("a menu");
-    let labels: Vec<String> = m.items.iter().map(|it| match it {
-        MenuItem::Enter(l) | MenuItem::Act(_, l) => l.clone(),
-    }).collect();
-    let i = labels.iter().position(|l| l == label).unwrap_or_else(|| panic!("no {label:?} in {labels:?}"));
-    m.list.select(Some(i));
-    app.on_key(KeyEvent::from(KeyCode::Enter));
 }
 
 #[test]
@@ -1877,12 +1820,6 @@ fn an_action_without_a_key_is_in_the_menu() {
     // A key given back still asks first.
     app.on_key(KeyEvent::from(KeyCode::Char('E')));
     assert!(app.confirm().is_some());
-}
-
-fn type_text(app: &mut App, text: &str) {
-    for c in text.chars() {
-        app.on_key(KeyEvent::from(KeyCode::Char(c)));
-    }
 }
 
 #[test]
@@ -1996,24 +1933,6 @@ fn settings_add_sites_and_vichan_boards_and_remove_them() {
     assert!(!app.visible_sites().contains(&SiteRow::Site(i)));
     assert!(toml::from_str::<Config>(&std::fs::read_to_string(&path).unwrap()).unwrap().sites.is_empty());
     crate::http::serve_test_host("vi2.invalid", None);
-}
-
-/// Draw the app once at `w`x`h` (layouts are made by drawing).
-fn draw_at(app: &mut App, w: u16, h: u16) {
-    let mut term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(w, h)).unwrap();
-    term.draw(|f| crate::ui::draw(f, app)).unwrap();
-}
-
-/// Posts 1..=n, some taller than others.
-fn posts_upto(n: u64) -> Vec<Post> {
-    (1..=n).map(|no| Post { no, body: (0..1 + no % 4).map(|k| Line::from(format!("post {no} line {k}"))).collect(), ..Default::default() }).collect()
-}
-
-/// The selected post's first row on screen.
-fn selected_row(app: &App) -> isize {
-    let t = app.tab.thread.as_ref().unwrap();
-    let l = t.layout.as_ref().unwrap();
-    l.starts[t.entry()] as isize - t.scroll as isize
 }
 
 fn thread_app_of(n: u64) -> App {
@@ -2171,11 +2090,6 @@ fn nsfw_app() -> App {
     app
 }
 
-fn with_file(no: u64, board: Option<&str>) -> Post {
-    let file = Attachment { filename: format!("{no}.png"), url: format!("http://127.0.0.1:3/src/{no}.png"), thumb: Some(format!("http://127.0.0.1:3/thumb/{no}.png")), ..Default::default() };
-    Post { no, files: vec![file], board: board.map(String::from), body: vec![Line::from("text")], ..Default::default() }
-}
-
 #[test]
 fn which_image_setting_applies_to_a_board() {
     use crate::config::NsfwImages;
@@ -2289,10 +2203,6 @@ fn an_unknown_nsfw_flag_loads_the_board_list_once() {
     app.store.save_boards("b", &[Board { uri: "y".into(), title: String::new(), nsfw: Some(true) }], 5).unwrap();
     app.know_nsfw(1);
     assert!(app.boards_refreshing.is_empty() && !app.images_on(1, "y"));
-}
-
-fn posts_saying(list: &[(u64, &str)]) -> Vec<Post> {
-    list.iter().map(|&(no, text)| Post { no, name: "Anonymous".into(), body: vec![Line::from(text.to_string())], ..Default::default() }).collect()
 }
 
 #[test]

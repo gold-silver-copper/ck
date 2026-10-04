@@ -31,7 +31,7 @@ fn time<T>(label: &str, n: u32, mut f: impl FnMut() -> T) -> Duration {
 }
 
 fn app() -> App {
-    let mut app = crate::app::tests::test_app();
+    let mut app = crate::test_fixtures::test_app();
     app.tab.board = Some(Board { uri: "g".into(), title: "Technology".into(), nsfw: Some(false) });
     app
 }
