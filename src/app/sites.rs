@@ -245,7 +245,7 @@ impl App {
 
     fn add_site(&mut self, site: SiteConfig, open: Option<String>) {
         let what = format!("{} ({})", site.name, site.kind.label());
-        let saved = self.try_save_config(&format!("the site {what}"), |d| config::add_site(d, &site));
+        let saved = self.save_config_or("Added", &format!("the site {what}"), |d| config::add_site(d, &site));
         self.sites.push(Site { backend: backend::build(&site), cfg: site, boards: None });
         match open {
             Some(o) => self.goto_str(&o),
@@ -260,7 +260,7 @@ impl App {
         let mut boards = before.boards.clone().unwrap_or_default();
         boards.push(BoardConfig::Uri(board.clone()));
         let what = format!("{}'s board /{board}/", before.name);
-        let saved = self.try_save_config(&what, |d| config::set_site_boards(d, &before, &boards));
+        let saved = self.save_config_or("Added", &what, |d| config::set_site_boards(d, &before, &boards));
         let cfg = SiteConfig { boards: Some(boards), ..before };
         self.sites[i] = Site { backend: backend::build(&cfg), cfg, boards: None };
         match open {
@@ -303,30 +303,11 @@ impl App {
         let before = s.cfg.clone();
         let boards = update.list(drop);
         let what = format!("{}'s board list", before.name);
-        let saved = self.try_save_config(&what, |d| config::set_site_boards(d, &before, &boards));
+        let saved = self.save_config_or("Added", &what, |d| config::set_site_boards(d, &before, &boards));
         let cfg = SiteConfig { boards: Some(boards), ..before };
         self.sites[i] = Site { backend: backend::build(&cfg), cfg, boards: None };
         if saved {
             self.info(format!("Updated {what}"));
-        }
-    }
-
-    /// `save_config` with an edit that can refuse; whether it was saved.
-    fn try_save_config(&mut self, what: &str, f: impl FnOnce(&mut toml_edit::DocumentMut) -> anyhow::Result<()>) -> bool {
-        let res = self
-            .config_path
-            .clone()
-            .ok_or_else(|| anyhow::anyhow!("no home directory to keep a config file in"))
-            .and_then(|path| config::try_edit_at(&path, f).map(|()| super::tilde(&path.display().to_string())));
-        match res {
-            Ok(path) => {
-                self.info(format!("Saved {what} in {path}"));
-                true
-            }
-            Err(e) => {
-                self.error(format!("Added {what} for now; couldn't save it: {e:#}"));
-                false
-            }
         }
     }
 
@@ -395,9 +376,11 @@ impl App {
     }
 
     fn try_save_removal(&mut self, what: &str, i: usize, old: &SiteConfig) -> bool {
-        let Some(path) = self.config_path.clone() else { return false };
-        match config::try_edit_at(&path, |d| config::remove_site(d, i, old)) {
-            Ok(()) => true,
+        if self.config_path.is_none() {
+            return false;
+        }
+        match self.edit_config(|d| config::remove_site(d, i, old)) {
+            Ok(_) => true,
             Err(e) => {
                 self.error(format!("Couldn't remove {what}: {e:#}"));
                 false

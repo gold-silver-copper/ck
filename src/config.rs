@@ -303,15 +303,7 @@ impl BoardConfig {
 }
 
 /// Change a config file (the user's is `Config::path()`), keeping its comments and layout.
-/// A missing file is first created from the default config.
-pub fn edit_at(path: &Path, f: impl FnOnce(&mut DocumentMut)) -> Result<()> {
-    try_edit_at(path, |d| {
-        f(d);
-        Ok(())
-    })
-}
-
-/// `edit_at`, with an edit that can refuse (nothing is written then).
+/// A missing file is first created from the default config. An edit that refuses writes nothing.
 pub fn try_edit_at(path: &Path, f: impl FnOnce(&mut DocumentMut) -> Result<()>) -> Result<()> {
     let mut doc: DocumentMut = match std::fs::read_to_string(path) {
         Ok(text) => text.parse().with_context(|| format!("parsing {}", path.display()))?,
@@ -668,6 +660,13 @@ mod tests {
     use super::*;
     use crate::keys::Binding;
     use crate::theme::ThemeSetting;
+
+    fn edit_at(path: &Path, f: impl FnOnce(&mut DocumentMut)) -> Result<()> {
+        try_edit_at(path, |d| {
+            f(d);
+            Ok(())
+        })
+    }
 
     #[test]
     fn default_config_parses() {

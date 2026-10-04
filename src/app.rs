@@ -1112,6 +1112,7 @@ impl App {
         match self.edit_config(|d| {
             d["catalog_layout"] = toml_edit::value(name);
             d.remove("compact_catalog");
+            Ok(())
         }) {
             Ok(path) => {
                 self.store.settings.compact_catalog = None;

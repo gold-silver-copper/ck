@@ -609,16 +609,32 @@ impl App {
 
     /// Write a change to the config file and say where it went.
     pub fn save_config(&mut self, what: &str, f: impl FnOnce(&mut toml_edit::DocumentMut)) {
+        self.save_config_or("Changed", what, |d| {
+            f(d);
+            Ok(())
+        });
+    }
+
+    /// `save_config` with an edit that can refuse; whether it was saved. If it wasn't, `done`
+    /// is what holds for now ("Changed", "Added").
+    pub(super) fn save_config_or(&mut self, done: &str, what: &str, f: impl FnOnce(&mut toml_edit::DocumentMut) -> anyhow::Result<()>) -> bool {
         match self.edit_config(f) {
-            Ok(path) => self.info(format!("Saved {what} in {path}")),
-            Err(e) => self.error(format!("Changed {what} for now; couldn't save it: {e:#}")),
+            Ok(path) => {
+                self.info(format!("Saved {what} in {path}"));
+                true
+            }
+            Err(e) => {
+                self.error(format!("{done} {what} for now; couldn't save it: {e:#}"));
+                false
+            }
         }
     }
 
-    /// Edit the config file; returns its path, for messages.
-    pub fn edit_config(&self, f: impl FnOnce(&mut toml_edit::DocumentMut)) -> anyhow::Result<String> {
+    /// Edit the config file, keeping its comments (an edit that refuses changes nothing);
+    /// returns its path, for messages.
+    pub fn edit_config(&self, f: impl FnOnce(&mut toml_edit::DocumentMut) -> anyhow::Result<()>) -> anyhow::Result<String> {
         let path = self.config_path.as_ref().ok_or_else(|| anyhow::anyhow!("no home directory to keep a config file in"))?;
-        config::edit_at(path, f)?;
+        config::try_edit_at(path, f)?;
         Ok(tilde(&path.display().to_string()))
     }
 }

@@ -408,9 +408,12 @@ impl App {
     }
 
     fn write_hidden_words(&self) -> anyhow::Result<()> {
-        let path = self.config_path.as_ref().ok_or_else(|| anyhow::anyhow!("no config file"))?;
-        let words = self.hidden_words.clone();
-        crate::config::edit_at(path, |d| crate::config::set_hidden_words(d, &words))
+        anyhow::ensure!(self.config_path.is_some(), "no config file");
+        self.edit_config(|d| {
+            crate::config::set_hidden_words(d, &self.hidden_words);
+            Ok(())
+        })
+        .map(drop)
     }
 
     /// `u` right after adding a filter or a hidden word: take it back.
@@ -435,8 +438,8 @@ impl App {
     /// Write a change to the config's filters. Without a config file to write (or when the
     /// file's filters changed meanwhile), the change still holds until ck quits.
     fn write_filters(&self, edit: FilterEdit) -> anyhow::Result<()> {
-        let path = self.config_path.as_ref().ok_or_else(|| anyhow::anyhow!("no config file"))?;
-        crate::config::try_edit_at(path, |d| crate::config::edit_filters(d, edit))
+        anyhow::ensure!(self.config_path.is_some(), "no config file");
+        self.edit_config(|d| crate::config::edit_filters(d, edit)).map(drop)
     }
 
     /// The filters changed: rebuild them, and mark the catalog and thread again.
