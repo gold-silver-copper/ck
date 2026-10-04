@@ -6,7 +6,7 @@ use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::{Position, Rect};
 use ratatui::widgets::ListState;
 
-use super::{App, Hit, Part, SiteRow, View, Viewer, list_move};
+use super::{App, Hit, Part, Popup, SiteRow, TabPopup, View, Viewer, list_move};
 use crate::download;
 use crate::keys::{Action, Scope};
 use crate::model::{Link, Target};
@@ -90,7 +90,7 @@ impl App {
             return;
         }
         let link = self.selected_link();
-        self.tab.viewer = Some(Viewer::new(files, k, link));
+        self.tab.popup = Some(TabPopup::Viewer(Viewer::new(files, k, link)));
     }
 
     /// A quote link: the post, when it's in this thread (`u` comes back); else where it leads.
@@ -180,7 +180,7 @@ impl App {
         if items.is_empty() {
             return;
         }
-        self.menu = Some(Menu { title, items, list: ListState::default().with_selected(Some(0)), area: Rect::default() });
+        self.popup = Some(Popup::Menu(Menu { title, items, list: ListState::default().with_selected(Some(0)), area: Rect::default() }));
     }
 
     /// `enter` here, in a few words, when it does something.
@@ -214,7 +214,7 @@ impl App {
         let mut items: Vec<MenuItem> = Vec::new();
         let mut title = String::new();
         let watching = |no: u64| self.tab.board.as_ref().is_some_and(|b| self.store.watched(&self.key(&b.uri, no)).is_some());
-        if let Some(v) = &self.tab.viewer {
+        if let Some(v) = self.tab.viewer() {
             title = v.files.get(v.index).map(|f| f.filename.clone()).unwrap_or_default();
             items.push(act(A::OpenFile, "open it outside ck"));
             items.push(act(A::Download, "save it"));
@@ -466,9 +466,9 @@ impl App {
     }
 
     pub(super) fn on_menu_key(&mut self, key: KeyEvent) {
-        let scope = if self.tab.viewer.is_some() { Scope::Viewer } else { self.scope() };
+        let scope = if self.tab.viewer().is_some() { Scope::Viewer } else { self.scope() };
         let action = self.keys.action(scope, &key);
-        let Some(m) = &mut self.menu else { return };
+        let Some(Popup::Menu(m)) = &mut self.popup else { return };
         let cur = m.list.selected().unwrap_or(0);
         if let Some(to) = list_move(key.code, cur, m.items.len()) {
             m.list.select(Some(to));
@@ -476,13 +476,13 @@ impl App {
         }
         match key.code {
             KeyCode::Enter | KeyCode::Right => self.run_menu_item(cur),
-            KeyCode::Esc | KeyCode::Left | KeyCode::Char('q') => self.menu = None,
+            KeyCode::Esc | KeyCode::Left | KeyCode::Char('q') => self.popup = None,
             _ => {
                 // A row's own key runs it.
                 let row = m.items.iter().position(|it| matches!(it, MenuItem::Act(a, _) if Some(*a) == action));
                 match (action, row) {
                     (_, Some(i)) => self.run_menu_item(i),
-                    (Some(Action::Menu), None) => self.menu = None,
+                    (Some(Action::Menu), None) => self.popup = None,
                     _ => {}
                 }
             }
@@ -491,7 +491,7 @@ impl App {
 
     /// Run row `i`, as its key would with the menu closed (also when it has none).
     fn run_menu_item(&mut self, i: usize) {
-        let Some(m) = self.menu.take() else { return };
+        let Some(m) = take_popup!(self, Menu) else { return };
         match m.items.get(i) {
             Some(MenuItem::Enter(_)) => self.on_key(KeyEvent::from(KeyCode::Enter)),
             Some(&MenuItem::Act(a, _)) => self.run_action(a),
@@ -501,12 +501,12 @@ impl App {
 
     /// A click on a row runs it; anywhere else closes the menu.
     pub(super) fn on_menu_click(&mut self, col: u16, row: u16) {
-        let Some(m) = &self.menu else { return };
+        let Some(Popup::Menu(m)) = &self.popup else { return };
         let i = m.list.offset() + row.saturating_sub(m.area.y) as usize;
         if m.area.contains(Position::new(col, row)) && i < m.items.len() {
             self.run_menu_item(i);
         } else {
-            self.menu = None;
+            self.popup = None;
         }
     }
 
@@ -562,7 +562,7 @@ impl App {
             return;
         }
         let targets = labels(at.len()).into_iter().zip(at).map(|(label, (x, y, to))| HintTarget { label, x, y, to }).collect();
-        self.hints = Some(Hints { targets, typed: String::new() });
+        self.popup = Some(Popup::Hints(Hints { targets, typed: String::new() }));
     }
 
     fn picker_len(&mut self) -> usize {
@@ -570,7 +570,7 @@ impl App {
     }
 
     pub(super) fn on_hints_key(&mut self, key: KeyEvent) {
-        let Some(h) = &mut self.hints else { return };
+        let Some(Popup::Hints(h)) = &mut self.popup else { return };
         match key.code {
             KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
                 h.typed.push(c.to_ascii_lowercase());
@@ -582,7 +582,7 @@ impl App {
                     }
                     [i] if h.targets[*i].label == h.typed => {
                         let to = h.targets[*i].to.clone();
-                        self.hints = None;
+                        self.popup = None;
                         self.go_hint(to);
                     }
                     _ => {}
@@ -591,7 +591,7 @@ impl App {
             KeyCode::Backspace if !h.typed.is_empty() => {
                 h.typed.pop();
             }
-            _ => self.hints = None,
+            _ => self.popup = None,
         }
     }
 

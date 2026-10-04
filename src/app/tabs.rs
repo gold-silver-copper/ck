@@ -20,6 +20,16 @@ pub struct Offline {
     pub dead: bool,
 }
 
+/// A popup of the tab's own (it stays with the tab when another is shown).
+pub enum TabPopup {
+    /// The full-screen image viewer.
+    Viewer(Viewer),
+    /// The posts the selected post quotes (`p`).
+    Preview(Preview),
+    /// The selected post's links and files (`O`).
+    Links(LinksPanel),
+}
+
 pub struct Tab {
     pub view: View,
     /// Where esc goes back to from Settings.
@@ -40,9 +50,8 @@ pub struct Tab {
     pub thread: Option<ThreadView>,
     /// Label of the in-flight request, if any.
     pub loading: Option<String>,
-    pub viewer: Option<Viewer>,
-    pub preview: Option<Preview>,
-    pub links: Option<LinksPanel>,
+    /// The tab's own popup, if any: one at a time.
+    pub popup: Option<TabPopup>,
     /// The thread's files as a grid (`V`), over the thread.
     pub gallery: Option<Gallery>,
     /// Threads left by following cross-thread links: (site, board, thread, selected post), for `u`.
@@ -84,6 +93,14 @@ pub struct Tab {
 }
 
 impl Tab {
+    pub fn viewer(&self) -> Option<&Viewer> {
+        if let Some(TabPopup::Viewer(v)) = &self.popup { Some(v) } else { None }
+    }
+
+    pub fn viewer_mut(&mut self) -> Option<&mut Viewer> {
+        if let Some(TabPopup::Viewer(v)) = &mut self.popup { Some(v) } else { None }
+    }
+
     pub fn new(site: usize, now: Instant) -> Self {
         Self {
             view: View::Sites,
@@ -100,9 +117,7 @@ impl Tab {
             catalog_new: HashSet::new(),
             thread: None,
             loading: None,
-            viewer: None,
-            preview: None,
-            links: None,
+            popup: None,
             gallery: None,
             trail: Vec::new(),
             pending_post: None,

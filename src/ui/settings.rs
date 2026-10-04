@@ -48,7 +48,11 @@ pub(super) fn draw_settings(f: &mut Frame, app: &mut App, area: Rect) {
 
 pub(super) fn draw_settings_popup(f: &mut Frame, app: &App) {
     let t = theme();
-    match &app.settings_popup {
+    let popup = match &app.popup {
+        Some(Popup::Settings(p)) => Some(p),
+        _ => None,
+    };
+    match popup {
         Some(SettingsPopup::Themes { list, names, .. }) => {
             let inner = panel(f, 52, names.len() as u16 + 3, "Theme", "enter keep · esc cancel");
             let sel = list.selected().unwrap_or(0);

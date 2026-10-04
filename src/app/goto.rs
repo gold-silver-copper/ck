@@ -2,7 +2,7 @@
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 
-use super::{App, Msg, View};
+use super::{App, Msg, Popup, View};
 use crate::route::{self, SiteInfo, Target};
 
 impl App {
@@ -103,11 +103,11 @@ impl App {
         }
         if let Some(g) = &mut self.goto {
             g.push_str(&text);
-        } else if let Some(a) = &mut self.filter_add {
+        } else if let Some(Popup::AddFilter(a)) = &mut self.popup {
             if let Some(label) = &mut a.typing {
                 label.push_str(&text);
             }
-        } else if let Some(super::settings::Popup::FilterEdit { typing: Some(field), .. }) = &mut self.settings_popup {
+        } else if let Some(Popup::Settings(super::SettingsPopup::FilterEdit { typing: Some(field), .. })) = &mut self.popup {
             field.push_str(&text);
         } else if self.searching {
             if let Some(t) = &mut self.tab.thread {
@@ -119,7 +119,7 @@ impl App {
                 p.filter.push_str(&text);
                 p.clamp(len);
             }
-        } else if self.settings_popup.is_none() && !self.show_help && self.tab.viewer.is_none() {
+        } else if !matches!(self.popup, Some(Popup::Settings(_) | Popup::Help(_))) && self.tab.viewer().is_none() {
             self.goto = Some(text);
         }
     }

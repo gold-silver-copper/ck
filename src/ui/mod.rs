@@ -14,7 +14,7 @@ use ratatui_image::Image;
 use unicode_width::UnicodeWidthStr;
 
 use crate::app::{
-    App, Clock, Hit, LineCache, LinkItem, Part, Reveal, SETTING_SECTIONS, Spot, SettingsPopup, SiteRow, Sort, Status, ThreadLayout, ThreadView, View, key_rows,
+    App, Clock, Hit, LineCache, LinkItem, Part, Popup, Reveal, TabPopup, SETTING_SECTIONS, Spot, SettingsPopup, SiteRow, Sort, Status, ThreadLayout, ThreadView, View, key_rows,
     setting_rows,
 };
 use std::collections::HashMap;
@@ -113,7 +113,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     // A saved copy is read offline: its images only come from disk.
     app.images.offline = app.tab.view == View::Thread && app.tab.offline.is_some();
     f.buffer_mut().set_style(all, Style::new().fg(t.text).bg(t.background));
-    if app.tab.viewer.is_some() {
+    if app.tab.viewer().is_some() {
         draw_viewer(f, app);
     } else {
         let [bar, gap, body, footer] =
@@ -138,36 +138,25 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             View::Search => draw_search(f, app, content),
         }
         draw_footer(f, app, footer);
-        if app.tab.preview.is_some() {
-            draw_preview(f, app);
+        match app.tab.popup {
+            Some(TabPopup::Preview(_)) => draw_preview(f, app),
+            Some(TabPopup::Links(_)) => draw_links(f, app),
+            _ => {}
         }
-        if app.tab.links.is_some() {
-            draw_links(f, app);
-        }
-        if app.settings_popup.is_some() {
-            draw_settings_popup(f, app);
-        }
-        if app.filter_add.is_some() {
-            draw_add_filter(f, app);
-        }
-        if app.show_help {
-            draw_help(f, app);
+        match app.popup {
+            Some(Popup::Settings(_)) => draw_settings_popup(f, app),
+            Some(Popup::AddFilter(_)) => draw_add_filter(f, app),
+            Some(Popup::Help(_)) => draw_help(f, app),
+            _ => {}
         }
     }
-    if app.hints.is_some() {
-        draw_hints(f, app);
-    }
-    if app.menu.is_some() {
-        draw_menu(f, app);
-    }
-    if app.image_search_panel.is_some() {
-        draw_image_search(f, app);
-    }
-    if app.adding.is_some() {
-        draw_adding(f, app);
-    }
-    if app.confirm.is_some() {
-        draw_confirm(f, app);
+    match app.popup {
+        Some(Popup::Hints(_)) => draw_hints(f, app),
+        Some(Popup::Menu(_)) => draw_menu(f, app),
+        Some(Popup::ImageSearch(_)) => draw_image_search(f, app),
+        Some(Popup::Adding(_)) => draw_adding(f, app),
+        Some(Popup::Confirm(_)) => draw_confirm(f, app),
+        _ => {}
     }
     app.images.end_frame();
     // Every 24-bit color to the nearest of 256, for terminals without 24-bit color.

@@ -220,7 +220,7 @@ fn bench_images() {
             let mut a = app();
             a.images = Images::with_picker(picker(proto));
             a.images.insert_decoded("https://x/big.png", DynamicImage::new_rgb8(2048, 1536));
-            a.tab.viewer = Some(Viewer::new(vec![file("https://x/big.png")], 0, None));
+            a.tab.popup = Some(crate::app::TabPopup::Viewer(Viewer::new(vec![file("https://x/big.png")], 0, None)));
             let mut t = term();
             let start = Instant::now();
             draw(&mut t, &mut a);

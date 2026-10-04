@@ -5,8 +5,8 @@
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 use ratatui::widgets::ListState;
 
-use super::settings::Popup;
-use super::{App, Part, View, edit_text, list_move};
+use super::settings::SettingsPopup;
+use super::{App, Part, Popup, View, edit_text, list_move};
 use crate::config::FilterEdit;
 use crate::filter::{Field, FilterAction, FilterConfig, Filters};
 use crate::model::Post;
@@ -264,7 +264,7 @@ impl App {
         let word = candidates.is_empty().then(|| self.tab.thread.as_ref().map(|t| t.search.clone()).unwrap_or_default());
         // A focused file: its MD5 first.
         let first = if file.is_some() { candidates.iter().position(|c| c.field == Field::Md5).unwrap_or(0) } else { 0 };
-        self.filter_add = Some(AddFilter {
+        self.popup = Some(Popup::AddFilter(AddFilter {
             post: p.no,
             site: self.current_site().cfg.name.clone(),
             board,
@@ -275,11 +275,11 @@ impl App {
             label: None,
             typing: None,
             word,
-        });
+        }));
     }
 
     pub fn on_add_filter_key(&mut self, key: KeyEvent) {
-        let Some(mut a) = self.filter_add.take() else { return };
+        let Some(mut a) = take_popup!(self, AddFilter) else { return };
         if let Some(mut word) = a.word.take() {
             match key.code {
                 // Back to the choices, or out when there are none.
@@ -291,7 +291,7 @@ impl App {
                     a.word = Some(word);
                 }
             }
-            self.filter_add = Some(a);
+            self.popup = Some(Popup::AddFilter(a));
             return;
         }
         if let Some(mut text) = a.typing.take() {
@@ -303,7 +303,7 @@ impl App {
                     a.typing = Some(text);
                 }
             }
-            self.filter_add = Some(a);
+            self.popup = Some(Popup::AddFilter(a));
             return;
         }
         match key.code {
@@ -332,7 +332,7 @@ impl App {
                 }
             }
         }
-        self.filter_add = Some(a);
+        self.popup = Some(Popup::AddFilter(a));
     }
 
     /// Add a filter; `u` right after takes it back.
@@ -467,21 +467,21 @@ impl App {
 
     // ----- Settings › Filters -----
 
-    pub fn filter_list(&self, selected: usize) -> Popup {
+    pub fn filter_list(&self, selected: usize) -> SettingsPopup {
         let counts = self.filter_cfgs.iter().map(|f| self.filter_counts(f)).collect();
         let sel = (!self.filter_cfgs.is_empty()).then(|| selected.min(self.filter_cfgs.len() - 1));
-        Popup::Filters { list: ListState::default().with_selected(sel), counts }
+        SettingsPopup::Filters { list: ListState::default().with_selected(sel), counts }
     }
 
     /// Keys in the list of filters.
-    pub(super) fn on_filter_list_key(&mut self, key: KeyEvent, mut list: ListState, counts: Vec<(usize, usize)>) -> Option<Popup> {
+    pub(super) fn on_filter_list_key(&mut self, key: KeyEvent, mut list: ListState, counts: Vec<(usize, usize)>) -> Option<SettingsPopup> {
         let sel = list.selected();
-        let editor = |index: Option<usize>, draft: FilterConfig, typing: Option<String>| Popup::FilterEdit { index, draft, row: 0, typing };
+        let editor = |index: Option<usize>, draft: FilterConfig, typing: Option<String>| SettingsPopup::FilterEdit { index, draft, row: 0, typing };
         match key.code {
             KeyCode::Esc | KeyCode::Char('q' | 'h') | KeyCode::Left => None,
             KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right => match sel.and_then(|i| self.filter_cfgs.get(i).cloned().map(|f| (i, f))) {
                 Some((i, f)) => Some(editor(Some(i), f, None)),
-                None => Some(Popup::Filters { list, counts }),
+                None => Some(SettingsPopup::Filters { list, counts }),
             },
             KeyCode::Char('a') => {
                 // Typing its pattern right away.
@@ -507,12 +507,12 @@ impl App {
                     self.apply_filters();
                     self.say_saved(&what, saved);
                 }
-                Some(Popup::Filters { list, counts })
+                Some(SettingsPopup::Filters { list, counts })
             }
             code => {
                 let cur = sel.unwrap_or(0);
                 list.select(list_move(code, cur, self.filter_cfgs.len()).or(sel).filter(|_| !self.filter_cfgs.is_empty()));
-                Some(Popup::Filters { list, counts })
+                Some(SettingsPopup::Filters { list, counts })
             }
         }
     }
@@ -526,29 +526,29 @@ impl App {
 
     /// Keys in the filter editor. Each accepted change is saved at once; a new filter is
     /// saved once it has a pattern.
-    pub(super) fn on_filter_edit_key(&mut self, key: KeyEvent, index: Option<usize>, draft: FilterConfig, mut row: usize, typing: Option<String>) -> Option<Popup> {
+    pub(super) fn on_filter_edit_key(&mut self, key: KeyEvent, index: Option<usize>, draft: FilterConfig, mut row: usize, typing: Option<String>) -> Option<SettingsPopup> {
         let r = EDIT_ROWS.get(row).copied().unwrap_or(EditRow::Pattern);
         if let Some(mut text) = typing {
             return match key.code {
                 // A new filter without a pattern yet is dropped.
                 KeyCode::Esc if index.is_none() && draft.pattern.is_empty() => Some(self.filter_list(usize::MAX)),
-                KeyCode::Esc => Some(Popup::FilterEdit { index, draft, row, typing: None }),
+                KeyCode::Esc => Some(SettingsPopup::FilterEdit { index, draft, row, typing: None }),
                 KeyCode::Enter => {
                     let next = with_text(&draft, r, &text);
                     match problem(&next) {
                         Some(e) => {
                             self.error(e);
-                            Some(Popup::FilterEdit { index, draft, row, typing: Some(text) })
+                            Some(SettingsPopup::FilterEdit { index, draft, row, typing: Some(text) })
                         }
                         None => {
                             let index = self.save_filter(index, &draft, &next);
-                            Some(Popup::FilterEdit { index, draft: next, row, typing: None })
+                            Some(SettingsPopup::FilterEdit { index, draft: next, row, typing: None })
                         }
                     }
                 }
                 code => {
                     edit_text(&mut text, code);
-                    Some(Popup::FilterEdit { index, draft, row, typing: Some(text) })
+                    Some(SettingsPopup::FilterEdit { index, draft, row, typing: Some(text) })
                 }
             };
         }
@@ -556,7 +556,7 @@ impl App {
             KeyCode::Esc | KeyCode::Char('q' | 'h') | KeyCode::Left => Some(self.filter_list(index.unwrap_or(usize::MAX))),
             KeyCode::Enter | KeyCode::Char(' ' | 'l') | KeyCode::Right => {
                 if r.is_text() {
-                    return Some(Popup::FilterEdit { index, draft: draft.clone(), row, typing: Some(r.text(&draft)) });
+                    return Some(SettingsPopup::FilterEdit { index, draft: draft.clone(), row, typing: Some(r.text(&draft)) });
                 }
                 let mut next = draft.clone();
                 match r {
@@ -572,7 +572,7 @@ impl App {
                         match fields.iter().position(|&f| f == field) {
                             Some(_) if fields.len() == 1 => {
                                 self.error("A filter needs at least one field");
-                                return Some(Popup::FilterEdit { index, draft, row, typing: None });
+                                return Some(SettingsPopup::FilterEdit { index, draft, row, typing: None });
                             }
                             Some(k) => {
                                 fields.remove(k);
@@ -587,14 +587,14 @@ impl App {
                 }
                 if let Some(e) = problem(&next).filter(|_| !next.pattern.is_empty()) {
                     self.error(e);
-                    return Some(Popup::FilterEdit { index, draft, row, typing: None });
+                    return Some(SettingsPopup::FilterEdit { index, draft, row, typing: None });
                 }
                 let index = self.save_filter(index, &draft, &next);
-                Some(Popup::FilterEdit { index, draft: next, row, typing: None })
+                Some(SettingsPopup::FilterEdit { index, draft: next, row, typing: None })
             }
             code => {
                 row = list_move(code, row, EDIT_ROWS.len()).unwrap_or(row);
-                Some(Popup::FilterEdit { index, draft, row, typing: None })
+                Some(SettingsPopup::FilterEdit { index, draft, row, typing: None })
             }
         }
     }

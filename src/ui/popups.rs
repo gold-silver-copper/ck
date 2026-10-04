@@ -6,7 +6,7 @@ use super::*;
 /// Adding a site: typing its link, asking it what it runs, then naming it.
 pub(super) fn draw_adding(f: &mut Frame, app: &App) {
     use crate::app::Adding;
-    let Some(a) = &app.adding else { return };
+    let Some(Popup::Adding(a)) = &app.popup else { return };
     let t = theme();
     let field = |label: &str, text: &str| {
         Line::from(vec![
@@ -100,7 +100,7 @@ pub(super) fn draw_adding(f: &mut Frame, app: &App) {
 /// A big save asking first: what it will write, and where (a long folder wraps at its
 /// slashes).
 pub(super) fn draw_confirm(f: &mut Frame, app: &App) {
-    let Some(c) = &app.confirm else { return };
+    let Some(Popup::Confirm(c)) = &app.popup else { return };
     let t = theme();
     let w = (c.lines.iter().map(|l| l.width()).max().unwrap_or(0).max(c.title.width() + 24) + 6).min(100) as u16;
     let width = (w.min(f.area().width.saturating_sub(4)).saturating_sub(4) as usize).max(10);
@@ -144,8 +144,11 @@ pub(crate) fn wrap_path(text: &str, width: usize) -> Vec<String> {
 /// The menu for what's selected: each thing that can be done, with its key.
 pub(super) fn draw_menu(f: &mut Frame, app: &mut App) {
     let t = theme();
-    let keys: Vec<String> = app.menu.as_ref().map(|m| m.items.iter().map(|i| app.menu_key(i)).collect()).unwrap_or_default();
-    let Some(m) = &mut app.menu else { return };
+    let keys: Vec<String> = match &app.popup {
+        Some(Popup::Menu(m)) => m.items.iter().map(|i| app.menu_key(i)).collect(),
+        _ => Vec::new(),
+    };
+    let Some(Popup::Menu(m)) = &mut app.popup else { return };
     let key_w = keys.iter().map(|k| k.width()).max().unwrap_or(1).max(5);
     let label = |i: &crate::app::MenuItem| match i {
         crate::app::MenuItem::Enter(l) | crate::app::MenuItem::Act(_, l) => l.clone(),
@@ -170,7 +173,7 @@ pub(super) fn draw_menu(f: &mut Frame, app: &mut App) {
 /// Link hints: each label where its target is; typed letters dim, the rest bright.
 pub(super) fn draw_hints(f: &mut Frame, app: &App) {
     let t = theme();
-    let Some(h) = &app.hints else { return };
+    let Some(Popup::Hints(h)) = &app.popup else { return };
     let area = f.area();
     for target in h.targets.iter().filter(|x| x.label.starts_with(&h.typed)) {
         if !area.contains(ratatui::layout::Position::new(target.x, target.y)) {
@@ -186,7 +189,7 @@ pub(super) fn draw_hints(f: &mut Frame, app: &App) {
 }
 
 pub(super) fn draw_preview(f: &mut Frame, app: &App) {
-    let (Some(p), Some(t)) = (&app.tab.preview, &app.tab.thread) else { return };
+    let (Some(TabPopup::Preview(p)), Some(t)) = (&app.tab.popup, &app.tab.thread) else { return };
     let w = f.area().width.saturating_sub(8).clamp(20, 110);
     let width = w.saturating_sub(4) as usize;
     let mut lines = Vec::new();
@@ -210,7 +213,7 @@ pub(super) fn draw_preview(f: &mut Frame, app: &App) {
 /// The selected post's links: quotes leading elsewhere, web links, files.
 pub(super) fn draw_links(f: &mut Frame, app: &mut App) {
     let t = theme();
-    let Some(p) = &mut app.tab.links else { return };
+    let Some(TabPopup::Links(p)) = &mut app.tab.popup else { return };
     let w = f.area().width.saturating_sub(8).clamp(20, 110);
     let inner = panel(f, w, p.items.len() as u16 + 3, "Links", "enter open · y copy · esc close");
     let rows = inner.height as usize;
@@ -243,7 +246,7 @@ pub(super) fn draw_links(f: &mut Frame, app: &mut App) {
 pub(super) fn draw_image_search(f: &mut Frame, app: &mut App) {
     let t = theme();
     let names: Vec<String> = app.image_search.iter().map(|e| e.name.clone()).collect();
-    let Some(p) = &mut app.image_search_panel else { return };
+    let Some(Popup::ImageSearch(p)) = &mut app.popup else { return };
     let inner = panel(f, 64, p.rows.len() as u16 + 3, "Search for this image", "enter open · y copy · esc close");
     let rows = inner.height as usize;
     let sel = p.list.selected().unwrap_or(0);
@@ -389,7 +392,8 @@ pub(super) fn draw_help(f: &mut Frame, app: &App) {
     let hint = format!("images: {} · esc close", app.images.protocol_name());
     let inner = panel(f, w, rows + 3, "Keys", &hint);
     // In small terminals the help scrolls (j/k).
-    let scroll = app.help_scroll.min(rows.saturating_sub(inner.height)) as usize;
+    let scrolled = if let Some(Popup::Help(s)) = app.popup { s } else { 0 };
+    let scroll = scrolled.min(rows.saturating_sub(inner.height)) as usize;
     for (c, lines) in cols.into_iter().enumerate() {
         let x = inner.x + c as u16 * (COL + 2);
         for (row, line) in lines.into_iter().skip(scroll).take(inner.height as usize).enumerate() {
@@ -404,7 +408,7 @@ pub(super) fn draw_help(f: &mut Frame, app: &App) {
 pub(super) fn draw_add_filter(f: &mut Frame, app: &App) {
     use crate::filter::FilterAction;
     let t = theme();
-    let Some(a) = &app.filter_add else { return };
+    let Some(Popup::AddFilter(a)) = &app.popup else { return };
     let h = a.candidates.len() as u16 + 9;
     let inner = panel(f, 72, h, &format!("Filter like No.{}", a.post), "enter add · esc cancel");
     let sel = a.list.selected().unwrap_or(0);

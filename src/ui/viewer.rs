@@ -41,7 +41,7 @@ pub(super) fn draw_gallery(f: &mut Frame, app: &mut App, area: Rect) {
 
 pub(super) fn draw_viewer(f: &mut Frame, app: &mut App) {
     let t = theme();
-    let Some(v) = &app.tab.viewer else { return };
+    let Some(v) = app.tab.viewer() else { return };
     let Some(file) = v.files.get(v.index) else { return };
     let [top, _, middle, _, bottom] = Layout::vertical([
         Constraint::Length(1),
@@ -103,12 +103,12 @@ pub(super) fn draw_viewer(f: &mut Frame, app: &mut App) {
         put(f, inner.x, inner.y + inner.height / 2, inner.width, Line::styled(s, style).centered());
     };
     // Terminal graphics would cover a panel on top.
-    let Some((url, kind)) = source.filter(|_| app.image_search_panel.is_none()) else { return };
+    let Some((url, kind)) = source.filter(|_| !matches!(app.popup, Some(Popup::ImageSearch(_)))) else { return };
     let spinner = SPINNER[app.tick % SPINNER.len()];
     // How much of the image this zoom shows here, for moving around (and so what's shown stays
     // inside the image).
     let mut crop = crop;
-    if let (Some((w, h)), Some((cw, ch)), Some(v)) = (app.images.dims(&url), app.images.cell_size(), app.tab.viewer.as_mut()) {
+    if let (Some((w, h)), Some((cw, ch)), Some(v)) = (app.images.dims(&url), app.images.cell_size(), app.tab.viewer_mut()) {
         let shown = crop.shown(w, h, (u32::from(inner.width) * cw, u32::from(inner.height) * ch));
         crop = crop.within(shown);
         (v.shown, v.crop) = (Some(shown), crop);

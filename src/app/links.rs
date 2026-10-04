@@ -6,7 +6,7 @@ use ratatui::crossterm::event::KeyCode;
 use ratatui::layout::Rect;
 use ratatui::widgets::ListState;
 
-use super::{App, View};
+use super::{App, Popup, TabPopup, View};
 use crate::model::{Attachment, Link};
 
 pub enum LinkItem {
@@ -53,11 +53,11 @@ impl App {
             return;
         }
         let list = ListState::default().with_selected(Some(0));
-        self.tab.links = Some(LinksPanel { items, list, area: Rect::default(), last_click: None });
+        self.tab.popup = Some(TabPopup::Links(LinksPanel { items, list, area: Rect::default(), last_click: None }));
     }
 
     pub fn on_links_key(&mut self, code: KeyCode) {
-        let Some(p) = &mut self.tab.links else { return };
+        let Some(TabPopup::Links(p)) = &mut self.tab.popup else { return };
         let n = p.items.len();
         let cur = p.list.selected().unwrap_or(0);
         match code {
@@ -69,19 +69,19 @@ impl App {
             }
             code => match super::list_move(code, cur, n) {
                 Some(to) => p.list.select(Some(to)),
-                None => self.tab.links = None,
+                None => self.tab.popup = None,
             },
         }
     }
 
     /// A click in the panel selects a row; a second quick click opens it. Clicks outside close it.
     pub fn on_links_click(&mut self, col: u16, row: u16, now: Instant) {
-        let Some(p) = &mut self.tab.links else { return };
+        let Some(TabPopup::Links(p)) = &mut self.tab.popup else { return };
         let pos = ratatui::layout::Position::new(col, row);
         let first = p.list.offset();
         let i = first + row.saturating_sub(p.area.y) as usize;
         if !p.area.contains(pos) || i >= p.items.len() {
-            self.tab.links = None;
+            self.tab.popup = None;
             return;
         }
         let double = p.last_click.is_some_and(|(t, k)| k == i && now.duration_since(t).as_millis() < 400);
@@ -93,7 +93,7 @@ impl App {
     }
 
     fn open_link_item(&mut self, i: usize) {
-        let Some(p) = self.tab.links.take() else { return };
+        let Some(TabPopup::Links(p)) = self.tab.popup.take() else { return };
         match p.items.into_iter().nth(i) {
             Some(LinkItem::Quote(link, _)) => self.follow(link),
             Some(LinkItem::Url(url)) => self.open_url(&url),
@@ -103,7 +103,7 @@ impl App {
     }
 
     fn link_item_url(&self, i: usize) -> Option<String> {
-        let p = self.tab.links.as_ref()?;
+        let Some(TabPopup::Links(p)) = &self.tab.popup else { return None };
         Some(match p.items.get(i)? {
             LinkItem::Url(u) => u.clone(),
             LinkItem::File(f) => f.url.clone(),
@@ -132,7 +132,7 @@ pub struct ImageSearchPanel {
 
 impl App {
     pub fn open_image_search(&mut self) {
-        let files: Vec<Attachment> = match &self.tab.viewer {
+        let files: Vec<Attachment> = match self.tab.viewer() {
             Some(v) => vec![v.files[v.index].clone()],
             None => self.selected_post().map(|p| p.files.clone()).unwrap_or_default(),
         };
@@ -151,11 +151,11 @@ impl App {
             rows.extend((0..self.image_search.len()).map(|e| Ok((url.clone(), e))));
         }
         let list = ListState::default().with_selected(rows.iter().position(Result::is_ok));
-        self.image_search_panel = Some(ImageSearchPanel { rows, list, area: Rect::default() });
+        self.popup = Some(Popup::ImageSearch(ImageSearchPanel { rows, list, area: Rect::default() }));
     }
 
     pub fn on_image_search_key(&mut self, code: KeyCode) {
-        let Some(p) = &mut self.image_search_panel else { return };
+        let Some(Popup::ImageSearch(p)) = &mut self.popup else { return };
         let ok: Vec<usize> = (0..p.rows.len()).filter(|&r| p.rows[r].is_ok()).collect();
         let cur = ok.iter().position(|&r| Some(r) == p.list.selected()).unwrap_or(0);
         if let Some(&to) = super::list_move(code, cur, ok.len()).and_then(|to| ok.get(to)) {
@@ -166,7 +166,7 @@ impl App {
         let link = row.map(|(url, e)| self.image_search[e].link(&url));
         match code {
             KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right => {
-                self.image_search_panel = None;
+                self.popup = None;
                 if let Some(link) = link {
                     self.open_url(&link);
                 }
@@ -176,12 +176,12 @@ impl App {
                     self.copy_text("link", link);
                 }
             }
-            _ => self.image_search_panel = None,
+            _ => self.popup = None,
         }
     }
 
     pub fn on_image_search_click(&mut self, col: u16, row: u16) {
-        let Some(p) = &mut self.image_search_panel else { return };
+        let Some(Popup::ImageSearch(p)) = &mut self.popup else { return };
         let r = p.list.offset() + row.saturating_sub(p.area.y) as usize;
         match p.rows.get(r) {
             Some(Ok(_)) if p.area.contains(ratatui::layout::Position::new(col, row)) => {
@@ -189,7 +189,7 @@ impl App {
                 self.on_image_search_key(KeyCode::Enter);
             }
             Some(Err(_)) if p.area.contains(ratatui::layout::Position::new(col, row)) => {}
-            _ => self.image_search_panel = None,
+            _ => self.popup = None,
         }
     }
 }

@@ -25,6 +25,19 @@ use crate::model::{Attachment, Board, Link, Post};
 use crate::store::{Store, ThreadKey};
 use crate::theme::{self, ThemeDef, ThemeSetting};
 
+/// The popup open, taken if it's of this kind (any other stays).
+macro_rules! take_popup {
+    ($app:expr, $kind:ident) => {
+        match $app.popup.take() {
+            Some(Popup::$kind(x)) => Some(x),
+            other => {
+                $app.popup = other;
+                None
+            }
+        }
+    };
+}
+
 mod filters;
 mod focus;
 mod gallery;
@@ -54,8 +67,8 @@ pub use saving::Downloads;
 use saving::DlEvent;
 pub use thread_view::*;
 pub use sites::{Adding, BoardsUpdate, MySites, origin as site_origin};
-pub use tabs::{MAX_TABS, Offline, Tab};
-pub use settings::{Popup as SettingsPopup, SECTIONS as SETTING_SECTIONS, key_rows, rows as setting_rows, tilde};
+pub use tabs::{MAX_TABS, Offline, Tab, TabPopup};
+pub use settings::{SettingsPopup, SECTIONS as SETTING_SECTIONS, key_rows, rows as setting_rows, tilde};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum View {
@@ -185,6 +198,27 @@ struct Note {
     replies: usize,
 }
 
+/// A popup over the whole screen. One at a time: each opens from a key or the menu, with
+/// nothing else open.
+pub enum Popup {
+    /// Settings' own: a theme, colors, keys, filters, …
+    Settings(SettingsPopup),
+    /// What can be done with what's selected (`.`).
+    Menu(Menu),
+    /// Labels on what's on screen (`f`).
+    Hints(Hints),
+    /// A big save asking first.
+    Confirm(saving::Confirm),
+    /// Adding a site.
+    Adding(sites::Adding),
+    /// `X`: a filter like the selected post.
+    AddFilter(AddFilter),
+    /// Choosing a reverse image search.
+    ImageSearch(ImageSearchPanel),
+    /// The key help, scrolled this far.
+    Help(u16),
+}
+
 /// Popup with the posts the selected post quotes.
 pub struct Preview {
     /// Indices of quoted posts in this thread.
@@ -279,11 +313,8 @@ pub struct App {
     pub default_layout: CatalogLayout,
     /// Columns of the catalog grid as last drawn (0: not a grid).
     pub grid_cols: usize,
-    /// The settings popup open, if any.
-    pub settings_popup: Option<SettingsPopup>,
-    /// The menu for what's selected (`.`), and link hints on screen (`f`).
-    pub menu: Option<Menu>,
-    pub hints: Option<Hints>,
+    /// The popup over the screen, if any: one at a time.
+    pub popup: Option<Popup>,
     pub settings_list: Picker,
     /// The current theme's name, and the config's custom themes.
     pub theme_name: String,
@@ -297,10 +328,6 @@ pub struct App {
     pub saved_list: Picker,
     /// The saved copy `x` was pressed on once: a second `x` removes it.
     pub saved_confirm: Option<ThreadKey>,
-    /// A big save asking first (see `ask_to_save`).
-    pub confirm: Option<saving::Confirm>,
-    /// Adding a site (see `add_site_from`).
-    pub adding: Option<sites::Adding>,
     /// The search of saved threads that's wanted; a running one stops when it changes.
     saved_search: Arc<std::sync::atomic::AtomicU64>,
     /// Sites taken out of the config in Settings: off the home screen until ck restarts.
@@ -339,8 +366,6 @@ pub struct App {
     pub filter_cfgs: Vec<crate::filter::FilterConfig>,
     /// `hidden_words`: posts with one are hidden everywhere.
     pub hidden_words: Vec<String>,
-    /// `X`: a filter being made from the selected post.
-    pub filter_add: Option<AddFilter>,
     /// The filter just added (and where): `u` as the next key takes it back.
     pub filter_undo: Option<filters::Undo>,
     /// Show hidden threads and posts (dimmed) instead of leaving them out.
@@ -350,12 +375,9 @@ pub struct App {
     pub status: Option<Status>,
     /// The status message as last seen by `expire_status`, and when it appeared.
     status_since: Option<(String, Instant)>,
-    pub show_help: bool,
-    pub help_scroll: u16,
     pub images: Images,
     /// Reverse image search engines (`R`), and the panel choosing one.
     pub image_search: Vec<crate::config::ImageSearch>,
-    pub image_search_panel: Option<ImageSearchPanel>,
     /// Save where you are and start there next time.
     pub restore_session: bool,
     /// Reading the end of a thread, new posts come into view (`follow_new_posts`).
@@ -449,9 +471,6 @@ impl App {
                 Some(false) => CatalogLayout::Cards,
                 None => layout,
             }),
-            settings_popup: None,
-            menu: None,
-            hints: None,
             settings_list: Picker::top(),
             theme_name,
             themes,
@@ -462,8 +481,6 @@ impl App {
             history_list: Picker::top(),
             saved_list: Picker::top(),
             saved_confirm: None,
-            confirm: None,
-            adding: None,
             saved_search: Arc::default(),
             removed_sites: Default::default(),
             store,
@@ -489,14 +506,12 @@ impl App {
             pages: crate::pages::Pages::default_dir()
                 .filter(|_| !cfg!(test) && cfg.page_cache_mb > 0)
                 .map(|d| crate::pages::Pages::new(d, cfg.page_cache_mb.saturating_mul(1024 * 1024))),
-            filter_add: None,
             filter_undo: None,
             show_hidden: false,
             filtering: false,
             status: None,
             status_since: None,
-            show_help: false,
-            help_scroll: 0,
+            popup: None,
             images: Images::new(picker, {
                 let tx = tx.clone();
                 Arc::new(move || {
@@ -504,7 +519,6 @@ impl App {
                 })
             }, DiskCache::default_dir().map(|d| DiskCache::new(d, crate::disk_cache::BUDGET))),
             image_search: if cfg.image_search.is_empty() { crate::config::ImageSearch::defaults() } else { cfg.image_search.clone() },
-            image_search_panel: None,
             restore_session: cfg.restore_session,
             follow_new_posts: cfg.follow_new_posts,
             nsfw_images: cfg.nsfw_images,
@@ -613,7 +627,7 @@ impl App {
 
     /// What's on screen, broadly: when it changes, the screen is painted whole.
     pub fn screen(&self) -> (View, usize, bool, bool) {
-        (self.tab.view, self.active, self.tab.viewer.is_some(), self.tab.gallery.is_some())
+        (self.tab.view, self.active, self.tab.viewer().is_some(), self.tab.gallery.is_some())
     }
 
     /// Keep the current list's selection on a row that exists.
@@ -719,7 +733,7 @@ impl App {
     /// due refresh, and at most a second (relative times like "5s ago" stay current).
     pub fn next_wake(&self, now: Instant) -> Duration {
         let mut wake = Duration::from_secs(1);
-        let animating = self.tab.loading.is_some() || !self.refreshing.is_empty() || self.downloads.running > 0 || self.tab.viewer.is_some();
+        let animating = self.tab.loading.is_some() || !self.refreshing.is_empty() || self.downloads.running > 0 || self.tab.viewer().is_some();
         if animating {
             wake = wake.min(Duration::from_millis(100));
         }
@@ -1381,7 +1395,7 @@ impl App {
         match self.selected_post().map(|p| p.files.clone()) {
             Some(files) if !files.is_empty() => {
                 if !self.thread_viewer(0) {
-                    self.tab.viewer = Some(Viewer::new(files, 0, link));
+                    self.tab.popup = Some(TabPopup::Viewer(Viewer::new(files, 0, link)));
                 }
             }
             _ => self.info("Post has no file"),
@@ -1593,7 +1607,7 @@ impl App {
 
     /// Copy the selected thing's text (or file URL in the viewer), or with `link` its URL.
     fn copy(&mut self, link: bool) {
-        let what = if let Some(v) = &self.tab.viewer {
+        let what = if let Some(v) = self.tab.viewer() {
             let post_link = v.link.clone().or_else(|| self.viewer_post_link()).or_else(|| self.gallery_link(v.index));
             if link { post_link.map(|l| ("link", l)) } else { Some(("file URL", v.files[v.index].url.clone())) }
         } else if link {
