@@ -161,13 +161,10 @@ pub(super) fn draw_menu(f: &mut Frame, app: &mut App) {
     let off = scroll_to(m.list.offset(), sel, rows);
     *m.list.offset_mut() = off;
     m.area = inner;
-    for (k, item) in m.items.iter().enumerate().skip(off).take(rows) {
-        let y = inner.y + (k - off) as u16;
-        paint_row(f, Rect::new(inner.x - 2, y, inner.width + 4, 1), None, k == sel, false);
+    list_rows(f, Rect { height: rows as u16, ..inner }, off, m.items.len(), Some(sel), |k| {
         let key = keys.get(k).cloned().unwrap_or_default();
-        let line = Line::from(vec![Span::styled(format!("{key:<key_w$}  "), bold(t.primary)), Span::styled(label(item), Style::new().fg(t.text))]);
-        put(f, inner.x, y, inner.width, line);
-    }
+        Line::from(vec![Span::styled(format!("{key:<key_w$}  "), bold(t.primary)), Span::styled(label(&m.items[k]), Style::new().fg(t.text))])
+    });
 }
 
 /// Link hints: each label where its target is; typed letters dim, the rest bright.
@@ -221,10 +218,8 @@ pub(super) fn draw_links(f: &mut Frame, app: &mut App) {
     let off = scroll_to(p.list.offset(), sel, rows);
     *p.list.offset_mut() = off;
     p.area = inner;
-    for (k, item) in p.items.iter().enumerate().skip(off).take(rows) {
-        let y = inner.y + (k - off) as u16;
-        paint_row(f, Rect::new(inner.x - 2, y, inner.width + 4, 1), None, k == sel, false);
-        let (kind, text, extra) = match item {
+    list_rows(f, Rect { height: rows as u16, ..inner }, off, p.items.len(), Some(sel), |k| {
+        let (kind, text, extra) = match &p.items[k] {
             LinkItem::Quote(_, label) => ("quote", label.clone(), String::new()),
             LinkItem::Url(u) => ("web", u.clone(), String::new()),
             LinkItem::File(file) => ("file", file.filename.clone(), format!("  {}", file.url)),
@@ -232,14 +227,13 @@ pub(super) fn draw_links(f: &mut Frame, app: &mut App) {
         let room = (inner.width as usize).saturating_sub(9);
         let text = truncate(&text, room);
         let extra = truncate(&extra, room.saturating_sub(text.width()));
-        let line = Line::from(vec![
+        Line::from(vec![
             chip(format!("{kind:<5}"), t.text_dim, t.surface_high),
             Span::raw("  "),
             Span::styled(text, Style::new().fg(if kind == "file" { t.text } else { t.quotelink })),
             Span::styled(extra, dim()),
-        ]);
-        put(f, inner.x, y, inner.width, line);
-    }
+        ])
+    });
 }
 
 /// `R`: the reverse image search engines, per file.
@@ -253,17 +247,11 @@ pub(super) fn draw_image_search(f: &mut Frame, app: &mut App) {
     let off = scroll_to(p.list.offset(), sel, rows);
     *p.list.offset_mut() = off;
     p.area = inner;
-    for (k, row) in p.rows.iter().enumerate().skip(off).take(rows) {
-        let y = inner.y + (k - off) as u16;
-        let line = match row {
-            Err(file) => Line::styled(truncate(file, inner.width as usize), bold(t.primary)),
-            Ok((_, e)) => {
-                paint_row(f, Rect::new(inner.x - 2, y, inner.width + 4, 1), None, k == sel, false);
-                Line::styled(format!("  {}", names[*e]), Style::new().fg(t.text))
-            }
-        };
-        put(f, inner.x, y, inner.width, line);
-    }
+    // File headers are never selected, so never painted.
+    list_rows(f, Rect { height: rows as u16, ..inner }, off, p.rows.len(), Some(sel), |k| match &p.rows[k] {
+        Err(file) => Line::styled(truncate(file, inner.width as usize), bold(t.primary)),
+        Ok((_, e)) => Line::styled(format!("  {}", names[*e]), Style::new().fg(t.text)),
+    });
 }
 
 /// Key help, by section, with the configured keys. Keep in sync with the README.

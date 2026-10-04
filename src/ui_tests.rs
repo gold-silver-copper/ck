@@ -1195,3 +1195,40 @@ fn a_hidden_words_label() {
     let text = render(&mut a).0;
     assert!(text.contains("hidden word: implying") && !text.contains("hidden: hidden word"), "{text}");
 }
+
+#[test]
+fn settings_list_popups() {
+    use crate::app::MySites;
+    use crate::config::{SiteConfig, SiteKind};
+    let mut a = app(false);
+    a.open_settings();
+    let site = |name: &str| SiteConfig { name: name.into(), kind: SiteKind::Vichan, url: Some(format!("https://{name}.example")), boards: None, thumb_ext: None, archive: None, media_url: None };
+    let mut shots = Vec::new();
+    // Your sites: none, then three with one armed for removal.
+    a.popup = Some(Popup::Settings(SettingsPopup::Sites(MySites { list: ratatui::widgets::ListState::default().with_selected(Some(0)), sites: vec![], armed: None })));
+    shots.push(render_at(&mut a, 110, 20).0);
+    let sites = vec![site("one"), site("lainchan"), site("three")];
+    a.popup = Some(Popup::Settings(SettingsPopup::Sites(MySites { list: ratatui::widgets::ListState::default().with_selected(Some(2)), sites, armed: Some(2) })));
+    shots.push(render_at(&mut a, 110, 20).0);
+    // Board images.
+    a.popup = Some(Popup::Settings(SettingsPopup::BoardImages { list: ratatui::widgets::ListState::default().with_selected(Some(0)) }));
+    shots.push(render_at(&mut a, 90, 16).0);
+    a.store.board_prefs.entry("4chan/b".into()).or_default().images = Some(false);
+    a.store.board_prefs.entry("4chan/g".into()).or_default().images = Some(true);
+    a.popup = Some(Popup::Settings(SettingsPopup::BoardImages { list: ratatui::widgets::ListState::default().with_selected(Some(1)) }));
+    shots.push(render_at(&mut a, 90, 16).0);
+    // Hidden words: none, a few, typing one, and many on a small screen, scrolled.
+    a.popup = Some(Popup::Settings(SettingsPopup::HiddenWords { list: ratatui::widgets::ListState::default().with_selected(Some(0)), typing: None }));
+    shots.push(render_at(&mut a, 90, 16).0);
+    a.hidden_words = vec!["crypto".into(), "free money".into(), "λ".into()];
+    a.popup = Some(Popup::Settings(SettingsPopup::HiddenWords { list: ratatui::widgets::ListState::default().with_selected(Some(1)), typing: None }));
+    shots.push(render_at(&mut a, 90, 16).0);
+    a.popup = Some(Popup::Settings(SettingsPopup::HiddenWords { list: ratatui::widgets::ListState::default().with_selected(Some(1)), typing: Some("spa".into()) }));
+    shots.push(render_at(&mut a, 90, 16).0);
+    a.hidden_words = (0..30).map(|i| format!("word{i}")).collect();
+    for typing in [None, Some("x".to_string())] {
+        a.popup = Some(Popup::Settings(SettingsPopup::HiddenWords { list: ratatui::widgets::ListState::default().with_selected(Some(25)), typing }));
+        shots.push(render_at(&mut a, 90, 16).0);
+    }
+    insta::assert_snapshot!(shots.join("\n=====\n"));
+}

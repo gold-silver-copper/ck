@@ -55,18 +55,16 @@ pub(super) fn draw_settings_popup(f: &mut Frame, app: &App) {
     match popup {
         Some(SettingsPopup::Themes { list, names, .. }) => {
             let inner = panel(f, 52, names.len() as u16 + 3, "Theme", "enter keep · esc cancel");
-            let sel = list.selected().unwrap_or(0);
-            for (k, name) in names.iter().enumerate().take(inner.height as usize) {
-                let y = inner.y + k as u16;
-                paint_row(f, Rect::new(inner.x - 2, y, inner.width + 4, 1), None, k == sel, false);
+            list_rows(f, inner, 0, names.len(), list.selected().or(Some(0)), |k| {
+                let name = &names[k];
                 let mut spans = vec![Span::styled(format!("{name:<22}"), Style::new().fg(t.text))];
                 // A row of colored cells: the theme at a glance.
                 if let Ok(th) = theme::resolve(name, &app.themes) {
                     let colors = [th.background, th.surface, th.selection, th.primary, th.primary_container, th.greentext, th.quotelink, th.heading, th.new];
                     spans.extend(colors.map(|c| Span::styled("  ", Style::new().bg(c))));
                 }
-                put(f, inner.x, y, inner.width, Line::from(spans));
-            }
+                Line::from(spans)
+            });
         }
         Some(SettingsPopup::Colors { list, editing }) => {
             let title = format!("Colors · {}", app.theme_name);
@@ -76,18 +74,16 @@ pub(super) fn draw_settings_popup(f: &mut Frame, app: &App) {
             let rows = inner.height.saturating_sub(2) as usize;
             let sel = list.selected().unwrap_or(0);
             let first = sel.saturating_sub(rows.saturating_sub(1));
-            for (k, (role, desc)) in ROLES.iter().enumerate().skip(first).take(rows) {
-                let y = inner.y + (k - first) as u16;
-                paint_row(f, Rect::new(inner.x - 2, y, inner.width + 4, 1), None, k == sel, false);
+            list_rows(f, Rect { height: rows as u16, ..inner }, first, ROLES.len(), Some(sel), |k| {
+                let (role, desc) = ROLES[k];
                 let c = t.get(role).unwrap_or(Color::Reset);
-                let line = Line::from(vec![
+                Line::from(vec![
                     Span::styled("    ", Style::new().bg(c)),
                     Span::styled(format!("  {role:<22}"), Style::new().fg(t.text)),
                     Span::styled(format!("{:<10}", theme::color_string(c)), bold(t.text)),
-                    Span::styled(*desc, dim()),
-                ]);
-                put(f, inner.x, y, inner.width, line);
-            }
+                    Span::styled(desc, dim()),
+                ])
+            });
             let y = inner.bottom().saturating_sub(1);
             let line = match editing {
                 Some(text) => Line::from(vec![
@@ -108,16 +104,12 @@ pub(super) fn draw_settings_popup(f: &mut Frame, app: &App) {
             let view = inner.height.saturating_sub(2) as usize;
             let sel = list.selected().unwrap_or(0);
             let first = (sel + 2).saturating_sub(view).min(rows.len().saturating_sub(view));
-            for (k, row) in rows.iter().enumerate().skip(first).take(view) {
-                let y = inner.y + (k - first) as u16;
-                let i = match row {
-                    Err(title) => {
-                        put(f, inner.x, y, inner.width, Line::styled(title.to_string(), bold(t.primary)));
-                        continue;
-                    }
-                    Ok(i) => *i,
+            // Group titles are never selected, so never painted.
+            list_rows(f, Rect { height: view as u16, ..inner }, first, rows.len(), Some(sel), |k| {
+                let i = match rows[k] {
+                    Err(title) => return Line::styled(title.to_string(), bold(t.primary)),
+                    Ok(i) => i,
                 };
-                paint_row(f, Rect::new(inner.x - 2, y, inner.width + 4, 1), None, k == sel, false);
                 let (action, name, _, scopes, desc) = keys::ACTIONS[i];
                 let changed = !app.keys.is_default(action);
                 let key_style = if changed { bold(t.primary) } else { bold(t.text) };
@@ -135,8 +127,8 @@ pub(super) fn draw_settings_popup(f: &mut Frame, app: &App) {
                 } else {
                     spans.push(Span::styled(truncate(desc, (inner.width as usize).saturating_sub(18)), Style::new().fg(t.text)));
                 }
-                put(f, inner.x, y, inner.width, Line::from(spans));
-            }
+                Line::from(spans)
+            });
             let y = inner.bottom().saturating_sub(1);
             let line = match (capture, rows.get(sel)) {
                 (Some(add), Some(Ok(i))) => {
@@ -191,105 +183,66 @@ fn counts_text((posts, threads): (usize, usize)) -> String {
     }
 }
 
-/// Settings › Filters: every `[[filter]]`, with what it catches on screen now.
 /// Settings › Catalog › Hidden words.
 fn draw_hidden_words(f: &mut Frame, app: &App, list: &ListState, typing: Option<&str>) {
     let t = theme();
     let words = &app.hidden_words;
     let hint = if typing.is_some() { "enter add · esc cancel" } else { "a add · x remove · esc close" };
-    let h = (words.len().max(1) as u16 + 6).min(f.area().height.saturating_sub(4));
-    let inner = panel(f, 70, h, "Hidden words", hint);
+    let empty = if typing.is_some() { "" } else { "None yet. a adds one; so does w in a post's X." };
     let sel = list.selected().unwrap_or(0);
-    let view = inner.height.saturating_sub(3) as usize;
-    let first = (sel + 1).saturating_sub(view);
-    if words.is_empty() && typing.is_none() {
-        put(f, inner.x, inner.y, inner.width, Line::styled("None yet. a adds one; so does w in a post's X.", dim()));
-    }
-    for (k, w) in words.iter().enumerate().skip(first).take(view) {
-        let y = inner.y + (k - first) as u16;
-        paint_row(f, Rect::new(inner.x - 2, y, inner.width + 4, 1), None, k == sel && typing.is_none(), false);
-        put(f, inner.x, y, inner.width, Line::styled(w.clone(), Style::new().fg(t.text)));
-    }
-    let y = inner.bottom().saturating_sub(2);
+    let inner = list_panel(f, (70, "Hidden words", hint), words.len(), (sel, typing.is_none()), (empty, "Whole words, any case. Kept in the config as hidden_words."), (1, 1), |k, _| {
+        Line::styled(words[k].clone(), Style::new().fg(t.text))
+    });
     if let Some(text) = typing {
         let line = Line::from(vec![Span::styled("New  ", dim()), Span::styled(text.to_string(), bold(t.text)), Span::styled("▏", Style::new().fg(t.primary))]);
-        put(f, inner.x, y, inner.width, line);
+        put(f, inner.x, inner.bottom().saturating_sub(2), inner.width, line);
     }
-    let note = "Whole words, any case. Kept in the config as hidden_words.";
-    put(f, inner.x, inner.bottom().saturating_sub(1), inner.width, Line::styled(note, dim()));
 }
 
 /// Settings › Catalog › Board images: boards with their own image setting.
 fn draw_board_images(f: &mut Frame, app: &App, list: &ListState) {
     let t = theme();
     let boards = app.boards_with_images_set();
-    let h = (boards.len().max(1) as u16 + 5).min(f.area().height.saturating_sub(4));
-    let inner = panel(f, 70, h, "Board images", "x back to the default · esc close");
-    let sel = list.selected().unwrap_or(0);
-    let view = inner.height.saturating_sub(2) as usize;
-    let first = (sel + 1).saturating_sub(view);
-    if boards.is_empty() {
-        put(f, inner.x, inner.y, inner.width, Line::styled("None: every board follows the default. A board's . menu changes it.", dim()));
-    }
-    for (k, (key, on)) in boards.iter().enumerate().skip(first).take(view) {
-        let y = inner.y + (k - first) as u16;
-        paint_row(f, Rect::new(inner.x - 2, y, inner.width + 4, 1), None, k == sel, false);
-        let left = vec![Span::styled(key.clone(), Style::new().fg(t.text))];
-        let right = vec![Span::styled(if *on { "images on" } else { "images off" }, dim())];
-        put(f, inner.x, y, inner.width, spread(left, right, inner.width as usize));
-    }
+    let empty = "None: every board follows the default. A board's . menu changes it.";
     let note = "Boards the site marks NSFW follow the NSFW boards setting; the rest show images.";
-    put(f, inner.x, inner.bottom().saturating_sub(1), inner.width, Line::styled(note, dim()));
+    list_panel(f, (70, "Board images", "x back to the default · esc close"), boards.len(), (list.selected().unwrap_or(0), true), (empty, note), (0, 0), |k, width| {
+        let (key, on) = &boards[k];
+        spread(vec![Span::styled(key.clone(), Style::new().fg(t.text))], vec![Span::styled(if *on { "images on" } else { "images off" }, dim())], width as usize)
+    });
 }
 
 /// Settings › Sites › Your sites: the config's `[[site]]` tables.
 fn draw_my_sites(f: &mut Frame, m: &crate::app::MySites) {
     let t = theme();
-    let h = (m.sites.len().max(1) as u16 + 6).min(f.area().height.saturating_sub(4));
-    let inner = panel(f, 100, h, "Your sites", "a add · r update a vichan site's boards · x remove · esc close");
-    let view = inner.height.saturating_sub(2) as usize;
-    let sel = m.list.selected().unwrap_or(0);
-    let first = (sel + 1).saturating_sub(view);
-    if m.sites.is_empty() {
-        put(f, inner.x, inner.y, inner.width, Line::styled("None yet: only the built-in sites. a adds one from a link to it.", dim()));
-    }
-    for (k, s) in m.sites.iter().enumerate().skip(first).take(view) {
-        let y = inner.y + (k - first) as u16;
-        paint_row(f, Rect::new(inner.x - 2, y, inner.width + 4, 1), None, k == sel, false);
-        let origin = crate::app::site_origin(s);
+    let empty = "None yet: only the built-in sites. a adds one from a link to it.";
+    let note = "Kept in the config as [[site]] tables; the built-in sites are always there too.";
+    let hint = "a add · r update a vichan site's boards · x remove · esc close";
+    list_panel(f, (100, "Your sites", hint), m.sites.len(), (m.list.selected().unwrap_or(0), true), (empty, note), (1, 0), |k, width| {
+        let s = &m.sites[k];
         let left = vec![
             Span::styled(format!("{:<18}", truncate(&s.name, 17)), bold(t.text)),
             Span::styled(format!("{:<11}", s.kind.as_str()), Style::new().fg(t.text)),
-            Span::styled(truncate(s.url.as_deref().unwrap_or(""), (inner.width as usize).saturating_sub(52)), dim()),
+            Span::styled(truncate(s.url.as_deref().unwrap_or(""), (width as usize).saturating_sub(52)), dim()),
         ];
-        let tag = if m.armed == Some(k) { "x again removes it".to_string() } else { origin.to_string() };
-        put(f, inner.x, y, inner.width, spread(left, vec![Span::styled(tag, dim())], inner.width as usize));
-    }
-    let note = "Kept in the config as [[site]] tables; the built-in sites are always there too.";
-    put(f, inner.x, inner.bottom().saturating_sub(1), inner.width, Line::styled(note, dim()));
+        let tag = if m.armed == Some(k) { "x again removes it".to_string() } else { crate::app::site_origin(s).to_string() };
+        spread(left, vec![Span::styled(tag, dim())], width as usize)
+    });
 }
 
 fn draw_filter_list(f: &mut Frame, app: &App, list: &ratatui::widgets::ListState, counts: &[(usize, usize)]) {
     let t = theme();
     let cfgs = &app.filter_cfgs;
-    let h = (cfgs.len().max(1) as u16 + 6).min(f.area().height.saturating_sub(4));
-    let inner = panel(f, 110, h, "Filters", "enter edit · space on/off · a add · x remove · esc close");
-    let view = inner.height.saturating_sub(2) as usize;
-    let sel = list.selected().unwrap_or(0);
-    let first = (sel + 1).saturating_sub(view);
-    if cfgs.is_empty() {
-        let x = app.keys.key(Action::Filter);
-        put(f, inner.x, inner.y, inner.width, Line::styled(format!("No filters yet. a adds one; {x} on a post makes one like it."), dim()));
-    }
-    let wide = inner.width >= 90;
-    for (k, c) in cfgs.iter().enumerate().skip(first).take(view) {
-        let y = inner.y + (k - first) as u16;
-        paint_row(f, Rect::new(inner.x - 2, y, inner.width + 4, 1), None, k == sel, false);
+    let empty = format!("No filters yet. a adds one; {} on a post makes one like it.", app.keys.key(Action::Filter));
+    let note = "Counts are for the open catalog and thread. Kept in the config as [[filter]] tables.";
+    let hint = "enter edit · space on/off · a add · x remove · esc close";
+    list_panel(f, (110, "Filters", hint), cfgs.len(), (list.selected().unwrap_or(0), true), (&empty, note), (1, 0), |k, width| {
+        let c = &cfgs[k];
+        let wide = width >= 90;
         let style = if c.enabled { Style::new().fg(t.text) } else { dim() };
         let fields = c.fields().iter().map(|f| f.as_str()).collect::<Vec<_>>().join("+");
         let count = counts.get(k).map_or(String::new(), |&n| counts_text(n));
         // Narrow: the label and fields share what the count leaves.
-        let (label_w, fields_w) = if wide { (22, 18) } else { ((inner.width as usize).saturating_sub(count.width() + 15) * 3 / 5, (inner.width as usize).saturating_sub(count.width() + 15) * 2 / 5) };
+        let (label_w, fields_w) = if wide { (22, 18) } else { ((width as usize).saturating_sub(count.width() + 15) * 3 / 5, (width as usize).saturating_sub(count.width() + 15) * 2 / 5) };
         let mut left = vec![
             if c.enabled { chip(format!("{:<9}", c.action.as_str()), t.on_primary_container, t.primary_container) } else { chip(format!("{:<9}", "off"), t.text_dim, t.surface_high) },
             Span::raw("  "),
@@ -300,13 +253,11 @@ fn draw_filter_list(f: &mut Frame, app: &App, list: &ratatui::widgets::ListState
             left.push(Span::styled(format!("{:<20}", truncate(&filter_scope(c), 19)), style));
             // The pattern gets what's left, beside the count.
             let used: usize = left.iter().map(|s| s.width()).sum::<usize>() + count.width() + 2;
-            left.push(Span::styled(truncate(&c.pattern, (inner.width as usize).saturating_sub(used)), dim()));
+            left.push(Span::styled(truncate(&c.pattern, (width as usize).saturating_sub(used)), dim()));
         }
         let right = vec![Span::styled(count, dim())];
-        put(f, inner.x, y, inner.width, spread(left, right, inner.width as usize));
-    }
-    let note = "Counts are for the open catalog and thread. Kept in the config as [[filter]] tables.";
-    put(f, inner.x, inner.bottom().saturating_sub(1), inner.width, Line::styled(note, dim()));
+        spread(left, right, width as usize)
+    });
 }
 
 /// One filter in the editor.
