@@ -221,7 +221,7 @@ impl App {
         d.total += jobs.len();
         d.running += 1;
         d.dir = Some(dir);
-        let tx = self.tx.clone();
+        let later = self.later();
         std::thread::spawn(move || {
             for (url, path) in jobs {
                 let ev = if path.exists() {
@@ -232,11 +232,11 @@ impl App {
                         Err(e) => DlEvent::Failed(format!("{e:#}")),
                     }
                 };
-                if tx.send(Msg::Download(ev)).is_err() {
+                if !later.run(move |app| app.download_event(ev)) {
                     return;
                 }
             }
-            let _ = tx.send(Msg::Download(DlEvent::Finished));
+            later.run(|app| app.download_event(DlEvent::Finished));
         });
     }
 

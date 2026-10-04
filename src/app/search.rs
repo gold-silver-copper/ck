@@ -127,7 +127,7 @@ impl App {
         self.tab.search_list = Picker::top();
         self.tab.view = View::Search;
         // Saving waits for nothing: copies being written are read as they were.
-        let (tx, current) = (self.tx.clone(), self.saved_search.clone());
+        let (later, current) = (self.later(), self.saved_search.clone());
         let needle = query.to_lowercase();
         std::thread::spawn(move || {
             for key in keys {
@@ -139,11 +139,11 @@ impl App {
                     Ok(posts) => SavedFound::Copy(key, posts),
                     Err(_) => SavedFound::Unreadable,
                 };
-                if tx.send(Msg::SavedSearch(id, found)).is_err() {
+                if !later.run(move |app| app.saved_found(id, found)) {
                     return;
                 }
             }
-            let _ = tx.send(Msg::SavedSearch(id, SavedFound::Done));
+            later.run(move |app| app.saved_found(id, SavedFound::Done));
         });
     }
 

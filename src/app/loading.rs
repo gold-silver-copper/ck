@@ -57,10 +57,16 @@ impl App {
         }
         self.boards_tried.insert(site, now);
         let backend = self.sites[site].backend.clone();
-        let tx = self.tx.clone();
+        let later = self.later();
         std::thread::spawn(move || {
             let res = http::background_at(now, || backend.boards(&|_| {}));
-            let _ = tx.send(Msg::BoardsRefreshed(site, res));
+            later.run(move |app| {
+                app.boards_refreshing.remove(&site);
+                // A failed background refresh keeps the saved list; there's nothing to say.
+                if let Ok(b) = res {
+                    app.set_boards(site, b, true);
+                }
+            });
         });
     }
 
@@ -337,7 +343,7 @@ impl App {
     fn refresh_in_background(&mut self, key: ThreadKey) {
         let Some(site) = self.sites.iter().find(|s| s.cfg.name == key.site) else { return };
         let backend = site.backend.clone();
-        let tx = self.tx.clone();
+        let later = self.later();
         self.refreshing.insert(key.clone());
         // The open thread's copy is kept up to date too (a watched one's is its saved copy).
         let pages = self.pages.clone().filter(|_| self.store.watched(&key).is_none());
@@ -349,7 +355,7 @@ impl App {
             {
                 p.write(&key.site, &key.board, Some(key.no), &copies, now);
             }
-            let _ = tx.send(Msg::Refreshed(key, res));
+            later.run(move |app| app.refreshed(key, res));
         });
     }
 
