@@ -4,7 +4,7 @@ use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
 
-use crate::app::{App, Clock, Part, Preview, SettingsPopup, ThreadView, View, Viewer};
+use crate::app::{App, Clock, Part, Popup, Preview, SettingsPopup, ThreadView, View, Viewer};
 use crate::images::Images;
 use crate::markup::{Flavor, parse_html};
 use crate::model::{Attachment, Board, Post};
@@ -223,7 +223,7 @@ fn thread_view() {
 #[test]
 fn help() {
     let mut a = app(false);
-    a.show_help = true;
+    a.popup = Some(Popup::Help(0));
     insta::assert_snapshot!(snapshot(&mut a));
 }
 
@@ -232,7 +232,7 @@ fn quote_preview() {
     let mut a = thread_app(false);
     let t = a.tab.thread.as_mut().unwrap();
     t.selected = 3;
-    a.tab.preview = Some(Preview { posts: vec![1], elsewhere: vec![], scroll: 0 });
+    a.tab.popup = Some(crate::app::TabPopup::Preview(Preview { posts: vec![1], elsewhere: vec![], scroll: 0 }));
     insta::assert_snapshot!(snapshot(&mut a));
 }
 
@@ -326,7 +326,7 @@ fn filter_list() {
     a.filter_cfgs = some_filters();
     a.tab.thread.as_mut().unwrap().posts[2].name = "Named !Trip".into();
     a.open_settings();
-    a.settings_popup = Some(a.filter_list(1));
+    a.popup = Some(Popup::Settings(a.filter_list(1)));
     insta::assert_snapshot!(snapshot(&mut a));
 }
 
@@ -336,7 +336,7 @@ fn filter_editor() {
     a.filter_cfgs = some_filters();
     a.open_settings();
     let draft = a.filter_cfgs[1].clone();
-    a.settings_popup = Some(SettingsPopup::FilterEdit { index: Some(1), draft, row: 0, typing: Some("^Named (!Trip".into()) });
+    a.popup = Some(Popup::Settings(SettingsPopup::FilterEdit { index: Some(1), draft, row: 0, typing: Some("^Named (!Trip".into()) }));
     insta::assert_snapshot!(snapshot(&mut a));
 }
 
@@ -662,7 +662,7 @@ fn hint_labels_from_before_a_refresh_dont_focus_what_is_gone() {
     render(&mut a);
     a.on_key(KeyEvent::from(KeyCode::Char('f')));
     render(&mut a);
-    let label = a.hints.as_ref().unwrap().targets.iter().find(|t| matches!(t.to, HintTo::Thread(_, Some(Part::Replies)))).unwrap().label.clone();
+    let label = a.hints().unwrap().targets.iter().find(|t| matches!(t.to, HintTo::Thread(_, Some(Part::Replies)))).unwrap().label.clone();
     // The thread comes back without any replies (found by fuzzing).
     let posts: Vec<Post> = thread().posts.into_iter().map(|p| Post { quotes: Vec::new(), ..p }).collect();
     a.tab.thread = Some(ThreadView::new("g".into(), 1000, posts));
@@ -683,10 +683,10 @@ fn history() {
 #[test]
 fn image_viewer_placeholder() {
     let mut a = thread_app(true);
-    a.tab.viewer = Some(Viewer::new(vec![file("op.png"), file("clip.webm")], 0, None));
+    a.tab.popup = Some(crate::app::TabPopup::Viewer(Viewer::new(vec![file("op.png"), file("clip.webm")], 0, None)));
     insta::assert_snapshot!(snapshot(&mut a));
     // Zoomed: how far, and the keys that move around.
-    a.tab.viewer.as_mut().unwrap().crop = crate::images::Crop::FIT.zoomed(true).zoomed(true);
+    a.tab.viewer_mut().unwrap().crop = crate::images::Crop::FIT.zoomed(true).zoomed(true);
     let text = snapshot(&mut a);
     assert!(text.contains("1 of 2  ·  200%") && text.contains("h/j/k/l move") && text.contains("0, esc fit"), "{text}");
 }
@@ -704,7 +704,7 @@ fn theme_picker() {
     let mut a = app(false);
     a.open_settings();
     a.activate_setting();
-    assert!(matches!(a.settings_popup, Some(SettingsPopup::Themes { .. })));
+    assert!(matches!(a.settings_popup(), Some(SettingsPopup::Themes { .. })));
     insta::assert_snapshot!(snapshot(&mut a));
 }
 
@@ -714,7 +714,7 @@ fn color_editor() {
     a.open_settings();
     a.settings_list.state.select(Some(1));
     a.activate_setting();
-    assert!(matches!(a.settings_popup, Some(SettingsPopup::Colors { .. })));
+    assert!(matches!(a.settings_popup(), Some(SettingsPopup::Colors { .. })));
     insta::assert_snapshot!(snapshot(&mut a));
 }
 
@@ -871,7 +871,7 @@ fn tabs_row() {
 #[test]
 fn help_fits_at_110x32_and_scrolls_when_small() {
     let mut a = app(false);
-    a.show_help = true;
+    a.popup = Some(Popup::Help(0));
     let (text, _) = render_at(&mut a, 110, 32);
     // Two columns, everything on screen.
     for line in ["Everywhere", "Home screen", "Image viewer", "Catalog", "Thread", "mark as yours", "copy file URL / post link", "watch / quote tab / general", "favorite this board"] {
@@ -879,7 +879,7 @@ fn help_fits_at_110x32_and_scrolls_when_small() {
     }
     let (text, _) = render_at(&mut a, 60, 20);
     assert!(text.contains("Everywhere") && !text.contains("mark as yours"), "{text}");
-    a.help_scroll = 100;
+    a.popup = Some(Popup::Help(100));
     let (text, _) = render_at(&mut a, 60, 20);
     assert!(text.contains("copy text / link"), "{text}");
 }
@@ -1046,12 +1046,12 @@ fn link_hints() {
     a.on_key(KeyEvent::from(KeyCode::Char('f')));
     insta::assert_snapshot!("link_hints_thread", snapshot(&mut a));
     // A label picks its target: here, post 1001's quote of the OP, which jumps there.
-    let h = a.hints.as_ref().unwrap();
+    let h = a.hints().unwrap();
     let label = h.targets.iter().find(|x| matches!(&x.to, crate::app::HintTo::Thread(1, Some(_)))).unwrap().label.clone();
     for c in label.chars() {
         a.on_key(KeyEvent::from(KeyCode::Char(c)));
     }
-    assert!(a.hints.is_none());
+    assert!(a.hints().is_none());
     assert_eq!(a.tab.thread.as_ref().unwrap().selected, 0);
     // In a catalog: a label per thread; picking one opens it.
     let mut c = catalog_app(false);
@@ -1077,7 +1077,7 @@ fn clicking_a_part_focuses_it() {
     assert!(matches!(&t.focus, Some(Part::Link(_))), "{:?}", t.focus);
     // Right-click: the menu for it.
     a.on_mouse(MouseEvent { kind: MouseEventKind::Down(MouseButton::Right), ..click }, std::time::Instant::now());
-    assert!(a.menu.as_ref().is_some_and(|m| m.items.iter().any(|i| matches!(i, crate::app::MenuItem::Enter(l) if l == "go to >>1000"))));
+    assert!(a.menu().is_some_and(|m| m.items.iter().any(|i| matches!(i, crate::app::MenuItem::Enter(l) if l == "go to >>1000"))));
 }
 
 #[test]
@@ -1087,13 +1087,13 @@ fn saving_the_thread_asks_first() {
     a.download_dir = Some("/saves/{board}/{thread}".into());
     render(&mut a);
     a.on_key(KeyEvent::from(KeyCode::Char('.')));
-    let m = a.menu.as_mut().unwrap();
+    let m = a.menu_mut().unwrap();
     let row = m.items.iter().position(|it| matches!(it, crate::app::MenuItem::Act(_, l) if l == "save the thread as a page…"));
     m.list.select(row);
     a.on_key(KeyEvent::from(KeyCode::Enter));
     insta::assert_snapshot!(snapshot(&mut a));
     a.on_key(KeyEvent::from(KeyCode::Esc));
-    assert!(a.confirm.is_none() && !render(&mut a).0.contains("thread.html"));
+    assert!(a.confirm().is_none() && !render(&mut a).0.contains("thread.html"));
 }
 
 #[test]
@@ -1110,10 +1110,10 @@ fn adding_a_site() {
     use crate::app::Adding;
     use crate::config::{BoardConfig, SiteConfig, SiteKind};
     let mut a = app(false);
-    a.adding = Some(Adding::Typing("somechan.org/b/".into()));
+    a.popup = Some(Popup::Adding(Adding::Typing("somechan.org/b/".into())));
     let text = render(&mut a).0;
     assert!(text.contains("Link  somechan.org/b/▏") && text.contains("enter look · esc cancel"), "{text}");
-    a.adding = Some(Adding::Looking { id: 1, host: "somechan.org".into(), open: None });
+    a.popup = Some(Popup::Adding(Adding::Looking { id: 1, host: "somechan.org".into(), open: None }));
     assert!(render(&mut a).0.contains("Asking somechan.org what it runs…"));
     let site = SiteConfig {
         name: "somechan".into(),
@@ -1124,15 +1124,15 @@ fn adding_a_site() {
         archive: None,
         media_url: None,
     };
-    a.adding = Some(Adding::Site { site: site.clone(), name: "somechan".into(), open: None });
+    a.popup = Some(Popup::Adding(Adding::Site { site: site.clone(), name: "somechan".into(), open: None }));
     insta::assert_snapshot!(snapshot(&mut a));
     // Boards read from the bar on its pages.
     let boards = ["wiz", "dep", "hob"].map(|b| BoardConfig::Full { uri: b.into(), title: String::new() }).to_vec();
-    a.adding = Some(Adding::Site { site: SiteConfig { boards: Some(boards), ..site }, name: "somechan".into(), open: None });
+    a.popup = Some(Popup::Adding(Adding::Site { site: SiteConfig { boards: Some(boards), ..site }, name: "somechan".into(), open: None }));
     let text = render(&mut a).0;
     assert!(text.contains("3 boards, from the list on its pages:") && text.contains("wiz dep hob"), "{text}");
     // Where its files are, when that isn't the usual.
-    if let Some(Adding::Site { site, .. }) = &mut a.adding {
+    if let Some(Adding::Site { site, .. }) = a.adding_mut() {
         site.thumb_ext = Some("png".into());
         site.media_url = Some("https://media.example".into());
     }
@@ -1179,7 +1179,7 @@ fn updating_a_built_in_sites_boards() {
     let mut bar = list.clone();
     bar.push(BoardConfig::Full { uri: "mega".into(), title: "Overboard".into() });
     bar.remove(0);
-    a.adding = Some(Adding::Boards { site: lain, update: BoardsUpdate::new(&list, bar), drop: false, builtin: true });
+    a.popup = Some(Popup::Adding(Adding::Boards { site: lain, update: BoardsUpdate::new(&list, bar), drop: false, builtin: true }));
     let text = render(&mut a).0;
     assert!(text.contains("Update lainchan's boards?") && text.contains("New: /mega/"), "{text}");
     assert!(text.contains("kept (d drops them)") && text.contains("lainchan is built in: this saves it as one of your sites"), "{text}");

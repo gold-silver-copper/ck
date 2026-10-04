@@ -5,7 +5,7 @@
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 use ratatui::widgets::ListState;
 
-use super::{App, Msg, Site, edit_text, list_move};
+use super::{App, Msg, Popup, Site, edit_text, list_move};
 use crate::backend::{self, detect};
 use crate::config::{self, BoardConfig, SiteConfig, SiteKind};
 
@@ -105,7 +105,7 @@ impl App {
         let open = open.then(|| input.trim().to_string());
         let known = self.sites.iter().position(|s| self.site_hosts(s).iter().any(|h| *h == link.host.trim_start_matches("www.")));
         let Some(i) = known else {
-            self.adding = Some(Adding::Looking { id: self.next_request(), host: link.host.clone(), open });
+            self.popup = Some(Popup::Adding(Adding::Looking { id: self.next_request(), host: link.host.clone(), open }));
             let (id, tx) = (self.next_id, self.tx.clone());
             std::thread::spawn(move || {
                 let _ = tx.send(Msg::Detected(id, detect::detect(&link).map(Detected::Site)));
@@ -118,7 +118,7 @@ impl App {
             _ => None,
         };
         let Some(board) = missing else {
-            self.adding = None;
+            take_popup!(self, Adding);
             let name = site.name.clone();
             self.info(format!("{name} is already one of your sites"));
             if let Some(o) = open {
@@ -126,7 +126,7 @@ impl App {
             }
             return;
         };
-        self.adding = Some(Adding::Looking { id: self.next_request(), host: link.host.clone(), open });
+        self.popup = Some(Popup::Adding(Adding::Looking { id: self.next_request(), host: link.host.clone(), open }));
         let (id, tx, base) = (self.next_id, self.tx.clone(), link.base.clone());
         std::thread::spawn(move || {
             let res = if detect::has_board(&base, &board) { Ok(Detected::Board(i, board)) } else { Err(anyhow::anyhow!("{base} has no /{board}/ (its catalog isn't there)")) };
@@ -146,12 +146,12 @@ impl App {
 
     /// What asking a site found, if it's still wanted.
     pub(super) fn detected(&mut self, id: u64, res: anyhow::Result<Detected>) {
-        let Some(Adding::Looking { id: want, open, .. }) = &mut self.adding else { return };
+        let Some(Popup::Adding(Adding::Looking { id: want, open, .. })) = &mut self.popup else { return };
         if *want != id {
             return;
         }
         let open = open.take();
-        self.adding = match res {
+        let next = match res {
             Ok(Detected::Site(site)) => Some(Adding::Site { name: self.free_name(&site.name), site, open }),
             Ok(Detected::Board(site, board)) => Some(Adding::Board { site, board, open }),
             Ok(Detected::Bar(site, bar)) => {
@@ -173,6 +173,7 @@ impl App {
                 None
             }
         };
+        self.popup = next.map(Popup::Adding);
     }
 
     /// `name`, or with a number after it if a site has it.
@@ -197,8 +198,8 @@ impl App {
 
     /// Keys while adding a site.
     pub(super) fn on_adding_key(&mut self, key: KeyEvent) {
-        let Some(adding) = self.adding.take() else { return };
-        self.adding = match (adding, key.code) {
+        let Some(adding) = take_popup!(self, Adding) else { return };
+        let next = match (adding, key.code) {
             (_, KeyCode::Esc) => None,
             (Adding::Typing(text), KeyCode::Enter) => {
                 self.add_site_from(&text, false);
@@ -224,17 +225,20 @@ impl App {
             (Adding::Boards { site, update, drop, builtin }, KeyCode::Char('d')) => Some(Adding::Boards { site, update, drop: !drop, builtin }),
             (other, _) => Some(other),
         };
+        if let Some(a) = next {
+            self.popup = Some(Popup::Adding(a));
+        }
     }
 
     /// Paste into the link or the name being typed.
     pub(super) fn paste_adding(&mut self, text: &str) -> bool {
-        match &mut self.adding {
-            Some(Adding::Typing(t) | Adding::Site { name: t, .. }) => {
+        match &mut self.popup {
+            Some(Popup::Adding(Adding::Typing(t) | Adding::Site { name: t, .. })) => {
                 t.push_str(text);
                 true
             }
-            Some(_) => true,
-            None => false,
+            Some(Popup::Adding(_)) => true,
+            _ => false,
         }
     }
 
@@ -277,7 +281,7 @@ impl App {
         }
         let base = base.trim_end_matches('/').to_string();
         let host = crate::http::host(&base).to_string();
-        self.adding = Some(Adding::Looking { id: self.next_request(), host: host.clone(), open: None });
+        self.popup = Some(Popup::Adding(Adding::Looking { id: self.next_request(), host: host.clone(), open: None }));
         let (id, tx) = (self.next_id, self.tx.clone());
         let first = list.first().map(|b| b.uri().to_string());
         std::thread::spawn(move || {
@@ -351,7 +355,7 @@ impl App {
         match key.code {
             KeyCode::Esc | KeyCode::Char('q' | 'h') | KeyCode::Left => None,
             KeyCode::Char('a') => {
-                self.adding = Some(Adding::Typing(String::new()));
+                self.popup = Some(Popup::Adding(Adding::Typing(String::new())));
                 None
             }
             // A vichan site: read its board list again.

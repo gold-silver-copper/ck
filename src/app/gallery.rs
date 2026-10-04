@@ -3,7 +3,7 @@
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 use ratatui::widgets::ListState;
 
-use super::{App, View, Viewer};
+use super::{App, TabPopup, View, Viewer};
 use crate::download;
 use crate::keys::{Action, Scope};
 use crate::model::Attachment;
@@ -105,7 +105,7 @@ impl App {
         }
         let files = g.files.iter().map(|(_, f)| f.clone()).collect();
         let posts = g.files.iter().map(|(i, _)| self.tab.thread.as_ref().and_then(|t| t.posts.get(*i)).map_or(0, |p| p.no)).collect();
-        self.tab.viewer = Some(Viewer { posts, ..Viewer::new(files, k, None) });
+        self.tab.popup = Some(TabPopup::Viewer(Viewer { posts, ..Viewer::new(files, k, None) }));
     }
 
     /// `v` in a thread: the viewer over every file in it (or in the conversation shown,
@@ -124,13 +124,13 @@ impl App {
             }
         }
         let Some(start) = start else { return false };
-        self.tab.viewer = Some(Viewer { posts, ..Viewer::new(files, start, None) });
+        self.tab.popup = Some(TabPopup::Viewer(Viewer { posts, ..Viewer::new(files, start, None) }));
         true
     }
 
     /// The link to the post the viewer's file is from, when it knows.
     pub(super) fn viewer_post_link(&self) -> Option<String> {
-        let (v, t, b) = (self.tab.viewer.as_ref()?, self.tab.thread.as_ref()?, self.tab.board.as_ref()?);
+        let (v, t, b) = (self.tab.viewer()?, self.tab.thread.as_ref()?, self.tab.board.as_ref()?);
         let no = *v.posts.get(v.index)?;
         self.thread_link(&self.key(&b.uri, t.no), Some(no))
     }

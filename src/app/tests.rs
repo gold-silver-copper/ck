@@ -172,7 +172,7 @@ fn key_editor_rebinds_saves_and_refuses_clashes() {
     // Move to `watch` and rebind it to W.
     let rows = settings::key_rows();
     let watch = rows.iter().position(|r| *r == Ok(ACTIONS.iter().position(|e| e.0 == Action::Watch).unwrap())).unwrap();
-    while app.settings_popup.as_ref().is_some_and(|p| !matches!(p, SettingsPopup::Keys { list, .. } if list.selected() == Some(watch))) {
+    while app.settings_popup().is_some_and(|p| !matches!(p, SettingsPopup::Keys { list, .. } if list.selected() == Some(watch))) {
         press(&mut app, KeyCode::Down);
     }
     press(&mut app, KeyCode::Enter);
@@ -195,7 +195,7 @@ fn key_editor_rebinds_saves_and_refuses_clashes() {
     let c: Config = toml::from_str(&std::fs::read_to_string(dir.path().join("config.toml")).unwrap()).unwrap();
     assert!(!c.keys.contains_key("watch"));
     // The new keys work at once.
-    app.settings_popup = None;
+    app.popup = None;
     app.tab.view = View::Catalog;
     assert_eq!(app.keys.action(app.scope(), &KeyEvent::from(KeyCode::Char('w'))), Some(Action::Watch));
 }
@@ -223,7 +223,7 @@ fn copies_text_and_links() {
     assert_eq!(app.copied.as_deref(), Some("https://i.4cdn.org/g/1.png"));
     app.on_key(KeyEvent::from(KeyCode::Char('Y')));
     assert_eq!(app.copied.as_deref(), Some("https://boards.4chan.org/g/thread/1#p2"));
-    app.tab.viewer = None;
+    app.tab.popup = None;
     // Catalog: subject and text; a thread link.
     app.tab.catalog = vec![post(7, vec![Line::raw("hello")])];
     app.tab.catalog_list.state.select(Some(0));
@@ -275,12 +275,12 @@ fn goto_opens_places_and_u_comes_back() {
     // A link to a site ck doesn't have: it asks the site what it runs, to add it. Also
     // without a scheme or a path (not a board of the current site called that).
     for link in ["https://example.com/g/", "example.com"] {
-        app.adding = None;
+        app.popup = None;
         app.goto_str(link);
-        assert!(matches!(&app.adding, Some(Adding::Looking { host, .. }) if host == "example.com"), "{link}");
+        assert!(matches!(app.adding(), Some(Adding::Looking { host, .. }) if host == "example.com"), "{link}");
         assert_eq!(app.tab.view, View::Boards);
     }
-    app.adding = None;
+    app.popup = None;
 }
 
 #[test]
@@ -319,7 +319,7 @@ fn links_panel_lists_and_opens() {
     app.tab.view = View::Thread;
     app.act(Action::Links);
     // The quote of a post in this thread isn't listed; the other board's is.
-    let kinds: Vec<String> = app.tab.links.as_ref().unwrap().items.iter().map(|i| match i {
+    let kinds: Vec<String> = (match &app.tab.popup { Some(crate::app::TabPopup::Links(l)) => l, _ => panic!("no links panel") }).items.iter().map(|i| match i {
         LinkItem::Quote(_, label) => label.clone(),
         LinkItem::Url(u) => u.clone(),
         LinkItem::File(f) => f.filename.clone(),
@@ -330,7 +330,7 @@ fn links_panel_lists_and_opens() {
     app.on_key(KeyEvent::from(KeyCode::Char('y')));
     assert_eq!(app.copied.as_deref(), Some("https://example.com/a"));
     app.on_key(KeyEvent::from(KeyCode::Enter));
-    assert!(app.tab.links.is_none());
+    assert!(!matches!(app.tab.popup, Some(crate::app::TabPopup::Links(_))));
     assert_eq!(app.opened.as_deref(), Some("https://example.com/a"));
     // Enter on the quote opens its thread, and `u` will come back.
     app.act(Action::Links);
@@ -340,7 +340,7 @@ fn links_panel_lists_and_opens() {
     // A post without links says so.
     app.tab.thread = Some(ThreadView::new("x".into(), 1, vec![Post { no: 1, ..Default::default() }]));
     app.act(Action::Links);
-    assert!(app.tab.links.is_none() && app.status.as_ref().unwrap().text == "Post has no links");
+    assert!(!matches!(app.tab.popup, Some(crate::app::TabPopup::Links(_))) && app.status.as_ref().unwrap().text == "Post has no links");
 }
 
 #[test]
@@ -564,12 +564,12 @@ fn gallery_of_the_threads_files() {
     assert_eq!(app.tab.gallery.as_ref().unwrap().state.selected(), Some(2));
     // Enter views every file of the thread, from this one; esc comes back to the grid.
     press(&mut app, KeyCode::Enter);
-    assert_eq!((app.tab.viewer.as_ref().unwrap().files.len(), app.tab.viewer.as_ref().unwrap().index), (3, 2));
+    assert_eq!((app.tab.viewer().unwrap().files.len(), app.tab.viewer().unwrap().index), (3, 2));
     press(&mut app, KeyCode::Char('h'));
     press(&mut app, KeyCode::Char('Y'));
     assert_eq!(app.copied.as_deref(), Some("http://127.0.0.1:3/x/res/1.html#3"));
     press(&mut app, KeyCode::Esc);
-    assert!(app.tab.viewer.is_none());
+    assert!(app.tab.viewer().is_none());
     assert_eq!(app.tab.gallery.as_ref().unwrap().state.selected(), Some(1));
     // d saves the one file.
     press(&mut app, KeyCode::Char('d'));
@@ -629,18 +629,18 @@ fn reverse_image_search() {
     app.tab.view = View::Thread;
     app.act(Action::ImageSearch);
     // The image itself, and the video's thumbnail; a file with neither is left out.
-    let rows = &app.image_search_panel.as_ref().unwrap().rows;
+    let rows = &app.image_search_panel().unwrap().rows;
     assert_eq!(rows.len(), 2 + 2 * 4);
     assert_eq!(rows[0], Err("a.png".into()));
     assert_eq!(rows[6], Ok(("https://i.example/bs.jpg".into(), 0)));
     app.on_key(KeyEvent::from(KeyCode::Down));
     app.on_key(KeyEvent::from(KeyCode::Enter));
     assert_eq!(app.opened.as_deref(), Some("https://lens.google.com/uploadbyurl?url=https%3A%2F%2Fi.example%2Fa.png"));
-    assert!(app.image_search_panel.is_none());
+    assert!(app.image_search_panel().is_none());
     // In the viewer: the file shown.
     app.act(Action::View);
     app.on_key(KeyEvent::from(KeyCode::Char('R')));
-    assert_eq!(app.image_search_panel.as_ref().unwrap().rows.len(), 4);
+    assert_eq!(app.image_search_panel().unwrap().rows.len(), 4);
     app.on_key(KeyEvent::from(KeyCode::Char('y')));
     assert_eq!(app.copied.as_deref(), Some("https://saucenao.com/search.php?url=https%3A%2F%2Fi.example%2Fa.png"));
     // Engines can be configured.
@@ -727,10 +727,10 @@ fn tabs_keep_their_own_place_and_responses() {
     // Tab chips don't switch tabs under a settings popup (it isn't the tab's).
     app.tabs.push(Tab::new(0, Instant::now()));
     app.tab_chips = vec![(Rect::new(0, 0, 5, 1), 1)];
-    app.settings_popup = Some(SettingsPopup::Folder { value: String::new() });
+    app.popup = Some(Popup::Settings(SettingsPopup::Folder { value: String::new() }));
     app.on_mouse(MouseEvent { kind: MouseEventKind::Down(MouseButton::Left), column: 1, row: 0, modifiers: KeyModifiers::NONE }, Instant::now());
     assert_eq!((app.active, app.tab.view), (0, View::Settings));
-    app.settings_popup = None;
+    app.popup = None;
     app.tabs.pop();
     app.tab.view = View::Catalog;
     // A response for a tab that's gone is dropped.
@@ -1075,8 +1075,8 @@ fn tab_focuses_parts_and_the_verbs_follow_it() {
     tab(&mut app, false);
     tab(&mut app, false);
     app.on_key(KeyEvent::from(KeyCode::Enter));
-    assert_eq!(app.tab.viewer.as_ref().map(|v| v.index), Some(1));
-    app.tab.viewer = None;
+    assert_eq!(app.tab.viewer().map(|v| v.index), Some(1));
+    app.tab.popup = None;
     // Past the last part with any: a message, the focus stays.
     for _ in 0..10 {
         tab(&mut app, false);
@@ -1090,22 +1090,22 @@ fn the_menu_runs_what_it_lists() {
     app.goto_str("a/x/1");
     app.handle(Msg::Thread(app.tab.req, Ok(vec![Post { no: 1, files: vec![Attachment { filename: "a.png".into(), url: "http://127.0.0.1:3/a.png".into(), ..Default::default() }], ..Default::default() }])));
     app.on_key(KeyEvent::from(KeyCode::Char('.')));
-    let m = app.menu.as_ref().unwrap();
+    let m = app.menu().unwrap();
     let has = |a: Action| m.items.iter().any(|i| matches!(i, MenuItem::Act(x, _) if *x == a));
     assert!(has(Action::View) && has(Action::Watch) && has(Action::Gallery) && !has(Action::Preview));
     // A row's own key runs it, and the menu closes.
     app.on_key(KeyEvent::from(KeyCode::Char('w')));
-    assert!(app.menu.is_none() && app.status.as_ref().is_some_and(|s| s.text.starts_with("Watching")));
+    assert!(app.menu().is_none() && app.status.as_ref().is_some_and(|s| s.text.starts_with("Watching")));
     // So does enter on a row.
     app.on_key(KeyEvent::from(KeyCode::Char('.')));
-    let at = app.menu.as_ref().unwrap().items.iter().position(|i| matches!(i, MenuItem::Act(Action::Watch, _))).unwrap();
-    app.menu.as_mut().unwrap().list.select(Some(at));
+    let at = app.menu().unwrap().items.iter().position(|i| matches!(i, MenuItem::Act(Action::Watch, _))).unwrap();
+    app.menu_mut().unwrap().list.select(Some(at));
     app.on_key(KeyEvent::from(KeyCode::Enter));
-    assert!(app.menu.is_none() && app.status.as_ref().is_some_and(|s| s.text.starts_with("Stopped watching")));
+    assert!(app.menu().is_none() && app.status.as_ref().is_some_and(|s| s.text.starts_with("Stopped watching")));
     // Esc just closes it.
     app.on_key(KeyEvent::from(KeyCode::Char('.')));
     app.on_key(KeyEvent::from(KeyCode::Esc));
-    assert!(app.menu.is_none());
+    assert!(app.menu().is_none());
 }
 
 // ----- saved threads -----
@@ -1350,7 +1350,7 @@ fn x_filters_posts_like_the_selected_one() {
     let mut app = filter_app(dir.path());
     app.tab.thread.as_mut().unwrap().selected = 1;
     app.act(Action::Filter);
-    let a = app.filter_add.as_ref().unwrap();
+    let a = app.filter_add().unwrap();
     assert_eq!(a.candidates[0].what, "posts by Named !Trip");
     app.on_key(KeyEvent::from(KeyCode::Enter));
     // Written to the config, the rest kept as it was.
@@ -1389,10 +1389,10 @@ fn x_filters_posts_like_the_selected_one() {
     // it asks for straight away (esc: out).
     app.tab.thread.as_mut().unwrap().selected = 0;
     app.act(Action::Filter);
-    let a = app.filter_add.as_ref().unwrap();
+    let a = app.filter_add().unwrap();
     assert!(a.candidates.is_empty() && a.word.as_deref() == Some(""));
     app.on_key(KeyEvent::from(KeyCode::Esc));
-    assert!(app.filter_add.is_none());
+    assert!(app.filter_add().is_none());
 }
 
 #[test]
@@ -1404,7 +1404,7 @@ fn filters_from_a_catalog_by_subject_and_image() {
     let op = |no, subject: &str| Post { no, subject: Some(subject.into()), name: "Anonymous".into(), files: vec![file.clone()], ..Default::default() };
     app.handle(Msg::Catalog(app.tab.req, Ok(vec![op(1, "Daily (thread)"), op(2, "Other"), op(3, "Daily (thread)")])));
     app.act(Action::Filter);
-    let a = app.filter_add.as_ref().unwrap();
+    let a = app.filter_add().unwrap();
     let fields: Vec<_> = a.candidates.iter().map(|c| c.field).collect();
     assert_eq!(fields, [crate::filter::Field::Md5, crate::filter::Field::Filename, crate::filter::Field::Subject]);
     app.on_key(KeyEvent::from(KeyCode::Char('G')));
@@ -1426,7 +1426,7 @@ fn the_filter_list_edits_turns_off_and_removes() {
     app.open_settings();
     app.settings_list.state.select(settings::items().iter().position(|&i| i == settings::Item::Filters));
     app.enter();
-    let Some(settings::Popup::Filters { counts, .. }) = &app.settings_popup else { panic!("no list") };
+    let Some(SettingsPopup::Filters { counts, .. }) = app.settings_popup() else { panic!("no list") };
     assert_eq!(counts, &[(0, 0)]);
     // a: a new one, typing its pattern; a bad regex is refused, and isn't saved.
     app.on_key(KeyEvent::from(KeyCode::Char('a')));
@@ -1445,7 +1445,7 @@ fn the_filter_list_edits_turns_off_and_removes() {
     assert!(config_text(&app).ends_with("[[filter]]\npattern = \"Named\"\naction = \"hide\"\n"), "{}", config_text(&app));
     // Fields: the name too (row 5), then not the subject or comment (rows 3, 4).
     for (row, _) in [(5, ()), (3, ()), (4, ())] {
-        if let Some(settings::Popup::FilterEdit { row: r, .. }) = &mut app.settings_popup {
+        if let Some(SettingsPopup::FilterEdit { row: r, .. }) = app.settings_popup_mut() {
             *r = row;
         }
         app.on_key(KeyEvent::from(KeyCode::Enter));
@@ -1455,14 +1455,14 @@ fn the_filter_list_edits_turns_off_and_removes() {
     // The last field can't go.
     app.on_key(KeyEvent::from(KeyCode::Up));
     app.on_key(KeyEvent::from(KeyCode::Down));
-    if let Some(settings::Popup::FilterEdit { row: r, .. }) = &mut app.settings_popup {
+    if let Some(SettingsPopup::FilterEdit { row: r, .. }) = app.settings_popup_mut() {
         *r = 5;
     }
     app.on_key(KeyEvent::from(KeyCode::Enter));
     assert_eq!(app.status.as_ref().unwrap().text, "A filter needs at least one field");
     // Back to the list: it counts what it catches; space turns it off (kept in the file).
     app.on_key(KeyEvent::from(KeyCode::Esc));
-    let Some(settings::Popup::Filters { counts, list }) = &app.settings_popup else { panic!("not the list") };
+    let Some(SettingsPopup::Filters { counts, list }) = app.settings_popup() else { panic!("not the list") };
     assert_eq!((counts[1], list.selected()), ((2, 0), Some(1)));
     app.on_key(KeyEvent::from(KeyCode::Char(' ')));
     assert!(config_text(&app).contains("enabled = false"));
@@ -1610,34 +1610,34 @@ fn the_viewer_goes_through_the_whole_thread_and_zooms() {
     app.tab.thread.as_mut().unwrap().select(2);
     // v: every file of the thread, from the selected post's.
     app.act(Action::View);
-    let v = app.tab.viewer.as_ref().unwrap();
+    let v = app.tab.viewer().unwrap();
     assert_eq!((v.files.len(), v.index, v.posts.clone()), (4, 1, vec![1, 3, 3, 4]));
     let key = |app: &mut App, c: KeyCode| app.on_key(KeyEvent::from(c));
     key(&mut app, KeyCode::Char('l'));
     key(&mut app, KeyCode::Char('l'));
-    assert_eq!(app.tab.viewer.as_ref().unwrap().index, 3);
+    assert_eq!(app.tab.viewer().unwrap().index, 3);
     // Zoomed, h/j/k/l move instead; page down is the next file (fitted again).
     key(&mut app, KeyCode::Char('+'));
     key(&mut app, KeyCode::Char('='));
     key(&mut app, KeyCode::Char('l'));
-    let v = app.tab.viewer.as_ref().unwrap();
+    let v = app.tab.viewer().unwrap();
     assert_eq!((v.index, v.crop.zoom), (3, 200));
     assert!(v.crop.x > 500);
     key(&mut app, KeyCode::Char('-'));
-    assert_eq!(app.tab.viewer.as_ref().unwrap().crop.zoom, 150);
+    assert_eq!(app.tab.viewer().unwrap().crop.zoom, 150);
     // esc fits first, then closes, on the post of the file last viewed.
     key(&mut app, KeyCode::Esc);
-    assert_eq!(app.tab.viewer.as_ref().unwrap().crop, Crop::FIT);
+    assert_eq!(app.tab.viewer().unwrap().crop, Crop::FIT);
     key(&mut app, KeyCode::PageDown);
-    assert_eq!(app.tab.viewer.as_ref().unwrap().index, 0);
+    assert_eq!(app.tab.viewer().unwrap().index, 0);
     key(&mut app, KeyCode::Esc);
-    assert!(app.tab.viewer.is_none());
+    assert!(app.tab.viewer().is_none());
     assert_eq!(app.tab.thread.as_ref().unwrap().current().unwrap().no, 1);
     // In a catalog, it's still the one thread's files.
     app.goto_str("a/x");
     app.handle(Msg::Catalog(app.tab.req, Ok(vec![post(1, vec![file("a.png"), file("e.png")])])));
     app.act(Action::View);
-    let v = app.tab.viewer.as_ref().unwrap();
+    let v = app.tab.viewer().unwrap();
     assert!(v.files.len() == 2 && v.posts.is_empty());
 }
 
@@ -1784,7 +1784,7 @@ fn catalogs_open_from_their_last_copy_keeping_the_selection() {
 /// Run the menu row labeled `label`.
 fn run_menu_row(app: &mut App, label: &str) {
     app.on_key(KeyEvent::from(KeyCode::Char('.')));
-    let m = app.menu.as_mut().expect("a menu");
+    let m = app.menu_mut().expect("a menu");
     let labels: Vec<String> = m.items.iter().map(|it| match it {
         MenuItem::Enter(l) | MenuItem::Act(_, l) => l.clone(),
     }).collect();
@@ -1816,7 +1816,7 @@ fn saving_needs_a_target_or_asks_first() {
     // D and E aren't keys any more.
     press(&mut app, 'D');
     press(&mut app, 'E');
-    assert!(app.confirm.is_none() && total(&app) == 0);
+    assert!(app.confirm().is_none() && total(&app) == 0);
     // Focused, d saves the file.
     app.on_key(KeyEvent::from(KeyCode::Tab));
     press(&mut app, 'd');
@@ -1824,27 +1824,27 @@ fn saving_needs_a_target_or_asks_first() {
     app.on_key(KeyEvent::from(KeyCode::Esc));
     // All the thread's files: from the menu, which asks, saying what and where.
     run_menu_row(&mut app, "save all the thread's files…");
-    let c = app.confirm.as_ref().unwrap();
+    let c = app.confirm().unwrap();
     assert_eq!(c.lines[0], "3 files (3.0 MB in all)");
     assert!(c.lines[1].starts_with("to ") && c.lines[1].ends_with(&dir.path().display().to_string()));
     // Anything but enter cancels.
     press(&mut app, 'j');
-    assert!(app.confirm.is_none() && total(&app) == 1);
+    assert!(app.confirm().is_none() && total(&app) == 1);
     assert_eq!(app.status.as_ref().unwrap().text, "Not saved");
     // So does a click.
     run_menu_row(&mut app, "save all the thread's files…");
     app.on_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 0, 0), Instant::now());
-    assert!(app.confirm.is_none() && total(&app) == 1);
+    assert!(app.confirm().is_none() && total(&app) == 1);
     run_menu_row(&mut app, "save all the thread's files…");
     app.on_key(KeyEvent::from(KeyCode::Enter));
-    assert!(app.confirm.is_none() && total(&app) == 4);
+    assert!(app.confirm().is_none() && total(&app) == 4);
     // One post's files, from the menu: no question.
     app.tab.thread.as_mut().unwrap().select(1);
     run_menu_row(&mut app, "save the post's files");
     assert_eq!(total(&app), 6);
     // In the viewer, d saves the file shown.
     press(&mut app, 'v');
-    assert!(app.tab.viewer.is_some());
+    assert!(app.tab.viewer().is_some());
     press(&mut app, 'd');
     assert_eq!(total(&app), 7);
     run_menu_row(&mut app, "save it");
@@ -1869,14 +1869,14 @@ fn an_action_without_a_key_is_in_the_menu() {
     assert_eq!(app.downloads.total, 0);
     // The menu still runs it, with no key shown.
     app.on_key(KeyEvent::from(KeyCode::Char('.')));
-    let row = app.menu.as_ref().unwrap().items.iter().find(|it| matches!(it, MenuItem::Act(Action::Download, _))).cloned().unwrap();
+    let row = app.menu().unwrap().items.iter().find(|it| matches!(it, MenuItem::Act(Action::Download, _))).cloned().unwrap();
     assert_eq!(app.menu_key(&row), "");
     app.on_key(KeyEvent::from(KeyCode::Esc));
     run_menu_row(&mut app, "save this file");
     assert_eq!(app.downloads.total, 1);
     // A key given back still asks first.
     app.on_key(KeyEvent::from(KeyCode::Char('E')));
-    assert!(app.confirm.is_some());
+    assert!(app.confirm().is_some());
 }
 
 fn type_text(app: &mut App, text: &str) {
@@ -1896,27 +1896,27 @@ fn a_link_to_a_new_site_adds_it_then_goes_there() {
     app.act(Action::Goto);
     type_text(&mut app, "https://newchan.invalid/v/thread/5.html#7");
     app.on_key(KeyEvent::from(KeyCode::Enter));
-    assert!(matches!(&app.adding, Some(Adding::Looking { host, .. }) if host == "newchan.invalid"));
-    settle_until(&mut app, |a| matches!(a.adding, Some(Adding::Site { .. })));
-    assert!(matches!(&app.adding, Some(Adding::Site { site, name, .. }) if name == "newchan" && site.kind == crate::config::SiteKind::Jschan));
+    assert!(matches!(app.adding(), Some(Adding::Looking { host, .. }) if host == "newchan.invalid"));
+    settle_until(&mut app, |a| matches!(a.adding(), Some(Adding::Site { .. })));
+    assert!(matches!(app.adding(), Some(Adding::Site { site, name, .. }) if name == "newchan" && site.kind == crate::config::SiteKind::Jschan));
     // The name can be changed; a taken one (or one with a slash) is refused.
     for _ in 0..7 {
         app.on_key(KeyEvent::from(KeyCode::Backspace));
     }
     type_text(&mut app, "A");
     app.on_key(KeyEvent::from(KeyCode::Enter));
-    assert!(app.adding.is_some() && app.status.as_ref().unwrap().text == "A site is already called A");
+    assert!(app.adding().is_some() && app.status.as_ref().unwrap().text == "A site is already called A");
     app.on_key(KeyEvent::from(KeyCode::Backspace));
     type_text(&mut app, "my/chan");
     app.on_key(KeyEvent::from(KeyCode::Enter));
-    assert!(app.adding.is_some() && app.status.as_ref().unwrap().text.contains("can't have /"));
+    assert!(app.adding().is_some() && app.status.as_ref().unwrap().text.contains("can't have /"));
     for _ in 0..5 {
         app.on_key(KeyEvent::from(KeyCode::Backspace));
     }
     type_text(&mut app, "chan");
     app.on_key(KeyEvent::from(KeyCode::Enter));
     // Added, saved, and the link opened on it.
-    assert!(app.adding.is_none());
+    assert!(app.adding().is_none());
     let new = app.sites.len() - 1;
     assert_eq!((app.sites[new].cfg.name.as_str(), app.sites[new].cfg.url.as_deref()), ("mychan", Some("https://newchan.invalid")));
     let saved: Config = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
@@ -1925,14 +1925,14 @@ fn a_link_to_a_new_site_adds_it_then_goes_there() {
     assert!(app.visible_sites().contains(&SiteRow::Site(new)));
     // From now on its links just open.
     app.goto_str("https://newchan.invalid/tech/");
-    assert!(app.adding.is_none());
+    assert!(app.adding().is_none());
     assert_eq!((app.tab.site, app.tab.view), (new, View::Catalog));
     // A site that doesn't answer like any engine: said, nothing added. (After the catalog
     // load above has answered, so its error doesn't take the status.)
     settle_until(&mut app, |a| a.tab.loading.is_none());
     serve("blank.invalid", vec![]);
     app.goto_str("blank.invalid/b/");
-    settle_until(&mut app, |a| a.adding.is_none());
+    settle_until(&mut app, |a| a.adding().is_none());
     assert!(app.status.as_ref().unwrap().text.starts_with("blank.invalid doesn't answer like"), "{:?}", app.status);
     assert_eq!(app.sites.len(), new + 1);
     crate::http::serve_test_host("newchan.invalid", None);
@@ -1953,46 +1953,46 @@ fn settings_add_sites_and_vichan_boards_and_remove_them() {
     run_menu_row(&mut app, "add a site…");
     app.paste("vi2.invalid/tech/");
     app.on_key(KeyEvent::from(KeyCode::Enter));
-    settle_until(&mut app, |a| matches!(a.adding, Some(Adding::Site { .. })));
+    settle_until(&mut app, |a| matches!(a.adding(), Some(Adding::Site { .. })));
     app.on_key(KeyEvent::from(KeyCode::Enter));
     let i = app.sites.len() - 1;
     assert_eq!(app.status.as_ref().unwrap().text, "Added vi2 (vichan): it's on the home screen");
     assert_eq!(app.tab.view, View::Sites);
     // A link to a board it doesn't list adds the board; one it doesn't have is refused.
-    app.adding = Some(Adding::Typing(String::new()));
+    app.popup = Some(Popup::Adding(Adding::Typing(String::new())));
     app.paste("https://vi2.invalid/b/res/1.html");
     app.on_key(KeyEvent::from(KeyCode::Enter));
-    settle_until(&mut app, |a| matches!(a.adding, Some(Adding::Board { .. })));
+    settle_until(&mut app, |a| matches!(a.adding(), Some(Adding::Board { .. })));
     app.on_key(KeyEvent::from(KeyCode::Enter));
     let boards = |app: &App| app.sites[i].cfg.boards.clone().unwrap().iter().map(|b| crate::backend::to_board(b).uri).collect::<Vec<_>>();
     assert_eq!(boards(&app), ["tech", "b"]);
     let saved: Config = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
     assert_eq!(saved.sites[0].boards, app.sites[i].cfg.boards);
-    app.adding = Some(Adding::Typing("vi2.invalid/zz/".into()));
+    app.popup = Some(Popup::Adding(Adding::Typing("vi2.invalid/zz/".into())));
     app.on_key(KeyEvent::from(KeyCode::Enter));
-    settle_until(&mut app, |a| a.adding.is_none());
+    settle_until(&mut app, |a| a.adding().is_none());
     assert!(app.status.as_ref().unwrap().text.contains("has no /zz/"));
     // One it has: nothing to do.
-    app.adding = Some(Adding::Typing("vi2.invalid/b/".into()));
+    app.popup = Some(Popup::Adding(Adding::Typing("vi2.invalid/b/".into())));
     app.on_key(KeyEvent::from(KeyCode::Enter));
-    assert!(app.adding.is_none() && app.status.as_ref().unwrap().text == "vi2 is already one of your sites");
+    assert!(app.adding().is_none() && app.status.as_ref().unwrap().text == "vi2 is already one of your sites");
     // esc while asking: the answer is dropped.
-    app.adding = Some(Adding::Typing("vi2.invalid/b2/".into()));
+    app.popup = Some(Popup::Adding(Adding::Typing("vi2.invalid/b2/".into())));
     app.on_key(KeyEvent::from(KeyCode::Enter));
     app.on_key(KeyEvent::from(KeyCode::Esc));
     std::thread::sleep(Duration::from_millis(50));
     app.poll();
-    assert!(app.adding.is_none());
+    assert!(app.adding().is_none());
     // Settings › Your sites lists it; x twice takes it out of the config and off the home screen.
     app.open_settings();
     let mine = settings::items().iter().position(|&it| it == settings::Item::MySites).unwrap();
     app.settings_list.state.select(Some(mine));
     app.activate_setting();
-    assert!(matches!(&app.settings_popup, Some(SettingsPopup::Sites(m)) if m.sites.len() == 1 && m.sites[0].name == "vi2"));
+    assert!(matches!(app.settings_popup(), Some(SettingsPopup::Sites(m)) if m.sites.len() == 1 && m.sites[0].name == "vi2"));
     app.on_key(KeyEvent::from(KeyCode::Char('x')));
     assert_eq!(app.status.as_ref().unwrap().text, "x again removes vi2 from your config");
     app.on_key(KeyEvent::from(KeyCode::Char('x')));
-    assert!(matches!(&app.settings_popup, Some(SettingsPopup::Sites(m)) if m.sites.is_empty()));
+    assert!(matches!(app.settings_popup(), Some(SettingsPopup::Sites(m)) if m.sites.is_empty()));
     assert!(!app.visible_sites().contains(&SiteRow::Site(i)));
     assert!(toml::from_str::<Config>(&std::fs::read_to_string(&path).unwrap()).unwrap().sites.is_empty());
     crate::http::serve_test_host("vi2.invalid", None);
@@ -2236,7 +2236,7 @@ fn no_images_are_asked_for_on_a_board_with_images_off() {
     assert!(app.images.queued_urls().is_empty());
     // The viewer says why instead of opening.
     app.on_key(KeyEvent::from(KeyCode::Enter));
-    assert!(app.tab.viewer.is_none() && app.status.as_ref().unwrap().text.starts_with("Images are off on /x/"));
+    assert!(app.tab.viewer().is_none() && app.status.as_ref().unwrap().text.starts_with("Images are off on /x/"));
     // The same thread on a board with images: asked for.
     app.tab.gallery = None;
     app.tab.board = Some(Board { uri: "xy".into(), title: String::new(), nsfw: Some(false) });
@@ -2393,8 +2393,8 @@ fn updating_a_vichan_sites_boards() {
     app.settings_list.state.select(Some(mine));
     app.activate_setting();
     app.on_key(KeyEvent::from(KeyCode::Char('r')));
-    settle_until(&mut app, |a| matches!(a.adding, Some(Adding::Boards { .. })));
-    let Some(Adding::Boards { update, drop: false, .. }) = &app.adding else { panic!("{:?}", app.status) };
+    settle_until(&mut app, |a| matches!(a.adding(), Some(Adding::Boards { .. })));
+    let Some(Adding::Boards { update, drop: false, .. }) = app.adding() else { panic!("{:?}", app.status) };
     assert_eq!((update.added.len(), update.missing.len()), (1, 1));
     // d drops what the bar doesn't have; enter writes it, comments kept, and it's in use.
     app.on_key(KeyEvent::from(KeyCode::Char('d')));
@@ -2407,13 +2407,13 @@ fn updating_a_vichan_sites_boards() {
     assert_eq!(app.sites[0].cfg.boards, saved.sites[0].boards);
     // Again: nothing to change.
     app.refresh_board_list(0);
-    settle_until(&mut app, |a| a.adding.is_none());
+    settle_until(&mut app, |a| a.adding().is_none());
     assert_eq!(app.status.as_ref().unwrap().text, "vb's board list is up to date");
     // Pages without a bar: said, nothing changes.
     serve_text("vb.invalid", vec![("/", "<html></html>".into())]);
     crate::http::forget_host("vb.invalid");
     app.refresh_board_list(0);
-    settle_until(&mut app, |a| a.adding.is_none());
+    settle_until(&mut app, |a| a.adding().is_none());
     assert!(app.status.as_ref().unwrap().text.contains("have no board list to read"));
     assert_eq!(app.sites[0].cfg.boards, saved.sites[0].boards);
     crate::http::serve_test_host("vb.invalid", None);
@@ -2449,18 +2449,18 @@ fn hidden_words_hide_posts_everywhere() {
     app.on_key(KeyEvent::from(KeyCode::Char('x')));
     assert!(app.hidden_words.is_empty() && hidden(&app).iter().all(Option::is_none));
     assert!(!std::fs::read_to_string(&path).unwrap().contains("hidden_words"));
-    app.settings_popup = None;
+    app.popup = None;
     app.tab.view = View::Thread;
     // From a post's X: w, the thread's search to start with; u right after takes it back.
     app.tab.thread.as_mut().unwrap().posts[1].name = "Satoshi".into();
     app.tab.thread.as_mut().unwrap().set_search("free".into());
     app.tab.thread.as_mut().unwrap().select(1);
     app.open_add_filter();
-    assert!(app.filter_add.as_ref().is_some_and(|a| !a.candidates.is_empty() && a.word.is_none()));
+    assert!(app.filter_add().is_some_and(|a| !a.candidates.is_empty() && a.word.is_none()));
     app.on_key(KeyEvent::from(KeyCode::Char('w')));
-    assert_eq!(app.filter_add.as_ref().unwrap().word.as_deref(), Some("free"));
+    assert_eq!(app.filter_add().unwrap().word.as_deref(), Some("free"));
     app.on_key(KeyEvent::from(KeyCode::Enter));
-    assert!(app.filter_add.is_none());
+    assert!(app.filter_add().is_none());
     assert_eq!(app.hidden_words, ["free"]);
     assert_eq!(hidden(&app)[1], Some("hidden word: free".into()));
     app.on_key(KeyEvent::from(KeyCode::Char('u')));
@@ -2512,4 +2512,38 @@ fn going_to_the_site_already_on_shows_its_boards() {
     app.goto_str("a");
     assert_eq!(app.tab.view, View::Boards);
     assert_eq!(app.visible_boards().len(), 2);
+}
+
+/// The popup open, by kind: what tests used to read as fields.
+impl App {
+    pub fn menu(&self) -> Option<&Menu> {
+        if let Some(Popup::Menu(m)) = &self.popup { Some(m) } else { None }
+    }
+    pub fn menu_mut(&mut self) -> Option<&mut Menu> {
+        if let Some(Popup::Menu(m)) = &mut self.popup { Some(m) } else { None }
+    }
+    pub fn hints(&self) -> Option<&Hints> {
+        if let Some(Popup::Hints(h)) = &self.popup { Some(h) } else { None }
+    }
+    pub fn confirm(&self) -> Option<&saving::Confirm> {
+        if let Some(Popup::Confirm(c)) = &self.popup { Some(c) } else { None }
+    }
+    pub fn adding(&self) -> Option<&Adding> {
+        if let Some(Popup::Adding(a)) = &self.popup { Some(a) } else { None }
+    }
+    pub fn adding_mut(&mut self) -> Option<&mut Adding> {
+        if let Some(Popup::Adding(a)) = &mut self.popup { Some(a) } else { None }
+    }
+    pub fn filter_add(&self) -> Option<&AddFilter> {
+        if let Some(Popup::AddFilter(a)) = &self.popup { Some(a) } else { None }
+    }
+    pub fn settings_popup(&self) -> Option<&SettingsPopup> {
+        if let Some(Popup::Settings(p)) = &self.popup { Some(p) } else { None }
+    }
+    pub fn settings_popup_mut(&mut self) -> Option<&mut SettingsPopup> {
+        if let Some(Popup::Settings(p)) = &mut self.popup { Some(p) } else { None }
+    }
+    pub fn image_search_panel(&self) -> Option<&ImageSearchPanel> {
+        if let Some(Popup::ImageSearch(p)) = &self.popup { Some(p) } else { None }
+    }
 }

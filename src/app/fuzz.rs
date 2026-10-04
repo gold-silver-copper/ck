@@ -701,9 +701,9 @@ impl World {
             }
             Act::Filter(k, opts) => {
                 // (A popup already open was made from a post that may since have been replaced.)
-                let fresh = app.filter_add.is_none();
+                let fresh = app.filter_add().is_none();
                 app.on_key(KeyEvent::from(KeyCode::Char('X')));
-                let Some((n, post)) = app.filter_add.as_ref().map(|a| (a.candidates.len(), a.post)) else { return };
+                let Some((n, post)) = app.filter_add().map(|a| (a.candidates.len(), a.post)) else { return };
                 for _ in 0..k % n.max(1) {
                     app.on_key(KeyEvent::from(KeyCode::Char('j')));
                 }
@@ -748,7 +748,7 @@ impl World {
             Act::FilterList(seed) => {
                 let mut rng = Rng::new(*seed);
                 app.on_key(KeyEvent::from(KeyCode::Char(',')));
-                if app.tab.view != View::Settings || app.settings_popup.is_some() {
+                if app.tab.view != View::Settings || app.settings_popup().is_some() {
                     return;
                 }
                 app.settings_list.state.select(settings::items().iter().position(|&i| i == settings::Item::Filters));
@@ -1000,7 +1000,7 @@ fn check(app: &App) {
         if tab.cached.is_some() && tab.offline.is_some() {
             fail(format!("tab {i}: both a saved copy and a cached one"));
         }
-        if let Some(v) = &tab.viewer
+        if let Some(v) = tab.viewer()
             && v.index >= v.files.len()
         {
             fail(format!("tab {i}: viewer on file {} of {}", v.index, v.files.len()));
@@ -1010,12 +1010,12 @@ fn check(app: &App) {
         {
             fail(format!("tab {i}: gallery selection {:?} of {}", g.state.selected(), g.files.len()));
         }
-        if let Some(l) = &tab.links
+        if let Some(crate::app::TabPopup::Links(l)) = &tab.popup
             && (l.items.is_empty() || l.list.selected().is_some_and(|k| k >= l.items.len()))
         {
             fail(format!("tab {i}: links selection {:?} of {}", l.list.selected(), l.items.len()));
         }
-        if let (Some(p), Some(t)) = (&tab.preview, &tab.thread)
+        if let (Some(crate::app::TabPopup::Preview(p)), Some(t)) = (&tab.popup, &tab.thread)
             && p.posts.iter().any(|&k| k >= t.posts.len())
         {
             fail(format!("tab {i}: preview of posts {:?} in a thread of {}", p.posts, t.posts.len()));
@@ -1025,22 +1025,22 @@ fn check(app: &App) {
             fail(format!("tab {i}: {} catalog marks for {} threads", tab.catalog_marks.len(), tab.catalog.len()));
         }
     }
-    if let Some(m) = &app.menu
+    if let Some(m) = app.menu()
         && (m.items.is_empty() || m.list.selected().is_some_and(|k| k >= m.items.len()))
     {
         fail(format!("a menu of {} rows on row {:?}", m.items.len(), m.list.selected()));
     }
     // Hint labels: each one picks one target, so none starts another.
-    if let Some(h) = &app.hints {
+    if let Some(h) = app.hints() {
         let labels: Vec<&str> = h.targets.iter().map(|t| t.label.as_str()).collect();
         if labels.iter().enumerate().any(|(i, a)| labels.iter().enumerate().any(|(j, b)| i != j && b.starts_with(a))) {
             fail(format!("hint labels overlap: {labels:?}"));
         }
     }
-    if app.settings_popup.is_some() && app.tab.view != View::Settings {
+    if app.settings_popup().is_some() && app.tab.view != View::Settings {
         fail(format!("a settings popup in {:?}", app.tab.view));
     }
-    if let Some(p) = &app.image_search_panel
+    if let Some(p) = app.image_search_panel()
         && p.list.selected().is_some_and(|r| !matches!(p.rows.get(r), Some(Ok(_))))
     {
         fail(format!("image search on row {:?} of {}", p.list.selected(), p.rows.len()));
@@ -1126,7 +1126,7 @@ impl Before {
             }
             _ => None,
         };
-        let shown = app.tab.view == View::Thread && app.tab.gallery.is_none() && app.tab.viewer.is_none();
+        let shown = app.tab.view == View::Thread && app.tab.gallery.is_none() && app.tab.viewer().is_none();
         let reading = app.tab.thread.as_ref().filter(|_| shown).and_then(|t| {
             let top = t.posts[t.entries.get(t.layout.as_ref()?.entry_at(t.scroll))?.post].no;
             Some((app.active, t.board.clone(), t.no, t.posts.len(), t.at_end(), top))
@@ -1159,7 +1159,7 @@ fn check_images(app: &App, before: &[String]) {
         _ => false,
     };
     for u in asked {
-        assert!(!off_thumbs.contains(&u.as_str()) || shared(u) || app.tab.viewer.is_some(), "{u} was asked for on a board with images off");
+        assert!(!off_thumbs.contains(&u.as_str()) || shared(u) || app.tab.viewer().is_some(), "{u} was asked for on a board with images off");
     }
 }
 
@@ -1167,7 +1167,7 @@ fn check_images(app: &App, before: &[String]) {
 /// is on screen; reading elsewhere, the same post is at the top.
 fn check_follow(app: &App, before: &Before) {
     let Some((tab, board, no, posts, at_end, top)) = &before.reading else { return };
-    let shown = app.tab.view == View::Thread && app.tab.gallery.is_none() && app.tab.viewer.is_none();
+    let shown = app.tab.view == View::Thread && app.tab.gallery.is_none() && app.tab.viewer().is_none();
     let Some(t) = app.tab.thread.as_ref().filter(|t| shown && app.active == *tab && t.board == *board && t.no == *no && t.posts.len() > *posts) else { return };
     let Some(l) = &t.layout else { return };
     let e = t.entry();
@@ -1188,7 +1188,7 @@ fn check_follow(app: &App, before: &Before) {
 /// layout would give.
 fn check_layout(app: &mut App) {
     let clock = app.clock;
-    let drawn = app.tab.view == View::Thread && app.tab.gallery.is_none() && app.tab.viewer.is_none();
+    let drawn = app.tab.view == View::Thread && app.tab.gallery.is_none() && app.tab.viewer().is_none();
     let Some(t) = app.tab.thread.as_mut().filter(|_| drawn) else { return };
     let Some((width, thumbs)) = t.layout.as_ref().map(|l| (l.width, l.thumbs_on)) else { return };
     let full = crate::ui::layout_all(t, width, thumbs, clock);

@@ -36,7 +36,7 @@ impl App {
     /// `d`: the viewer's file, the gallery's (see `on_gallery_key`) or the focused one. On a
     /// post with nothing focused it says how, rather than saving all the post's files.
     pub(super) fn save_here(&mut self) {
-        if self.tab.viewer.is_some() {
+        if self.tab.viewer().is_some() {
             return self.save_viewed();
         }
         if self.download_focused() {
@@ -65,7 +65,7 @@ impl App {
 
     /// `d` in the image viewer: the file shown.
     fn save_viewed(&mut self) {
-        let Some(v) = &self.tab.viewer else { return };
+        let Some(v) = self.tab.viewer() else { return };
         let Some(url) = v.files.get(v.index).map(|f| f.url.clone()) else { return };
         let no = v.posts.get(v.index).copied();
         let from = if self.tab.view == View::Thread {
@@ -124,12 +124,12 @@ impl App {
                 vec![format!("thread.html and thread.json ({} posts)", t.posts.len()), format!("to {at}"), "and a copy in Saved".into()],
             ),
         };
-        self.confirm = Some(Confirm { what, title, lines });
+        self.popup = Some(Popup::Confirm(Confirm { what, title, lines }));
     }
 
     /// Keys while a save asks: `enter` (or `y`) saves, anything else cancels.
     pub(super) fn on_confirm_key(&mut self, key: KeyEvent) {
-        let Some(c) = self.confirm.take() else { return };
+        let Some(c) = take_popup!(self, Confirm) else { return };
         if !matches!(key.code, KeyCode::Enter | KeyCode::Char('y')) {
             return self.info("Not saved");
         }

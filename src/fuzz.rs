@@ -907,7 +907,7 @@ fn config_once(seed: u64) {
         term.draw(|f| crate::ui::draw(f, &mut app)).unwrap();
     }
     // The filter list, and whatever its keys do.
-    app.settings_popup = Some(app.filter_list(0));
+    app.popup = Some(crate::app::Popup::Settings(app.filter_list(0)));
     for _ in 0..rng.below(12) {
         let key = *rng.pick(&[KeyCode::Char('j'), KeyCode::Char(' '), KeyCode::Char('x'), KeyCode::Enter, KeyCode::Char('a'), KeyCode::Char('k'), KeyCode::Esc, KeyCode::Char('w')]);
         app.on_key(KeyEvent::from(key));

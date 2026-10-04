@@ -32,7 +32,7 @@ impl App {
             let key = |c| KeyEvent::from(if c { KeyCode::Down } else { KeyCode::Up });
             match self.modal() {
                 Some(Modal::Help | Modal::Menu | Modal::Viewer | Modal::Preview | Modal::Links | Modal::ImageSearch) => self.on_key(key(down)),
-                Some(Modal::Hints) => self.hints = None,
+                Some(Modal::Hints) => self.popup = None,
                 _ if self.tab.view == View::Thread => {
                     if let Some(t) = &mut self.tab.thread {
                         t.scroll_lines(if down { 3 } else { -3 });
@@ -50,7 +50,7 @@ impl App {
         // A right-click selects what's under it and opens its menu (or closes one that's open).
         if right {
             match self.modal() {
-                Some(Modal::Menu) => self.menu = None,
+                Some(Modal::Menu) => self.popup = None,
                 None => {
                     self.select_at(ev.column, ev.row);
                     self.open_menu();
@@ -85,18 +85,17 @@ impl App {
         match self.modal() {
             Some(Modal::Menu) => return self.on_menu_click(ev.column, ev.row),
             Some(Modal::Hints) => {
-                self.hints = None;
+                self.popup = None;
                 return;
             }
             Some(Modal::Links) => return self.on_links_click(ev.column, ev.row, now),
             Some(Modal::ImageSearch) => return self.on_image_search_click(ev.column, ev.row),
             Some(Modal::Help | Modal::Preview | Modal::AddFilter | Modal::Confirm | Modal::Adding) => {
                 // Clicking anywhere closes a popup (a save that asks isn't made, nor a site added).
-                self.confirm = None;
-                self.adding = None;
-                self.show_help = false;
-                self.tab.preview = None;
-                self.filter_add = None;
+                self.popup = None;
+                if matches!(self.tab.popup, Some(TabPopup::Preview(_))) {
+                    self.tab.popup = None;
+                }
                 return;
             }
             Some(Modal::Viewer | Modal::Searching | Modal::Filtering) => return,
@@ -146,19 +145,23 @@ impl App {
     /// What's capturing input, topmost first (the viewer can be open over the gallery, and
     /// image search over the viewer). It gets every key; clicks go to it or close it.
     fn modal(&self) -> Option<Modal> {
+        if let Some(p) = &self.popup {
+            return Some(match p {
+                Popup::Settings(_) => Modal::Settings,
+                Popup::Menu(_) => Modal::Menu,
+                Popup::Hints(_) => Modal::Hints,
+                Popup::Confirm(_) => Modal::Confirm,
+                Popup::Adding(_) => Modal::Adding,
+                Popup::AddFilter(_) => Modal::AddFilter,
+                Popup::ImageSearch(_) => Modal::ImageSearch,
+                Popup::Help(_) => Modal::Help,
+            });
+        }
         let open = [
-            (self.confirm.is_some(), Modal::Confirm),
-            (self.adding.is_some(), Modal::Adding),
-            (self.settings_popup.is_some(), Modal::Settings),
-            (self.filter_add.is_some(), Modal::AddFilter),
-            (self.show_help, Modal::Help),
-            (self.menu.is_some(), Modal::Menu),
-            (self.hints.is_some(), Modal::Hints),
-            (self.image_search_panel.is_some(), Modal::ImageSearch),
-            (self.tab.viewer.is_some(), Modal::Viewer),
-            (self.tab.preview.is_some(), Modal::Preview),
+            (self.tab.viewer().is_some(), Modal::Viewer),
+            (matches!(self.tab.popup, Some(TabPopup::Preview(_))), Modal::Preview),
             (self.tab.gallery.is_some() && self.tab.view == View::Thread, Modal::Gallery),
-            (self.tab.links.is_some(), Modal::Links),
+            (matches!(self.tab.popup, Some(TabPopup::Links(_))), Modal::Links),
             (self.goto.is_some(), Modal::Goto),
             (self.search_input.is_some(), Modal::SearchInput),
             (self.searching, Modal::Searching),
@@ -231,13 +234,10 @@ impl App {
                 Modal::AddFilter => self.on_add_filter_key(key),
                 Modal::Menu => self.on_menu_key(key),
                 Modal::Hints => self.on_hints_key(key),
-                Modal::Help => match key.code {
-                    KeyCode::Char('j') | KeyCode::Down => self.help_scroll = self.help_scroll.saturating_add(1),
-                    KeyCode::Char('k') | KeyCode::Up => self.help_scroll = self.help_scroll.saturating_sub(1),
-                    _ => {
-                        self.show_help = false;
-                        self.help_scroll = 0;
-                    }
+                Modal::Help => match (&mut self.popup, key.code) {
+                    (Some(Popup::Help(scroll)), KeyCode::Char('j') | KeyCode::Down) => *scroll = scroll.saturating_add(1),
+                    (Some(Popup::Help(scroll)), KeyCode::Char('k') | KeyCode::Up) => *scroll = scroll.saturating_sub(1),
+                    _ => self.popup = None,
                 },
                 Modal::ImageSearch => self.on_image_search_key(key.code),
                 Modal::Viewer => match self.keys.action(Scope::Viewer, &key) {
@@ -341,7 +341,7 @@ impl App {
     pub(super) fn act(&mut self, action: Action) {
         match action {
             Action::Quit => self.quit = true,
-            Action::Help => self.show_help = true,
+            Action::Help => self.popup = Some(Popup::Help(0)),
             Action::Settings => self.open_settings(),
             Action::Search if self.tab.view == View::Settings => {}
             Action::Search if self.tab.view == View::Thread => {
@@ -378,7 +378,7 @@ impl App {
             Action::ImageSearch => self.open_image_search(),
             Action::NewTab => self.new_tab(),
             Action::Favorite => self.toggle_favorite(),
-            Action::AddSite => self.adding = Some(super::Adding::Typing(String::new())),
+            Action::AddSite => self.popup = Some(Popup::Adding(super::Adding::Typing(String::new()))),
             Action::BoardImages => self.toggle_board_images(),
             Action::UpdateBoards if self.tab.view == View::Boards => self.refresh_board_list(self.tab.site),
             Action::UpdateBoards => {}
@@ -614,11 +614,11 @@ impl App {
             self.info("Post quotes nothing");
             return;
         }
-        self.tab.preview = Some(Preview { posts, elsewhere, scroll: 0 });
+        self.tab.popup = Some(TabPopup::Preview(Preview { posts, elsewhere, scroll: 0 }));
     }
 
     fn on_preview_key(&mut self, code: KeyCode) {
-        let Some(p) = &mut self.tab.preview else { return };
+        let Some(TabPopup::Preview(p)) = &mut self.tab.popup else { return };
         match code {
             KeyCode::Char('j') | KeyCode::Down => p.scroll = p.scroll.saturating_add(1),
             KeyCode::Char('k') | KeyCode::Up => p.scroll = p.scroll.saturating_sub(1),
@@ -628,19 +628,19 @@ impl App {
             // Jump to the (first) quoted post.
             KeyCode::Enter => {
                 let first = p.posts.first().copied();
-                self.tab.preview = None;
+                self.tab.popup = None;
                 if let (Some(i), Some(t)) = (first, &mut self.tab.thread) {
                     t.jumps.push(t.selected);
                     t.select(i);
                 }
             }
-            _ => self.tab.preview = None,
+            _ => self.tab.popup = None,
         }
     }
 
     fn on_viewer_key(&mut self, code: KeyCode) {
         use crate::images::Crop;
-        let Some(v) = &mut self.tab.viewer else { return };
+        let Some(TabPopup::Viewer(v)) = &mut self.tab.popup else { return };
         let n = v.files.len();
         let zoomed = !v.crop.is_fit();
         match code {
@@ -673,7 +673,7 @@ impl App {
                 {
                     t.select(i);
                 }
-                self.tab.viewer = None;
+                self.tab.popup = None;
             }
             KeyCode::Char('h' | 'k') | KeyCode::Left | KeyCode::Up => v.index = (v.index + n - 1) % n,
             // Space pauses an animated GIF; otherwise it's the next file.

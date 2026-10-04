@@ -6,7 +6,7 @@ use std::time::Duration;
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 use ratatui::widgets::ListState;
 
-use super::{App, View, edit_text, list_move};
+use super::{App, Popup, View, edit_text, list_move};
 use crate::config::{self, ColorMode, ImagesMode};
 use crate::keys::{ACTIONS, Key, Scope};
 use crate::theme::{self, ROLES, Theme, ThemeDef};
@@ -95,7 +95,7 @@ pub fn rows() -> Vec<Result<usize, &'static str>> {
     out
 }
 
-pub enum Popup {
+pub enum SettingsPopup {
     /// Choosing a theme; moving previews it, `before` is restored on esc.
     Themes { list: ListState, names: Vec<String>, before: (String, Theme) },
     /// The current theme's colors; `editing` holds a color being typed.
@@ -245,11 +245,11 @@ impl App {
                 let names = theme::names(&self.themes);
                 let list = ListState::default().with_selected(Some(names.iter().position(|n| *n == self.theme_name).unwrap_or(0)));
                 let before = (self.theme_name.clone(), theme::theme());
-                self.settings_popup = Some(Popup::Themes { list, names, before });
+                self.popup = Some(Popup::Settings(SettingsPopup::Themes { list, names, before }));
             }
             Item::Colors => {
                 let list = ListState::default().with_selected(Some(0));
-                self.settings_popup = Some(Popup::Colors { list, editing: None });
+                self.popup = Some(Popup::Settings(SettingsPopup::Colors { list, editing: None }));
             }
             Item::ColorDepth => {
                 self.color_mode = self.color_mode.next();
@@ -272,7 +272,7 @@ impl App {
                 let mode = self.images_mode.as_str();
                 self.save_config("images (from the next start)", |d| d["images"] = toml_edit::value(mode));
             }
-            Item::Filters => self.settings_popup = Some(self.filter_list(0)),
+            Item::Filters => self.popup = Some(Popup::Settings(self.filter_list(0))),
             Item::RefreshThread => {
                 let secs = next(REFRESH_THREAD, self.refresh_thread.as_secs());
                 self.refresh_thread = Duration::from_secs(secs);
@@ -289,15 +289,15 @@ impl App {
                 self.save_config(&format!("notifications {mode}"), |d| d["notify"] = toml_edit::value(mode));
             }
             Item::DownloadDir => {
-                self.settings_popup = Some(Popup::Folder { value: self.download_dir.clone().unwrap_or_default() });
+                self.popup = Some(Popup::Settings(SettingsPopup::Folder { value: self.download_dir.clone().unwrap_or_default() }));
             }
-            Item::HiddenWords => self.settings_popup = Some(Popup::HiddenWords { list: ListState::default().with_selected(Some(0)), typing: None }),
+            Item::HiddenWords => self.popup = Some(Popup::Settings(SettingsPopup::HiddenWords { list: ListState::default().with_selected(Some(0)), typing: None })),
             Item::NsfwImages => {
                 self.nsfw_images = self.nsfw_images.next();
                 let mode = self.nsfw_images.as_str();
                 self.save_config(&format!("nsfw_images = \"{mode}\""), |d| d["nsfw_images"] = toml_edit::value(mode));
             }
-            Item::BoardImages => self.settings_popup = Some(Popup::BoardImages { list: ListState::default().with_selected(Some(0)) }),
+            Item::BoardImages => self.popup = Some(Popup::Settings(SettingsPopup::BoardImages { list: ListState::default().with_selected(Some(0)) })),
             Item::FollowNew => {
                 self.follow_new_posts = !self.follow_new_posts;
                 let on = self.follow_new_posts;
@@ -314,18 +314,18 @@ impl App {
             }
             Item::Keys => {
                 let list = ListState::default().with_selected(key_rows().iter().position(Result::is_ok));
-                self.settings_popup = Some(Popup::Keys { list, capture: None });
+                self.popup = Some(Popup::Settings(SettingsPopup::Keys { list, capture: None }));
             }
-            Item::AddSite => self.adding = Some(super::Adding::Typing(String::new())),
-            Item::MySites => self.settings_popup = self.my_sites().map(Popup::Sites),
+            Item::AddSite => self.popup = Some(Popup::Adding(super::Adding::Typing(String::new()))),
+            Item::MySites => self.popup = self.my_sites().map(|m| Popup::Settings(SettingsPopup::Sites(m))),
         }
     }
 
     /// Keys while a settings popup is open.
     pub fn on_settings_popup_key(&mut self, key: KeyEvent) {
-        let Some(popup) = self.settings_popup.take() else { return };
-        self.settings_popup = match popup {
-            Popup::Themes { mut list, names, before } => match key.code {
+        let Some(popup) = take_popup!(self, Settings) else { return };
+        let next = match popup {
+            SettingsPopup::Themes { mut list, names, before } => match key.code {
                 KeyCode::Esc | KeyCode::Char('q') => {
                     self.theme_name = before.0;
                     self.set_theme(before.1);
@@ -344,67 +344,67 @@ impl App {
                     if let Some(Ok(t)) = names.get(to).map(|name| theme::resolve(name, &self.themes)) {
                         self.set_theme(t);
                     }
-                    Some(Popup::Themes { list, names, before })
+                    Some(SettingsPopup::Themes { list, names, before })
                 }
             },
-            Popup::Colors { list, editing: Some(mut text) } => match key.code {
-                KeyCode::Esc => Some(Popup::Colors { list, editing: None }),
+            SettingsPopup::Colors { list, editing: Some(mut text) } => match key.code {
+                KeyCode::Esc => Some(SettingsPopup::Colors { list, editing: None }),
                 KeyCode::Enter => {
                     let role = ROLES[list.selected().unwrap_or(0)].0;
                     match theme::parse_color(&text) {
                         Ok(c) => {
                             self.set_role_color(role, Some(theme::color_string(c)));
-                            Some(Popup::Colors { list, editing: None })
+                            Some(SettingsPopup::Colors { list, editing: None })
                         }
                         Err(e) => {
                             self.error(e);
-                            Some(Popup::Colors { list, editing: Some(text) })
+                            Some(SettingsPopup::Colors { list, editing: Some(text) })
                         }
                     }
                 }
                 code => {
                     edit_text(&mut text, code);
-                    Some(Popup::Colors { list, editing: Some(text) })
+                    Some(SettingsPopup::Colors { list, editing: Some(text) })
                 }
             },
-            Popup::Colors { mut list, editing: None } => {
+            SettingsPopup::Colors { mut list, editing: None } => {
                 let cur = list.selected().unwrap_or(0);
                 let role = ROLES[cur].0;
                 match key.code {
                     KeyCode::Esc | KeyCode::Char('q' | 'h') | KeyCode::Left => None,
                     // The field starts empty; the current color is on the row above it.
                     KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right => {
-                        Some(Popup::Colors { list, editing: Some(String::new()) })
+                        Some(SettingsPopup::Colors { list, editing: Some(String::new()) })
                     }
                     // Back to what the base theme has.
                     KeyCode::Char('x') | KeyCode::Delete => {
                         self.set_role_color(role, None);
-                        Some(Popup::Colors { list, editing: None })
+                        Some(SettingsPopup::Colors { list, editing: None })
                     }
                     code => {
                         list.select(Some(list_move(code, cur, ROLES.len()).unwrap_or(cur)));
-                        Some(Popup::Colors { list, editing: None })
+                        Some(SettingsPopup::Colors { list, editing: None })
                     }
                 }
             }
-            Popup::Keys { list, capture: Some(add) } => {
+            SettingsPopup::Keys { list, capture: Some(add) } => {
                 if key.code != KeyCode::Esc {
                     self.bind_key(&list, Some((Key::from_event(&key), add)));
                 }
-                Some(Popup::Keys { list, capture: None })
+                Some(SettingsPopup::Keys { list, capture: None })
             }
-            Popup::Keys { mut list, capture: None } => match key.code {
+            SettingsPopup::Keys { mut list, capture: None } => match key.code {
                 KeyCode::Esc | KeyCode::Char('q' | 'h') | KeyCode::Left => None,
-                KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right => Some(Popup::Keys { list, capture: Some(false) }),
-                KeyCode::Char('a') => Some(Popup::Keys { list, capture: Some(true) }),
+                KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right => Some(SettingsPopup::Keys { list, capture: Some(false) }),
+                KeyCode::Char('a') => Some(SettingsPopup::Keys { list, capture: Some(true) }),
                 // No key: the action is left to the menu.
                 KeyCode::Char('u') => {
                     self.unbind_key(&list);
-                    Some(Popup::Keys { list, capture: None })
+                    Some(SettingsPopup::Keys { list, capture: None })
                 }
                 KeyCode::Char('x') | KeyCode::Delete => {
                     self.bind_key(&list, None);
-                    Some(Popup::Keys { list, capture: None })
+                    Some(SettingsPopup::Keys { list, capture: None })
                 }
                 code => {
                     let rows = key_rows();
@@ -416,42 +416,42 @@ impl App {
                         _ => list_move(code, cur, actions.len()).unwrap_or(cur),
                     };
                     list.select(actions.get(to).copied());
-                    Some(Popup::Keys { list, capture: None })
+                    Some(SettingsPopup::Keys { list, capture: None })
                 }
             },
-            Popup::Filters { list, counts } => self.on_filter_list_key(key, list, counts),
-            Popup::Sites(m) => self.on_my_sites_key(key, m).map(Popup::Sites),
-            Popup::HiddenWords { list, typing: Some(mut text) } => match key.code {
-                KeyCode::Esc => Some(Popup::HiddenWords { list, typing: None }),
+            SettingsPopup::Filters { list, counts } => self.on_filter_list_key(key, list, counts),
+            SettingsPopup::Sites(m) => self.on_my_sites_key(key, m).map(SettingsPopup::Sites),
+            SettingsPopup::HiddenWords { list, typing: Some(mut text) } => match key.code {
+                KeyCode::Esc => Some(SettingsPopup::HiddenWords { list, typing: None }),
                 KeyCode::Enter => {
                     self.add_hidden_word(&text);
                     let last = self.hidden_words.len().saturating_sub(1);
-                    Some(Popup::HiddenWords { list: ListState::default().with_selected(Some(last)), typing: None })
+                    Some(SettingsPopup::HiddenWords { list: ListState::default().with_selected(Some(last)), typing: None })
                 }
                 code => {
                     edit_text(&mut text, code);
-                    Some(Popup::HiddenWords { list, typing: Some(text) })
+                    Some(SettingsPopup::HiddenWords { list, typing: Some(text) })
                 }
             },
-            Popup::HiddenWords { mut list, typing: None } => {
+            SettingsPopup::HiddenWords { mut list, typing: None } => {
                 let cur = list.selected().unwrap_or(0);
                 match key.code {
                     KeyCode::Esc | KeyCode::Char('q' | 'h') | KeyCode::Left => None,
-                    KeyCode::Char('a') => Some(Popup::HiddenWords { list, typing: Some(String::new()) }),
+                    KeyCode::Char('a') => Some(SettingsPopup::HiddenWords { list, typing: Some(String::new()) }),
                     KeyCode::Char('x') | KeyCode::Delete => {
                         if let Some(w) = self.hidden_words.get(cur).cloned() {
                             self.remove_hidden_word(&w);
                         }
                         list.select(Some(cur.min(self.hidden_words.len().saturating_sub(1))));
-                        Some(Popup::HiddenWords { list, typing: None })
+                        Some(SettingsPopup::HiddenWords { list, typing: None })
                     }
                     code => {
                         list.select(Some(list_move(code, cur, self.hidden_words.len()).unwrap_or(cur)));
-                        Some(Popup::HiddenWords { list, typing: None })
+                        Some(SettingsPopup::HiddenWords { list, typing: None })
                     }
                 }
             }
-            Popup::BoardImages { mut list } => {
+            SettingsPopup::BoardImages { mut list } => {
                 let boards = self.boards_with_images_set();
                 let cur = list.selected().unwrap_or(0);
                 match key.code {
@@ -461,16 +461,16 @@ impl App {
                             self.reset_board_images(&k.clone());
                         }
                         list.select(Some(cur.min(boards.len().saturating_sub(2))));
-                        Some(Popup::BoardImages { list })
+                        Some(SettingsPopup::BoardImages { list })
                     }
                     code => {
                         list.select(Some(list_move(code, cur, boards.len()).unwrap_or(cur)));
-                        Some(Popup::BoardImages { list })
+                        Some(SettingsPopup::BoardImages { list })
                     }
                 }
             }
-            Popup::FilterEdit { index, draft, row, typing } => self.on_filter_edit_key(key, index, draft, row, typing),
-            Popup::Folder { mut value } => match key.code {
+            SettingsPopup::FilterEdit { index, draft, row, typing } => self.on_filter_edit_key(key, index, draft, row, typing),
+            SettingsPopup::Folder { mut value } => match key.code {
                 KeyCode::Esc => None,
                 KeyCode::Enter => {
                     let dir = Some(value.trim().to_string()).filter(|v| !v.is_empty());
@@ -485,10 +485,13 @@ impl App {
                 }
                 code => {
                     edit_text(&mut value, code);
-                    Some(Popup::Folder { value })
+                    Some(SettingsPopup::Folder { value })
                 }
             },
         };
+        if let Some(p) = next {
+            self.popup = Some(Popup::Settings(p));
+        }
     }
 
     /// Bind a key to the action selected in the key editor (replacing its keys, or added to
