@@ -1184,3 +1184,14 @@ fn updating_a_built_in_sites_boards() {
     assert!(text.contains("Update lainchan's boards?") && text.contains("New: /mega/"), "{text}");
     assert!(text.contains("kept (d drops them)") && text.contains("lainchan is built in: this saves it as one of your sites"), "{text}");
 }
+
+#[test]
+fn a_hidden_words_label() {
+    let mut a = thread_app(false);
+    a.hidden_words = vec!["implying".into()];
+    a.filters = crate::filter::Filters::new(&[]).unwrap().with_words(&a.hidden_words).unwrap();
+    a.remark_thread();
+    a.tab.thread.as_mut().unwrap().show_hidden = true;
+    let text = render(&mut a).0;
+    assert!(text.contains("hidden word: implying") && !text.contains("hidden: hidden word"), "{text}");
+}
