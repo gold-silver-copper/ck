@@ -575,6 +575,43 @@ fn paint_row(f: &mut Frame, row: Rect, bg: Option<Color>, selected: bool, marked
     }
 }
 
+/// The rows of a list in `area`, from `first`, a line each; the selected one is painted
+/// (out into the panel's padding).
+pub(super) fn list_rows(f: &mut Frame, area: Rect, first: usize, n: usize, sel: Option<usize>, mut row: impl FnMut(usize) -> Line<'static>) {
+    for k in (first..n).take(area.height as usize) {
+        let y = area.y + (k - first) as u16;
+        paint_row(f, Rect::new(area.x - 2, y, area.width + 4, 1), None, Some(k) == sel, false);
+        put(f, area.x, y, area.width, row(k));
+    }
+}
+
+/// A list in a panel, as Settings' lists are: `n` rows (made by `row`, given the width)
+/// scrolled to the selected one (painted unless not `painted`), `empty` when there are none,
+/// and `note` on the last line.
+/// The panel is `extra` rows taller than the list needs; `input` of them, above the note,
+/// are left for a field. Returns the panel's inner area.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn list_panel(
+    f: &mut Frame,
+    (width, title, hint): (u16, &str, &str),
+    n: usize,
+    (sel, painted): (usize, bool),
+    (empty, note): (&str, &str),
+    (extra, input): (u16, u16),
+    mut row: impl FnMut(usize, u16) -> Line<'static>,
+) -> Rect {
+    let h = (n.max(1) as u16 + 5 + extra).min(f.area().height.saturating_sub(4));
+    let inner = panel(f, width, h, title, hint);
+    let view = inner.height.saturating_sub(2 + input);
+    let first = (sel + 1).saturating_sub(view as usize);
+    if n == 0 {
+        put(f, inner.x, inner.y, inner.width, Line::styled(empty.to_string(), dim()));
+    }
+    list_rows(f, Rect { height: view, ..inner }, first, n, painted.then_some(sel), |k| row(k, inner.width));
+    put(f, inner.x, inner.bottom().saturating_sub(1), inner.width, Line::styled(note.to_string(), dim()));
+    inner
+}
+
 /// Draw `count` items `height` rows tall with `gap` rows of background between them;
 /// `build` makes only the ones on screen. With `card` each item sits on that color; the
 /// selected one gets the selection color and an accent stripe, as do those `stripe` marks
