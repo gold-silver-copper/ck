@@ -4,7 +4,7 @@
 use std::collections::HashSet;
 use std::time::Instant;
 
-use super::{App, Gallery, LinksPanel, Msg, Picker, Preview, Search, Sort, ThreadView, View, Viewer, thread_subject};
+use super::{App, Gallery, LinksPanel, Picker, Preview, Search, Sort, ThreadView, View, Viewer, thread_subject};
 use crate::filter::Mark;
 use crate::model::{Board, Post};
 use crate::store::ThreadKey;
@@ -181,10 +181,10 @@ impl App {
     }
 
     /// Handle a response for an inactive tab, as that tab, then switch back.
-    pub(super) fn handle_in_tab(&mut self, i: usize, msg: Msg) {
+    pub(super) fn handle_in_tab(&mut self, i: usize, apply: Box<dyn FnOnce(&mut App) + Send>) {
         let (active, status) = (self.active, self.status.clone());
         self.switch_tab(i);
-        self.handle(msg);
+        apply(self);
         self.switch_tab(active);
         // What happens in other tabs isn't news here.
         self.status = status;

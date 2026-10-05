@@ -263,21 +263,10 @@ impl Viewer {
 }
 
 enum Msg {
-    /// The request was answered from the cache without hitting the network.
-    Cached(u64, Duration),
-    Boards(u64, usize, Result<Vec<Board>>),
-    /// The pages of a board list loaded so far; more are coming.
-    BoardsPartial(u64, usize, Vec<Board>),
-    Catalog(u64, Result<Vec<Post>>),
-    CatalogPartial(u64, Vec<Post>),
-    Thread(u64, Result<Vec<Post>>),
-    /// The last copy kept of the catalog or thread being fetched, and when it was fetched.
-    CachedCatalog(u64, Vec<Post>, i64),
-    CachedThread(u64, Vec<Post>, i64),
-    /// A page of archive search results.
-    Search(u64, u32, Result<crate::backend::SearchPage>),
-    /// The thread a quoted post is in: (board, post, thread).
-    Found(u64, Board, u64, Result<Option<u64>>),
+    /// What a tab's request (`Tab::req`) found, to apply in that tab: another tab's is
+    /// applied there, and one its tab has moved on from is stale and dropped, unless it's
+    /// worth keeping anyway (a finished board list).
+    ForRequest { id: u64, keep_if_stale: bool, apply: Box<dyn FnOnce(&mut App) + Send> },
     /// What background work found, to apply on the UI thread (see `Later`).
     Done(Box<dyn FnOnce(&mut App) + Send>),
     Input(Event),
@@ -297,21 +286,14 @@ impl Later {
 }
 
 impl Msg {
-    /// The request a response is for.
-    fn id(&self) -> Option<u64> {
-        match self {
-            Msg::Cached(id, _)
-            | Msg::Boards(id, ..)
-            | Msg::BoardsPartial(id, ..)
-            | Msg::Catalog(id, _)
-            | Msg::CatalogPartial(id, _)
-            | Msg::CachedCatalog(id, ..)
-            | Msg::CachedThread(id, ..)
-            | Msg::Thread(id, _)
-            | Msg::Search(id, ..)
-            | Msg::Found(id, ..) => Some(*id),
-            _ => None,
-        }
+    /// What request `id` found: `apply` runs in its tab, if it's still waiting for it.
+    fn request(id: u64, apply: impl FnOnce(&mut App) + Send + 'static) -> Msg {
+        Msg::ForRequest { id, keep_if_stale: false, apply: Box::new(apply) }
+    }
+
+    /// `request`, but applied even once its tab has moved on.
+    fn kept(id: u64, apply: impl FnOnce(&mut App) + Send + 'static) -> Msg {
+        Msg::ForRequest { id, keep_if_stale: true, apply: Box::new(apply) }
     }
 }
 
@@ -854,134 +836,31 @@ impl App {
     }
 
     fn handle(&mut self, msg: Msg) {
-        // A response to another request: another tab's is handled there, the rest are stale
-        // (but a finished board list is worth keeping anyway).
-        let other = msg.id().filter(|&id| Some(id) != self.tab.req);
-        if let Some(i) = other.and_then(|id| self.tab_of(id)) {
-            self.handle_in_tab(i, msg);
-            return;
-        }
-        if other.is_some() && !matches!(msg, Msg::Boards(..)) {
-            return;
-        }
-        if let Msg::Input(ev) = &msg {
-            let acted = !matches!(ev, Event::Key(k) if k.kind != KeyEventKind::Press);
-            crate::input_log::note(|| format!("handle  {ev:?}{}", if acted { "" } else { "  (not a press: ignored)" }));
-        }
         match msg {
             Msg::Wake => {}
-            Msg::Input(Event::Key(key)) if key.kind == KeyEventKind::Press => self.on_key(key),
-            Msg::Input(Event::Mouse(m)) => self.on_mouse(m, self.clock.instant()),
-            Msg::Input(Event::Paste(text)) => self.paste(&text),
-            Msg::Input(_) => {}
+            Msg::Input(ev) => {
+                let acted = !matches!(ev, Event::Key(k) if k.kind != KeyEventKind::Press);
+                crate::input_log::note(|| format!("handle  {ev:?}{}", if acted { "" } else { "  (not a press: ignored)" }));
+                match ev {
+                    Event::Key(key) if key.kind == KeyEventKind::Press => self.on_key(key),
+                    Event::Mouse(m) => self.on_mouse(m, self.clock.instant()),
+                    Event::Paste(text) => self.paste(&text),
+                    _ => {}
+                }
+            }
             Msg::Done(apply) => apply(self),
-            Msg::Found(_, board, post, res) => {
-                self.tab.loading = None;
-                match res {
-                    Ok(Some(no)) => {
-                        self.leave_trail(self.tab.board.clone().unwrap_or(board.clone()));
-                        let in_settings = self.tab.view == View::Settings;
-                        self.open_thread_at(board, no, Some(post));
-                        // Found while the settings were open: the thread is behind them.
-                        if in_settings {
-                            self.tab.settings_back = Some(View::Thread);
-                            self.tab.view = View::Settings;
-                        }
+            Msg::ForRequest { id, keep_if_stale, apply } => {
+                // A response to another request: another tab's is handled there, the rest
+                // are stale.
+                if Some(id) != self.tab.req {
+                    if let Some(i) = self.tab_of(id) {
+                        return self.handle_in_tab(i, apply);
                     }
-                    Ok(None) => {
-                        self.error(format!("Post {post} isn't in this thread, and this site can't say which thread it's in"));
-                    }
-                    Err(e) => self.error(e),
-                }
-            }
-            Msg::Search(_, page, res) => {
-                self.tab.loading = None;
-                self.search_results(page, res);
-            }
-            Msg::Cached(_, age) => {
-                if self.status.is_none() {
-                    self.info(format!("Up to date (checked {}s ago)", age.as_secs()));
-                }
-            }
-            Msg::Boards(_, site, res) => {
-                if other.is_none() {
-                    self.tab.loading = None;
-                }
-                match res {
-                    Ok(b) => self.set_boards(site, b, true),
-                    Err(e) if other.is_none() => self.load_failed(http::plain(&e)),
-                    Err(e) => self.error(http::plain(&e)),
-                }
-            }
-            Msg::BoardsPartial(_, site, b) => self.set_boards(site, b, false),
-            Msg::CachedCatalog(_, posts, fetched) => {
-                // Only before anything fetched has arrived.
-                if self.tab.catalog.is_empty() && self.tab.view == View::Catalog {
-                    self.tab.catalog_cached = Some(tabs::Offline { saved: fetched, dead: false });
-                    self.show_catalog(posts);
-                    if let Some(no) = self.tab.pending_catalog
-                        && let Some(i) = self.visible_catalog().iter().position(|&k| self.tab.catalog[k].no == no)
-                    {
-                        self.tab.catalog_list.state.select(Some(i));
+                    if !keep_if_stale {
+                        return;
                     }
                 }
-            }
-            Msg::CachedThread(_, posts, fetched) => {
-                if self.tab.thread.is_none() && self.tab.view == View::Thread && self.tab.saved().is_none() {
-                    self.set_cached_thread(posts, fetched);
-                }
-            }
-            Msg::CatalogPartial(_, posts) => {
-                self.tab.catalog_cached = None;
-                self.show_catalog(posts);
-            }
-            Msg::Catalog(_, res) => {
-                self.tab.loading = None;
-                match res {
-                    Ok(posts) => {
-                        self.tab.catalog_cached = None;
-                        self.show_catalog(posts);
-                        self.catalog_seen();
-                        if let Some(no) = self.tab.pending_catalog.take()
-                            && let Some(i) = self.visible_catalog().iter().position(|&k| self.tab.catalog[k].no == no)
-                        {
-                            self.tab.catalog_list.state.select(Some(i));
-                        }
-                        let len = self.visible_catalog().len();
-                        self.tab.catalog_list.clamp(len);
-                    }
-                    Err(e) if http::is_not_found(&e) => {
-                        let board = self.tab.board.as_ref().map_or_else(String::new, |b| b.uri.clone());
-                        self.load_failed(format!("There's no /{board}/ on {}", self.current_site().cfg.name));
-                    }
-                    Err(e) => self.load_failed(http::plain(&e)),
-                }
-            }
-            Msg::Thread(_, res) => {
-                self.tab.loading = None;
-                self.tab.thread_checked = self.clock.instant();
-                let restoring = std::mem::take(&mut self.tab.restoring);
-                match res {
-                    Ok(posts) => self.set_thread(posts),
-                    // Last session's thread is gone: its catalog instead.
-                    Err(e) if restoring && http::is_not_found(&e) => {
-                        self.tab.view = View::Catalog;
-                        self.load_catalog();
-                        self.info("The thread you had open last time is gone (archived or deleted)");
-                    }
-                    Err(e) if http::is_not_found(&e) => {
-                        let Some(key) = self.tab.board.as_ref().map(|b| self.key(&b.uri, self.tab.pending_thread.unwrap_or_default())) else {
-                            return;
-                        };
-                        if let Some(w) = self.store.watched_mut(&key) {
-                            w.dead = true;
-                            self.save();
-                        }
-                        self.store.saved_dead(&key);
-                        self.thread_gone(&key);
-                    }
-                    Err(e) => self.load_failed(http::plain(&e)),
-                }
+                apply(self);
             }
         }
     }
@@ -1439,8 +1318,29 @@ impl App {
                 // Ask the engine which thread the post is in (only some can).
                 let uri = target.uri.clone();
                 let label = format!("Looking up post {post}");
-                self.spawn(label, move |b, _, _| b.find_thread(&uri, post), move |id, r| Msg::Found(id, target, post, r));
+                self.spawn(label, move |b, _, _| b.find_thread(&uri, post), move |app, r| app.thread_found(target, post, r));
             }
+        }
+    }
+
+    /// The engine said which thread on `board` the quoted `post` is in: open it there.
+    fn thread_found(&mut self, board: Board, post: u64, res: Result<Option<u64>>) {
+        self.tab.loading = None;
+        match res {
+            Ok(Some(no)) => {
+                self.leave_trail(self.tab.board.clone().unwrap_or(board.clone()));
+                let in_settings = self.tab.view == View::Settings;
+                self.open_thread_at(board, no, Some(post));
+                // Found while the settings were open: the thread is behind them.
+                if in_settings {
+                    self.tab.settings_back = Some(View::Thread);
+                    self.tab.view = View::Settings;
+                }
+            }
+            Ok(None) => {
+                self.error(format!("Post {post} isn't in this thread, and this site can't say which thread it's in"));
+            }
+            Err(e) => self.error(e),
         }
     }
 

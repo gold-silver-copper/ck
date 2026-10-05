@@ -4,7 +4,7 @@ use ratatui::crossterm::event::{KeyCode, KeyEvent};
 
 use std::sync::atomic::Ordering;
 
-use super::{App, Msg, Picker, View};
+use super::{App, Picker, View};
 use crate::store::ThreadKey;
 use crate::backend::SearchPage;
 use crate::config::SiteKind;
@@ -188,10 +188,12 @@ impl App {
         }
         let (board, query, page) = (s.board.clone(), s.query.clone(), s.pages + 1);
         let label = if page == 1 { format!("Searching /{board}/ for \"{query}\"") } else { format!("Loading page {page} of results") };
-        self.spawn(label, move |b, _, _| b.search(&board, &query, page), move |id, r| Msg::Search(id, page, r));
+        self.spawn(label, move |b, _, _| b.search(&board, &query, page), move |app, r| app.search_results(page, r));
     }
 
+    /// A page of archive search results arrived.
     pub fn search_results(&mut self, page: u32, res: anyhow::Result<SearchPage>) {
+        self.tab.loading = None;
         let Some(s) = &mut self.tab.search else { return };
         match res {
             Ok(p) => {

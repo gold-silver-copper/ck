@@ -2,7 +2,7 @@
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 
-use super::{App, Msg, Popup, View};
+use super::{App, Popup, View};
 use crate::config::SiteConfig;
 use crate::route::{self, SiteInfo, Target};
 
@@ -90,7 +90,7 @@ impl App {
                 // A post without its thread (FoolFuuka's /post/ links): ask the engine.
                 let label = format!("Looking up post {post}");
                 let job_board = uri.clone();
-                self.spawn(label, move |b, _, _| b.find_thread(&job_board, post), move |id, r| Msg::Found(id, board, post, r));
+                self.spawn(label, move |b, _, _| b.find_thread(&job_board, post), move |app, r| app.thread_found(board, post, r));
             }
             (None, None) => {
                 self.tab.return_to = None;
