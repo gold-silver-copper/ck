@@ -42,6 +42,9 @@ const ANIMATION_BYTES: usize = 40 * 1024 * 1024;
 const GIF_FRAME_ALLOC: u64 = 128 * 1024 * 1024;
 /// No real image is wider or taller; past this a file is broken or hostile.
 const MAX_SIDE: u32 = 16384;
+/// The most decoding one image may take: a full-size one, and a thumbnail.
+const FULL_ALLOC: u64 = 256 * 1024 * 1024;
+const THUMB_ALLOC: u64 = 64 * 1024 * 1024;
 
 /// An animated GIF's frames and how long each shows.
 type Frames = Arc<Vec<(DynamicImage, Duration)>>;
@@ -80,6 +83,16 @@ impl Animation {
 pub enum Kind {
     Thumb,
     Full,
+}
+
+impl Kind {
+    /// The most decoding one may take.
+    fn alloc(self) -> u64 {
+        match self {
+            Kind::Thumb => THUMB_ALLOC,
+            Kind::Full => FULL_ALLOC,
+        }
+    }
 }
 
 pub enum State<'a> {
@@ -708,18 +721,18 @@ fn fetch(url: &str, kind: Kind, disk: Option<&DiskCache>) -> Result<(DynamicImag
     if let Some(path) = url.strip_prefix("file://") {
         let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
         let frames = if kind == Kind::Full { gif_frames(&bytes) } else { None };
-        return Ok((decode(&bytes)?, frames));
+        return Ok((decode_within(&bytes, kind.alloc())?, frames));
     }
     if let Some(d) = disk
         && let Some(bytes) = d.get(url)
     {
-        match decode(&bytes) {
+        match decode_within(&bytes, kind.alloc()) {
             Ok(img) => return Ok((img, None)),
             Err(_) => d.remove(url),
         }
     }
     let bytes = http::get_bytes(url, MAX_DOWNLOAD).map_err(|e| format!("{e:#}"))?;
-    let img = decode(&bytes)?;
+    let img = decode_within(&bytes, kind.alloc())?;
     if let Some(d) = disk {
         let _ = d.put(url, &bytes);
     }
@@ -782,8 +795,17 @@ fn limits(alloc: u64) -> image::Limits {
     limits
 }
 
+/// Decode a full-size image (within `FULL_ALLOC`).
 pub(crate) fn decode(bytes: &[u8]) -> Result<DynamicImage, String> {
-    let img = image::load_from_memory(bytes).map_err(|e| e.to_string())?;
+    decode_within(bytes, FULL_ALLOC)
+}
+
+/// Decode an image, refusing one that would take more than `alloc` bytes (a small file can
+/// claim a huge image) or is over `MAX_SIDE` either way. Big ones are scaled to `MAX_DIM`.
+fn decode_within(bytes: &[u8], alloc: u64) -> Result<DynamicImage, String> {
+    let mut reader = image::ImageReader::new(std::io::Cursor::new(bytes)).with_guessed_format().map_err(|e| e.to_string())?;
+    reader.limits(limits(alloc));
+    let img = reader.decode().map_err(|e| e.to_string())?;
     Ok(if img.width() > MAX_DIM || img.height() > MAX_DIM { img.thumbnail(MAX_DIM, MAX_DIM) } else { img })
 }
 
@@ -1074,6 +1096,21 @@ mod tests {
         g.extend(frame(65535, 65535));
         g.push(0x3b);
         g
+    }
+
+    #[test]
+    fn images_too_big_to_decode_are_refused() {
+        let png = |w, h| {
+            let mut out = std::io::Cursor::new(Vec::new());
+            DynamicImage::new_luma8(w, h).write_to(&mut out, image::ImageFormat::Png).unwrap();
+            out.into_inner()
+        };
+        assert!(decode(&png(100, 100)).is_ok());
+        // Wider than any real image.
+        assert!(decode(&png(MAX_SIDE + 1, 1)).is_err());
+        // More than it may take: 10000 bytes, with 1000 allowed.
+        assert!(decode_within(&png(100, 100), 1000).is_err());
+        assert!(Kind::Thumb.alloc() < Kind::Full.alloc());
     }
 
     #[test]
