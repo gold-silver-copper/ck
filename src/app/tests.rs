@@ -1227,6 +1227,7 @@ fn the_saved_view_lists_and_removes_after_asking() {
     assert_eq!(app.store.saved.len(), 3);
     assert!(app.status.as_ref().unwrap().text.contains("again to remove the saved copy of thread 3"));
     app.act(Action::Remove);
+    app.flush_writes();
     assert!(app.store.saved(&key(3)).is_none() && !dir.path().join("threads/a/x/3.json").exists());
     // Unwatching keeps a copy.
     app.store.toggle_watch(key(1), String::new(), 1, 1);
