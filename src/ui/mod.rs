@@ -99,8 +99,14 @@ fn cells(n: usize) -> u16 {
     u16::try_from(n).unwrap_or(u16::MAX)
 }
 
+/// "1 thread", "2 threads".
 fn plural(n: usize, word: &str) -> String {
-    format!("{n} {word}{}", if n == 1 { "" } else { "s" })
+    count(n, word, &format!("{word}s"))
+}
+
+/// "1 reply", "2 replies": for words that don't just take an s.
+fn count(n: usize, one: &str, many: &str) -> String {
+    format!("{n} {}", if n == 1 { one } else { many })
 }
 
 /// A dim message in the middle of an area.
@@ -336,7 +342,7 @@ fn location(app: &App) -> (Vec<String>, Vec<Span<'static>>) {
     let query = match app.tab.view {
         View::Thread => app.tab.thread.as_ref().filter(|th| !th.search.is_empty() && !app.searching).map(|th| {
             let k = th.matches.len();
-            format!("/{}  {}", th.search, plural(k, "match").replace("matchs", "matches"))
+            format!("/{}  {}", th.search, count(k, "match", "matches"))
         }),
         _ => Some(current_filter(app)).filter(|q| !q.is_empty() && !app.filtering).map(|q| format!("/{q}")),
     };

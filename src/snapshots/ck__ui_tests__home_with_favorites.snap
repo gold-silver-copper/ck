@@ -5,12 +5,12 @@ expression: snapshot(&mut a)
  ck  Sites                                                                                 23 sites
 
     ◉  Watched         3 threads   2 new
-    ◷  History         2 threads recent
+    ◷  History         2 recent threads
     ▤  Saved           0 threads
     ★  4chan /g/       Technology                                                              1
     ★  lainchan /λ/    Programming                                                             2
     ↺  4chan /a/       Anime & Manga
-       4chan            fourchan    https://4chan.org
+       4chan            4chan       https://4chan.org
        lainchan         vichan      https://lainchan.org
        desuarchive      foolfuuka   https://desuarchive.org
        leftypol         vichan      https://leftypol.org

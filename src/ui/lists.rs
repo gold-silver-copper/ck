@@ -26,7 +26,7 @@ pub(super) fn draw_sites(f: &mut Frame, app: &mut App, area: Rect) {
             SiteRow::History => vec![Line::from(vec![
                 Span::styled("◷  ", Style::new().fg(t.primary)),
                 Span::styled(format!("{:<16}", "History"), bold(t.text)),
-                Span::styled(format!("{} recent", plural(app.store.history.len(), "thread")), dim()),
+                Span::styled(plural(app.store.history.len(), "recent thread"), dim()),
             ])],
             SiteRow::Saved => {
                 let dead = app.store.saved.iter().filter(|m| m.dead).count();
@@ -63,7 +63,7 @@ pub(super) fn draw_sites(f: &mut Frame, app: &mut App, area: Rect) {
             SiteRow::Site(i) => {
                 let s = &app.sites[i];
                 let url = s.cfg.url.clone().unwrap_or_else(|| "https://4chan.org".into());
-                let kind = format!("{:?}", s.cfg.kind).to_lowercase();
+                let kind = s.cfg.kind.engine().name;
                 let hidden = app.is_site_hidden(i);
                 let spans = vec![
                     Span::raw("   "),
@@ -248,8 +248,8 @@ pub(super) fn draw_catalog(f: &mut Frame, app: &mut App, area: Rect) {
         }
         let mut facts = Vec::new();
         if let Some(r) = p.replies {
-            facts.push(format!("{r} replies"));
-            facts.push(format!("{} images", p.images.unwrap_or(0)));
+            facts.push(count(r as usize, "reply", "replies"));
+            facts.push(plural(p.images.unwrap_or(0) as usize, "image"));
         }
         facts.push(ago(p.time, app.clock));
         meta.push(Span::styled(facts.join(" · "), dim()));
