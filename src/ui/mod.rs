@@ -94,6 +94,11 @@ fn chip(text: impl Into<String>, fg: Color, bg: Color) -> Span<'static> {
     Span::styled(format!(" {} ", text.into()), Style::new().fg(fg).bg(bg))
 }
 
+/// A count of rows or columns as a size on screen, which can't be bigger anyway.
+fn cells(n: usize) -> u16 {
+    u16::try_from(n).unwrap_or(u16::MAX)
+}
+
 fn plural(n: usize, word: &str) -> String {
     format!("{n} {word}{}", if n == 1 { "" } else { "s" })
 }

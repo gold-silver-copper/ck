@@ -105,7 +105,7 @@ impl App {
                 }
                 let have = jobs.iter().filter(|(_, path)| path.exists()).count();
                 let files: Vec<&Attachment> = t.posts.iter().flat_map(|p| &p.files).collect();
-                let known: u64 = files.iter().filter_map(|f| f.size).sum();
+                let known = files.iter().filter_map(|f| f.size).fold(0u64, u64::saturating_add);
                 let mut first = format!("{} file{}", jobs.len() - have, if jobs.len() - have == 1 { "" } else { "s" });
                 if known > 0 {
                     let about = if files.iter().all(|f| f.size.is_some()) { "" } else { "at least " };

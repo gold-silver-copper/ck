@@ -372,9 +372,9 @@ pub(super) fn draw_search(f: &mut Frame, app: &mut App, area: Rect) {
     }
     // Below the last card: more to load.
     if more && let Some(Hit::List { offset, item_height, .. }) = hit {
-        let shown = (s.hits.len() - offset) as u16 * item_height;
+        let shown = cells(s.hits.len().saturating_sub(offset)).saturating_mul(item_height);
         if shown < area.height {
-            let hint = format!("{} more: {} or go down to load them", s.total.unwrap_or(0) as usize - s.hits.len(), app.keys.key(Action::NextMatch));
+            let hint = format!("{} more: {} or go down to load them", (s.total.unwrap_or(0) as usize).saturating_sub(s.hits.len()), app.keys.key(Action::NextMatch));
             put(f, area.x, area.y + shown, area.width, Line::styled(hint, dim()).centered());
         }
     }

@@ -1192,3 +1192,16 @@ fn settings_list_popups() {
     }
     insta::assert_snapshot!(shots.join("\n=====\n"));
 }
+
+#[test]
+fn popups_with_more_rows_than_a_screen_can_hold() {
+    // More lines than fit in a u16: sized to the screen, without overflowing.
+    for n in 65_525..65_536 {
+        let mut a = thread_app(false);
+        let t = a.tab.thread.as_mut().unwrap();
+        t.posts[1].body = (0..n).map(|_| ratatui::text::Line::from("x")).collect();
+        t.selected = 3;
+        a.tab.popup = Some(crate::app::TabPopup::Preview(Preview { posts: vec![1001], elsewhere: vec![], scroll: 0 }));
+        render(&mut a);
+    }
+}
