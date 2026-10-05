@@ -1,10 +1,11 @@
 //! Makaba, 2ch.hk's engine: `/{board}/catalog.json`, `/{board}/res/{no}.json`, and the
 //! mobile API for the board list and post lookups.
+#![deny(clippy::indexing_slicing, clippy::arithmetic_side_effects, clippy::cast_possible_truncation)]
 
 use anyhow::Result;
 use serde_json::Value;
 
-use super::{Backend, Partial};
+use super::{Backend, Partial, as_u32, saturate};
 use crate::http::{as_bool, as_i64, as_str, as_u64, encode_segment as enc, get_json, items, register_media_host};
 use crate::markup::{self, Flavor};
 use crate::model::{Attachment, Board, Post};
@@ -34,8 +35,8 @@ impl Makaba {
             .map(|t| {
                 let mut p = self.post(t);
                 // posts_count includes the OP.
-                p.replies = as_u64(&t["posts_count"]).map(|n| n.saturating_sub(1) as u32);
-                p.images = as_u64(&t["files_count"]).map(|n| n as u32);
+                p.replies = as_u64(&t["posts_count"]).map(|n| saturate(n.saturating_sub(1)));
+                p.images = as_u32(&t["files_count"]);
                 p
             })
             .collect()
@@ -43,7 +44,7 @@ impl Makaba {
 
     /// Posts from `res/{no}.json`: `{ "threads": [{ "posts": [...] }] }`, OP first.
     pub fn parse_thread(&self, v: &Value) -> Vec<Post> {
-        items(&v["threads"][0]["posts"]).map(|p| self.post(p)).collect()
+        v.get("threads").and_then(|t| t.get(0)).into_iter().flat_map(|t| items(&t["posts"])).map(|p| self.post(p)).collect()
     }
 
     fn post(&self, v: &Value) -> Post {
@@ -74,8 +75,8 @@ impl Makaba {
             url: format!("{}{path}", self.media),
             thumb: as_str(&f["thumbnail"]).map(|t| format!("{}{t}", self.media)),
             spoiler: false,
-            width: as_u64(&f["width"]).map(|n| n as u32),
-            height: as_u64(&f["height"]).map(|n| n as u32),
+            width: as_u32(&f["width"]),
+            height: as_u32(&f["height"]),
             size: as_u64(&f["size"]).map(|kb| kb.saturating_mul(1024)),
             md5: as_str(&f["md5"]).and_then(|h| hex_to_base64(&h)),
         })
@@ -131,7 +132,7 @@ impl Backend for Makaba {
     /// `/api/mobile/v2/post/{board}/{no}` gives the post with its thread as `parent` (0 for OPs).
     fn find_thread(&self, board: &str, post: u64) -> Result<Option<u64>> {
         let v = get_json(&format!("{}/api/mobile/v2/post/{}/{post}", self.base, enc(board)))?;
-        Ok(as_u64(&v["post"]["parent"]).map(|p| if p == 0 { post } else { p }))
+        Ok(v.get("post").and_then(|p| as_u64(&p["parent"])).map(|p| if p == 0 { post } else { p }))
     }
 
     fn board_url(&self, board: &str) -> String {
@@ -146,7 +147,7 @@ impl Backend for Makaba {
 /// makaba gives MD5s in hex; filters match them in base64, like every other engine's.
 fn hex_to_base64(hex: &str) -> Option<String> {
     use base64::Engine;
-    let bytes: Vec<u8> = (0..hex.len()).step_by(2).map(|i| u8::from_str_radix(hex.get(i..i + 2)?, 16).ok()).collect::<Option<_>>()?;
+    let bytes: Vec<u8> = (0..hex.len()).step_by(2).map(|i| u8::from_str_radix(hex.get(i..i.saturating_add(2))?, 16).ok()).collect::<Option<_>>()?;
     Some(base64::engine::general_purpose::STANDARD.encode(bytes))
 }
 

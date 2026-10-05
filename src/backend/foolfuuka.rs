@@ -1,9 +1,10 @@
 //! FoolFuuka 4chan archives (desuarchive, b4k, ...): the `/_/api/chan/` JSON API.
+#![deny(clippy::indexing_slicing, clippy::arithmetic_side_effects, clippy::cast_possible_truncation)]
 
 use anyhow::Result;
 use serde_json::Value;
 
-use super::{Backend, Partial, SearchPage};
+use super::{Backend, Partial, SearchPage, as_u32, saturate};
 use crate::http::{as_bool, as_i64, as_str, as_u64, encode_segment as enc, get_json, items, register_media_host};
 use crate::markup::{self, Flavor};
 use crate::model::{Attachment, Board, Post};
@@ -56,8 +57,8 @@ pub fn parse_index(v: &Value) -> Vec<Post> {
             let last = t["posts"].as_array().map_or(&[][..], Vec::as_slice);
             let bumped = last.iter().filter_map(|p| as_i64(&p["timestamp"])).max().unwrap_or(op.time);
             let shown_images = last.iter().filter(|p| p["media"].is_object()).count() as u64;
-            op.replies = Some(as_u64(&t["omitted"]).unwrap_or(0).saturating_add(last.len() as u64) as u32);
-            op.images = Some(as_u64(&t["images_omitted"]).unwrap_or(0).saturating_add(shown_images) as u32);
+            op.replies = Some(saturate(as_u64(&t["omitted"]).unwrap_or(0).saturating_add(last.len() as u64)));
+            op.images = Some(saturate(as_u64(&t["images_omitted"]).unwrap_or(0).saturating_add(shown_images)));
             Some((bumped, op))
         })
         .collect();
@@ -84,10 +85,10 @@ pub fn parse_search(v: &Value) -> Result<SearchPage> {
         }
         anyhow::bail!("{}", markup::decode(&e));
     }
-    let hits = items(&v["0"]["posts"])
+    let hits = v.get("0").into_iter().flat_map(|r| items(&r["posts"]))
         .filter_map(|p| Some((as_u64(&p["thread_num"])?, post(p)?)))
         .collect();
-    Ok(SearchPage { hits, total: as_u64(&v["meta"]["total_found"]) })
+    Ok(SearchPage { hits, total: v.get("meta").and_then(|m| as_u64(&m["total_found"])) })
 }
 
 fn post(v: &Value) -> Option<Post> {
@@ -118,7 +119,7 @@ fn post(v: &Value) -> Option<Post> {
         time: as_i64(&v["timestamp"]).unwrap_or(0),
         files: attachment(&v["media"]).into_iter().collect(),
         sticky: as_bool(&v["sticky"]),
-        board: as_str(&v["board"]["shortname"]),
+        board: v.get("board").and_then(|b| as_str(&b["shortname"])),
         locked: as_bool(&v["locked"]),
         ..parsed.into()
     })
@@ -141,8 +142,8 @@ fn attachment(m: &Value) -> Option<Attachment> {
         url,
         thumb: if spoiler { None } else { thumb },
         spoiler,
-        width: as_u64(&m["media_w"]).map(|n| n as u32),
-        height: as_u64(&m["media_h"]).map(|n| n as u32),
+        width: as_u32(&m["media_w"]),
+        height: as_u32(&m["media_h"]),
         size: as_u64(&m["media_size"]),
         md5: as_str(&m["media_hash"]),
     })
@@ -192,7 +193,7 @@ impl Backend for Foolfuuka {
 
     fn find_thread(&self, board: &str, post: u64) -> Result<Option<u64>> {
         let v = self.api(&format!("post/?board={}&num={post}", enc(board)))?;
-        Ok(as_u64(&v["thread_num"]))
+        Ok(v.get("thread_num").and_then(as_u64))
     }
 
     fn board_url(&self, board: &str) -> String {

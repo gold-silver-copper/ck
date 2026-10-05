@@ -7,6 +7,7 @@
 //!
 //! Turning an image into terminal output (sixel, kitty, half-blocks) takes milliseconds, so
 //! it happens on an encoder thread too; `get` only ever hands out finished encodings.
+#![deny(clippy::indexing_slicing, clippy::arithmetic_side_effects, clippy::cast_possible_truncation)]
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::mpsc::{Receiver, Sender, channel};
@@ -62,7 +63,8 @@ struct Animation {
 impl Animation {
     fn at(&self, now: Instant) -> Duration {
         let t = self.paused.unwrap_or_else(|| now.duration_since(self.start));
-        Duration::from_nanos((t.as_nanos() % self.total.as_nanos().max(1)) as u64)
+        let nanos = t.as_nanos().checked_rem(self.total.as_nanos()).unwrap_or(0);
+        Duration::from_nanos(u64::try_from(nanos).unwrap_or(u64::MAX))
     }
 
     /// The frame showing now, and how long until the next one.
@@ -70,11 +72,11 @@ impl Animation {
         let mut t = self.at(now);
         for (i, (_, d)) in self.frames.iter().enumerate() {
             if t < *d {
-                return (i, *d - t);
+                return (i, d.saturating_sub(t));
             }
-            t -= *d;
+            t = t.saturating_sub(*d);
         }
-        (0, self.frames[0].1)
+        (0, self.frames.first().map_or(Duration::ZERO, |f| f.1))
     }
 }
 
@@ -127,24 +129,25 @@ impl Crop {
     /// One zoom level in (or out), keeping the center.
     pub fn zoomed(self, zoom_in: bool) -> Crop {
         let i = ZOOMS.iter().position(|&z| z >= self.zoom).unwrap_or(0);
-        let i = if zoom_in { (i + 1).min(ZOOMS.len() - 1) } else { i.saturating_sub(1) };
-        if ZOOMS[i] <= 100 {
+        let zoom = if zoom_in { ZOOMS.get(i.saturating_add(1)).or(ZOOMS.last()) } else { ZOOMS.get(i.saturating_sub(1)) };
+        let zoom = zoom.copied().unwrap_or(100);
+        if zoom <= 100 {
             return Crop::FIT;
         }
-        Crop { zoom: ZOOMS[i], ..self }
+        Crop { zoom, ..self }
     }
 
     /// Moved by a quarter of what's shown (`shown`: thousandths of the image's width and
     /// height on screen), in steps of `dx`, `dy`; never past the image's edges.
     pub fn moved(self, dx: i32, dy: i32, shown: (u16, u16)) -> Crop {
         let step = |s: u16| (i32::from(s) / 4).max(1);
-        let at = |v: u16, d: i32, s: u16| (i32::from(v) + d * step(s)).clamp(0, 1000) as u16;
+        let at = |v: u16, d: i32, s: u16| u16::try_from(i32::from(v).saturating_add(d.saturating_mul(step(s))).clamp(0, 1000)).unwrap_or_default();
         Crop { x: at(self.x, dx, shown.0), y: at(self.y, dy, shown.1), ..self }.within(shown)
     }
 
     /// How much is shown before it's known (not drawn yet): the image's shape at this zoom.
     pub fn guess_shown(self) -> (u16, u16) {
-        let s = (100_000 / u32::from(self.zoom.max(100))) as u16;
+        let s = u16::try_from(100_000u32.checked_div(u32::from(self.zoom.max(100))).unwrap_or(0)).unwrap_or(u16::MAX);
         (s, s)
     }
 
@@ -152,7 +155,7 @@ impl Crop {
     pub fn within(self, shown: (u16, u16)) -> Crop {
         let keep = |v: u16, s: u16| {
             let half = s.min(1000) / 2;
-            v.clamp(half, 1000 - half)
+            v.clamp(half, 1000u16.saturating_sub(half))
         };
         Crop { x: keep(self.x, shown.0), y: keep(self.y, shown.1), ..self }
     }
@@ -162,7 +165,8 @@ impl Crop {
     /// at that zoom (its shape, not the image's), up to all of it.
     pub fn shown(self, w: u32, h: u32, view: (u32, u32)) -> (u16, u16) {
         let (_, _, rw, rh) = self.region(w, h, view);
-        ((u64::from(rw) * 1000 / u64::from(w.max(1))) as u16, (u64::from(rh) * 1000 / u64::from(h.max(1))) as u16)
+        let part = |r: u32, of: u32| u16::try_from(u64::from(r).saturating_mul(1000).checked_div(u64::from(of.max(1))).unwrap_or(0)).unwrap_or(u16::MAX);
+        (part(rw, w), part(rh, h))
     }
 
     /// The part of a `w` x `h` image it shows on a screen area of `view` pixels: left, top,
@@ -172,11 +176,11 @@ impl Crop {
         let (w, h) = (w.max(1), h.max(1));
         let (aw, ah) = (f64::from(view.0.max(1)), f64::from(view.1.max(1)));
         let scale = f64::min(aw / f64::from(w), ah / f64::from(h)) * f64::from(self.zoom.max(100)) / 100.0;
-        let rw = ((aw / scale).round() as u32).clamp(1, w);
-        let rh = ((ah / scale).round() as u32).clamp(1, h);
-        let left = (u64::from(w) * u64::from(self.x) / 1000) as u32;
-        let top = (u64::from(h) * u64::from(self.y) / 1000) as u32;
-        (left.saturating_sub(rw / 2).min(w - rw), top.saturating_sub(rh / 2).min(h - rh), rw, rh)
+        #[allow(clippy::cast_possible_truncation)] // f64 as u32 saturates
+        let (rw, rh) = (((aw / scale).round() as u32).clamp(1, w), ((ah / scale).round() as u32).clamp(1, h));
+        let at = |side: u32, thousandths: u16| u32::try_from(u64::from(side).saturating_mul(u64::from(thousandths)) / 1000).unwrap_or(u32::MAX);
+        let (left, top) = (at(w, self.x), at(h, self.y));
+        (left.saturating_sub(rw / 2).min(w.saturating_sub(rw)), top.saturating_sub(rh / 2).min(h.saturating_sub(rh)), rw, rh)
     }
 }
 
@@ -315,7 +319,7 @@ impl Images {
     /// Put an already decoded image in the cache (tests and benchmarks).
     #[cfg(test)]
     pub fn insert_decoded(&mut self, url: &str, img: DynamicImage) {
-        let bytes = img.as_bytes().len() * 2;
+        let bytes = img.as_bytes().len().saturating_mul(2);
         let slot = Slot::Ready { img: Arc::new(img), protos: Vec::new(), pending: None, asked: None, bytes, used: 0, frames: None, animation: None, animating: None };
         self.slots.insert(url.to_string(), slot);
     }
@@ -323,7 +327,8 @@ impl Images {
     /// Put an animation's decoded frames in the cache (tests).
     #[cfg(test)]
     pub fn insert_frames(&mut self, url: &str, frames: Vec<(DynamicImage, Duration)>) {
-        self.insert_decoded(url, frames[0].0.clone());
+        let Some((first, _)) = frames.first() else { return };
+        self.insert_decoded(url, first.clone());
         if let Some(Slot::Ready { frames: f, .. }) = self.slots.get_mut(url) {
             *f = Some(Arc::new(frames));
         }
@@ -377,7 +382,7 @@ impl Images {
             return State::Unavailable;
         }
         self.frame.push((url.to_string(), kind, Some(size)));
-        self.tick += 1;
+        self.tick = self.tick.saturating_add(1);
         // Looked at before borrowing it to change (stable's borrow checker needs the order).
         match self.slots.get(url) {
             Some(Slot::Ready { .. }) => {}
@@ -394,11 +399,12 @@ impl Images {
                 Some(a) if a.size == size => {
                     let now = Instant::now();
                     let (i, left) = a.frame(now);
-                    if a.paused.is_none() {
-                        let next = now + left.max(MIN_FRAME);
+                    if a.paused.is_none()
+                        && let Some(next) = now.checked_add(left.max(MIN_FRAME))
+                    {
                         self.drawing_next = Some(self.drawing_next.map_or(next, |t| t.min(next)));
                     }
-                    return State::Ready(&a.frames[i].0);
+                    return a.frames.get(i).map_or(State::Loading, |(p, _)| State::Ready(p));
                 }
                 _ if *animating != Some(size) => {
                     if let Some(enc) = &self.encode {
@@ -410,7 +416,7 @@ impl Images {
             }
         }
         if let Some(i) = protos.iter().position(|(v, _)| *v == view) {
-            return State::Ready(&protos[i].1);
+            return protos.get(i).map_or(State::Loading, |(_, p)| State::Ready(p));
         }
         if *pending != Some(view) {
             // The first encoding starts at once, and so does a zoom or a move (a key, once);
@@ -503,9 +509,9 @@ impl Images {
                 }
                 Done::Fetched(url, Ok((img, frames)), pending) => {
                     let frame_bytes: usize = frames.iter().flat_map(|f| f.iter()).map(|(f, _)| f.as_bytes().len()).sum();
-                    let bytes = img.as_bytes().len() * 2 + frame_bytes;
-                    self.bytes += bytes;
-                    self.tick += 1;
+                    let bytes = img.as_bytes().len().saturating_mul(2).saturating_add(frame_bytes);
+                    self.bytes = self.bytes.saturating_add(bytes);
+                    self.tick = self.tick.saturating_add(1);
                     let slot = Slot::Ready { img, protos: Vec::new(), pending, asked: None, bytes, used: self.tick, frames, animation: None, animating: None };
                     self.slots.insert(url, slot);
                     self.evict();
@@ -552,7 +558,7 @@ impl Images {
             let oldest = ready.iter().min().filter(|_| ready.len() > 1).map(|(_, k)| (*k).clone());
             let Some(k) = oldest else { break };
             if let Some(Slot::Ready { bytes, .. }) = self.slots.remove(&k) {
-                self.bytes -= bytes;
+                self.bytes = self.bytes.saturating_sub(bytes);
             }
         }
     }
@@ -634,7 +640,7 @@ pub(crate) fn encode_crop(picker: &Picker, img: &DynamicImage, size: Size, crop:
         return encode(picker, img, size);
     }
     let font = picker.font_size();
-    let (w, h) = (size.width as u32 * font.width as u32, size.height as u32 * font.height as u32);
+    let (w, h) = pixels(size, font);
     let (x, y, cw, ch) = crop.region(img.width(), img.height(), (w, h));
     let part = img.crop_imm(x, y, cw, ch);
     if picker.protocol_type() == ProtocolType::Halfblocks {
@@ -649,9 +655,13 @@ fn encode(picker: &Picker, img: &DynamicImage, size: Size) -> Result<Protocol, S
     if picker.protocol_type() == ProtocolType::Halfblocks {
         return halfblocks(img, size, picker.font_size(), false);
     }
-    let font = picker.font_size();
-    let (w, h) = (size.width as u32 * font.width as u32, size.height as u32 * font.height as u32);
+    let (w, h) = pixels(size, picker.font_size());
     picker.new_protocol(shrink(img, w, h, false), size, Resize::Fit(None)).map_err(|e| e.to_string())
+}
+
+/// `size` cells in pixels, at the terminal's cell size `font`.
+fn pixels(size: Size, font: ratatui_image::FontSize) -> (u32, u32) {
+    (u32::from(size.width).saturating_mul(u32::from(font.width)), u32::from(size.height).saturating_mul(u32::from(font.height)))
 }
 
 /// `img` fitted into `w` x `h` pixels (keeping its shape): scaled down with the fast
@@ -677,21 +687,23 @@ fn shrink(img: &DynamicImage, w: u32, h: u32, grow: bool) -> DynamicImage {
 fn halfblocks(img: &DynamicImage, size: Size, font: ratatui_image::FontSize, fill: bool) -> Result<Protocol, String> {
     use ratatui_image::protocol::halfblocks::Halfblocks;
     let (fw, fh) = (u32::from(font.width).max(1), u32::from(font.height).max(1));
-    let (area_w, area_h) = (u32::from(size.width) * fw, u32::from(size.height) * fh);
+    let (area_w, area_h) = (u32::from(size.width).saturating_mul(fw), u32::from(size.height).saturating_mul(fh));
     let (iw, ih) = (img.width().max(1), img.height().max(1));
     // Its size on screen, in pixels: as it is if it fits (and isn't to fill), else fitted.
+    #[allow(clippy::cast_possible_truncation)] // f64 as u32 saturates
     let (pw, ph) = if !fill && iw <= area_w && ih <= area_h {
         (iw, ih)
     } else {
         let ratio = f64::min(f64::from(area_w) / f64::from(iw), f64::from(area_h) / f64::from(ih));
         (((f64::from(iw) * ratio).round() as u32).clamp(1, area_w.max(1)), ((f64::from(ih) * ratio).round() as u32).clamp(1, area_h.max(1)))
     };
-    let cells = Size::new(pw.div_ceil(fw).max(1) as u16, ph.div_ceil(fh).max(1) as u16);
+    let cells_in = |px: u32, f: u32| u16::try_from(px.div_ceil(f).max(1)).unwrap_or(u16::MAX);
+    let cells = Size::new(cells_in(pw, fw), cells_in(ph, fh));
     // The image in half-block pixels: a cell's width, half its height.
     // (Rounded: pw / fw wide, ph * 2 / fh tall.)
-    let cw = ((pw * 2 + fw) / (2 * fw)).clamp(1, u32::from(cells.width));
-    let ch = ((ph * 4 + fh) / (2 * fh)).clamp(1, u32::from(cells.height) * 2);
-    let scaled = if iw > cw * 2 || ih > ch * 2 { img.thumbnail_exact(cw, ch) } else { img.resize_exact(cw, ch, FilterType::Triangle) };
+    let cw = pw.saturating_mul(2).saturating_add(fw).checked_div(fw.saturating_mul(2)).unwrap_or(0).clamp(1, u32::from(cells.width));
+    let ch = ph.saturating_mul(4).saturating_add(fh).checked_div(fh.saturating_mul(2)).unwrap_or(0).clamp(1, u32::from(cells.height) * 2);
+    let scaled = if iw > cw.saturating_mul(2) || ih > ch.saturating_mul(2) { img.thumbnail_exact(cw, ch) } else { img.resize_exact(cw, ch, FilterType::Triangle) };
     // Padded to whole cells like the library pads (transparent, shown black).
     let (gw, gh) = (u32::from(cells.width), u32::from(cells.height) * 2);
     let image = if (cw, ch) == (gw, gh) {
@@ -748,13 +760,15 @@ fn gif_frames(bytes: &[u8]) -> Option<Frames> {
 
 pub(crate) fn gif_frames_within(bytes: &[u8], budget: usize) -> Option<Frames> {
     use image::AnimationDecoder;
-    if !bytes.starts_with(b"GIF8") || bytes.len() < 10 {
+    if !bytes.starts_with(b"GIF8") {
         return None;
     }
+    // The canvas's width and height, after the 6-byte signature.
+    let Some(&[w0, w1, h0, h1]) = bytes.get(6..10) else { return None };
     // Frames, from their graphic control blocks (a slight overcount at worst), and the
     // canvas size from the header: what the frames will take decoded.
     let count = bytes.windows(3).filter(|w| *w == [0x21, 0xf9, 0x04]).count().max(1);
-    let (w, h) = (u16::from_le_bytes([bytes[6], bytes[7]]) as f64, u16::from_le_bytes([bytes[8], bytes[9]]) as f64);
+    let (w, h) = (f64::from(u16::from_le_bytes([w0, w1])), f64::from(u16::from_le_bytes([h0, h1])));
     let need = count as f64 * w * h * 4.0;
     let scale = (budget as f64 / need).sqrt().min(1.0);
     if scale < 0.25 {
@@ -765,7 +779,7 @@ pub(crate) fn gif_frames_within(bytes: &[u8], budget: usize) -> Option<Frames> {
     let mut decoder = image::codecs::gif::GifDecoder::new(std::io::Cursor::new(bytes)).ok()?;
     image::ImageDecoder::set_limits(&mut decoder, limits(GIF_FRAME_ALLOC)).ok()?;
     let mut frames = Vec::new();
-    let mut size = 0;
+    let mut size = 0usize;
     for frame in decoder.into_frames() {
         let frame = frame.ok()?;
         let (num, den) = frame.delay().numer_denom_ms();
@@ -774,10 +788,11 @@ pub(crate) fn gif_frames_within(bytes: &[u8], budget: usize) -> Option<Frames> {
         let delay = Duration::from_millis(if ms < 20 { 100 } else { ms as u64 });
         let mut img = DynamicImage::ImageRgba8(frame.into_buffer());
         if scale < 1.0 {
-            let (fw, fh) = ((img.width() as f64 * scale) as u32, (img.height() as f64 * scale) as u32);
+            #[allow(clippy::cast_possible_truncation)] // f64 as u32 saturates
+            let (fw, fh) = ((f64::from(img.width()) * scale) as u32, (f64::from(img.height()) * scale) as u32);
             img = img.resize_exact(fw.max(1), fh.max(1), FilterType::Triangle);
         }
-        size += img.as_bytes().len();
+        size = size.saturating_add(img.as_bytes().len());
         if size > budget {
             return None;
         }
@@ -810,6 +825,7 @@ fn decode_within(bytes: &[u8], alloc: u64) -> Result<DynamicImage, String> {
 }
 
 #[cfg(test)]
+#[allow(clippy::indexing_slicing, clippy::arithmetic_side_effects, clippy::cast_possible_truncation)]
 mod tests {
     use super::*;
 

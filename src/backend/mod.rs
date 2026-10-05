@@ -1,4 +1,5 @@
 //! Imageboard backends. Each one speaks a different engine's JSON API.
+#![deny(clippy::indexing_slicing, clippy::arithmetic_side_effects, clippy::cast_possible_truncation)]
 
 pub mod detect;
 pub(crate) mod foolfuuka;
@@ -144,6 +145,7 @@ pub const ENGINES: [Engine; 6] = [
 ];
 
 /// Where each `SiteKind` is in `ENGINES`, which has each once.
+#[allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)] // const-evaluated: out of bounds fails the build
 const AT: [usize; ENGINES.len()] = {
     let mut at = [ENGINES.len(); ENGINES.len()];
     let mut i = 0;
@@ -152,16 +154,31 @@ const AT: [usize; ENGINES.len()] = {
         at[ENGINES[i].kind as usize] = i;
         i += 1;
     }
+    let mut k = 0;
+    while k < at.len() {
+        assert!(at[k] < ENGINES.len(), "a SiteKind isn't in ENGINES");
+        k += 1;
+    }
     at
 };
 
 impl SiteKind {
+    #[allow(clippy::indexing_slicing)] // AT has a place in ENGINES for every SiteKind, checked as it's built
     pub fn engine(self) -> &'static Engine {
         &ENGINES[AT[self as usize]]
     }
 }
 
 const FUZZ_BASE: &str = "https://fuzz.invalid";
+
+/// A server's count or size, saturating if it doesn't fit.
+fn saturate(n: u64) -> u32 {
+    u32::try_from(n).unwrap_or(u32::MAX)
+}
+
+fn as_u32(v: &serde_json::Value) -> Option<u32> {
+    crate::http::as_u64(v).map(saturate)
+}
 
 fn url(cfg: &SiteConfig) -> String {
     cfg.url.as_deref().map(|u| u.trim_end_matches('/').to_string()).unwrap_or_default()

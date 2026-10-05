@@ -1,4 +1,5 @@
 //! Turning post comments into styled ratatui lines, and wrapping them.
+#![deny(clippy::indexing_slicing, clippy::arithmetic_side_effects, clippy::cast_possible_truncation)]
 
 use std::collections::HashSet;
 
@@ -304,7 +305,7 @@ impl Builder {
             }
             let at = self.at();
             self.cur.push(Span::styled(quote.to_string(), style.patch(QUOTELINK)));
-            self.cur_len += quote.len();
+            self.cur_len = self.cur_len.saturating_add(quote.len());
             self.anchor(at, Target::Quote(link));
             self.sealed = true;
             rest = after;
@@ -337,7 +338,7 @@ impl Builder {
             Some(last) if last.style == style && !self.sealed => last.content.to_mut().push_str(text),
             _ => self.cur.push(Span::styled(text.to_string(), style)),
         }
-        self.cur_len += text.len();
+        self.cur_len = self.cur_len.saturating_add(text.len());
         self.sealed = false;
     }
 
@@ -409,13 +410,13 @@ fn find_urls(s: &str) -> Vec<(usize, usize)> {
     while let Some(tail) = s.get(from..)
         && let Some(i) = tail.find("http")
     {
-        let start = from + i;
+        let start = from.saturating_add(i);
         let Some(here) = s.get(start..).filter(|u| u.starts_with("http://") || u.starts_with("https://")) else {
-            from = start + 4;
+            from = start.saturating_add(4);
             continue;
         };
         let url_end = |c: char| c.is_whitespace() || matches!(c, '<' | '>' | '"' | '`');
-        let end = here.find(url_end).map_or(s.len(), |e| start + e);
+        let end = here.find(url_end).map_or(s.len(), |e| start.saturating_add(e));
         let mut url = s.get(start..end).unwrap_or_default();
         // Trailing punctuation, and closing brackets without an opening one, aren't part of it.
         // The brackets are counted once, and the counts kept as the end comes off.
@@ -424,19 +425,19 @@ fn find_urls(s: &str) -> Vec<(usize, usize)> {
         loop {
             if url.ends_with(['.', ',', ';', ':', '!', '?', '\'', '*']) {
             } else if url.ends_with(')') && parens.0 < parens.1 {
-                parens.1 -= 1;
+                parens.1 = parens.1.saturating_sub(1);
             } else if url.ends_with(']') && brackets.0 < brackets.1 {
-                brackets.1 -= 1;
+                brackets.1 = brackets.1.saturating_sub(1);
             } else {
                 break;
             }
-            url = url.get(..url.len() - 1).unwrap_or_default();
+            url = url.get(..url.len().saturating_sub(1)).unwrap_or_default();
         }
         let host = url.split_once("://").map_or("", |(_, h)| h);
         if !host.is_empty() && !host.starts_with('/') {
-            out.push((start, start + url.len()));
+            out.push((start, start.saturating_add(url.len())));
         }
-        from = end.max(start + 1);
+        from = end.max(start.saturating_add(1));
     }
     out
 }
@@ -445,32 +446,34 @@ fn find_urls(s: &str) -> Vec<(usize, usize)> {
 /// style, splitting spans as needed. Spoilers and quote links keep their style.
 fn style_ranges(spans: Vec<Span<'static>>, ranges: &[(usize, usize)]) -> Vec<Span<'static>> {
     let mut out = Vec::new();
-    let mut off = 0;
+    let mut off = 0usize;
     // The ranges are in order and don't overlap: the first one not yet behind this span.
     let mut first = 0;
     for s in spans {
         let len = s.content.len();
+        let span_end = off.saturating_add(len);
         let keep = is_spoiler(s.style) || is_quote_link(s.style) || s.style.fg == Some(mark::LINK);
         while ranges.get(first).is_some_and(|&(_, b)| b <= off) {
-            first += 1;
+            first = first.saturating_add(1);
         }
         let near = ranges.get(first..).unwrap_or_default();
-        let near = near.get(..near.partition_point(|&(a, _)| a < off + len)).unwrap_or_default();
-        let mut cuts: Vec<usize> = near.iter().flat_map(|&(a, b)| [a, b]).filter(|&c| c > off && c < off + len).map(|c| c - off).collect();
+        let near = near.get(..near.partition_point(|&(a, _)| a < span_end)).unwrap_or_default();
+        let mut cuts: Vec<usize> = near.iter().flat_map(|&(a, b)| [a, b]).filter(|&c| c > off && c < span_end).map(|c| c.saturating_sub(off)).collect();
         cuts.sort_unstable();
         cuts.dedup();
         let (mut at, mut k) = (0, 0);
         for end in cuts.into_iter().chain([len]) {
             let piece = s.content.get(at..end).unwrap_or_default();
-            while near.get(k).is_some_and(|&(_, b)| b <= off + at) {
-                k += 1;
+            let pos = off.saturating_add(at);
+            while near.get(k).is_some_and(|&(_, b)| b <= pos) {
+                k = k.saturating_add(1);
             }
-            let inside = near.get(k).is_some_and(|&(a, b)| off + at >= a && off + at < b);
+            let inside = near.get(k).is_some_and(|&(a, b)| pos >= a && pos < b);
             let style = if inside && !keep { s.style.patch(LINK) } else { s.style };
             out.push(Span::styled(piece.to_string(), style));
             at = end;
         }
-        off += len;
+        off = off.saturating_add(len);
     }
     out
 }
@@ -496,6 +499,7 @@ pub fn for_terminal(s: &str) -> std::borrow::Cow<'_, str> {
             '\u{200d}' => {
                 chars.next();
             }
+            #[allow(clippy::arithmetic_side_effects, clippy::cast_possible_truncation)] // c is in the range just matched: 0..26
             '\u{1f1e6}'..='\u{1f1ff}' => out.push(char::from(b'A' + (c as u32 - 0x1f1e6) as u8)),
             c if odd(c) => {}
             c => out.push(c),
@@ -508,23 +512,25 @@ pub fn for_terminal(s: &str) -> std::borrow::Cow<'_, str> {
 /// spans split where needed.
 pub fn restyle(line: &Line<'static>, ranges: &[(usize, usize)], f: impl Fn(Style, usize) -> Style) -> Line<'static> {
     let mut out = Vec::new();
-    let mut off = 0;
+    let mut off = 0usize;
     for s in &line.spans {
         let len = s.content.len();
-        let mut cuts: Vec<usize> = ranges.iter().flat_map(|&(a, b)| [a, b]).filter(|&c| c > off && c < off + len).map(|c| c - off).collect();
+        let span_end = off.saturating_add(len);
+        let mut cuts: Vec<usize> = ranges.iter().flat_map(|&(a, b)| [a, b]).filter(|&c| c > off && c < span_end).map(|c| c.saturating_sub(off)).collect();
         cuts.sort_unstable();
         cuts.dedup();
         let mut at = 0;
         for end in cuts.into_iter().chain([len]) {
             let Some(piece) = s.content.get(at..end) else { continue };
-            let style = match ranges.iter().position(|&(a, b)| off + at >= a && off + at < b) {
+            let pos = off.saturating_add(at);
+            let style = match ranges.iter().position(|&(a, b)| pos >= a && pos < b) {
                 Some(k) => f(s.style, k),
                 None => s.style,
             };
             out.push(Span::styled(piece.to_string(), style));
             at = end;
         }
-        off += len;
+        off = off.saturating_add(len);
     }
     Line::from(out).style(line.style)
 }
@@ -539,11 +545,12 @@ fn quote_at(s: &str) -> Option<(usize, Link)> {
         }
         let digits: String = after.chars().take_while(|c| c.is_ascii_digit()).collect();
         let link = Link { board: Some(board.to_string()), thread: None, post: digits.parse().ok() };
-        return Some((4 + board.len() + 1 + digits.len(), link));
+        // `>>>/`, the board, `/`, the number.
+        return Some((board.len().saturating_add(digits.len()).saturating_add(5), link));
     }
     let digits: String = s.strip_prefix(">>")?.chars().take_while(|c| c.is_ascii_digit()).collect();
     let post = digits.parse().ok()?;
-    Some((2 + digits.len(), Link { board: None, thread: None, post: Some(post) }))
+    Some((digits.len().saturating_add(2), Link { board: None, thread: None, post: Some(post) }))
 }
 
 /// Read a quote link's target from its href: `#p123`, `/g/thread/123#p456`,
@@ -603,8 +610,9 @@ pub fn highlight(line: &Line<'static>, needle: &str, hl: Style) -> Line<'static>
             if i > at {
                 spans.push(Span::styled(piece(at, i), s.style));
             }
-            spans.push(Span::styled(piece(i, i + m.len()), s.style.patch(hl)));
-            at = i + m.len();
+            let end = i.saturating_add(m.len());
+            spans.push(Span::styled(piece(i, end), s.style.patch(hl)));
+            at = end;
         }
         if at < s.content.len() {
             spans.push(Span::styled(piece(at, s.content.len()), s.style));
@@ -636,15 +644,15 @@ pub fn wrap(line: &Line<'static>, width: usize) -> Vec<Line<'static>> {
     }
     let mut out = Vec::new();
     let mut cur: Vec<Span<'static>> = Vec::new();
-    let mut cur_w = 0;
+    let mut cur_w = 0usize;
 
     for span in &line.spans {
         for token in split_keep_spaces(&span.content) {
             let tw = token.width();
             let is_space = token.starts_with(' ');
-            if cur_w + tw <= width {
+            if cur_w.saturating_add(tw) <= width {
                 push_merged(&mut cur, token, span.style);
-                cur_w += tw;
+                cur_w = cur_w.saturating_add(tw);
             } else if is_space {
                 // Break at whitespace; don't carry it to the next line.
                 out.push(Line::from(std::mem::take(&mut cur)));
@@ -656,12 +664,12 @@ pub fn wrap(line: &Line<'static>, width: usize) -> Vec<Line<'static>> {
             } else {
                 for ch in token.chars() {
                     let cw = ch.to_string().width();
-                    if cur_w + cw > width {
+                    if cur_w.saturating_add(cw) > width {
                         out.push(Line::from(std::mem::take(&mut cur)));
                         cur_w = 0;
                     }
                     push_merged(&mut cur, &ch.to_string(), span.style);
-                    cur_w += cw;
+                    cur_w = cur_w.saturating_add(cw);
                 }
             }
         }
@@ -674,14 +682,14 @@ fn wrap_code(line: &Line<'static>, width: usize) -> Vec<Line<'static>> {
     let marker = Style::new().fg(Color::DarkGray);
     let mut out = Vec::new();
     let mut cur: Vec<Span<'static>> = Vec::new();
-    let mut cur_w = 0;
+    let mut cur_w = 0usize;
     for span in &line.spans {
         for ch in span.content.chars() {
             let mut buf = [0; 4];
             let ch = &*ch.encode_utf8(&mut buf);
             // Measured as a string, as it's drawn (a few characters are wider that way).
             let cw = ch.width();
-            if cur_w > 0 && cur_w + cw > width {
+            if cur_w > 0 && cur_w.saturating_add(cw) > width {
                 out.push(Line::from(std::mem::take(&mut cur)).style(CODE_LINE));
                 // The marker only where the character still fits beside it (not at width 2).
                 cur_w = 0;
@@ -691,7 +699,7 @@ fn wrap_code(line: &Line<'static>, width: usize) -> Vec<Line<'static>> {
                 }
             }
             push_merged(&mut cur, ch, span.style);
-            cur_w += cw;
+            cur_w = cur_w.saturating_add(cw);
         }
     }
     out.push(Line::from(cur).style(CODE_LINE));

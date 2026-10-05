@@ -1,9 +1,10 @@
 //! LynxChan engine JSON API (endchan, kohlchan, ...).
+#![deny(clippy::indexing_slicing, clippy::arithmetic_side_effects, clippy::cast_possible_truncation)]
 
 use anyhow::Result;
 use serde_json::Value;
 
-use super::{Backend, Partial};
+use super::{Backend, Partial, as_u32, saturate};
 use crate::http::{as_bool, as_str, as_u64, encode_segment as enc, get_json, items, is_not_found};
 use crate::markup;
 use crate::model::{Attachment, Board, Post};
@@ -38,8 +39,8 @@ impl Lynxchan {
                 let mut p = self.post(t, "threadId");
                 let shown = t["posts"].as_array().map_or(0, |a| a.len()) as u64;
                 let shown_files: u64 = items(&t["posts"]).map(|r| r["files"].as_array().map_or(0, |f| f.len()) as u64).sum();
-                p.replies = Some(as_u64(&t["omittedPosts"]).unwrap_or(0).saturating_add(shown) as u32);
-                p.images = Some(as_u64(&t["omittedFiles"]).unwrap_or(0).saturating_add(shown_files) as u32);
+                p.replies = Some(saturate(as_u64(&t["omittedPosts"]).unwrap_or(0).saturating_add(shown)));
+                p.images = Some(saturate(as_u64(&t["omittedFiles"]).unwrap_or(0).saturating_add(shown_files)));
                 p
             })
             .collect()
@@ -71,8 +72,8 @@ impl Lynxchan {
                     url: format!("{}{path}", self.base),
                     thumb: thumb.map(|t| format!("{}{t}", self.base)),
                     spoiler,
-                    width: as_u64(&f["width"]).map(|n| n as u32),
-                    height: as_u64(&f["height"]).map(|n| n as u32),
+                    width: as_u32(&f["width"]),
+                    height: as_u32(&f["height"]),
                     size: as_u64(&f["size"]),
                     md5: None,
                 })
@@ -98,8 +99,8 @@ impl Lynxchan {
             time: parse_time(&v["creation"]).or_else(|| parse_time(&v["lastBump"])).unwrap_or(0),
             files,
             // postCount excludes the OP, like 4chan's `replies`.
-            replies: as_u64(&v["postCount"]).map(|n| n as u32),
-            images: as_u64(&v["fileCount"]).map(|n| n as u32),
+            replies: as_u32(&v["postCount"]),
+            images: as_u32(&v["fileCount"]),
             sticky: as_bool(&v["pinned"]),
             board: as_str(&v["boardUri"]),
             locked: as_bool(&v["locked"]),
@@ -110,8 +111,10 @@ impl Lynxchan {
 
 /// Some responses (kohlchan's board list) are wrapped as `{"status": "ok", "data": ...}`.
 pub fn unwrap(mut v: Value) -> Value {
-    if v.get("status").is_some() && v.get("data").is_some() {
-        v = v["data"].take();
+    if v.get("status").is_some()
+        && let Some(data) = v.get_mut("data")
+    {
+        v = data.take();
     }
     v
 }
@@ -167,7 +170,7 @@ impl Backend for Lynxchan {
                 break;
             }
             partial(&out);
-            page += 1;
+            page = page.saturating_add(1);
         }
         Ok(out)
     }
