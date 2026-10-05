@@ -237,13 +237,26 @@ fn draw_tab_row(f: &mut Frame, app: &mut App, area: Rect) {
 fn draw_app_bar(f: &mut Frame, app: &App, area: Rect) {
     let t = theme();
     fill(f, area, t.bar);
-    let (crumbs, meta) = location(app);
+    let (crumbs, mut meta) = location(app);
     let mut spans = vec![Span::styled(" ck ", bold(t.on_primary).bg(t.primary)), Span::raw(" ")];
-    let meta_w = meta.iter().map(|s| s.width()).sum::<usize>() as u16;
-    let left_w = area.width.saturating_sub(meta_w + 2);
-    // The last crumb (the most specific) gives way, with an ellipsis, when space is short.
     let n = crumbs.len();
     let before: usize = 5 + crumbs.iter().take(n.saturating_sub(1)).map(|c| c.width() + 5).sum::<usize>();
+    // The facts on the right give way (the counts first, then the chips) before the last
+    // crumb is cut to less than a few letters: where you are matters more.
+    let wanted = before + crumbs.last().map_or(0, |c| c.width().min(12));
+    let meta_width = |meta: &[Span]| meta.iter().map(|s| s.width()).sum::<usize>();
+    while !meta.is_empty() && usize::from(area.width).saturating_sub(meta_width(&meta) + 2) < wanted {
+        // The counts are the last span but the trailing space.
+        let counts = meta.len().saturating_sub(2);
+        if meta.get(counts).is_some_and(|s| !s.content.trim().is_empty()) {
+            meta.remove(counts);
+        } else {
+            meta.remove(0);
+        }
+    }
+    let meta_w = cells(meta_width(&meta));
+    let left_w = area.width.saturating_sub(meta_w + 2);
+    // The last crumb (the most specific) gives way, with an ellipsis, when space is short.
     for (i, c) in crumbs.into_iter().enumerate() {
         if i > 0 {
             spans.push(Span::styled("  ›  ", dim()));

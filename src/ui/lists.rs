@@ -246,14 +246,36 @@ pub(super) fn draw_catalog(f: &mut Frame, app: &mut App, area: Rect) {
         if let Some(n) = app.new_replies(p) {
             meta.push(Span::styled(format!("+{n} "), bold(t.new)));
         }
-        let mut facts = Vec::new();
-        if let Some(r) = p.replies {
-            facts.push(count(r as usize, "reply", "replies"));
-            facts.push(plural(p.images.unwrap_or(0) as usize, "image"));
-        }
-        facts.push(ago(p.time, app.clock));
-        meta.push(Span::styled(facts.join(" · "), dim()));
         let text_w = if thumbs { width.saturating_sub(CAT_THUMB.width as usize + 2) } else { width };
+        // The counts in words, or (when that doesn't leave the subject room) as the grid
+        // writes them, "R312 I58": on a narrow screen they shrink rather than vanish.
+        let facts = |short: bool| {
+            let mut facts = Vec::new();
+            if let Some(r) = p.replies {
+                let images = p.images.unwrap_or(0) as usize;
+                if short {
+                    facts.push(format!("R{r} I{images}"));
+                } else {
+                    facts.push(count(r as usize, "reply", "replies"));
+                    facts.push(plural(images, "image"));
+                }
+            }
+            facts.push(ago(p.time, app.clock));
+            facts.join(" · ")
+        };
+        let head_w: usize = head.iter().map(|s| s.width()).sum();
+        let long = facts(false);
+        let short = head_w.min(20) + long.width() + 4 > text_w;
+        meta.push(Span::styled(if short { facts(true) } else { long }, dim()));
+        // The subject gives way to the counts.
+        let meta_w: usize = meta.iter().map(|s| s.width()).sum();
+        let head_room = text_w.saturating_sub(meta_w + 2);
+        if head_w > head_room
+            && let Some(last) = head.last_mut()
+        {
+            let others = head_w.saturating_sub(last.width());
+            last.content = truncate(&last.content, head_room.saturating_sub(others)).into();
+        }
         if compact {
             let used: usize = head.iter().chain(&meta).map(|s| s.width()).sum();
             let room = text_w.saturating_sub(used + 4);

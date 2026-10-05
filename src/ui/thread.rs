@@ -77,6 +77,8 @@ pub(super) fn draw_thread(f: &mut Frame, app: &mut App, area: Rect) {
         settle(t, clock);
     }
     let Some(l) = t.layout.as_ref() else { return };
+    // Where the text on the first and last rows ends, for the markers of a tall post.
+    let mut ends = (area.x, area.x);
     for row in 0..area.height {
         let i = t.scroll + row as usize;
         let Some((e, line)) = l.line(i) else { break };
@@ -97,20 +99,30 @@ pub(super) fn draw_thread(f: &mut Frame, app: &mut App, area: Rect) {
             fill(f, Rect::new(code_x, y, area.right().saturating_sub(code_x + 1), 1), th.code_bg);
         }
         put(f, x + PAD, y, width.saturating_sub(PAD + 2), Line::from(line.spans.clone()));
+        let end = x.saturating_add(PAD).saturating_add(cells(line.width()));
+        if row == 0 {
+            ends.0 = end;
+        }
+        if row + 1 == area.height {
+            ends.1 = end;
+        }
     }
 
     // In a post taller than the screen: whether it goes on below, or started above.
+    // Over the end of the row when the text leaves room; else just the arrow, in the margin
+    // the text never reaches, so no text is covered.
     if let Some((_, above, below)) = t.tall() {
-        let mark = |f: &mut Frame, y: u16, text: &str| {
+        let mark = |f: &mut Frame, y: u16, end: u16, text: &str, arrow: &str| {
             let w = cells(text.width()).saturating_add(2);
             let x = area.right().saturating_sub(w + 1);
-            put(f, x, y, w, Line::from(Span::styled(format!(" {text} "), Style::new().fg(th.text_dim).bg(th.surface_high))));
+            let (x, w, text) = if x > end { (x, w, format!(" {text} ")) } else { (area.right().saturating_sub(1), 1, arrow.to_string()) };
+            put(f, x, y, w, Line::from(Span::styled(text, Style::new().fg(th.text_dim).bg(th.surface_high))));
         };
         if above {
-            mark(f, area.y, "↑");
+            mark(f, area.y, ends.0, "↑", "↑");
         }
         if below {
-            mark(f, area.bottom().saturating_sub(1), "↓ more");
+            mark(f, area.bottom().saturating_sub(1), ends.1, "↓ more", "↓");
         }
     }
 
