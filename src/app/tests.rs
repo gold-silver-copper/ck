@@ -2502,3 +2502,12 @@ fn a_request_that_panics_ends_like_one_that_failed() {
     let status = app.status.as_ref().unwrap();
     assert!(status.error && status.text.contains("ck hit a bug: deliberate: index out of bounds"), "{}", status.text);
 }
+
+#[cfg(unix)]
+#[test]
+fn a_termination_signal_quits_like_q() {
+    let mut app = local_app();
+    app.quit_on_signals().unwrap();
+    signal_hook::low_level::raise(signal_hook::consts::SIGTERM).unwrap();
+    settle_until(&mut app, |a| a.quit);
+}

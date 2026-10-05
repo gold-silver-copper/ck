@@ -50,6 +50,10 @@ fn main() -> Result<()> {
     let picker = (config.images != ImagesMode::Off).then(|| detect_images(config.images));
     ck::input_log::note(|| format!("images  {:?}", picker.as_ref().map(|p| p.protocol_type())));
     let mut app = App::new(config, keys, picker, store);
+    #[cfg(unix)]
+    if let Err(e) = app.quit_on_signals() {
+        app.error(format!("Closing the terminal won't save first: {e}"));
+    }
     if let Some(w) = warnings.first() {
         app.error(w);
     }
