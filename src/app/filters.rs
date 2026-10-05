@@ -100,11 +100,20 @@ impl AddFilter {
 /// Names sites give everyone who doesn't give one (filtering by them would hide everyone).
 const ANONYMOUS: &[&str] = &["anonymous", "anon", "аноним", "anonyme", "anónimo", "anonimo", "名無しさん", "名無し", "nameless"];
 
-/// The filters that would catch `p`: by its name (with the tripcode), its file's MD5 or
-/// name (the focused file, else the first), and an OP's subject. `default_name` is the name
-/// most posts around it have, which is skipped like the usual anonymous names.
+/// The filters that would catch `p`: by its poster ID, its name (with the tripcode), its
+/// tripcode alone, its flag, its file's MD5 or name (the focused file, else the first), and
+/// an OP's subject. `default_name` is the name most posts around it have, which is skipped
+/// like the usual anonymous names.
 pub fn candidates(p: &Post, file: Option<usize>, is_op: bool, default_name: Option<&str>) -> Vec<Candidate> {
     let mut out = Vec::new();
+    if let Some(id) = p.id.as_deref().filter(|id| !id.trim().is_empty()) {
+        out.push(Candidate {
+            what: format!("this poster (ID:{})", crate::ui::truncate(id, 30)),
+            field: Field::Id,
+            pattern: format!("^{}$", regex::escape(id)),
+            label: format!("ID:{}", crate::ui::truncate(id, 30)),
+        });
+    }
     let name = p.name.trim();
     let anonymous = name.is_empty() || ANONYMOUS.contains(&name.to_lowercase().as_str()) || default_name == Some(p.name.as_str());
     if !anonymous {
@@ -113,6 +122,24 @@ pub fn candidates(p: &Post, file: Option<usize>, is_op: bool, default_name: Opti
             field: Field::Name,
             pattern: format!("^{}$", regex::escape(&p.name)),
             label: name.to_string(),
+        });
+    }
+    if let Some(trip) = p.trip.as_deref().filter(|t| !t.trim().is_empty()) {
+        out.push(Candidate {
+            what: format!("posts with the tripcode {}", crate::ui::truncate(trip, 40)),
+            field: Field::Tripcode,
+            pattern: format!("^{}$", regex::escape(trip)),
+            label: trip.to_string(),
+        });
+    }
+    if let Some(flag) = &p.flag {
+        // By its code where it has one (names can be spelled differently).
+        let (by, shown) = if flag.code.is_empty() { (&flag.name, &flag.name) } else { (&flag.code, if flag.name.is_empty() { &flag.code } else { &flag.name }) };
+        out.push(Candidate {
+            what: format!("posts with the flag {}", crate::ui::truncate(shown, 40)),
+            field: Field::Flag,
+            pattern: format!("^{}$", regex::escape(by)),
+            label: format!("flag {}", crate::ui::truncate(shown, 30)),
         });
     }
     let focused = file.and_then(|k| p.files.get(k));
@@ -160,12 +187,16 @@ pub enum EditRow {
     Field(Field),
     Sites,
     Boards,
+    /// All posts, OPs only (`op`), or replies only (`reply`).
+    Posts,
     /// What it hides, its replies are hidden with.
     Recursive,
+    Notify,
+    Top,
     Enabled,
 }
 
-pub const EDIT_ROWS: [EditRow; 12] = [
+pub const EDIT_ROWS: [EditRow; 22] = [
     EditRow::Pattern,
     EditRow::Label,
     EditRow::Action,
@@ -174,9 +205,19 @@ pub const EDIT_ROWS: [EditRow; 12] = [
     EditRow::Field(Field::Name),
     EditRow::Field(Field::Filename),
     EditRow::Field(Field::Md5),
+    EditRow::Field(Field::Id),
+    EditRow::Field(Field::Flag),
+    EditRow::Field(Field::Tripcode),
+    EditRow::Field(Field::Capcode),
+    EditRow::Field(Field::Dimensions),
+    EditRow::Field(Field::Filesize),
+    EditRow::Field(Field::Postno),
     EditRow::Sites,
     EditRow::Boards,
+    EditRow::Posts,
     EditRow::Recursive,
+    EditRow::Notify,
+    EditRow::Top,
     EditRow::Enabled,
 ];
 
@@ -223,7 +264,11 @@ pub fn problem(f: &FilterConfig) -> Option<String> {
     // A regex error is several lines, pointing at the spot; its last line says what's wrong.
     let e = f.check().err()?.root_cause().to_string();
     let what = e.lines().rev().find_map(|l| l.trim().strip_prefix("error: ")).unwrap_or_else(|| e.lines().next().unwrap_or_default());
-    Some(format!("Not a valid pattern: {what}"))
+    // Not the regex: what's wrong with the filter as a whole, said without its place.
+    match what.strip_prefix("[[filter]] #").and_then(|w| w.split_once(": ")) {
+        Some((_, w)) => Some(format!("{}{}", w.get(..1).unwrap_or_default().to_uppercase(), w.get(1..).unwrap_or_default())),
+        None => Some(format!("Not a valid pattern: {what}")),
+    }
 }
 
 /// The post `X` makes a filter from.
@@ -462,12 +507,12 @@ impl App {
     pub fn filter_counts(&self, f: &FilterConfig) -> (usize, usize) {
         let Ok(one) = Filters::new(std::slice::from_ref(&FilterConfig { enabled: true, ..f.clone() })) else { return (0, 0) };
         let site = &self.current_site().cfg.name;
-        let caught = |board: &str, p: &Post| {
-            let m = one.check(site, board, p);
+        let caught = |board: &str, p: &Post, is_op: bool| {
+            let m = one.check(site, board, p, is_op);
             m.hidden.is_some() || m.highlight.is_some()
         };
-        let posts = self.tab.thread.as_ref().map_or(0, |t| t.posts.iter().filter(|p| caught(&t.board, p)).count());
-        let threads = self.tab.catalog.iter().filter(|p| caught(&self.board_of(p), p)).count();
+        let posts = self.tab.thread.as_ref().map_or(0, |t| t.posts.iter().enumerate().filter(|&(i, p)| caught(&t.board, p, i == 0)).count());
+        let threads = self.tab.catalog.iter().filter(|p| caught(&self.board_of(p), p, true)).count();
         (posts, threads)
     }
 
@@ -574,6 +619,10 @@ impl App {
                     }
                     EditRow::Enabled => next.enabled = !next.enabled,
                     EditRow::Recursive => next.recursive = !next.recursive,
+                    EditRow::Notify => next.notify = !next.notify,
+                    EditRow::Top => next.top = !next.top,
+                    // All, OPs, replies.
+                    EditRow::Posts => (next.op, next.reply) = (!next.op && !next.reply, next.op),
                     EditRow::Field(field) => {
                         let mut fields = next.fields();
                         match fields.iter().position(|&f| f == field) {
@@ -671,9 +720,36 @@ mod tests {
         let p = post("Mr. (Smith) !!Trip+");
         for c in candidates(&p, None, true, None) {
             let f = Filters::new(&[FilterConfig::new(c.pattern.clone(), &[c.field])]).unwrap();
-            assert!(f.check("4chan", "g", &p).hidden.is_some(), "{c:?}");
-            assert!(f.check("4chan", "g", &post("Someone")).hidden.is_none() || c.field != Field::Name, "{c:?}");
+            assert!(f.check("4chan", "g", &p, false).hidden.is_some(), "{c:?}");
+            assert!(f.check("4chan", "g", &post("Someone"), false).hidden.is_none() || c.field != Field::Name, "{c:?}");
         }
+    }
+
+    #[test]
+    fn candidates_by_poster_id_tripcode_and_flag() {
+        use crate::model::Flag;
+        let p = Post {
+            id: Some("Ab3d+f".into()),
+            trip: Some("!!Tr1p".into()),
+            flag: Some(Flag { code: "AC".into(), name: "Anarcho-Capitalist".into() }),
+            ..post("Anonymous !!Tr1p")
+        };
+        let c = candidates(&p, None, false, None);
+        // The ID first: on a board with them, that's who it is.
+        assert_eq!((c[0].field, c[0].pattern.as_str(), c[0].what.as_str()), (Field::Id, r"^Ab3d\+f$", "this poster (ID:Ab3d+f)"));
+        let by = |field| c.iter().find(|c| c.field == field).unwrap();
+        assert_eq!(by(Field::Tripcode).pattern, r"^!!Tr1p$");
+        // A flag by its code, named by its name.
+        assert_eq!((by(Field::Flag).pattern.as_str(), by(Field::Flag).label.as_str()), ("^AC$", "flag Anarcho-Capitalist"));
+        for c in &c {
+            let f = Filters::new(&[FilterConfig::new(c.pattern.clone(), &[c.field])]).unwrap();
+            assert!(f.check("4chan", "pol", &p, false).hidden.is_some(), "{c:?}");
+        }
+        // A custom flag without a code: by its name.
+        let p = Post { flag: Some(Flag { code: String::new(), name: "Tatarstan".into() }), ..post("Anonymous") };
+        assert_eq!(candidates(&p, None, false, None).iter().find(|c| c.field == Field::Flag).unwrap().pattern, "^Tatarstan$");
+        // Nothing of the kind on a board without them.
+        assert!(candidates(&post("Anonymous"), None, false, None).iter().all(|c| !matches!(c.field, Field::Id | Field::Flag | Field::Tripcode)));
     }
 
     #[test]
@@ -710,7 +786,14 @@ mod tests {
         assert_eq!(with_text(&f, EditRow::Label, "  ").label, None);
         assert_eq!(problem(&with_text(&f, EditRow::Pattern, "(unclosed")).as_deref(), Some("Not a valid pattern: unclosed group"));
         assert_eq!(problem(&with_text(&f, EditRow::Pattern, "")).as_deref(), Some("A filter needs a pattern"));
-        // An MD5 filter's pattern isn't a regex.
+        // An MD5 filter's pattern isn't a regex, nor is a file size's.
         assert!(problem(&FilterConfig::new("(abc".into(), &[Field::Md5])).is_none());
+        assert!(problem(&FilterConfig::new(">2MB".into(), &[Field::Filesize])).is_none());
+        assert_eq!(
+            problem(&FilterConfig::new("huge".into(), &[Field::Filesize])).as_deref(),
+            Some("\"huge\" isn't a file size range (try \">2MB\", \"<100KB\", \"1MB-5MB\")")
+        );
+        let both = FilterConfig { op: true, reply: true, ..f };
+        assert!(problem(&both).unwrap().starts_with("`op` and `reply` together catch nothing"));
     }
 }

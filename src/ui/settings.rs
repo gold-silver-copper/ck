@@ -278,8 +278,11 @@ fn draw_filter_edit(f: &mut Frame, app: &App, index: Option<usize>, draft: &crat
     let hint = if typing.is_some() { "enter keep · esc cancel" } else { "enter change · esc back" };
     let inner = panel(f, 84, cells(EDIT_ROWS.len()).saturating_add(6), &title, hint);
     let fields = draft.fields();
-    for (k, r) in EDIT_ROWS.iter().enumerate().take(inner.height.saturating_sub(2) as usize) {
-        let y = inner.y + k as u16;
+    // On a short screen the rows scroll, the selected one in view.
+    let shown = inner.height.saturating_sub(2) as usize;
+    let skip = (row + 1).saturating_sub(shown);
+    for (k, r) in EDIT_ROWS.iter().enumerate().skip(skip).take(shown) {
+        let y = inner.y + (k - skip) as u16;
         paint_row(f, Rect::new(inner.x - 2, y, inner.width + 4, 1), None, k == row, false);
         let (name, value): (String, String) = match r {
             EditRow::Pattern => ("Pattern".into(), draft.pattern.clone()),
@@ -297,11 +300,28 @@ fn draw_filter_edit(f: &mut Frame, app: &App, index: Option<usize>, draft: &crat
             EditRow::Sites => ("Sites".into(), if draft.sites.is_empty() { "(any)".into() } else { draft.sites.join(", ") }),
             EditRow::Boards => ("Boards".into(), if draft.boards.is_empty() { "(any)".into() } else { draft.boards.join(", ") }),
             EditRow::Enabled => ("On".into(), if draft.enabled { "yes".into() } else { "no (kept, not applied)".into() }),
+            EditRow::Posts => (
+                "Posts".into(),
+                match (draft.op, draft.reply) {
+                    (true, _) => "OPs only".into(),
+                    (_, true) => "replies only".into(),
+                    _ => "all".into(),
+                },
+            ),
+            EditRow::Notify => ("Notify".into(), if draft.notify { "yes, in watched threads and followed boards".into() } else { "no".into() }),
+            EditRow::Top => (
+                "Top".into(),
+                match (draft.top, draft.action) {
+                    (true, crate::filter::FilterAction::Highlight) => "first in catalogs".into(),
+                    (true, _) => "first in catalogs, when it highlights".into(),
+                    (false, _) => "no".into(),
+                },
+            ),
         };
-        let mut spans = vec![Span::styled(format!("{name:<12}"), dim())];
+        let mut spans = vec![Span::styled(format!("{name:<13}"), dim())];
         match typing.filter(|_| k == row) {
             Some(text) => spans.extend([Span::styled(text.to_string(), bold(t.text)), Span::styled("▏", Style::new().fg(t.primary))]),
-            None => spans.push(Span::styled(truncate(&value, (inner.width as usize).saturating_sub(13)), Style::new().fg(t.text))),
+            None => spans.push(Span::styled(truncate(&value, (inner.width as usize).saturating_sub(14)), Style::new().fg(t.text))),
         }
         put(f, inner.x, y, inner.width, Line::from(spans));
     }
@@ -309,7 +329,7 @@ fn draw_filter_edit(f: &mut Frame, app: &App, index: Option<usize>, draft: &crat
     let r = EDIT_ROWS.get(row).copied().unwrap_or(EditRow::Pattern);
     let line = match typing.map(|text| crate::app::filters_problem(&crate::app::filters_with_text(draft, r, text))) {
         Some(Some(e)) => Line::styled(e, Style::new().fg(t.error)),
-        _ if draft.pattern.is_empty() => Line::styled("Type a pattern (a regex; an MD5 for the md5 field).", dim()),
+        _ if draft.pattern.is_empty() => Line::styled("Type a pattern (a regex; an MD5 for md5, a range like >2MB for filesize).", dim()),
         _ => Line::styled(format!("Catches {} now. Each change is saved in the config.", counts_text(app.filter_counts(draft))), dim()),
     };
     put(f, inner.x, inner.bottom().saturating_sub(1), inner.width, line);

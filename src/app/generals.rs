@@ -3,7 +3,7 @@
 
 use std::time::{Duration, Instant};
 
-use super::{App, View, thread_subject};
+use super::{App, Note, View, thread_subject};
 use crate::model::{Post, max_no};
 use crate::store::{ThreadKey, Watched};
 
@@ -122,6 +122,7 @@ impl App {
     pub(super) fn general_catalog(&mut self, key: &ThreadKey, res: anyhow::Result<Vec<Post>>) {
         self.generals_searching.remove(key);
         let Ok(catalog) = res else { return };
+        self.notify_new_threads(key, &catalog);
         let Some(w) = self.store.watched(key) else { return };
         let Some(pattern) = w.general.clone() else { return };
         let dead = w.dead;
@@ -153,6 +154,25 @@ impl App {
         match sent {
             Ok(()) => self.info(msg),
             Err(e) => self.error(format!("{msg} (couldn't notify: {e:#})")),
+        }
+    }
+
+    /// A followed general's board catalog arrived: threads new since the last look this
+    /// session (not on the first, which finds the whole board) that a `notify` filter
+    /// catches are told about, once each.
+    fn notify_new_threads(&mut self, key: &ThreadKey, catalog: &[Post]) {
+        let here = |op: &&Post| op.board.as_deref().is_none_or(|b| b == key.board);
+        let newest = catalog.iter().filter(here).map(|op| op.no).max().unwrap_or(0);
+        let board = (key.site.clone(), key.board.clone());
+        let Some(seen) = self.board_notified_max.insert(board.clone(), newest) else { return };
+        // Never back: a short or broken answer doesn't bring old threads up again.
+        self.board_notified_max.insert(board, newest.max(seen));
+        for op in catalog.iter().filter(here).filter(|op| op.no > seen) {
+            let Some(filter) = self.filters.check(&key.site, &key.board, op, true).notify else { continue };
+            let thread = ThreadKey { site: key.site.clone(), board: key.board.clone(), no: op.no };
+            let note = Note { key: thread, subject: thread_subject(std::slice::from_ref(op)), new: 0, replies: 0, caught: 1, filter };
+            self.notes_since.get_or_insert_with(|| self.clock.instant());
+            self.notes.push(note);
         }
     }
 }

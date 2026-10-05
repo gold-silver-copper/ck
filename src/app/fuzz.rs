@@ -392,7 +392,10 @@ impl Backend for Gated {
 const FILTERS: &str = "[[filter]]\npattern = \"(?i)word\"\nlabel = \"word\"\n\
     [[filter]]\npattern = \"日本\"\naction = \"highlight\"\n\
     [[filter]]\npattern = \"(OP)\"\nfield = \"subject\"\naction = \"hide\"\n\
-    [[filter]]\npattern = \"^.{1,8}$\"\nfield = \"subject\"\nrecursive = true\nboards = [\"b\", \"λ\"]\n";
+    [[filter]]\npattern = \"^.{1,8}$\"\nfield = \"subject\"\nrecursive = true\nboards = [\"b\", \"λ\"]\n\
+    [[filter]]\npattern = \"^id[12]$\"\nfield = [\"id\", \"flag\", \"tripcode\"]\nreply = true\nnotify = true\n\
+    [[filter]]\npattern = \">1MB\"\nfield = \"filesize\"\naction = \"highlight\"\nop = true\ntop = true\nnotify = true\n\
+    [[filter]]\npattern = \"[02468]$\"\nfield = [\"postno\", \"dimensions\", \"capcode\"]\naction = \"highlight\"\ntop = true\n";
 
 /// The wall clock the fuzzer starts from.
 const START: i64 = 1_790_000_000;
@@ -1286,13 +1289,18 @@ fn check_deleted(app: &App, before: &Before) {
 
 /// After the filters change, the open catalog's and thread's marks are what they say.
 fn check_marks(app: &App, before: &Before) {
+    // Threads a `top` filter highlights come first, whatever the sort.
+    if app.tab.catalog_marks.len() == app.tab.catalog.len() {
+        let tops: Vec<bool> = app.visible_catalog().iter().map(|&i| app.tab.catalog_marks[i].top).collect();
+        assert!(tops.windows(2).all(|w| w[0] || !w[1]), "a top thread after another: {tops:?}");
+    }
     if app.filter_cfgs == before.filters && app.recursive_hiding == before.recursive_hiding {
         return;
     }
     let tab = &app.tab;
     // (A catalog left loaded from another site is marked for that one.)
     if !tab.catalog.is_empty() && tab.catalog_site == tab.site {
-        let want = app.marks(&tab.catalog, |p| app.board_of(p));
+        let want = app.marks(&tab.catalog, false, |p| app.board_of(p));
         if let Some(i) = (0..want.len()).find(|&i| tab.catalog_marks.get(i) != Some(&want[i])) {
             let p = &tab.catalog[i];
             panic!(

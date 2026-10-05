@@ -810,7 +810,7 @@ fn config_once(seed: u64) {
             3 => {
                 let mut f = toml_edit::Table::new();
                 f["pattern"] = toml_edit::value(*rng.pick(&["(", "a{99999}", "", "(?i)x", "[", "\\p{Han}"]));
-                f[*rng.pick(&["action", "field", "label", "enabled", "sites", "boards"])] = odd_toml(&mut rng);
+                f[*rng.pick(&["action", "field", "label", "enabled", "sites", "boards", "op", "reply", "notify", "top"])] = odd_toml(&mut rng);
                 doc["filter"].or_insert(toml_edit::Item::ArrayOfTables(Default::default()));
                 if let Some(a) = doc["filter"].as_array_of_tables_mut() {
                     a.push(f);
@@ -826,13 +826,23 @@ fn config_once(seed: u64) {
             6 | 7 => {
                 use crate::filter::{Field, FilterAction, FilterConfig};
                 let fields: Vec<Field> = Field::ALL.into_iter().filter(|_| rng.chance(40)).collect();
-                let mut f = FilterConfig::new(rng.pick(&["(?i)word", "^Anon$", "日本", "abc==", "x|y"]).to_string(), if fields.is_empty() { &[Field::Comment] } else { &fields });
+                // (A file size's pattern is a range, and a regex too.)
+                let patterns: &[&str] = if fields.contains(&Field::Filesize) { &[">2MB", "<=100KB", "1KB-5MB", "0"] } else { &["(?i)word", "^Anon$", "日本", "abc==", "x|y"] };
+                let mut f = FilterConfig::new(rng.pick(patterns).to_string(), if fields.is_empty() { &[Field::Comment] } else { &fields });
                 f.action = if rng.chance(50) { FilterAction::Hide } else { FilterAction::Highlight };
                 f.sites = (0..rng.below(3)).map(|_| rng.pick(&["4chan", "lainchan", "nosuch"]).to_string()).collect();
                 f.boards = (0..rng.below(3)).map(|_| rng.pick(&["g", "λ", "b"]).to_string()).collect();
                 f.label = rng.chance(50).then(|| html(&mut rng, 1));
                 f.enabled = rng.chance(70);
                 f.recursive = rng.chance(30);
+                // OPs or replies (never both: that's refused).
+                (f.op, f.reply) = match rng.below(4) {
+                    0 => (true, false),
+                    1 => (false, true),
+                    _ => (false, false),
+                };
+                f.notify = rng.chance(30);
+                f.top = rng.chance(30);
                 let mut t = toml_edit::Table::new();
                 f.write(&mut t, None);
                 doc["filter"].or_insert(toml_edit::Item::ArrayOfTables(Default::default()));

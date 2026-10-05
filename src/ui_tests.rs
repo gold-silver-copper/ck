@@ -307,8 +307,13 @@ fn filter_editor() {
     a.filter_cfgs = some_filters();
     a.open_settings();
     let draft = a.filter_cfgs[1].clone();
-    a.popup = Some(Popup::Settings(SettingsPopup::FilterEdit { index: Some(1), draft, row: 0, typing: Some("^Named (!Trip".into()) }));
+    a.popup = Some(Popup::Settings(SettingsPopup::FilterEdit { index: Some(1), draft: draft.clone(), row: 0, typing: Some("^Named (!Trip".into()) }));
     insta::assert_snapshot!(snapshot(&mut a));
+    // On a short screen the rows scroll: the last one selected is in view.
+    let last = crate::app::EDIT_ROWS.len() - 1;
+    a.popup = Some(Popup::Settings(SettingsPopup::FilterEdit { index: Some(1), draft, row: last, typing: None }));
+    let (text, _) = render_at(&mut a, 100, 20);
+    assert!(text.contains("On           yes") && text.contains("Top") && !text.contains("Pattern"), "{text}");
 }
 
 #[test]
