@@ -1,6 +1,6 @@
 [package]
 name = "ck"
-version = "0.7.0"
+version = "0.7.1"
 edition = "2024"
 description = "A read-only terminal imageboard browser for 4chan, vichan, LynxChan, jschan and FoolFuuka archives"
 license = "MIT OR Apache-2.0"
