@@ -255,7 +255,7 @@ fn saved() {
 fn saved_dead_thread() {
     let mut a = thread_app(false);
     with_saved(&mut a);
-    a.tab.offline = Some(crate::app::Offline { saved: NOW - 5 * HOUR, dead: true });
+    a.tab.copy = Some(crate::app::ThreadCopy::Saved(crate::app::Offline { saved: NOW - 5 * HOUR, dead: true }));
     insta::assert_snapshot!(snapshot(&mut a));
 }
 
@@ -323,7 +323,7 @@ fn conversation() {
 #[test]
 fn thread_from_its_last_copy() {
     let mut a = thread_app(false);
-    a.tab.cached = Some(crate::app::Offline { saved: NOW - 3 * 60, dead: false });
+    a.tab.copy = Some(crate::app::ThreadCopy::Cached(crate::app::Offline { saved: NOW - 3 * 60, dead: false }));
     a.tab.loading = Some("Loading thread 1000".into());
     insta::assert_snapshot!(snapshot(&mut a));
 }
@@ -1022,7 +1022,7 @@ fn link_hints() {
     c.on_key(KeyEvent::from(KeyCode::Char('f')));
     insta::assert_snapshot!("link_hints_catalog", snapshot(&mut c));
     c.on_key(KeyEvent::from(KeyCode::Char('s')));
-    assert_eq!((c.tab.view, c.tab.pending_thread), (View::Thread, c.tab.catalog[1].no));
+    assert_eq!((c.tab.view, c.tab.pending_thread.unwrap()), (View::Thread, c.tab.catalog[1].no));
 }
 
 #[test]
@@ -1107,7 +1107,7 @@ fn adding_a_site() {
 fn images_off_on_a_board() {
     // The board's own setting: tiles say so, nothing's asked for, and the top bar says it.
     let mut a = catalog_app(true);
-    a.tab.catalog_board = "g".into();
+    a.tab.catalog_board = Some("g".into());
     a.store.board_prefs.entry("4chan/g".into()).or_default().images = Some(false);
     insta::assert_snapshot!("images_off_catalog", snapshot(&mut a));
     assert_eq!(a.images.queued(), 0);

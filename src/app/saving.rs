@@ -79,7 +79,7 @@ impl App {
         } else {
             // Over a catalog: the thread's OP.
             self.selected_post().and_then(|p| {
-                let board = p.board.clone().or_else(|| Some(self.tab.catalog_board.clone()).filter(|b| !b.is_empty()));
+                let board = p.board.clone().or_else(|| self.tab.catalog_board.clone());
                 let board = board.or_else(|| self.tab.board.as_ref().map(|b| b.uri.clone()))?;
                 Some((board, p.no, p.clone()))
             })

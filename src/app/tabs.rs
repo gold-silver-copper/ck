@@ -20,6 +20,15 @@ pub struct Offline {
     pub dead: bool,
 }
 
+/// A copy of the thread shown instead of the live one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ThreadCopy {
+    /// The last copy kept, shown while the thread is fetched: when it was fetched.
+    Cached(Offline),
+    /// A saved copy, read offline.
+    Saved(Offline),
+}
+
 /// A popup of the tab's own (it stays with the tab when another is shown).
 pub enum TabPopup {
     /// The full-screen image viewer.
@@ -61,7 +70,7 @@ pub struct Tab {
     /// Post whose conversation to show once the loading thread arrives (a session's).
     pub pending_conversation: Option<u64>,
     /// Board the loaded catalog belongs to.
-    pub catalog_board: String,
+    pub catalog_board: Option<String>,
     /// The site the loaded catalog is from.
     pub catalog_site: usize,
     /// The board whose catalog is loaded, to return to from a thread opened on another board
@@ -73,18 +82,17 @@ pub struct Tab {
     pub archive_offer: Option<ThreadKey>,
     /// After a thread 404'd: its saved copy (`enter` opens it).
     pub saved_offer: Option<ThreadKey>,
-    /// The open thread is a saved copy, read offline.
-    pub offline: Option<Offline>,
-    /// The thread shown is the last copy kept (it's being fetched): when it was fetched.
-    pub cached: Option<Offline>,
+    /// The thread shown is a copy, not the live thread.
+    pub copy: Option<ThreadCopy>,
     /// The same for the catalog.
     pub catalog_cached: Option<Offline>,
-    /// The tab's request in flight (0: none).
-    pub req: u64,
+    /// The tab's last request, whose answers are its own. It outlives `loading`: a cached
+    /// answer's note comes after the answer. `None` once dropped by navigating away.
+    pub req: Option<u64>,
     /// Why the tab's last load failed, shown where what it loads would be (until the next).
     pub failed: Option<String>,
     /// The thread number of the last thread load, for 404 handling.
-    pub pending_thread: u64,
+    pub pending_thread: Option<u64>,
     /// Thread to select in the catalog once it loads (restoring a session).
     pub pending_catalog: Option<u64>,
     /// The open thread is being restored from the last session.
@@ -101,6 +109,16 @@ impl Tab {
 
     pub fn viewer_mut(&mut self) -> Option<&mut Viewer> {
         if let Some(TabPopup::Viewer(v)) = &mut self.popup { Some(v) } else { None }
+    }
+
+    /// The saved copy being read, if that's what's shown.
+    pub fn saved(&self) -> Option<Offline> {
+        if let Some(ThreadCopy::Saved(o)) = self.copy { Some(o) } else { None }
+    }
+
+    /// The last copy kept, if that's what's shown while the thread is fetched.
+    pub fn cached(&self) -> Option<Offline> {
+        if let Some(ThreadCopy::Cached(o)) = self.copy { Some(o) } else { None }
     }
 
     pub fn new(site: usize, now: Instant) -> Self {
@@ -123,19 +141,18 @@ impl Tab {
             gallery: None,
             trail: Vec::new(),
             pending_post: None,
-            catalog_board: String::new(),
+            catalog_board: None,
             catalog_site: site,
             catalog_of: None,
             from_catalog: false,
             archive_offer: None,
             saved_offer: None,
             pending_conversation: None,
-            cached: None,
+            copy: None,
             catalog_cached: None,
-            offline: None,
-            req: 0,
+            req: None,
             failed: None,
-            pending_thread: 0,
+            pending_thread: None,
             pending_catalog: None,
             restoring: false,
             search: None,
@@ -175,7 +192,7 @@ impl App {
 
     /// The inactive tab whose request this is.
     pub(super) fn tab_of(&self, id: u64) -> Option<usize> {
-        (id != 0).then(|| self.tabs.iter().enumerate().position(|(i, t)| i != self.active && t.req == id)).flatten()
+        self.tabs.iter().enumerate().position(|(i, t)| i != self.active && t.req == Some(id))
     }
 }
 
@@ -271,7 +288,7 @@ impl App {
         match t.view {
             View::Thread => match &t.thread {
                 Some(th) => thread_subject(&th.posts),
-                None => format!("/{board}/{}", t.pending_thread),
+                None => format!("/{board}/{}", t.pending_thread.unwrap_or_default()),
             },
             View::Catalog => format!("/{board}/"),
             View::Boards => self.sites.get(t.site).map_or(String::new(), |s| s.cfg.name.clone()),

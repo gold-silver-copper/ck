@@ -33,7 +33,7 @@ impl App {
         };
         let mut place = Place { view: view_name(view).into(), site: self.current_site().cfg.name.clone(), ..Default::default() };
         // A saved copy open: reopened as one.
-        if view == View::Thread && self.tab.offline.is_some() {
+        if view == View::Thread && self.tab.saved().is_some() {
             place.view = "saved".into();
         }
         match view {
@@ -47,7 +47,7 @@ impl App {
         match view {
             View::Thread => {
                 let t = self.tab.thread.as_ref();
-                place.thread = t.map(|t| t.no).or((self.tab.pending_thread > 0).then_some(self.tab.pending_thread));
+                place.thread = t.map(|t| t.no).or(self.tab.pending_thread);
                 place.selected = t.and_then(|t| t.current()).map(|p| p.no).or(self.tab.pending_post);
                 place.conversation = t.and_then(|t| Some(t.conversation.as_ref()?.anchor)).or(self.tab.pending_conversation);
             }

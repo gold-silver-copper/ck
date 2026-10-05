@@ -14,7 +14,7 @@ use ratatui_image::Image;
 use unicode_width::UnicodeWidthStr;
 
 use crate::app::{
-    App, Clock, Hit, LineCache, LinkItem, Part, Popup, Reveal, TabPopup, Spot, SettingsPopup, SiteRow, Sort, Status, ThreadLayout, ThreadView, Typing, View, key_rows,
+    App, Clock, Hit, LineCache, LinkItem, Part, Popup, Reveal, TabPopup, Spot, SettingsPopup, SiteRow, Sort, Status, ThreadLayout, ThreadCopy, ThreadView, Typing, View, key_rows,
     setting_rows, settings,
 };
 use std::collections::HashMap;
@@ -146,7 +146,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     let t = theme();
     let all = f.area();
     // A saved copy is read offline: its images only come from disk.
-    app.images.offline = app.tab.view == View::Thread && app.tab.offline.is_some();
+    app.images.offline = app.tab.view == View::Thread && app.tab.saved().is_some();
     f.buffer_mut().set_style(all, Style::new().fg(t.text).bg(t.background));
     if app.tab.viewer().is_some() {
         draw_viewer(f, app);
@@ -301,7 +301,9 @@ fn location(app: &App) -> (Vec<String>, Vec<Span<'static>>) {
             if app.tab.catalog_sort != Sort::Bump {
                 meta.push(app.tab.catalog_sort.as_str().into());
             }
-            if !app.tab.catalog_board.is_empty() && !app.images_on(app.tab.catalog_site, &app.tab.catalog_board) {
+            if let Some(board) = &app.tab.catalog_board
+                && !app.images_on(app.tab.catalog_site, board)
+            {
                 meta.push("images off".into());
             }
             vec![site(), board().unwrap_or_default()]
@@ -392,7 +394,10 @@ fn location(app: &App) -> (Vec<String>, Vec<Span<'static>>) {
     }
     // A saved copy, read offline; or the last copy kept, shown while it loads.
     let copy = match app.tab.view {
-        View::Thread => app.tab.offline.map(|o| ("saved", o)).or(app.tab.cached.map(|c| ("cached", c))),
+        View::Thread => app.tab.copy.map(|c| match c {
+            ThreadCopy::Saved(o) => ("saved", o),
+            ThreadCopy::Cached(o) => ("cached", o),
+        }),
         View::Catalog => app.tab.catalog_cached.map(|c| ("cached", c)),
         _ => None,
     };
@@ -598,7 +603,7 @@ fn footer_hints(app: &App) -> Vec<(String, &'static str)> {
         ],
     };
     // A saved copy of a thread that's still up: the live one is a key away.
-    if app.tab.view == View::Thread && app.tab.gallery.is_none() && app.focused().is_none() && app.tab.offline.is_some_and(|o| !o.dead) {
+    if app.tab.view == View::Thread && app.tab.gallery.is_none() && app.focused().is_none() && app.tab.saved().is_some_and(|o| !o.dead) {
         hints.insert(0, (k(Action::Reload), "live thread"));
     }
     if app.tab.view != View::Settings {

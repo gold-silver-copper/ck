@@ -36,7 +36,7 @@ impl App {
     /// Images on a catalog's thread: the catalog's own setting if it has one (an overboard
     /// as a whole), else the thread's board's.
     pub fn catalog_images_on(&self, p: &Post) -> bool {
-        let (site, catalog) = (self.tab.catalog_site, self.tab.catalog_board.as_str());
+        let (site, catalog) = (self.tab.catalog_site, self.tab.catalog_board.as_deref().unwrap_or_default());
         if let Some(on) = self.store.board_prefs.get(&self.prefs_key(site, catalog)).and_then(|p| p.images) {
             return on;
         }
@@ -64,7 +64,7 @@ impl App {
     pub(super) fn images_target(&self) -> Option<(usize, String)> {
         match self.tab.view {
             View::Boards => self.selected_index().and_then(|i| self.boards().get(i).map(|b| (self.tab.site, b.uri.clone()))),
-            View::Catalog => Some((self.tab.catalog_site, self.tab.catalog_board.clone())).filter(|(_, b)| !b.is_empty()),
+            View::Catalog => self.tab.catalog_board.clone().map(|b| (self.tab.catalog_site, b)),
             View::Thread => self.tab.thread.as_ref().map(|t| (self.tab.site, t.board.clone())),
             _ => None,
         }
@@ -107,7 +107,7 @@ impl App {
         let (on, board) = match self.tab.view {
             View::Catalog => {
                 let Some(p) = self.selected_post() else { return false };
-                (self.catalog_images_on(p), p.board.clone().unwrap_or_else(|| self.tab.catalog_board.clone()))
+                (self.catalog_images_on(p), p.board.clone().or_else(|| self.tab.catalog_board.clone()).unwrap_or_default())
             }
             View::Thread => {
                 let Some(t) = &self.tab.thread else { return false };

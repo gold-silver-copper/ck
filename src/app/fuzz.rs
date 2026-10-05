@@ -888,7 +888,7 @@ fn replay(seed: u64, acts: &[Act]) -> Result<(), (String, String)> {
                 let a = &world.app;
                 let hid: Vec<String> = a.store.hidden.iter().map(|(k, v)| format!("{k}:{}", v.len())).collect();
                 let m: usize = a.tab.catalog_marks.iter().filter(|m| m.hidden.is_some()).count();
-                eprintln!("TRACE {step} {act}: tab {} view {:?} site {} board {:?} cat_board {} cat {} hidden-marks {m} store {hid:?} filters {}", a.active, a.tab.view, a.current_site().cfg.name, a.tab.board.as_ref().map(|b| &b.uri), a.tab.catalog_board, a.tab.catalog.len(), a.filter_cfgs.len());
+                eprintln!("TRACE {step} {act}: tab {} view {:?} site {} board {:?} cat_board {} cat {} hidden-marks {m} store {hid:?} filters {}", a.active, a.tab.view, a.current_site().cfg.name, a.tab.board.as_ref().map(|b| &b.uri), a.tab.catalog_board.as_deref().unwrap_or_default(), a.tab.catalog.len(), a.filter_cfgs.len());
                 let w: Vec<String> = a.store.watched.iter().map(|w| format!("{}/{}/{} dead={} seen={}", w.key.site, w.key.board, w.key.no, w.dead, w.last_seen)).collect();
                 let sv: Vec<String> = a.store.saved.iter().map(|m| format!("{}/{}/{}", m.key.site, m.key.board, m.key.no)).collect();
                 eprintln!("TRACE   watched {w:?} saved {sv:?} status {:?}", a.status.as_ref().map(|s| &s.text));
@@ -1003,18 +1003,15 @@ fn check(app: &App) {
         {
             fail(format!("tab {i}: focus on {f:?}, not a part of post {}", t.selected));
         }
-        if tab.loading.is_some() && tab.req == 0 {
+        if tab.loading.is_some() && tab.req.is_none() {
             fail(format!("tab {i} is loading with no request"));
         }
         // A copy shown while loading is marked as one, and there's something to show.
-        if tab.cached.is_some() && tab.thread.is_none() {
+        if tab.cached().is_some() && tab.thread.is_none() {
             fail(format!("tab {i}: marked cached with no thread"));
         }
         if tab.catalog_cached.is_some() && tab.catalog.is_empty() {
             fail(format!("tab {i}: catalog marked cached with nothing in it"));
-        }
-        if tab.cached.is_some() && tab.offline.is_some() {
-            fail(format!("tab {i}: both a saved copy and a cached one"));
         }
         if let Some(v) = tab.viewer()
             && v.index >= v.files.len()
@@ -1131,7 +1128,7 @@ impl Before {
     fn of(app: &App, gate: &Gate) -> Self {
         let watched_alive = |k: &ThreadKey| app.store.watched(k).is_some_and(|w| !w.dead);
         let saved = app.store.saved.iter().map(|m| (m.key.clone(), m.dead && app.store.watched(&m.key).is_none())).collect();
-        let offline_dead = match (&app.tab.offline, &app.tab.thread) {
+        let offline_dead = match (app.tab.saved(), &app.tab.thread) {
             (Some(o), Some(t)) if o.dead && app.tab.view == View::Thread => {
                 Some(app.key(&t.board, t.no)).filter(|k| !watched_alive(k)).map(|k| (app.active, k))
             }

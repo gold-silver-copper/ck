@@ -318,7 +318,7 @@ impl App {
                             items.push(MenuItem::Act(A::BoardImages, row));
                         }
                         items.push(act(A::Export, "save the thread as a page…"));
-                        match self.tab.offline {
+                        match self.tab.saved() {
                             Some(o) if o.dead => {}
                             Some(_) => items.push(act(A::Reload, "open the live thread")),
                             None => items.push(act(A::Reload, "reload")),
