@@ -53,12 +53,17 @@ fn main() -> Result<()> {
     if let Some(w) = warnings.first() {
         app.error(w);
     }
-    match start_at {
-        Some(at) => app.goto_str(&at),
-        None if app.restore_session => app.restore_session(),
-        None => {}
-    }
-    let result = run(&mut terminal, &mut app);
+    // A panic still saves what can be saved and restores the terminal (the hook has
+    // already put it back and printed the message).
+    let result = ck::guard::catching(|| {
+        match start_at {
+            Some(at) => app.goto_str(&at),
+            None if app.restore_session => app.restore_session(),
+            None => {}
+        }
+        run(&mut terminal, &mut app)
+    })
+    .unwrap_or_else(|what| Err(anyhow::anyhow!("ck stopped on a bug ({what}); what it had was saved")));
     app.save_session(None);
     app.flush_writes();
     app.save_now();

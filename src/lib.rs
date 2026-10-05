@@ -43,6 +43,7 @@ pub mod filter;
 pub mod fuzzing;
 #[cfg(test)]
 mod fuzz;
+pub mod guard;
 pub mod http;
 pub mod images;
 pub mod input_log;
