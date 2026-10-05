@@ -126,6 +126,12 @@ pub struct Settings {
     pub catalog_layout: Option<crate::config::CatalogLayout>,
 }
 
+/// The `site/board` a board's hidden numbers, preferences, seen threads and place in the
+/// recent boards are kept under, in memory and in their files.
+pub fn board_key(site: &str, board: &str) -> String {
+    format!("{site}/{board}")
+}
+
 #[derive(Default)]
 pub struct Store {
     dir: Option<PathBuf>,
@@ -276,7 +282,7 @@ impl Store {
     /// A board's catalog was loaded: remember its threads, and return the ones that weren't
     /// there on the previous load (none on the first).
     pub fn catalog_seen(&mut self, site: &str, board: &str, threads: &[u64], now: i64) -> std::collections::HashSet<u64> {
-        let key = format!("{site}/{board}");
+        let key = board_key(site, board);
         let first = !self.seen.contains_key(&key);
         let map = self.seen.entry(key).or_default();
         let new = if first { Default::default() } else { threads.iter().copied().filter(|no| !map.contains_key(no)).collect() };
@@ -289,7 +295,7 @@ impl Store {
 
     /// A board's catalog was opened: it goes to the front of the recent boards.
     pub fn board_opened(&mut self, site: &str, board: &str) {
-        let key = format!("{site}/{board}");
+        let key = board_key(site, board);
         self.recent_boards.retain(|b| *b != key);
         self.recent_boards.insert(0, key);
         self.recent_boards.truncate(RECENT_BOARDS);
@@ -297,7 +303,7 @@ impl Store {
 
     /// A thread was opened with `replies` replies.
     pub fn opened(&mut self, site: &str, board: &str, no: u64, replies: u32, now: i64) {
-        let t = self.seen.entry(format!("{site}/{board}")).or_default().entry(no).or_default();
+        let t = self.seen.entry(board_key(site, board)).or_default().entry(no).or_default();
         t.replies = Some(replies);
         // A thread opened from elsewhere (not seen in a catalog) is kept a while too.
         if t.last == 0 {
@@ -307,7 +313,7 @@ impl Store {
 
     /// Replies the thread had when it was last opened.
     pub fn replies_seen(&self, site: &str, board: &str, no: u64) -> Option<u32> {
-        self.seen.get(&format!("{site}/{board}"))?.get(&no)?.replies
+        self.seen.get(&board_key(site, board))?.get(&no)?.replies
     }
 
     pub fn load_session(&self) -> Option<Session> {
@@ -322,12 +328,12 @@ impl Store {
 
     /// What's hidden by hand on a board.
     pub fn hidden_on(&self, site: &str, board: &str) -> std::collections::HashSet<u64> {
-        self.hidden.get(&format!("{site}/{board}")).into_iter().flatten().copied().collect()
+        self.hidden.get(&board_key(site, board)).into_iter().flatten().copied().collect()
     }
 
     /// Hide a thread or post, or unhide it; returns whether it's hidden now.
     pub fn toggle_hidden(&mut self, site: &str, board: &str, no: u64) -> bool {
-        let key = format!("{site}/{board}");
+        let key = board_key(site, board);
         let list = self.hidden.entry(key.clone()).or_default();
         if let Some(i) = list.iter().position(|&n| n == no) {
             list.remove(i);

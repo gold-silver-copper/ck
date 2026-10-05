@@ -8,7 +8,7 @@ use crate::config::NsfwImages;
 impl App {
     /// The key of a board's preferences: `site/board`.
     pub(super) fn prefs_key(&self, site: usize, board: &str) -> String {
-        format!("{}/{}", self.sites.get(site).map_or("", |s| s.cfg.name.as_str()), board)
+        crate::store::board_key(self.sites.get(site).map_or("", |s| s.cfg.name.as_str()), board)
     }
 
     /// Whether the site marks a board NSFW, as far as its board list says (`None`: it doesn't

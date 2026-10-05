@@ -18,7 +18,7 @@ impl BoardRef {
     }
 
     pub fn key(&self) -> String {
-        format!("{}/{}", self.site, self.board)
+        crate::store::board_key(&self.site, &self.board)
     }
 }
 
@@ -31,7 +31,7 @@ impl App {
     pub fn note_titles(&mut self, site: usize) {
         let Some(name) = self.sites.get(site).map(|s| s.cfg.name.clone()) else { return };
         let boards = self.known_boards(site).unwrap_or_default();
-        self.home_titles.extend(boards.into_iter().map(|b| (format!("{name}/{}", b.uri), b.title)));
+        self.home_titles.extend(boards.into_iter().map(|b| (crate::store::board_key(&name, &b.uri), b.title)));
     }
 
     /// At the start: titles for the sites the favorites and recent boards are on.
