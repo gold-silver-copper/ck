@@ -38,6 +38,10 @@ const MIN_FRAME: Duration = Duration::from_millis(50);
 /// An animated GIF's decoded frames are scaled down to fit in this (well within the cache
 /// budget); one that would need more than 4x less is shown still.
 const ANIMATION_BYTES: usize = 40 * 1024 * 1024;
+/// The most one decoded GIF frame (or the canvas it's drawn on) may take.
+const GIF_FRAME_ALLOC: u64 = 128 * 1024 * 1024;
+/// No real image is wider or taller; past this a file is broken or hostile.
+const MAX_SIDE: u32 = 16384;
 
 /// An animated GIF's frames and how long each shows.
 type Frames = Arc<Vec<(DynamicImage, Duration)>>;
@@ -733,7 +737,10 @@ pub(crate) fn gif_frames_within(bytes: &[u8], budget: usize) -> Option<Frames> {
     if scale < 0.25 {
         return None;
     }
-    let decoder = image::codecs::gif::GifDecoder::new(std::io::Cursor::new(bytes)).ok()?;
+    // The header's size says nothing about the frames': a later one can claim 65535x65535,
+    // which unlimited would be allocated (and abort) before anything checks it.
+    let mut decoder = image::codecs::gif::GifDecoder::new(std::io::Cursor::new(bytes)).ok()?;
+    image::ImageDecoder::set_limits(&mut decoder, limits(GIF_FRAME_ALLOC)).ok()?;
     let mut frames = Vec::new();
     let mut size = 0;
     for frame in decoder.into_frames() {
@@ -754,6 +761,15 @@ pub(crate) fn gif_frames_within(bytes: &[u8], budget: usize) -> Option<Frames> {
         frames.push((img, delay));
     }
     (frames.len() > 1).then(|| Arc::new(frames))
+}
+
+/// Decoding limits: no side over `MAX_SIDE`, and at most `alloc` bytes allocated at once.
+fn limits(alloc: u64) -> image::Limits {
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(MAX_SIDE);
+    limits.max_image_height = Some(MAX_SIDE);
+    limits.max_alloc = Some(alloc);
+    limits
 }
 
 pub(crate) fn decode(bytes: &[u8]) -> Result<DynamicImage, String> {
@@ -1030,6 +1046,31 @@ mod tests {
             }
         }
         out
+    }
+
+    /// A GIF whose header says 1x1, with two 1x1 frames and a third that claims 65535x65535.
+    fn gif_bomb() -> Vec<u8> {
+        let frame = |w: u16, h: u16| {
+            let mut v = vec![0x21, 0xf9, 0x04, 0x00, 0x0a, 0x00, 0x00, 0x00, 0x2c, 0, 0, 0, 0];
+            v.extend(w.to_le_bytes());
+            v.extend(h.to_le_bytes());
+            v.extend([0x00, 0x02, 0x02, 0x44, 0x01, 0x00]);
+            v
+        };
+        let mut g = b"GIF89a".to_vec();
+        g.extend([1, 0, 1, 0, 0x80, 0, 0, 0, 0, 0, 255, 255, 255]);
+        g.extend(frame(1, 1));
+        g.extend(frame(1, 1));
+        g.extend(frame(65535, 65535));
+        g.push(0x3b);
+        g
+    }
+
+    #[test]
+    fn a_frame_bigger_than_its_gif_isnt_allocated() {
+        let bomb = gif_bomb();
+        assert!(decode(&bomb).is_ok(), "the first frame is fine");
+        assert!(gif_frames(&bomb).is_none());
     }
 
     #[test]
