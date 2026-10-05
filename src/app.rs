@@ -57,16 +57,24 @@ mod session;
 mod tabs;
 mod settings;
 mod sites;
-pub use filters::{AddFilter, Candidate, EDIT_ROWS, EditRow, Reach, problem as filters_problem, with_text as filters_with_text};
-pub use focus::{HintTarget, HintTo, Hints, Menu, MenuItem};
+pub use filters::{AddFilter, EDIT_ROWS, EditRow, problem as filters_problem, with_text as filters_with_text};
+pub use focus::{Hints, Menu, MenuItem};
+#[cfg(test)]
+pub use focus::HintTo;
 pub use gallery::Gallery;
 pub use home::BoardRef;
 pub use links::{ImageSearchPanel, LinkItem, LinksPanel};
-pub use saving::{Confirm, Saving};
-pub use search::{SavedSearch, Search};
+pub use saving::Saving;
+pub use search::Search;
+#[cfg(test)]
+pub use search::SavedSearch;
 pub use saving::Downloads;
-pub use thread_view::*;
-pub use sites::{Adding, BoardsUpdate, MySites, origin as site_origin};
+pub use thread_view::{LineCache, Part, Reveal, Spot, ThreadLayout, ThreadView, parts};
+#[cfg(test)]
+pub use thread_view::{CONVERSATION_MAX, conversation_of};
+pub use sites::{Adding, MySites, origin as site_origin};
+#[cfg(test)]
+pub use sites::BoardsUpdate;
 pub use tabs::{MAX_TABS, Offline, Tab, TabPopup, ThreadCopy};
 pub use settings::{SettingsPopup, key_rows, rows as setting_rows, settings, tilde};
 
@@ -1103,7 +1111,7 @@ impl App {
         let shown = self.tab.thread.as_ref().is_some_and(|t| t.no == key.no && t.board == key.board);
         let text = match saved {
             Some(at) if shown => {
-                self.tab.copy = Some(ThreadCopy::Saved(tabs::Offline { saved: at, dead: true }));
+                self.tab.copy = Some(ThreadCopy::Saved(Offline { saved: at, dead: true }));
                 format!("Thread was deleted or archived: this is its saved copy{}", in_archive.map(|a| format!(" ({a})")).unwrap_or_default())
             }
             Some(at) => {

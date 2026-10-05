@@ -9,11 +9,7 @@ use ratatui::crossterm::execute;
 use ratatui_image::picker::Picker;
 use ratatui_image::picker::cap_parser::QueryStdioOptions;
 
-use ck::app::App;
-use ck::config::{self, Config, ImagesMode};
-use ck::keys::KeyMap;
-use ck::store::Store;
-use ck::{disk_cache, filter, theme, ui};
+use ck::{App, Config, DiskCache, Filters, ImagesMode, KeyMap, Pages, Store};
 
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -21,11 +17,11 @@ fn main() -> Result<()> {
     match args.iter().map(String::as_str).collect::<Vec<_>>().as_slice() {
         [] => {}
         ["--print-config"] => {
-            print!("{}", config::fresh());
+            print!("{}", ck::fresh_config());
             return Ok(());
         }
         ["--print-sites"] => {
-            print!("{}", config::builtin_sites_text());
+            print!("{}", ck::builtin_sites_text());
             return Ok(());
         }
         ["-h" | "--help"] => {
@@ -42,14 +38,14 @@ fn main() -> Result<()> {
     }
 
     let config = Config::load()?;
-    if let Some(e) = start_at.as_deref().and_then(|at| ck::app::start_error(&config.sites, at)) {
+    if let Some(e) = start_at.as_deref().and_then(|at| ck::start_error(&config.sites, at)) {
         anyhow::bail!("can't start at {}: {e}", start_at.unwrap_or_default());
     }
     // Config errors are reported before the terminal is taken over.
     let keys = KeyMap::new(&config.keys)?;
-    let filters = filter::Filters::from_config(&config.filters, &config.hidden_words)?;
+    let filters = Filters::from_config(&config.filters, &config.hidden_words)?;
     // The theme is checked now, so a bad one is reported before the terminal is taken over.
-    theme::set(theme::from_config(config.theme.as_ref(), &config.themes)?);
+    ck::set_theme(ck::theme_from_config(config.theme.as_ref(), &config.themes)?);
     let (store, warnings) = Store::load(Store::dir());
     let mut terminal = ratatui::init();
     let _ = execute!(stdout(), EnableMouseCapture, EnableBracketedPaste);
@@ -71,7 +67,7 @@ fn main() -> Result<()> {
     }
     // A panic still saves what can be saved and restores the terminal (the hook has
     // already put it back and printed the message).
-    let result = ck::guard::catching(|| {
+    let result = ck::catching(|| {
         match start_at {
             Some(at) => app.goto_str(&at),
             None if app.restore_session => app.restore_session(),
@@ -135,9 +131,9 @@ Press ? inside ck for the keys. See the README for configuration.
         env!("CARGO_PKG_VERSION"),
         path(Config::path()),
         path(Store::dir()),
-        path(disk_cache::DiskCache::default_dir()),
-        path(ck::pages::Pages::default_dir()),
-        ck::download::default_root().display(),
+        path(DiskCache::default_dir()),
+        path(Pages::default_dir()),
+        ck::download_root().display(),
     )
 }
 
@@ -166,7 +162,7 @@ fn detect_images(mode: ImagesMode) -> (Picker, Option<String>) {
     }
     let mut picker = picker.unwrap_or_else(|_| Picker::halfblocks());
     let in_zellij = std::env::var_os("ZELLIJ").is_some();
-    picker.set_protocol_type(ck::images::choose_protocol(mode, picker.protocol_type(), in_zellij));
+    picker.set_protocol_type(ck::choose_protocol(mode, picker.protocol_type(), in_zellij));
     (picker, None)
 }
 
@@ -216,7 +212,7 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
             }
             screen = now;
         }
-        let frame = terminal.draw(|f| ui::draw(f, app))?;
+        let frame = terminal.draw(|f| ck::draw(f, app))?;
         ck::input_log::note(|| "frame".into());
         if let Some(path) = &dump {
             let _ = std::fs::write(path, frame_text(frame.buffer));

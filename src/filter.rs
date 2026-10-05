@@ -264,14 +264,6 @@ impl Filters {
         Ok(self)
     }
 
-    pub fn len(&self) -> usize {
-        self.0.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
-
     /// What the filters say about a post on `site`'s `board`.
     pub fn check(&self, site: &str, board: &str, p: &Post) -> Mark {
         let mut mark = Mark::default();
@@ -379,7 +371,7 @@ pub mod tests {
             "#,
         )
         .unwrap();
-        assert_eq!(f.len(), 4);
+        assert_eq!(f.0.len(), 4);
         // Subject, case-insensitive by the pattern's own flag.
         let m = f.check("lainchan", "b", &post("CRYPTO general", "hi"));
         assert_eq!(m.hidden, Some(Hidden::ByFilter("crypto".into())));
@@ -406,7 +398,7 @@ pub mod tests {
     #[test]
     fn disabled_filters_are_kept_but_not_applied() {
         let f = filters("[[filter]]\npattern = \"crypto\"\nenabled = false\n[[filter]]\npattern = \"x\"").unwrap();
-        assert_eq!(f.len(), 1);
+        assert_eq!(f.0.len(), 1);
         assert!(f.check("4chan", "g", &post("crypto", "")).hidden.is_none());
         // A disabled filter must still be a valid one.
         assert!(filters("[[filter]]\npattern = \"(\"\nenabled = false").is_err());
