@@ -1205,3 +1205,76 @@ fn popups_with_more_rows_than_a_screen_can_hold() {
         render(&mut a);
     }
 }
+
+#[test]
+fn every_view_draws_on_tiny_screens() {
+    type Make = fn() -> App;
+    let views: Vec<(&str, Make)> = vec![
+        ("sites", || app(false)),
+        ("boards", || {
+            let mut a = app(false);
+            a.tab.view = View::Boards;
+            a
+        }),
+        ("catalog", || catalog_app(true)),
+        ("catalog compact", || {
+            let mut a = catalog_app(true);
+            a.default_layout = crate::config::CatalogLayout::Compact;
+            a
+        }),
+        ("catalog grid", || {
+            let mut a = catalog_app(true);
+            a.default_layout = crate::config::CatalogLayout::Grid;
+            a
+        }),
+        ("thread", || thread_app(true)),
+        ("quote preview", || {
+            let mut a = thread_app(false);
+            a.tab.popup = Some(crate::app::TabPopup::Preview(Preview { posts: vec![1001], elsewhere: vec![7], scroll: 0 }));
+            a
+        }),
+        ("links", || {
+            let mut a = thread_app(false);
+            a.open_links();
+            a
+        }),
+        ("viewer", || {
+            let mut a = thread_app(true);
+            a.tab.popup = Some(crate::app::TabPopup::Viewer(Viewer::new(vec![file("op.png")], 0, None)));
+            a
+        }),
+        ("help", || {
+            let mut a = app(false);
+            a.popup = Some(Popup::Help(0));
+            a
+        }),
+        ("watched", || {
+            let mut a = app(false);
+            a.tab.view = View::Watched;
+            a
+        }),
+        ("history", || {
+            let mut a = app(false);
+            a.tab.view = View::History;
+            a
+        }),
+        ("settings", || {
+            let mut a = app(false);
+            a.open_settings();
+            a
+        }),
+        ("theme picker", || {
+            let mut a = app(false);
+            a.open_settings();
+            a.activate_setting();
+            a
+        }),
+    ];
+    for (name, make) in views {
+        for (w, h) in [(0, 0), (1, 1), (8, 40), (40, 8), (2, 200)] {
+            let mut a = make();
+            let drawn = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| render_at(&mut a, w, h)));
+            assert!(drawn.is_ok(), "{name} at {w}x{h}");
+        }
+    }
+}

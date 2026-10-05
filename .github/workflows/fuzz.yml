@@ -55,7 +55,14 @@ jobs:
         working-directory: fuzz
         run: |
           secs=$(( ${{ github.event.inputs.minutes || 5 }} * 60 ))
-          cargo fuzz run -O ${{ matrix.target }} corpus/${{ matrix.target }} -- -max_total_time=$secs -rss_limit_mb=2048 -timeout=10 -max_len=65536
+          # Per target: images must decode within a sane allocation (a bomb aborts), and a
+          # comment, at up to twice the size ck keeps, must parse in well under a second.
+          case ${{ matrix.target }} in
+            image) extra="-malloc_limit_mb=512 -timeout=10 -max_len=65536" ;;
+            markup) extra="-timeout=2 -max_len=131072" ;;
+            *) extra="-timeout=10 -max_len=65536" ;;
+          esac
+          cargo fuzz run -O ${{ matrix.target }} corpus/${{ matrix.target }} -- -max_total_time=$secs -rss_limit_mb=2048 $extra
       - if: failure()
         uses: actions/upload-artifact@v4
         with:
