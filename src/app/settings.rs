@@ -394,7 +394,7 @@ impl App {
                     let role = ROLES[list.selected().unwrap_or(0)].0;
                     match theme::parse_color(&text) {
                         Ok(c) => {
-                            self.set_role_color(role, Some(theme::color_string(c)));
+                            self.set_role_color(role, Some(&theme::color_string(c)));
                             Some(SettingsPopup::Colors { list, editing: None })
                         }
                         Err(e) => {
@@ -591,7 +591,7 @@ impl App {
 
     /// Change (or with `None`, reset) one color of the current theme. A built-in theme is
     /// first copied to `NAME-custom`, which becomes the current theme.
-    fn set_role_color(&mut self, role: &str, color: Option<String>) {
+    fn set_role_color(&mut self, role: &str, color: Option<&str>) {
         let builtin = !self.themes.contains_key(&self.theme_name);
         let (name, base) = if builtin {
             (format!("{}-custom", self.theme_name), Some(self.theme_name.clone()))
@@ -604,7 +604,7 @@ impl App {
         let def = self.themes.entry(name.clone()).or_insert_with(|| ThemeDef { base: base.clone(), ..Default::default() });
         match &color {
             Some(c) => {
-                def.colors.insert(role.to_string(), c.clone());
+                def.colors.insert(role.to_string(), c.to_string());
             }
             None => {
                 def.colors.remove(role);
@@ -620,7 +620,7 @@ impl App {
                 };
                 self.save_config(&what, |d| {
                     config::set_theme(d, &name);
-                    config::set_theme_color(d, &name, base.as_deref(), role, color.as_deref());
+                    config::set_theme_color(d, &name, base.as_deref(), role, color);
                 });
             }
             Err(e) => self.error(e),
@@ -644,7 +644,7 @@ impl App {
                 true
             }
             Err(e) => {
-                self.error_unsaved(&format!("{done} {what}"), e);
+                self.error_unsaved(&format!("{done} {what}"), &e);
                 false
             }
         }

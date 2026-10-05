@@ -71,7 +71,7 @@ impl App {
         match part {
             Part::File(k) => self.view_file(k),
             Part::Link(Target::Url(u)) => self.open_url(&u),
-            Part::Link(Target::Quote(l)) => self.go_to_quote(l),
+            Part::Link(Target::Quote(l)) => self.go_to_quote(&l),
             Part::Replies => self.act(Action::Expand),
         }
     }
@@ -94,7 +94,7 @@ impl App {
     }
 
     /// A quote link: the post, when it's in this thread (`u` comes back); else where it leads.
-    fn go_to_quote(&mut self, l: Link) {
+    fn go_to_quote(&mut self, l: &Link) {
         let board = self.tab.board.as_ref().map(|b| b.uri.clone());
         if let Some(t) = &mut self.tab.thread
             && let Some(n) = l.post

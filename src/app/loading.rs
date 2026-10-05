@@ -113,7 +113,7 @@ impl App {
         }
         match res {
             Ok(b) => self.set_boards(site, b, true),
-            Err(e) if !stale => self.load_failed(http::plain(&e)),
+            Err(e) if !stale => self.load_failed(&http::plain(&e)),
             Err(e) => self.error(http::plain(&e)),
         }
     }
@@ -155,9 +155,9 @@ impl App {
             }
             Err(e) if http::is_not_found(&e) => {
                 let board = self.tab.board.as_ref().map_or_else(String::new, |b| b.uri.clone());
-                self.load_failed(format!("There's no /{board}/ on {}", self.current_site().cfg.name));
+                self.load_failed(&format!("There's no /{board}/ on {}", self.current_site().cfg.name));
             }
-            Err(e) => self.load_failed(http::plain(&e)),
+            Err(e) => self.load_failed(&http::plain(&e)),
         }
     }
 
@@ -192,7 +192,7 @@ impl App {
                 self.store.saved_dead(&key);
                 self.thread_gone(&key);
             }
-            Err(e) => self.load_failed(http::plain(&e)),
+            Err(e) => self.load_failed(&http::plain(&e)),
         }
     }
 

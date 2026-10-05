@@ -111,17 +111,17 @@ impl App {
                 let res = crate::guard::result(|| crate::http::background_at(now, || backend.catalog(&board, &|_| {})));
                 for key in keys {
                     let res = res.as_ref().map(Vec::clone).map_err(|e| anyhow::anyhow!("{e:#}"));
-                    later.run(move |app| app.general_catalog(key, res));
+                    later.run(move |app| app.general_catalog(&key, res));
                 }
             });
         }
     }
 
     /// A followed general's board catalog arrived: watch the newest matching thread.
-    pub(super) fn general_catalog(&mut self, key: ThreadKey, res: anyhow::Result<Vec<Post>>) {
-        self.generals_searching.remove(&key);
+    pub(super) fn general_catalog(&mut self, key: &ThreadKey, res: anyhow::Result<Vec<Post>>) {
+        self.generals_searching.remove(key);
         let Ok(catalog) = res else { return };
-        let Some(w) = self.store.watched(&key) else { return };
+        let Some(w) = self.store.watched(key) else { return };
         let Some(pattern) = w.general.clone() else { return };
         let dead = w.dead;
         let next = catalog
@@ -139,11 +139,11 @@ impl App {
         }
         // A dead thread has nothing more to show; one at its bump limit is still going.
         if dead {
-            self.store.watched.retain(|w| w.key != key);
-        } else if let Some(old) = self.store.watched_mut(&key) {
+            self.store.watched.retain(|w| w.key != *key);
+        } else if let Some(old) = self.store.watched_mut(key) {
             old.general = None;
         }
-        self.generals_checked.remove(&key);
+        self.generals_checked.remove(key);
         self.save();
         let msg = format!("New {pattern} thread on /{}/: {}", key.board, subject.chars().take(60).collect::<String>());
         let method = crate::notify::method(self.notify_mode, self.notify_command.as_deref(), &|k| std::env::var(k).ok());

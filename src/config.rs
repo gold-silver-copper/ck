@@ -347,6 +347,7 @@ pub fn set_theme_color(doc: &mut DocumentMut, name: &str, base: Option<&str>, ro
 /// Set an action's keys in `[keys]`, or with `None` (the default) remove its entry.
 /// A change to the config's `[[filter]]` tables. A change or removal names the table by
 /// position and what ck read there, and is refused if the file says otherwise now.
+#[derive(Clone, Copy)]
 pub enum FilterEdit<'a> {
     Add(&'a crate::filter::FilterConfig),
     Change(usize, &'a crate::filter::FilterConfig, &'a crate::filter::FilterConfig),

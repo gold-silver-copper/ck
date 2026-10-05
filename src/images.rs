@@ -288,12 +288,13 @@ impl Images {
         let mut encode = None;
         if let Some(p) = &picker {
             let (enc_tx, enc_rx) = channel::<EncodeJob>();
-            let (p, etx, ewake) = (p.clone(), tx.clone(), wake.clone());
-            std::thread::spawn(move || encoder(&p, &enc_rx, &etx, &*ewake));
             for _ in 0..workers {
                 let (q, tx, enc_tx, wake, disk) = (queue.clone(), tx.clone(), enc_tx.clone(), wake.clone(), disk.clone());
                 std::thread::spawn(move || worker(&q, &tx, &enc_tx, &*wake, disk.as_deref()));
             }
+            // Last, as it takes `tx` and `wake` themselves.
+            let p = p.clone();
+            std::thread::spawn(move || encoder(&p, &enc_rx, &tx, &*wake));
             encode = Some(enc_tx);
         }
         let (offline, frame) = (false, Vec::new());
@@ -610,6 +611,7 @@ fn worker(q: &Queue, tx: &Sender<Done>, encode: &Sender<EncodeJob>, wake: &dyn F
 }
 
 /// A panic in a job, as the job's failure.
+#[allow(clippy::needless_pass_by_value)] // what guard::catching gives unwrap_or_else
 fn bug<T>(what: String) -> Result<T, String> {
     Err(format!("ck hit a bug: {what}"))
 }

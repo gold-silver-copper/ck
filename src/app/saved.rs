@@ -11,12 +11,12 @@ use crate::store::ThreadKey;
 
 impl App {
     /// Open a thread's saved copy. It's read offline: nothing in it is fetched.
-    pub fn open_saved(&mut self, key: ThreadKey) {
+    pub fn open_saved(&mut self, key: &ThreadKey) {
         let Some(site) = self.site_index(&key.site) else {
             self.error(format!("No site named {} in the config", key.site));
             return;
         };
-        let copy = match self.store.load_saved(&key) {
+        let copy = match self.store.load_saved(key) {
             Ok(t) => t,
             Err(e) => {
                 self.error(format!("Couldn't open the saved copy: {e:#}"));
@@ -25,7 +25,7 @@ impl App {
                 return;
             }
         };
-        let dead = copy.dead || self.store.saved(&key).is_some_and(|m| m.dead);
+        let dead = copy.dead || self.store.saved(key).is_some_and(|m| m.dead);
         let posts: Vec<Post> = copy.posts.into_iter().map(Post::from).collect();
         if posts.is_empty() {
             self.error("The saved copy has no posts");
@@ -100,7 +100,7 @@ impl App {
     pub(super) fn take_saved_offer(&mut self) -> bool {
         match self.tab.saved_offer.take() {
             Some(key) if self.tab.thread.is_none() => {
-                self.open_saved(key);
+                self.open_saved(&key);
                 true
             }
             _ => false,

@@ -237,8 +237,8 @@ impl App {
         match open {
             Open::Thread(board, no) => self.open_thread_at(board, no, None),
             Open::Key(key) => self.open_key(key),
-            Open::Saved(key) => self.open_saved(key),
-            Open::Link(link) => self.follow(link),
+            Open::Saved(key) => self.open_saved(&key),
+            Open::Link(link) => self.follow(&link),
         }
     }
 

@@ -403,7 +403,7 @@ impl App {
         self.apply_filters();
         match saved {
             Ok(()) => self.info(format!("Posts with \"{word}\" aren't hidden now")),
-            Err(e) => self.error_unsaved(&format!("Posts with \"{word}\" aren't hidden"), e),
+            Err(e) => self.error_unsaved(&format!("Posts with \"{word}\" aren't hidden"), &e),
         }
     }
 
@@ -431,7 +431,7 @@ impl App {
         self.apply_filters();
         match saved {
             Ok(()) => self.info(format!("Took the filter {} back", f.label())),
-            Err(e) => self.error_unsaved(&format!("Took the filter {} back", f.label()), e),
+            Err(e) => self.error_unsaved(&format!("Took the filter {} back", f.label()), &e),
         }
     }
 
@@ -523,7 +523,7 @@ impl App {
     fn say_saved(&mut self, what: &str, saved: anyhow::Result<()>) {
         match saved {
             Ok(()) => self.info(what),
-            Err(e) => self.error_unsaved(what, e),
+            Err(e) => self.error_unsaved(what, &e),
         }
     }
 

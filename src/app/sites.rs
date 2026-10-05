@@ -223,7 +223,7 @@ impl App {
                 edit_text(&mut name, code);
                 Some(Adding::Site { site, name, open })
             }
-            (Adding::Board { site, board, open }, KeyCode::Enter) => return self.add_board(site, board, open),
+            (Adding::Board { site, board, open }, KeyCode::Enter) => return self.add_board(site, &board, open),
             (Adding::Boards { site, update, drop, .. }, KeyCode::Enter) => return self.update_boards(site, &update, drop),
             (Adding::Boards { site, update, drop, builtin }, KeyCode::Char('d')) => Some(Adding::Boards { site, update, drop: !drop, builtin }),
             (other, _) => Some(other),
@@ -256,11 +256,11 @@ impl App {
         }
     }
 
-    fn add_board(&mut self, i: usize, board: String, open: Option<String>) {
+    fn add_board(&mut self, i: usize, board: &str, open: Option<String>) {
         let Some(s) = self.sites.get(i) else { return };
         let before = s.cfg.clone();
         let mut boards = before.boards.clone().unwrap_or_default();
-        boards.push(BoardConfig::Uri(board.clone()));
+        boards.push(BoardConfig::Uri(board.to_string()));
         let what = format!("{}'s board /{board}/", before.name);
         let saved = self.save_config_or("Added", &what, |d| config::set_site_boards(d, &before, &boards));
         let cfg = SiteConfig { boards: Some(boards), ..before };

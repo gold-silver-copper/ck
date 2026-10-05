@@ -95,7 +95,7 @@ impl App {
     fn open_link_item(&mut self, i: usize) {
         let Some(TabPopup::Links(p)) = self.tab.popup.take() else { return };
         match p.items.into_iter().nth(i) {
-            Some(LinkItem::Quote(link, _)) => self.follow(link),
+            Some(LinkItem::Quote(link, _)) => self.follow(&link),
             Some(LinkItem::Url(url)) => self.open_url(&url),
             Some(LinkItem::File(f)) => self.open_file(&f),
             None => {}

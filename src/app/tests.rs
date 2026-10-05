@@ -892,19 +892,19 @@ fn following_a_general() {
     app.check_generals(now);
     assert_eq!(app.generals_searching.len(), 1);
     // No new thread yet: tried again only after a while.
-    app.general_catalog(key(10), Ok(vec![op(10, "/lmg/ - Local Models General #5"), op(12, "/ldg/ - Local Diffusion")]));
+    app.general_catalog(&key(10), Ok(vec![op(10, "/lmg/ - Local Models General #5"), op(12, "/ldg/ - Local Diffusion")]));
     app.check_generals(now + Duration::from_secs(60));
     assert!(app.generals_searching.is_empty());
     // The next one appears: it's watched and followed; the old one (still going) is kept.
     app.check_generals(now + Duration::from_secs(601));
-    app.general_catalog(key(10), Ok(vec![op(9, "/lmg/ old"), op(13, "/lmg/ - Local Models General #6"), op(14, "/ldg/")]));
+    app.general_catalog(&key(10), Ok(vec![op(9, "/lmg/ old"), op(13, "/lmg/ - Local Models General #6"), op(14, "/ldg/")]));
     assert_eq!(app.store.watched(&key(13)).unwrap().general.as_deref(), Some("/lmg/"));
     assert_eq!(app.store.watched(&key(10)).unwrap().general, None);
     assert!(app.notified.last().unwrap().starts_with("New /lmg/ thread on /x/"));
     // When the followed thread dies, it's replaced in Watched.
     app.store.watched_mut(&key(13)).unwrap().dead = true;
     app.check_generals(now + Duration::from_secs(1200));
-    app.general_catalog(key(13), Ok(vec![op(20, "/lmg/ - Local Models General #7")]));
+    app.general_catalog(&key(13), Ok(vec![op(20, "/lmg/ - Local Models General #7")]));
     assert!(app.store.watched(&key(13)).is_none());
     assert!(app.store.watched(&key(20)).is_some());
     // F again stops following.
@@ -1268,7 +1268,7 @@ fn a_saved_copy_is_remembered_in_the_session() {
     let mut app = saving_app(dir.path(), 1000);
     let key = ThreadKey { site: "b".into(), board: "y".into(), no: 5 };
     app.store.keep_thread(&key, "five", "u", &nos(&[5, 6]), 900);
-    app.open_saved(key);
+    app.open_saved(&key);
     app.tab.thread.as_mut().unwrap().selected = 1;
     let place = app.place();
     assert_eq!((place.view.as_str(), place.thread, place.selected), ("saved", Some(5), Some(6)));
@@ -1289,7 +1289,7 @@ fn watching_a_saved_copy_keeps_it_under_its_own_number() {
     let mut app = saving_app(dir.path(), 1000);
     let key = |no| ThreadKey { site: "a".into(), board: "x".into(), no };
     app.store.keep_thread(&key(5), "five", "u", &nos(&[9, 10]), 900);
-    app.open_saved(key(5));
+    app.open_saved(&key(5));
     assert_eq!(app.tab.thread.as_ref().unwrap().no, 9);
     app.act(Action::Watch);
     assert!(app.store.watched(&key(9)).is_some_and(|w| w.last_seen > 0));
