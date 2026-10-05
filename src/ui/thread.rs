@@ -364,7 +364,7 @@ fn shown_with(t: &ThreadView, i: usize, p: &Post, ctx: &PostCtx) -> u64 {
     let highlighted = t.matches.binary_search(&i).is_ok() || (quotes_marked && in_added);
     (ago(p.time, ctx.clock), ctx.is_op, ctx.is_new, ctx.deleted, ctx.reveal, ctx.mark, ctx.mine.contains(&p.no), &marked, ctx.backlinks).hash(&mut h);
     // The post itself, which a refresh may bring changed (a file deleted, say).
-    (&p.name, &p.subject, p.plain_text(), p.body.len()).hash(&mut h);
+    (&p.name, &p.subject, p.plain_text(), p.body.len(), &p.id, &p.flag, ctx.id_count).hash(&mut h);
     for f in &p.files {
         (&f.url, &f.filename, f.width, f.height, f.size).hash(&mut h);
     }
@@ -394,6 +394,8 @@ pub(super) struct PostCtx<'a> {
     focus: Option<&'a Part>,
     /// The post a conversation is shown for.
     anchor: bool,
+    /// How many posts its poster ID has in the thread.
+    id_count: usize,
 }
 
 pub(super) fn post_ctx(t: &ThreadView, i: usize, clock: Clock) -> PostCtx<'_> {
@@ -409,8 +411,23 @@ pub(super) fn post_ctx(t: &ThreadView, i: usize, clock: Clock) -> PostCtx<'_> {
         mark: t.marks.get(i),
         mine: &t.mine,
         focus: None,
-        anchor: t.conversation.as_ref().is_some_and(|c| c.anchor == t.posts[i].no),
+        anchor: t.conversation.as_ref().is_some_and(|c| c.poster.is_none() && c.anchor == t.posts[i].no),
+        id_count: t.posts[i].id.as_deref().map_or(0, |id| t.id_count(id)),
     }
+}
+
+/// A poster ID's chip colors: one of a few tones, by a hash of the ID, each light enough
+/// for dark text and apart from every theme's background. None under a colorless theme.
+fn id_colors(id: &str) -> (Color, Color) {
+    const TONES: [u32; 10] = [0xef9a9a, 0xffb74d, 0xffd54f, 0xaed581, 0x4db6ac, 0x4fc3f7, 0x9fa8da, 0xce93d8, 0xf48fb1, 0xbcaaa4];
+    let t = theme();
+    if t.primary == Color::Reset && t.text == Color::Reset {
+        return (Color::Reset, Color::Reset);
+    }
+    // FNV-1a: the same color for an ID every time.
+    let h = id.bytes().fold(0x811c_9dc5u32, |h, b| (h ^ u32::from(b)).wrapping_mul(0x0100_0193));
+    let rgb = TONES[h as usize % TONES.len()];
+    (Color::Rgb(0x1a, 0x1a, 0x1a), Color::Rgb((rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8))
 }
 
 pub(super) fn search_hl() -> Style {
@@ -426,6 +443,16 @@ pub(super) fn post_lines(p: &Post, ctx: &PostCtx, width: usize) -> (Vec<Line<'st
     let index = |part: &Part| parts.iter().position(|x| x == part);
     let tag = |style: Style, k: usize| Style { underline_color: Some(Color::Rgb(0xfe, (k >> 8) as u8, k as u8)), ..style };
     let mut head = vec![Span::styled(p.name.clone(), bold(t.name)), Span::raw("  ")];
+    if let Some(id) = &p.id {
+        let k = index(&Part::Poster).unwrap_or(usize::MAX);
+        let (fg, bg) = id_colors(id);
+        let text = if ctx.id_count > 0 { format!("ID:{id} ({})", ctx.id_count) } else { format!("ID:{id}") };
+        let chip = chip(text, fg, bg);
+        head.extend([Span::styled(chip.content, tag(chip.style, k)), Span::raw(" ")]);
+    }
+    if let Some(flag) = &p.flag {
+        head.extend([Span::styled(flag.short(), Style::new().fg(t.text)), Span::raw("  ")]);
+    }
     if ctx.is_op {
         head.extend([chip("OP", t.on_primary_container, t.primary_container), Span::raw(" ")]);
     }

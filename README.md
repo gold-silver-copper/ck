@@ -147,7 +147,7 @@ ones for where you are.
 | key  | action |
 |------|--------|
 | `J`/`K`, space | scroll by line / page |
-| tab / shift-tab | focus the post's next / previous image, link or reply (then on into the next post) [`next_part`, `prev_part`] |
+| tab / shift-tab | focus the post's next / previous poster ID, image, link or reply (then on into the next post) [`next_part`, `prev_part`] |
 | `enter`, `l` | on a focused part: view the image, go to the quoted post (it shows while focused), open the link, show the replies; on the post: follow its `>>quote`, also into other threads and boards |
 | `esc` | from a focused part back to the post |
 | `p` / `b` | preview the posts a post quotes / jump to the first reply [`preview`, `replies`] |
@@ -156,6 +156,7 @@ ones for where you are.
 | `s` / `S` | show spoilers in the post / the whole thread [`spoiler`, `all_spoilers`] |
 | `e`  | show / hide the post's replies under it, indented; again on a reply goes a level deeper (up to 4) [`expand`] |
 | `c`  | the post's conversation alone: what it replies to and the replies to it; `esc` (or `c`) shows the whole thread again [`conversation`] |
+| `I`  | on a board with poster IDs: that poster's posts alone; `esc` (or `I`) shows the whole thread again [`poster`] |
 | `v` / `V` | image viewer from the post's files on through the thread's / gallery of every file in the thread [`view`, `gallery`] |
 | `i` / `R` | open the post's file (videos in mpv if it's installed) / reverse image search [`open_file`, `image_search`] |
 | `O`  | the post's links: quotes of other threads, web links, files; `enter` opens, `y` copies [`links`] |
@@ -213,6 +214,20 @@ replies that belong in it appear as the thread refreshes. `esc` or `c` goes back
 whole thread, scrolled where it was, and tabs and the next start remember a conversation
 that was open. At most 500 posts are shown, the nearest ones; the footer says when there
 are more.
+
+### Poster IDs and flags
+
+Where a board gives posters IDs (4chan's /pol/, /biz/, /b/ and others, 8kun, LynxChan,
+jschan, archives of those), the post's header shows the ID as a chip, with how many posts
+it has in the thread: `ID:Ab3dEf+g (4)`. Its color comes from the ID, so one poster's posts
+look alike (under the `mono` theme, only the text). A country or board flag shows next to
+it, as its two-letter code (`US`) or, for a board's own flags, its name.
+
+`I` on a post (or `enter` on its ID, focused with `tab`, clicked, or picked with `f`) shows
+that poster's posts alone, as a conversation shows its posts: the top bar says "Posts by
+ID:…", everything works as in the whole thread, and `esc` or `I` goes back. It isn't
+remembered across starts (IDs are the thread's alone). Filters can catch IDs and flags too
+(see Filters).
 
 In the gallery (`V`), `h`/`j`/`k`/`l` move, `enter` views (`h`/`l` there go through every
 file of the thread), `d` saves the file, `esc` returns to its post.

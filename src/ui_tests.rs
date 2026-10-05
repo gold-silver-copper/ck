@@ -343,6 +343,50 @@ fn deleted_post() {
     assert_layout_exact(&mut a);
 }
 
+#[test]
+fn poster_ids_and_flags() {
+    use crate::app::HintTo;
+    use ratatui::crossterm::event::{KeyCode, KeyEvent};
+    let mut a = app(false);
+    a.tab.view = View::Thread;
+    a.tab.board = Some(Board { uri: "pol".into(), title: "Politically Incorrect".into(), nsfw: Some(true) });
+    let posts = crate::backend::futaba::Futaba::fourchan(None).parse_thread("pol", &crate::backend::fixture("4chan_pol_thread.json"));
+    a.tab.thread = Some(ThreadView::new("pol".into(), 487211034, posts));
+    insta::assert_snapshot!(snapshot(&mut a));
+    assert_layout_exact(&mut a);
+    let (text, buf) = render_at(&mut a, 100, 90);
+    // Each ID's chip has its color, the same on each of its posts.
+    // Where the chip's text starts on each row it's on, and its background there.
+    let at = |text: &str, needle: &str| -> Vec<(u16, u16)> {
+        text.lines().enumerate().filter_map(|(y, l)| Some((l.split_once(needle)?.0.chars().count() as u16, y as u16))).collect()
+    };
+    let chip_bg = |id: &str| -> Vec<ratatui::style::Color> { at(&text, &format!("ID:{id} ")).into_iter().map(|p| buf[p].bg).collect() };
+    let (ab, zq) = (chip_bg("Ab3dEf+g"), chip_bg("Zq9Wx2Lp"));
+    assert!(ab.len() == 2 && ab[0] == ab[1] && zq.len() == 2 && zq[0] == zq[1], "{ab:?} {zq:?}");
+    assert_ne!(ab[0], zq[0]);
+    assert!(text.contains("ID:Ab3dEf+g (2)") && text.contains("  AC  ") && text.contains(" GB "), "{text}");
+    // Under mono, only the text.
+    crate::theme::set(crate::theme::resolve("mono", &Default::default()).unwrap());
+    a.tab.thread.as_mut().unwrap().cache.clear();
+    a.tab.thread.as_mut().unwrap().layout = None;
+    let (text, buf) = render(&mut a);
+    assert_eq!(buf[at(&text, "ID:Zq9Wx2Lp")[0]].bg, ratatui::style::Color::Reset);
+    crate::theme::set(crate::theme::resolve("material", &Default::default()).unwrap());
+    a.tab.thread.as_mut().unwrap().cache.clear();
+    a.tab.thread.as_mut().unwrap().layout = None;
+    // A hint on an ID shows that poster's posts.
+    render(&mut a);
+    a.on_key(KeyEvent::from(KeyCode::Char('f')));
+    render(&mut a);
+    let label = a.hints().unwrap().targets.iter().find(|t| matches!(t.to, HintTo::Thread(1, Some(Part::Poster)))).unwrap().label.clone();
+    type_text(&mut a, &label);
+    let (text, _) = render(&mut a);
+    let t = a.tab.thread.as_ref().unwrap();
+    assert_eq!(t.entries.iter().map(|e| t.posts[e.post].no).collect::<Vec<_>>(), [487211102, 487211390]);
+    assert!(text.contains("Posts by ID:Zq9Wx2Lp") && text.contains("esc or I shows the whole thread"), "{text}");
+    assert_layout_exact(&mut a);
+}
+
 /// A long thread: posts of different lengths, every one numbered in its text.
 fn long_thread_app(n: u64) -> App {
     let mut a = app(false);

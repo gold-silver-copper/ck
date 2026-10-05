@@ -72,6 +72,14 @@ pub struct SavedPost {
     pub locked: bool,
     pub bumplimit: bool,
     pub board: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub flag: Option<crate::model::Flag>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trip: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub capcode: Option<String>,
 }
 
 /// A body line: a code block's line or not, and its runs of text.
@@ -166,6 +174,10 @@ impl From<&Post> for SavedPost {
             locked: p.locked,
             bumplimit: p.bumplimit,
             board: p.board.clone(),
+            id: p.id.clone(),
+            flag: p.flag.clone(),
+            trip: p.trip.clone(),
+            capcode: p.capcode.clone(),
         }
     }
 }
@@ -197,6 +209,10 @@ impl From<SavedPost> for Post {
             locked: p.locked,
             bumplimit: p.bumplimit,
             board: p.board,
+            id: p.id,
+            flag: p.flag,
+            trip: p.trip,
+            capcode: p.capcode,
             ..Default::default()
         }
     }
@@ -283,11 +299,24 @@ mod tests {
         assert_eq!((a.no, &a.name, &a.subject, a.time), (b.no, &b.name, &b.subject, b.time));
         assert_eq!((&a.quotes, &a.links, &a.urls, &a.anchors, &a.files), (&b.quotes, &b.links, &b.urls, &b.anchors, &b.files));
         assert_eq!((a.replies, a.images, a.sticky, a.locked, a.bumplimit, &a.board), (b.replies, b.images, b.sticky, b.locked, b.bumplimit, &b.board));
+        assert_eq!((&a.id, &a.flag, &a.trip, &a.capcode), (&b.id, &b.flag, &b.trip, &b.capcode));
     }
 
     fn round_trip(p: &Post) -> Post {
         let json = serde_json::to_string(&SavedPost::from(p)).unwrap();
         serde_json::from_str::<SavedPost>(&json).unwrap().into()
+    }
+
+    #[test]
+    fn poster_ids_and_flags_are_kept_and_old_files_load() {
+        let posts = crate::backend::futaba::Futaba::fourchan(None).parse_thread("pol", &crate::backend::fixture("4chan_pol_thread.json"));
+        let back = round_trip(&posts[0]);
+        assert_eq!((back.id.as_deref(), back.flag.as_ref().map(|f| f.code.as_str())), (Some("Ab3dEf+g"), Some("US")));
+        // Written only where there are some; a post saved before them loads without.
+        let json = serde_json::to_string(&SavedPost::from(&Post { no: 1, ..Default::default() })).unwrap();
+        assert!(!json.contains("\"id\"") && !json.contains("flag") && !json.contains("trip"), "{json}");
+        let old: SavedPost = serde_json::from_str(r#"{"no": 5, "name": "Anonymous ## mod", "time": 1}"#).unwrap();
+        assert_eq!((old.no, old.id, old.flag, old.capcode), (5, None, None, None));
     }
 
     #[test]

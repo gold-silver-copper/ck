@@ -9,7 +9,7 @@ use serde_json::Value;
 use super::{Backend, Partial, SearchPage, as_u32, saturate};
 use crate::http::{as_bool, as_i64, as_str, as_u64, encode_segment as enc, get_json, items, register_media_host};
 use crate::markup::{self, Flavor};
-use crate::model::{Attachment, Board, Post};
+use crate::model::{Attachment, Board, Flag, Post};
 
 /// Index pages fetched for the "catalog" (each is one rate-limited request).
 const INDEX_PAGES: u32 = 3;
@@ -100,9 +100,10 @@ fn post(v: &Value) -> Option<Post> {
     }
     let parsed = markup::parse_html(v["comment_processed"].as_str().unwrap_or(""), Flavor::Vichan);
     let mut name = as_str(&v["name_processed"]).or_else(|| as_str(&v["name"])).map(|n| markup::decode(&n)).unwrap_or_else(|| "Anonymous".into());
-    if let Some(trip) = as_str(&v["trip"]) {
+    let trip = as_str(&v["trip"]);
+    if let Some(trip) = &trip {
         name.push(' ');
-        name.push_str(&trip);
+        name.push_str(trip);
     }
     let cap = match as_str(&v["capcode"]).as_deref() {
         Some("M") => Some("Mod"),
@@ -114,9 +115,14 @@ fn post(v: &Value) -> Option<Post> {
     if let Some(cap) = cap {
         let _ = write!(name, " ## {cap}");
     }
+    let text = |k: &str| as_str(&v[k]).map(|s| markup::decode(&s));
     Some(Post {
         no: as_u64(&v["num"])?,
         name,
+        id: text("poster_hash"),
+        flag: Flag::new(text("poster_country"), text("poster_country_name")),
+        trip,
+        capcode: cap.map(String::from),
         subject: as_str(&v["title_processed"]).or_else(|| as_str(&v["title"])).map(|s| markup::decode(&s)),
         time: as_i64(&v["timestamp"]).unwrap_or(0),
         files: attachment(&v["media"]).into_iter().collect(),
@@ -243,6 +249,23 @@ mod tests {
         assert_eq!((none.hits.len(), none.total), (0, Some(0)));
         let err = super::parse_search(&serde_json::json!({"error": "You&#039;re searching too fast."})).err().unwrap();
         assert_eq!(err.to_string(), "You're searching too fast.");
+    }
+
+    #[test]
+    fn ids_and_flags() {
+        // The fixture's /g/ has none; an archived /pol/ post has them all.
+        let v = fixture("foolfuuka_post.json");
+        let p = super::post(&v).unwrap();
+        assert!(p.id.is_none() && p.flag.is_none() && p.trip.is_none() && p.capcode.is_none());
+        let mut v = v;
+        v["poster_hash"] = "Ab3dEf+g".into();
+        v["poster_country"] = "FI".into();
+        v["poster_country_name"] = "Finland".into();
+        v["trip"] = "!!Fz3mQwerty".into();
+        v["capcode"] = "M".into();
+        let p = super::post(&v).unwrap();
+        assert_eq!((p.id.as_deref(), p.flag.as_ref().map(|f| f.short())), (Some("Ab3dEf+g"), Some("FI".into())));
+        assert_eq!((p.trip.as_deref(), p.capcode.as_deref()), (Some("!!Fz3mQwerty"), Some("Mod")));
     }
 
     #[test]

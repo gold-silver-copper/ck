@@ -216,6 +216,11 @@ impl Fake {
             locked: rng.chance(5),
             bumplimit: rng.chance(5),
             board: rng.chance(10).then(|| rng.pick(BOARD_NAMES).to_string()),
+            // A few posters, by number (taking nothing from `rng`, so seeds replay as before).
+            id: (!no.is_multiple_of(7)).then(|| format!("id{}", no % 4)),
+            flag: no.is_multiple_of(3).then(|| crate::model::Flag { code: "US".into(), name: "United States".into() }),
+            trip: no.is_multiple_of(11).then(|| "!!trip".into()),
+            capcode: no.is_multiple_of(13).then(|| "mod".into()),
             ..markup::parse_html(&html, flavor).into()
         }
     }
@@ -1096,7 +1101,11 @@ fn check_thread(t: &ThreadView) -> Result<(), String> {
     match &t.conversation {
         Some(c) => {
             let Some(&p) = t.index.get(&c.anchor) else { return Err(format!("a conversation of No.{}, which isn't in the thread", c.anchor)) };
-            let (set, _) = conversation_of(&t.posts, &t.index, &t.backlinks, p);
+            let set = match &c.poster {
+                // A poster's posts: every post with the ID.
+                Some(id) => t.posts_by(id),
+                None => conversation_of(&t.posts, &t.index, &t.backlinks, p).0,
+            };
             if top != set.keys().copied().collect::<Vec<_>>() {
                 return Err(format!("the conversation of No.{} shows {top:?}, not {:?}", c.anchor, set.keys().collect::<Vec<_>>()));
             }

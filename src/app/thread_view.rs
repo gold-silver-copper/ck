@@ -20,11 +20,14 @@ const MAX_DEPTH: u8 = 4;
 pub const CONVERSATION_MAX: usize = 500;
 
 /// One post's conversation (`c`): the post, what it quotes in the thread (and what those
-/// quote, on up), and what quotes it (and what quotes those, on down).
+/// quote, on up), and what quotes it (and what quotes those, on down). Or, with `poster`,
+/// every post by that post's poster (`I`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Conversation {
     /// The post it's about.
     pub anchor: u64,
+    /// Showing the posts with this poster ID instead.
+    pub poster: Option<String>,
     /// Its posts (indices, so in thread order), each with its distance from the anchor:
     /// negative for what the anchor replies to, positive for replies.
     pub depth: std::collections::BTreeMap<usize, i32>,
@@ -161,6 +164,8 @@ pub struct ThreadView {
     pub deleted: HashSet<u64>,
     /// Refreshes that came back too small to keep what they left out (`SHRUNK`).
     pub shrinks: u32,
+    /// How many posts each poster ID has in the thread.
+    ids: HashMap<String, usize>,
 }
 
 /// How the selection comes into view.
@@ -181,15 +186,19 @@ pub enum Reveal {
 /// A part of a post that can take focus, be clicked or get a hint.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Part {
+    /// The poster ID in the header: shows that poster's posts alone.
+    Poster,
     File(usize),
     Link(crate::model::Target),
     /// The "Replies" label: shows them inline.
     Replies,
 }
 
-/// A post's parts in reading order: its files, the links in its text, then its replies.
+/// A post's parts in reading order: its poster ID, its files, the links in its text, then
+/// its replies.
 pub fn parts(p: &Post, backlinks: &[u64]) -> Vec<Part> {
-    let mut out: Vec<Part> = (0..p.files.len()).map(Part::File).collect();
+    let mut out: Vec<Part> = p.id.iter().map(|_| Part::Poster).collect();
+    out.extend((0..p.files.len()).map(Part::File));
     let mut add = |part: Part| {
         if !out.contains(&part) {
             out.push(part);
@@ -306,7 +315,11 @@ impl ThreadView {
             }
         }
         let entries = (0..posts.len()).map(|i| Entry { post: i, depth: 0, path: vec![posts[i].no] }).collect();
-        Self { entries, board, no, posts, index, backlinks, ..Default::default() }
+        let mut ids: HashMap<String, usize> = HashMap::new();
+        for id in posts.iter().filter_map(|p| p.id.as_ref()) {
+            *ids.entry(id.clone()).or_default() += 1;
+        }
+        Self { entries, board, no, posts, index, backlinks, ids, ..Default::default() }
     }
 
     /// The post is collapsed to a line: hidden, not shown anyway, and not the OP.
@@ -383,12 +396,36 @@ impl ThreadView {
         if !quotes && self.backlinks[self.selected].is_empty() {
             return Err(format!("No.{no} isn't part of a conversation here: it quotes no post in the thread, and none quote it"));
         }
-        self.conversation = Some(Conversation { anchor: no, depth: Default::default(), capped: false, back_scroll: self.scroll });
+        Ok(self.show_only(no, None))
+    }
+
+    /// `I`: only the posts by the selected post's poster (by its poster ID).
+    pub fn enter_poster(&mut self) -> Result<usize, String> {
+        let Some(p) = self.current() else { return Err("No posts".into()) };
+        let Some(id) = p.id.clone() else { return Err(format!("No.{} has no poster ID (the board doesn't give them)", p.no)) };
+        Ok(self.show_only(p.no, Some(id)))
+    }
+
+    /// Show a conversation (or a poster's posts) instead of the whole thread; how many posts.
+    fn show_only(&mut self, anchor: u64, poster: Option<String>) -> usize {
+        // From another conversation, back is still to where the whole thread was.
+        let back_scroll = self.conversation.as_ref().map_or(self.scroll, |c| c.back_scroll);
+        self.conversation = Some(Conversation { anchor, poster, depth: Default::default(), capped: false, back_scroll });
         self.focus = None;
         self.scroll = 0;
         self.rebuild_entries();
         self.set_search(self.search.clone());
-        Ok(self.conversation.as_ref().map_or(0, |c| c.depth.len()))
+        self.conversation.as_ref().map_or(0, |c| c.depth.len())
+    }
+
+    /// The posts with poster ID `id`, as a conversation's posts (all at the top level).
+    pub fn posts_by(&self, id: &str) -> std::collections::BTreeMap<usize, i32> {
+        self.posts.iter().enumerate().filter(|(_, p)| p.id.as_deref() == Some(id)).map(|(i, _)| (i, 0)).collect()
+    }
+
+    /// How many posts of the thread have poster ID `id`.
+    pub fn id_count(&self, id: &str) -> usize {
+        self.ids.get(id).copied().unwrap_or(0)
     }
 
     /// Back to the whole thread, with the conversation's post selected and the thread
@@ -499,11 +536,13 @@ impl ThreadView {
     /// a refresh may add to it), keeping the cursor on the same path if it's still there.
     pub(super) fn rebuild_entries(&mut self) {
         let path = self.entries.get(self.entry()).map(|e| e.path.clone());
-        if let Some(c) = &mut self.conversation {
-            match self.index.get(&c.anchor) {
-                Some(&p) => (c.depth, c.capped) = conversation_of(&self.posts, &self.index, &self.backlinks, p),
-                None => self.conversation = None,
+        if let Some(mut c) = self.conversation.take() {
+            match (self.index.get(&c.anchor), &c.poster) {
+                (Some(_), Some(id)) => c.depth = self.posts_by(id),
+                (Some(&p), None) => (c.depth, c.capped) = conversation_of(&self.posts, &self.index, &self.backlinks, p),
+                (None, _) => {}
             }
+            self.conversation = Some(c).filter(|c| self.index.contains_key(&c.anchor));
         }
         let shown: Vec<(usize, i32)> = match &self.conversation {
             Some(c) => c.depth.iter().map(|(&i, &d)| (i, d)).collect(),

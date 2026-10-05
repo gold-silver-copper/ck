@@ -49,7 +49,8 @@ impl App {
                 let t = self.tab.thread.as_ref();
                 place.thread = t.map(|t| t.no).or(self.tab.pending_thread);
                 place.selected = t.and_then(|t| t.current()).map(|p| p.no).or(self.tab.pending_post);
-                place.conversation = t.and_then(|t| Some(t.conversation.as_ref()?.anchor)).or(self.tab.pending_conversation);
+                // A poster's posts aren't kept: an ID is the thread's alone, and short-lived.
+                place.conversation = t.and_then(|t| Some(t.conversation.as_ref().filter(|c| c.poster.is_none())?.anchor)).or(self.tab.pending_conversation);
             }
             View::Catalog => {
                 place.selected = self.tab.catalog_list.state.selected().and_then(|i| self.visible_catalog().get(i).map(|&k| self.tab.catalog[k].no));

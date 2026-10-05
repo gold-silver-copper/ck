@@ -9,7 +9,7 @@ use serde_json::Value;
 use super::{Backend, Partial, as_u32, saturate};
 use crate::http::{as_bool, as_str, as_u64, encode_segment as enc, get_json, items, is_not_found};
 use crate::markup;
-use crate::model::{Attachment, Board, Post};
+use crate::model::{Attachment, Board, Flag, Post};
 
 /// Board list is paginated; don't hammer huge sites at startup.
 const MAX_BOARD_PAGES: u64 = 5;
@@ -62,9 +62,13 @@ impl Lynxchan {
             None => markup::parse_plain(v["message"].as_str().unwrap_or("")),
         };
         let mut name = as_str(&v["name"]).unwrap_or_else(|| "Anonymous".into());
-        if let Some(role) = as_str(&v["signedRole"]) {
+        let capcode = as_str(&v["signedRole"]);
+        if let Some(role) = &capcode {
             let _ = write!(name, " ## {role}");
         }
+        // `flagCode` is `-us` for a country; a board's custom flag has only its name.
+        let code = as_str(&v["flagCode"]).map(|c| c.trim_start_matches('-').to_string());
+        let flag = Flag::new(code, as_str(&v["flagName"]));
         let mut files: Vec<Attachment> = items(&v["files"])
             .filter_map(|f| {
                 let path = as_str(&f["path"])?;
@@ -97,6 +101,9 @@ impl Lynxchan {
         Post {
             no: as_u64(&v[no_key]).unwrap_or(0),
             name,
+            id: as_str(&v["id"]),
+            flag,
+            capcode,
             subject: as_str(&v["subject"]),
             time: parse_time(&v["creation"]).or_else(|| parse_time(&v["lastBump"])).unwrap_or(0),
             files,
@@ -251,6 +258,24 @@ mod tests {
         let kohl = Lynxchan::new("https://kohlchan.net".into(), None);
         let posts = kohl.parse_thread(&fixture("kohlchan_thread.json"));
         assert!(posts.len() > 1 && posts.iter().all(|p| p.no > 0));
+    }
+
+    #[test]
+    fn ids_and_flags() {
+        use crate::model::Flag;
+        let posts = Lynxchan::new("https://endchan.net".into(), None).parse_thread(&fixture("lynxchan_thread.json"));
+        assert_eq!(posts[0].id.as_deref(), Some("443169"));
+        // A board's own flag has a name and no code.
+        assert_eq!(posts[0].flag, Some(Flag { code: String::new(), name: "Tatarstan".into() }));
+        assert_eq!(posts[0].flag.as_ref().unwrap().short(), "Tatarstan");
+        let p = posts.iter().find(|p| p.no == 867094).unwrap();
+        assert_eq!((p.id.as_deref(), p.flag.as_ref().map(Flag::short).as_deref()), (Some("dc6304"), Some("RO")));
+        assert!(posts.iter().find(|p| p.no == 867169).is_some_and(|p| p.id.is_none() && p.flag.is_none()));
+        // kohlchan: flags without IDs; `-br` is Brazil's.
+        let posts = Lynxchan::new("https://kohlchan.net".into(), None).parse_thread(&fixture("kohlchan_thread.json"));
+        assert!(posts.iter().all(|p| p.id.is_none()));
+        let p = posts.iter().find(|p| p.no == 28883633).unwrap();
+        assert_eq!(p.flag, Some(Flag { code: "br".into(), name: "Brasil".into() }));
     }
 
     fn find(v: &Value, no: u64) -> &Value {

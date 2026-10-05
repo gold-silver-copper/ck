@@ -342,7 +342,11 @@ fn location(app: &App) -> (Vec<String>, Vec<Span<'static>>) {
                 // The conversation's posts instead of the thread's.
                 meta.retain(|m| !m.ends_with("posts") && !m.ends_with("post"));
                 meta.insert(0, if c.capped { format!("first {}", plural(c.depth.len(), "post")) } else { plural(c.depth.len(), "post") });
-                return_crumbs = Some(vec![site(), uri.clone(), truncate(&subject, 24), format!("Conversation of No.{}", c.anchor)]);
+                let what = match &c.poster {
+                    Some(id) => format!("Posts by ID:{}", truncate(id, 16)),
+                    None => format!("Conversation of No.{}", c.anchor),
+                };
+                return_crumbs = Some(vec![site(), uri.clone(), truncate(&subject, 24), what]);
             }
             if let Some(crumbs) = return_crumbs {
                 crumbs
@@ -530,6 +534,12 @@ fn footer_hints(app: &App) -> Vec<(String, &'static str)> {
                 (k(Action::Menu), "more"),
                 ("esc".into(), "the post"),
             ],
+            Some(Part::Poster) => vec![
+                ("enter".into(), "this poster's posts"),
+                (k(Action::NextPart), "next"),
+                (k(Action::Menu), "more"),
+                ("esc".into(), "the post"),
+            ],
             Some(Part::Replies) => vec![
                 ("enter".into(), "show / hide replies"),
                 (k(Action::NextPart), "next"),
@@ -537,13 +547,15 @@ fn footer_hints(app: &App) -> Vec<(String, &'static str)> {
                 ("esc".into(), "the post"),
             ],
             None if app.tab.thread.as_ref().is_some_and(|t| t.conversation.is_some()) => {
-                let capped = app.tab.thread.as_ref().and_then(|t| t.conversation.as_ref()).is_some_and(|c| c.capped);
+                let c = app.tab.thread.as_ref().and_then(|t| t.conversation.as_ref());
+                let capped = c.is_some_and(|c| c.capped);
+                let back = if c.is_some_and(|c| c.poster.is_some()) { Action::Poster } else { Action::Conversation };
                 let mut hints = vec![
                     ("j/k".into(), "post"),
                     (k(Action::NextPart), "images & links"),
                     (k(Action::Menu), "more"),
                     ("enter".into(), "quote"),
-                    (format!("esc/{}", k(Action::Conversation)), "whole thread"),
+                    (format!("esc/{}", k(back)), "whole thread"),
                 ];
                 if capped {
                     hints.push(("".into(), "the nearest 500 posts"));

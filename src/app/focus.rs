@@ -73,6 +73,7 @@ impl App {
             Part::Link(Target::Url(u)) => self.open_url(&u),
             Part::Link(Target::Quote(l)) => self.go_to_quote(&l),
             Part::Replies => self.act(Action::Expand),
+            Part::Poster => self.act(Action::Poster),
         }
     }
 
@@ -116,7 +117,7 @@ impl App {
             Part::File(k) => ("file URL", p.files.get(*k)?.url.clone()),
             Part::Link(Target::Url(u)) => ("link", u.clone()),
             Part::Link(Target::Quote(l)) => ("link", self.quote_url(l)?),
-            Part::Replies => return None,
+            Part::Replies | Part::Poster => return None,
         })
     }
 
@@ -201,6 +202,8 @@ impl App {
             },
             Some(Part::Replies) if t.expanded.contains(&t.entries.get(t.entry())?.path) => "hide the replies".into(),
             Some(Part::Replies) => "show the replies under it".into(),
+            Some(Part::Poster) if t.conversation.as_ref().is_some_and(|c| c.poster.is_some()) => "the whole thread again".into(),
+            Some(Part::Poster) => format!("only ID:{}'s posts", p.id.as_deref().unwrap_or_default()),
             None if p.quotes.iter().any(|q| t.index.contains_key(q)) => "go to the post it quotes".into(),
             None if self.outgoing_link().is_some() => "follow its link".into(),
             None => return None,
@@ -253,7 +256,7 @@ impl App {
         let title = match focus {
             Some(Part::File(k)) => p.files.get(*k).map_or(String::new(), |f| f.filename.clone()),
             Some(Part::Link(Target::Url(u))) => crate::ui::truncate(u, 50),
-            Some(Part::Link(Target::Quote(_))) | Some(Part::Replies) | None => format!("No.{}", p.no),
+            Some(Part::Link(Target::Quote(_))) | Some(Part::Replies) | Some(Part::Poster) | None => format!("No.{}", p.no),
         };
         if let Some(label) = self.enter_label() {
             items.push(MenuItem::Enter(label));
@@ -272,7 +275,7 @@ impl App {
                 items.push(act(A::Copy, "copy its address"));
                 items.push(act(A::Browser, "open it in the browser"));
             }
-            Some(Part::Replies) | None => {}
+            Some(Part::Replies) | Some(Part::Poster) | None => {}
         }
         if !p.files.is_empty() {
             items.push(act(A::View, "view the post's images"));
@@ -305,6 +308,10 @@ impl App {
         let hidden = t.marks.get(t.selected).is_some_and(|m| m.hidden.is_some());
         items.push(act(A::Hide, if hidden { "unhide it" } else { "hide it" }));
         items.push(act(A::Filter, "hide or highlight posts like it…"));
+        let by_poster = t.conversation.as_ref().is_some_and(|c| c.poster.is_some());
+        if let Some(id) = p.id.as_deref().filter(|_| !by_poster) {
+            items.push(act(A::Poster, &format!("only this poster's posts (ID:{id}, {})", t.id_count(id))));
+        }
         if t.conversation.is_some() {
             items.push(act(A::Conversation, "the whole thread again"));
         } else if t.backlinks[t.selected].len() + p.quotes.iter().filter(|q| t.index.contains_key(q)).count() > 0 {

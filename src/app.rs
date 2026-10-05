@@ -1191,6 +1191,22 @@ impl App {
         }
     }
 
+    /// `I`: the selected post's poster's posts alone, or the whole thread again.
+    fn toggle_poster(&mut self) {
+        let Some(t) = self.tab.thread.as_mut().filter(|_| self.tab.view == View::Thread && self.tab.gallery.is_none()) else { return };
+        if t.conversation.as_ref().is_some_and(|c| c.poster.is_some()) {
+            t.leave_conversation();
+            return;
+        }
+        match t.enter_poster() {
+            Ok(n) => {
+                let id = t.conversation.as_ref().and_then(|c| c.poster.clone()).unwrap_or_default();
+                self.info(format!("{} by ID:{id}; esc or {} shows the whole thread", plural_posts(n), self.keys.key(Action::Poster)));
+            }
+            Err(e) => self.info(e),
+        }
+    }
+
     /// Keep a copy of a thread's posts in the data directory (a watched thread's, or with
     /// `always`, any). Unchanged posts aren't written again.
     fn keep_copy(&mut self, key: &ThreadKey, posts: &[Post], always: bool) {

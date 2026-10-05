@@ -72,6 +72,30 @@ impl Attachment {
     }
 }
 
+/// A poster's flag: their country's, or one the board lets them pick.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct Flag {
+    /// As the site gives it: `US`, a board flag's `AC`, a custom flag's own name; may be empty.
+    pub code: String,
+    /// `United States`, `Anarcho-Capitalist`; may be empty.
+    pub name: String,
+}
+
+impl Flag {
+    /// A flag from what the site says, if it says anything.
+    pub fn new(code: Option<String>, name: Option<String>) -> Option<Self> {
+        let clean = |s: Option<String>| s.map(|s| s.trim().to_string()).unwrap_or_default();
+        let (code, name) = (clean(code), clean(name));
+        (!code.is_empty() || !name.is_empty()).then_some(Self { code, name })
+    }
+
+    /// What a post's header shows: a two-letter code as it is (`US`), else the name.
+    pub fn short(&self) -> String {
+        let two = self.code.len() == 2 && self.code.chars().all(|c| c.is_ascii_alphabetic());
+        if two || self.name.is_empty() { self.code.to_ascii_uppercase() } else { self.name.clone() }
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct Post {
     pub no: u64,
@@ -90,6 +114,12 @@ pub struct Post {
     /// Every link in the text, where it is.
     pub anchors: Vec<Anchor>,
     pub files: Vec<Attachment>,
+    /// The poster's ID in this thread, on boards that give them (4chan's /pol/, /b/).
+    pub id: Option<String>,
+    pub flag: Option<Flag>,
+    /// The tripcode and capcode, also in `name` as shown, apart for filters.
+    pub trip: Option<String>,
+    pub capcode: Option<String>,
     // Catalog-only fields.
     pub replies: Option<u32>,
     pub images: Option<u32>,
