@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
-use crate::model::{Board, Post};
+use crate::model::{Board, Post, max_no};
 use crate::saved::{self, SavedMeta, SavedPost, SavedThread};
 
 const HISTORY_LEN: usize = 100;
@@ -410,7 +410,7 @@ impl Store {
             return false;
         }
         let bytes = before.map_or(0, |m| m.bytes);
-        let (count, newest) = (posts.len(), posts.iter().map(|p| p.no).max().unwrap_or(0));
+        let (count, newest) = (posts.len(), max_no(posts));
         let (posts, key2, subject2, url2) = (posts.to_vec(), key.clone(), subject.to_string(), url.to_string());
         writer.run(move || {
             let thread = SavedThread {

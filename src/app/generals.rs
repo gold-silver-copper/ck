@@ -4,7 +4,7 @@
 use std::time::{Duration, Instant};
 
 use super::{App, View, thread_subject};
-use crate::model::Post;
+use crate::model::{Post, max_no};
 use crate::store::{ThreadKey, Watched};
 
 /// How often a dead (or full) general's board is checked for the next thread.
@@ -40,7 +40,7 @@ impl App {
         let (key, subject, posts, max_no) = match (self.tab.view, &self.tab.board) {
             (View::Thread, _) => {
                 let Some(t) = &self.tab.thread else { return };
-                (self.key(&t.board, t.no), thread_subject(&t.posts), t.posts.len(), t.posts.iter().map(|p| p.no).max().unwrap_or(0))
+                (self.key(&t.board, t.no), thread_subject(&t.posts), t.posts.len(), max_no(&t.posts))
             }
             (View::Catalog, Some(_)) => {
                 let Some(i) = self.selected_index() else { return };

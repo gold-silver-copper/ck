@@ -21,7 +21,7 @@ use crate::filter::{Filters, Hidden, Mark};
 use crate::http;
 use crate::images::Images;
 use crate::keys::{Action, KeyMap, Scope};
-use crate::model::{Attachment, Board, Link, Post};
+use crate::model::{Attachment, Board, Link, Post, max_no};
 use crate::store::{Store, ThreadKey};
 use crate::theme::{self, ThemeDef, ThemeSetting};
 
@@ -1245,7 +1245,7 @@ impl App {
         let (board, no, subject, posts, last_seen) = match (self.tab.view, &self.tab.board) {
             (View::Thread, _) => {
                 let Some(t) = &self.tab.thread else { return };
-                let max_no = t.posts.iter().map(|p| p.no).max().unwrap_or(0);
+                let max_no = max_no(&t.posts);
                 (t.board.clone(), t.no, thread_subject(&t.posts), t.posts.len(), max_no)
             }
             (View::Catalog, Some(b)) => {
@@ -1323,7 +1323,7 @@ impl App {
         let key = self.key(&t.board, t.no);
         let Some(no) = t.current().map(|p| p.no) else { return };
         if self.store.watched(&key).is_none() {
-            let max_no = t.posts.iter().map(|p| p.no).max().unwrap_or(0);
+            let max_no = max_no(&t.posts);
             self.store.toggle_watch(key.clone(), thread_subject(&t.posts), t.posts.len(), max_no);
             self.keep_open_thread(&key);
         }
