@@ -268,20 +268,20 @@ fn goto_input_completes_and_takes_pastes() {
     app.paste("a/");
     app.on_key(KeyEvent::from(KeyCode::Tab));
     // x and xy: completes the common part and lists both.
-    assert_eq!(app.goto.as_deref(), Some("a/x"));
+    assert_eq!(app.goto_text(), Some("a/x"));
     assert!(app.status.as_ref().unwrap().text.contains("xy"));
     app.on_key(KeyEvent::from(KeyCode::Char('y')));
     app.on_key(KeyEvent::from(KeyCode::Enter));
-    assert_eq!((app.goto.as_deref(), app.tab.view, app.tab.board.as_ref().unwrap().uri.as_str()), (None, View::Catalog, "xy"));
+    assert_eq!((app.goto_text(), app.tab.view, app.tab.board.as_ref().unwrap().uri.as_str()), (None, View::Catalog, "xy"));
     // Site names complete with a slash.
     app.act(Action::Goto);
     app.on_key(KeyEvent::from(KeyCode::Char('b')));
     app.on_key(KeyEvent::from(KeyCode::Tab));
-    assert_eq!(app.goto.as_deref(), Some("b/"));
+    assert_eq!(app.goto_text(), Some("b/"));
     app.on_key(KeyEvent::from(KeyCode::Esc));
     // A paste with nothing being typed starts the input.
     app.paste("http://localhost:3/y/res/1.html\n");
-    assert_eq!(app.goto.as_deref(), Some("http://localhost:3/y/res/1.html"));
+    assert_eq!(app.goto_text(), Some("http://localhost:3/y/res/1.html"));
 }
 
 #[test]
@@ -594,7 +594,7 @@ fn archive_search_and_back() {
     // Sites without an archive say so.
     app.sites[0].cfg.archive = None;
     app.act(Action::ArchiveSearch);
-    assert!(app.search_input.is_none() && app.status.as_ref().unwrap().text.contains("no archive"));
+    assert!(app.typing.is_none() && app.status.as_ref().unwrap().text.contains("no archive"));
 }
 
 #[test]
@@ -1343,7 +1343,7 @@ fn x_filters_posts_like_the_selected_one() {
     }
     // Pasted into the label.
     app.paste("him");
-    assert!(app.goto.is_none());
+    assert!(app.goto_text().is_none());
     app.on_key(KeyEvent::from(KeyCode::Enter));
     app.on_key(KeyEvent::from(KeyCode::Enter));
     let f = app.filter_cfgs.last().unwrap();
@@ -2218,7 +2218,7 @@ fn searching_inside_saved_threads() {
     app.tab.view = View::Saved;
     // From the Saved view's menu: `:` with "saved " typed.
     run_menu_row(&mut app, "search inside the saved threads…");
-    assert_eq!(app.goto.as_deref(), Some("saved "));
+    assert_eq!(app.goto_text(), Some("saved "));
     type_text(&mut app, "rust");
     app.on_key(KeyEvent::from(KeyCode::Enter));
     assert_eq!(app.tab.view, View::Search);

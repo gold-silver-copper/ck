@@ -219,6 +219,19 @@ pub enum Popup {
     Help(u16),
 }
 
+/// What's being typed in the footer: one thing at a time.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Typing {
+    /// What's typed after `:`.
+    Goto(String),
+    /// An archive search query.
+    ArchiveQuery(String),
+    /// A thread search; the text is the thread's `search`.
+    ThreadSearch,
+    /// A list's filter; the text is the list's `filter`.
+    ListFilter,
+}
+
 /// Popup with the posts the selected post quotes.
 pub struct Preview {
     /// Numbers of the quoted posts in this thread (not indices: a refresh can drop posts).
@@ -372,8 +385,6 @@ pub struct App {
     pub filter_undo: Option<filters::Undo>,
     /// Show hidden threads and posts (dimmed) instead of leaving them out.
     pub show_hidden: bool,
-    /// True while typing into the filter.
-    pub filtering: bool,
     pub status: Option<Status>,
     /// The status message as last seen by `expire_status`, and when it appeared.
     status_since: Option<(String, Instant)>,
@@ -395,12 +406,8 @@ pub struct App {
     saved_at: Instant,
     /// The session as last saved, and when that was checked.
     session_saved: (Option<crate::store::Session>, Instant),
-    /// The archive search query being typed.
-    pub search_input: Option<String>,
-    /// True while typing a thread search.
-    pub searching: bool,
-    /// What's typed after `:`, while it's being typed.
-    pub goto: Option<String>,
+    /// What's being typed, if anything.
+    pub typing: Option<Typing>,
     pub keys: KeyMap,
     /// The last text copied to the clipboard, and the last URL opened.
     pub copied: Option<String>,
@@ -514,7 +521,6 @@ impl App {
                 .map(|d| crate::pages::Pages::new(d, cfg.page_cache_mb.saturating_mul(1024 * 1024))),
             filter_undo: None,
             show_hidden: false,
-            filtering: false,
             status: None,
             status_since: None,
             popup: None,
@@ -533,9 +539,7 @@ impl App {
             save_pending: false,
             saved_at: Instant::now(),
             session_saved: (None, Instant::now()),
-            search_input: None,
-            searching: false,
-            goto: None,
+            typing: None,
             keys,
             copied: None,
             opened: None,
@@ -666,6 +670,14 @@ impl App {
 
     pub fn current_site(&self) -> &Site {
         &self.sites[self.tab.site]
+    }
+
+    /// What's typed after `:`, while it's being typed.
+    pub fn goto_text(&self) -> Option<&str> {
+        match &self.typing {
+            Some(Typing::Goto(text)) => Some(text),
+            _ => None,
+        }
     }
 
     // ----- background loading -----

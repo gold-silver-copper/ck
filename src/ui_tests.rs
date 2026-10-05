@@ -801,10 +801,10 @@ fn archive_search_results() {
     let mut a = app(false);
     let v = crate::backend::fixture("foolfuuka_search.json");
     a.tab.site = a.sites.iter().position(|s| s.cfg.name == "desuarchive").unwrap();
-    a.search_input = Some("borrow".into());
+    a.typing = Some(crate::app::Typing::ArchiveQuery("borrow".into()));
     a.tab.view = View::Catalog;
     insta::assert_snapshot!("archive_search_typing", snapshot(&mut a));
-    a.search_input = None;
+    a.typing = None;
     a.tab.view = View::Search;
     let page = crate::backend::foolfuuka::parse_search(&v).unwrap();
     a.tab.search = Some(crate::app::Search::for_tests("g", "rust borrow checker", page));

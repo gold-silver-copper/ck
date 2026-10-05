@@ -14,7 +14,7 @@ use ratatui_image::Image;
 use unicode_width::UnicodeWidthStr;
 
 use crate::app::{
-    App, Clock, Hit, LineCache, LinkItem, Part, Popup, Reveal, TabPopup, Spot, SettingsPopup, SiteRow, Sort, Status, ThreadLayout, ThreadView, View, key_rows,
+    App, Clock, Hit, LineCache, LinkItem, Part, Popup, Reveal, TabPopup, Spot, SettingsPopup, SiteRow, Sort, Status, ThreadLayout, ThreadView, Typing, View, key_rows,
     setting_rows, settings,
 };
 use std::collections::HashMap;
@@ -381,11 +381,11 @@ fn location(app: &App) -> (Vec<String>, Vec<Span<'static>>) {
     let mut spans: Vec<Span> = Vec::new();
     // An active filter or search, unless it's being typed (the footer shows that).
     let query = match app.tab.view {
-        View::Thread => app.tab.thread.as_ref().filter(|th| !th.search.is_empty() && !app.searching).map(|th| {
+        View::Thread => app.tab.thread.as_ref().filter(|th| !th.search.is_empty() && app.typing != Some(Typing::ThreadSearch)).map(|th| {
             let k = th.matches.len();
             format!("/{}  {}", th.search, count(k, "match", "matches"))
         }),
-        _ => Some(current_filter(app)).filter(|q| !q.is_empty() && !app.filtering).map(|q| format!("/{q}")),
+        _ => Some(current_filter(app)).filter(|q| !q.is_empty() && app.typing != Some(Typing::ListFilter)).map(|q| format!("/{q}")),
     };
     if let Some(q) = query {
         spans.extend([chip(q, t.on_primary_container, t.primary_container), Span::raw("  ")]);
@@ -420,17 +420,12 @@ fn status_spans(s: &Status, t: Theme) -> Vec<Span<'static>> {
 fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
     let t = theme();
     fill(f, area, t.bar);
-    let typing = if let Some(g) = &app.goto {
-        Some(("go to", g.as_str()))
-    } else if let Some(q) = &app.search_input {
-        Some(("search the archive", q.as_str()))
-    } else if app.searching {
-        Some(("search", app.tab.thread.as_ref().map_or("", |th| th.search.as_str())))
-    } else if app.filtering {
-        Some(("filter", current_filter(app)))
-    } else {
-        None
-    };
+    let typing = app.typing.as_ref().map(|typing| match typing {
+        Typing::Goto(g) => ("go to", g.as_str()),
+        Typing::ArchiveQuery(q) => ("search the archive", q.as_str()),
+        Typing::ThreadSearch => ("search", app.tab.thread.as_ref().map_or("", |th| th.search.as_str())),
+        Typing::ListFilter => ("filter", current_filter(app)),
+    });
     let line = if let Some((what, q)) = typing {
         Line::from(vec![
             Span::raw(" "),
@@ -438,7 +433,7 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
             Span::styled(format!(" {q}"), Style::new().fg(t.on_bar)),
             Span::styled("▏", Style::new().fg(t.primary)),
             Span::styled(
-                match (&app.goto, &app.status) {
+                match (app.goto_text(), &app.status) {
                     // Tab completion's candidates.
                     (Some(_), Some(Status { text, error: false })) => format!("   {text}"),
                     (Some(_), _) => "   enter go   tab complete   esc cancel".into(),

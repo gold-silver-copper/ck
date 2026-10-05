@@ -662,7 +662,7 @@ impl World {
             Act::Paste(t) => app.paste(t),
             Act::Goto(t) => {
                 app.on_key(KeyEvent::from(KeyCode::Char(':')));
-                if app.goto.is_some() {
+                if app.goto_text().is_some() {
                     app.paste(t);
                     app.on_key(KeyEvent::from(KeyCode::Enter));
                 }
@@ -777,7 +777,7 @@ impl World {
             }
             Act::Saved(k) => {
                 app.on_key(KeyEvent::from(KeyCode::Char(':')));
-                if app.goto.is_some() {
+                if app.goto_text().is_some() {
                     app.paste("saved");
                     app.on_key(KeyEvent::from(KeyCode::Enter));
                 }
