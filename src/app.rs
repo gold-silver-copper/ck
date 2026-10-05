@@ -46,6 +46,7 @@ mod generals;
 mod loading;
 mod thread_view;
 mod goto;
+pub use goto::start_error;
 mod home;
 mod links;
 mod saved;

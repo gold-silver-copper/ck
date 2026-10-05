@@ -3,7 +3,36 @@
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 
 use super::{App, Msg, Popup, View};
+use crate::config::SiteConfig;
 use crate::route::{self, SiteInfo, Target};
+
+/// The lists, by name (before boards that happen to be called that).
+fn list_named(input: &str) -> Option<View> {
+    match input.trim().to_lowercase().as_str() {
+        "watched" => Some(View::Watched),
+        "history" => Some(View::History),
+        "saved" => Some(View::Saved),
+        _ => None,
+    }
+}
+
+/// `saved WORDS`: the words to search the saved threads for.
+fn saved_query(input: &str) -> Option<&str> {
+    input.trim().strip_prefix("saved ").map(str::trim).filter(|q| !q.is_empty())
+}
+
+/// Why ck can't start at `input` (`ck URL`), if it can't, to say before the terminal is
+/// taken over. A link to a site that isn't one of `sites` is fine: ck asks it, to add it.
+pub fn start_error(sites: &[SiteConfig], input: &str) -> Option<String> {
+    if list_named(input).is_some() || saved_query(input).is_some() {
+        return None;
+    }
+    let infos: Vec<SiteInfo> = sites.iter().map(|c| SiteInfo::new(c, &crate::backend::build(c).board_url("x"))).collect();
+    if crate::backend::detect::link(input).is_some_and(|l| !infos.iter().any(|s| s.hosts.iter().any(|h| h == l.host.strip_prefix("www.").unwrap_or(&l.host)))) {
+        return None;
+    }
+    route::resolve(input, &infos, (0, None)).err().map(|e| format!("{e:#}"))
+}
 
 impl App {
     fn site_infos(&self) -> Vec<SiteInfo> {
@@ -12,20 +41,12 @@ impl App {
 
     /// Go where `input` leads, or say why it can't.
     pub fn goto_str(&mut self, input: &str) {
-        // The lists by name (before boards that happen to be called that).
-        let view = match input.trim().to_lowercase().as_str() {
-            "watched" => Some(View::Watched),
-            "history" => Some(View::History),
-            "saved" => Some(View::Saved),
-            _ => None,
-        };
-        if let Some(view) = view {
+        if let Some(view) = list_named(input) {
             self.tab.gallery = None;
             self.tab.view = view;
             return;
         }
-        // `saved WORDS`: search inside the saved threads.
-        if let Some(query) = input.trim().strip_prefix("saved ").map(str::trim).filter(|q| !q.is_empty()) {
+        if let Some(query) = saved_query(input) {
             self.tab.gallery = None;
             return self.search_saved(query.to_string());
         }
