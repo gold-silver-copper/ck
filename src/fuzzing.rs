@@ -54,7 +54,7 @@ pub fn config(data: &[u8]) {
     let Ok(text) = std::str::from_utf8(data) else { return };
     let Ok(cfg) = toml::from_str::<crate::config::Config>(text) else { return };
     let _ = crate::keys::KeyMap::new(&cfg.keys);
-    let _ = crate::filter::Filters::new(&cfg.filters).and_then(|f| f.with_words(&cfg.hidden_words));
+    let _ = crate::filter::Filters::from_config(&cfg.filters, &cfg.hidden_words);
     let _ = crate::theme::from_config(cfg.theme.as_ref(), &cfg.themes);
     let _ = cfg.with_builtin_sites();
 }

@@ -683,7 +683,8 @@ fn data_dir_once(seed: u64) {
     // The app starts on it, restores the session, draws and saves.
     let mut app = crate::test_fixtures::test_app();
     let cfg: crate::config::Config = toml::from_str(crate::config::DEFAULT_CONFIG).unwrap();
-    app = crate::app::App::new(cfg, app.keys.clone(), None, store);
+    let filters = crate::filter::Filters::from_config(&cfg.filters, &cfg.hidden_words).unwrap();
+    app = crate::app::App::new(cfg, app.keys.clone(), filters, None, store);
     app.config_path = None;
     app.restore_session();
     // The Saved view, and each copy in it.
@@ -857,7 +858,7 @@ fn config_once(seed: u64) {
     // the config, none may panic.
     let Ok(cfg) = toml::from_str::<crate::config::Config>(&text).map_err(anyhow::Error::from).and_then(crate::config::Config::with_builtin_sites) else { return };
     let Ok(keys) = crate::keys::KeyMap::new(&cfg.keys) else { return };
-    if crate::filter::Filters::new(&cfg.filters).and_then(|f| f.with_words(&cfg.hidden_words)).is_err() || crate::theme::from_config(cfg.theme.as_ref(), &cfg.themes).is_err() {
+    if crate::filter::Filters::from_config(&cfg.filters, &cfg.hidden_words).is_err() || crate::theme::from_config(cfg.theme.as_ref(), &cfg.themes).is_err() {
         return;
     }
     // Editing its filters changes just the one, and what's written reads back.
@@ -897,7 +898,8 @@ fn config_once(seed: u64) {
         assert_eq!(std::fs::read_to_string(&path).unwrap(), before);
         std::fs::write(&path, &text).unwrap();
     }
-    let mut app = crate::app::App::new(cfg, keys, None, crate::store::Store::default());
+    let filters = crate::filter::Filters::from_config(&cfg.filters, &cfg.hidden_words).unwrap();
+    let mut app = crate::app::App::new(cfg, keys, filters, None, crate::store::Store::default());
     app.config_path = Some(path);
     let mut term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 24)).unwrap();
     for key in [KeyCode::Enter, KeyCode::Char(','), KeyCode::Char('j'), KeyCode::Enter, KeyCode::Esc] {

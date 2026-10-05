@@ -24,7 +24,8 @@ pub const NOW: i64 = 1_790_000_000;
 /// config file.
 pub fn app_with(config: &str) -> App {
     let cfg: Config = toml::from_str(config).unwrap();
-    let mut app = App::new(cfg, KeyMap::default(), None, Store::default());
+    let filters = crate::filter::Filters::from_config(&cfg.filters, &cfg.hidden_words).unwrap();
+    let mut app = App::new(cfg, KeyMap::default(), filters, None, Store::default());
     app.config_path = None;
     app
 }

@@ -201,6 +201,11 @@ pub fn word_pattern(word: &str) -> Option<String> {
 pub struct Filters(Vec<Filter>, Option<Words>);
 
 impl Filters {
+    /// The config's filters and hidden words.
+    pub fn from_config(cfgs: &[FilterConfig], hidden_words: &[String]) -> Result<Self> {
+        Self::new(cfgs)?.with_words(hidden_words)
+    }
+
     /// The enabled filters (every one is checked, enabled or not).
     pub fn new(cfgs: &[FilterConfig]) -> Result<Self> {
         let mut out = Vec::new();

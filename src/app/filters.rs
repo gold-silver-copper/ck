@@ -444,7 +444,7 @@ impl App {
 
     /// The filters changed: rebuild them, and mark the catalog and thread again.
     pub(super) fn apply_filters(&mut self) {
-        match Filters::new(&self.filter_cfgs).and_then(|f| f.with_words(&self.hidden_words)) {
+        match Filters::from_config(&self.filter_cfgs, &self.hidden_words) {
             Ok(f) => self.filters = f,
             Err(e) => self.error(format!("{e:#}")),
         }

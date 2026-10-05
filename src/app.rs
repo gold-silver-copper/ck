@@ -431,7 +431,8 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(cfg: Config, keys: KeyMap, picker: Option<ratatui_image::picker::Picker>, store: Store) -> Self {
+    /// `keys` and `filters` are built from `cfg` by the caller, which reports their errors.
+    pub fn new(cfg: Config, keys: KeyMap, filters: Filters, picker: Option<ratatui_image::picker::Picker>, store: Store) -> Self {
         // ck 0.2's [theme] table of overrides becomes a theme of its own, "legacy".
         let mut themes = cfg.themes.clone();
         let theme_name = match &cfg.theme {
@@ -503,7 +504,7 @@ impl App {
             notified: Vec::new(),
             boards_refreshing: HashSet::new(),
             boards_tried: HashMap::new(),
-            filters: Filters::new(&cfg.filters).and_then(|f| f.with_words(&cfg.hidden_words)).unwrap_or_default(),
+            filters,
             hidden_words: cfg.hidden_words.clone(),
             filter_cfgs: cfg.filters.clone(),
             scroll_margin: if cfg.scroll_margin.is_finite() { cfg.scroll_margin.clamp(0.0, 0.5) } else { 0.3 },

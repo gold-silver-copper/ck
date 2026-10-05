@@ -612,7 +612,8 @@ impl World {
                 store.board_prefs.entry(board.into()).or_default().images = Some(rng.chance(30));
             }
         }
-        let mut app = App::new(cfg, KeyMap::default(), None, store);
+        let filters = crate::filter::Filters::from_config(&cfg.filters, &cfg.hidden_words).unwrap();
+        let mut app = App::new(cfg, KeyMap::default(), filters, None, store);
         app.config_path = Some(dir.join("config.toml"));
         app.download_dir = Some(dir.join("downloads").display().to_string());
         app.pages = Some(crate::pages::Pages::new(dir.join("cache/pages"), 4 << 20));
