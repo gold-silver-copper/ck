@@ -44,13 +44,8 @@ fn main() -> Result<()> {
     theme::set(theme::from_config(config.theme.as_ref(), &config.themes)?);
     let (store, warnings) = Store::load(Store::dir());
     let mut terminal = ratatui::init();
-    // ratatui::init restores the terminal on panic; also turn mouse capture off first.
     let _ = execute!(stdout(), EnableMouseCapture, EnableBracketedPaste);
-    let hook = std::panic::take_hook();
-    std::panic::set_hook(Box::new(move |info| {
-        let _ = execute!(stdout(), DisableMouseCapture, DisableBracketedPaste);
-        hook(info);
-    }));
+    restore_on_main_thread_panics();
     ck::input_log::note(|| "images  asking the terminal".into());
     let picker = (config.images != ImagesMode::Off).then(|| detect_images(config.images));
     ck::input_log::note(|| format!("images  {:?}", picker.as_ref().map(|p| p.protocol_type())));
@@ -70,6 +65,23 @@ fn main() -> Result<()> {
     let _ = execute!(stdout(), DisableMouseCapture, DisableBracketedPaste);
     ratatui::restore();
     result
+}
+
+/// ratatui::init's panic hook restores the terminal, for a panic on any thread; one on a
+/// background thread would leave ck running on a terminal no longer set up for it. Only
+/// the main thread's restores (mouse capture off too); others are left to the thread's
+/// owner to report, and the terminal alone.
+fn restore_on_main_thread_panics() {
+    let main = std::thread::current().id();
+    let restore = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        if std::thread::current().id() == main {
+            let _ = execute!(stdout(), DisableMouseCapture, DisableBracketedPaste);
+            restore(info);
+        } else {
+            ck::input_log::note(|| format!("panic   {info}"));
+        }
+    }));
 }
 
 fn help_text() -> String {
@@ -187,4 +199,25 @@ fn frame_text(buf: &ratatui::buffer::Buffer) -> String {
         out.push('\n');
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[test]
+    fn only_a_main_thread_panic_restores_the_terminal() {
+        let restored = Arc::new(AtomicUsize::new(0));
+        let count = restored.clone();
+        std::panic::set_hook(Box::new(move |_| {
+            count.fetch_add(1, Ordering::SeqCst);
+        }));
+        super::restore_on_main_thread_panics();
+        assert!(std::thread::spawn(|| std::panic::panic_any("in the background")).join().is_err());
+        assert_eq!(restored.load(Ordering::SeqCst), 0);
+        assert!(std::panic::catch_unwind(|| std::panic::panic_any("on the main thread")).is_err());
+        assert_eq!(restored.load(Ordering::SeqCst), 1);
+        let _ = std::panic::take_hook();
+    }
 }
