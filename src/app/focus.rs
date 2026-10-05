@@ -209,242 +209,274 @@ impl App {
 
     /// Everything that can be done with what's selected, most specific first.
     fn menu_items(&self) -> (String, Vec<MenuItem>) {
-        use Action as A;
-        let act = |a: Action, label: &str| MenuItem::Act(a, label.to_string());
         let mut items: Vec<MenuItem> = Vec::new();
-        let mut title = String::new();
-        let watching = |no: u64| self.tab.board.as_ref().is_some_and(|b| self.store.watched(&self.key(&b.uri, no)).is_some());
-        if let Some(v) = self.tab.viewer() {
-            title = v.files.get(v.index).map(|f| f.filename.clone()).unwrap_or_default();
-            items.push(act(A::OpenFile, "open it outside ck"));
-            items.push(act(A::Download, "save it"));
-            items.push(act(A::ImageSearch, "search for this image"));
-            items.push(act(A::Copy, "copy the file's URL"));
-            items.push(act(A::CopyLink, "copy the post's link"));
+        let title = if let Some(v) = self.tab.viewer() {
+            viewer_menu(v, &mut items)
         } else if self.tab.view == View::Thread && self.tab.gallery.is_some() {
-            title = "Gallery".into();
-            items.push(MenuItem::Enter("view it".into()));
-            items.push(act(A::Download, "save it"));
-            items.push(act(A::Copy, "copy the file's URL"));
-            items.push(act(A::CopyLink, "copy the post's link"));
+            gallery_menu(&mut items)
         } else {
             match self.tab.view {
-                View::Thread => {
-                    if let Some(t) = &self.tab.thread
-                        && let Some(p) = t.current()
-                    {
-                        let focus = t.focus.as_ref();
-                        title = match focus {
-                            Some(Part::File(k)) => p.files.get(*k).map_or(String::new(), |f| f.filename.clone()),
-                            Some(Part::Link(Target::Url(u))) => crate::ui::truncate(u, 50),
-                            Some(Part::Link(Target::Quote(_))) | Some(Part::Replies) | None => format!("No.{}", p.no),
-                        };
-                        if let Some(label) = self.enter_label() {
-                            items.push(MenuItem::Enter(label));
-                        }
-                        match focus {
-                            Some(Part::File(k)) => {
-                                items.push(act(A::Download, "save this file"));
-                                items.push(act(A::Copy, "copy the file's URL"));
-                                items.push(act(A::Browser, "open the file in the browser"));
-                                if p.files.get(*k).is_some_and(|f| f.is_image()) {
-                                    items.push(act(A::ImageSearch, "search for this image"));
-                                }
-                            }
-                            Some(Part::Link(Target::Url(_))) => items.push(act(A::Copy, "copy the URL")),
-                            Some(Part::Link(Target::Quote(_))) => {
-                                items.push(act(A::Copy, "copy its address"));
-                                items.push(act(A::Browser, "open it in the browser"));
-                            }
-                            Some(Part::Replies) | None => {}
-                        }
-                        if !p.files.is_empty() {
-                            items.push(act(A::View, "view the post's images"));
-                            if !matches!(focus, Some(Part::File(_))) {
-                                items.push(act(A::DownloadPost, if p.files.len() == 1 { "save the post's file" } else { "save the post's files" }));
-                            }
-                        }
-                        if focus.is_none() {
-                            items.push(act(A::Copy, "copy the post's text"));
-                        }
-                        items.push(act(A::CopyLink, "copy the post's link"));
-                        if focus.is_none() {
-                            items.push(act(A::Browser, "open the post in the browser"));
-                        }
-                        if !p.anchors.is_empty() || !p.files.is_empty() {
-                            items.push(act(A::Links, "list its links and files"));
-                        }
-                        if !p.quotes.is_empty() {
-                            items.push(act(A::Preview, "preview the posts it quotes"));
-                        }
-                        if t.backlinks.get(t.selected).is_some_and(|b| !b.is_empty()) {
-                            items.push(act(A::Replies, "go to the first reply"));
-                            let open = t.entries.get(t.entry()).is_some_and(|e| t.expanded.contains(&e.path));
-                            items.push(act(A::Expand, if open { "hide its replies" } else { "show its replies under it" }));
-                        }
-                        if p.body.iter().flat_map(|l| &l.spans).any(|s| crate::markup::is_spoiler(s.style)) {
-                            items.push(act(A::Spoiler, "show its spoilers"));
-                        }
-                        items.push(act(A::Mine, if t.mine.contains(&p.no) { "it's not yours" } else { "mark it as yours" }));
-                        let hidden = t.marks.get(t.selected).is_some_and(|m| m.hidden.is_some());
-                        items.push(act(A::Hide, if hidden { "unhide it" } else { "hide it" }));
-                        items.push(act(A::Filter, "hide or highlight posts like it…"));
-                        if t.conversation.is_some() {
-                            items.push(act(A::Conversation, "the whole thread again"));
-                        } else if t.backlinks[t.selected].len() + p.quotes.iter().filter(|q| t.index.contains_key(q)).count() > 0 {
-                            items.push(act(A::Conversation, "its conversation alone"));
-                        }
-                        items.push(act(A::Watch, if watching(t.no) { "stop watching the thread" } else { "watch the thread" }));
-                        items.push(act(A::Follow, "follow the thread as a general"));
-                        if t.posts.iter().any(|p| !p.files.is_empty()) {
-                            items.push(act(A::Gallery, "all the thread's files"));
-                            items.push(act(A::DownloadThread, "save all the thread's files…"));
-                        }
-                        if !t.jumps.is_empty() || !self.tab.trail.is_empty() {
-                            items.push(act(A::JumpBack, "go back"));
-                        }
-                        if (0..t.posts.len()).any(|i| t.is_new(i)) {
-                            items.push(act(A::Unread, "the first unread post"));
-                        }
-                        if self.outgoing_link().is_some() {
-                            items.push(act(A::NewTab, "open its link in a new tab"));
-                        }
-                        if self.tab.archive_offer.is_some() {
-                            items.push(act(A::Archive, "open the thread in the archive"));
-                        }
-                        items.push(act(A::Search, "search the thread"));
-                        items.push(act(A::Hints, "pick a link or post by its label"));
-                        if let Some(row) = self.board_images_row() {
-                            items.push(MenuItem::Act(A::BoardImages, row));
-                        }
-                        items.push(act(A::Export, "save the thread as a page…"));
-                        match self.tab.saved() {
-                            Some(o) if o.dead => {}
-                            Some(_) => items.push(act(A::Reload, "open the live thread")),
-                            None => items.push(act(A::Reload, "reload")),
-                        }
-                    }
+                View::Thread => self.thread_menu(&mut items),
+                View::Catalog => self.catalog_menu(&mut items),
+                View::Sites => self.sites_menu(&mut items),
+                View::Boards => self.boards_menu(&mut items),
+                View::Watched | View::History => self.watched_menu(&mut items),
+                View::Saved => self.saved_menu(&mut items),
+                View::Search => self.search_menu(&mut items),
+                View::Settings => {
+                    items.push(MenuItem::Enter("change it".into()));
+                    String::new()
                 }
-                View::Catalog => {
-                    if let Some(p) = self.selected_post() {
-                        title = format!("No.{}", p.no);
-                        items.push(MenuItem::Enter("open the thread".into()));
-                        items.push(act(A::NewTab, "open it in a new tab"));
-                        if !p.files.is_empty() {
-                            items.push(act(A::View, "view its images"));
-                        }
-                        items.push(act(A::Watch, if watching(p.no) { "stop watching it" } else { "watch it" }));
-                        items.push(act(A::Follow, "follow it as a general"));
-                        items.push(act(A::Hide, "hide it (or unhide)"));
-                        items.push(act(A::Filter, "hide or highlight threads like it…"));
-                        if !p.anchors.is_empty() || !p.files.is_empty() {
-                            items.push(act(A::Links, "list its links and files"));
-                        }
-                        items.push(act(A::Copy, "copy its text"));
-                        items.push(act(A::CopyLink, "copy its link"));
-                        items.push(act(A::Browser, "open it in the browser"));
-                    }
-                    items.push(act(A::ShowHidden, if self.show_hidden { "leave out hidden threads" } else { "show hidden threads" }));
-                    let sort = self.tab.catalog_sort;
-                    items.push(MenuItem::Act(A::Sort, format!("sort by {} (now {})", sort.next().as_str(), sort.as_str())));
-                    let layout = self.layout();
-                    items.push(MenuItem::Act(A::Compact, format!("{} layout (now {})", layout.next().as_str(), layout.as_str())));
-                    items.push(act(A::Favorite, "favorite the board (or not)"));
-                    if let Some(row) = self.board_images_row() {
-                        items.push(MenuItem::Act(A::BoardImages, row));
-                    }
-                    if self.archive_site().is_some() {
-                        items.push(act(A::ArchiveSearch, "search the board's archive"));
-                    }
-                    items.push(act(A::Search, "filter the threads"));
-                    items.push(act(A::Hints, "pick a thread by its label"));
-                    items.push(act(A::Reload, "reload"));
+            }
+        };
+        self.everywhere_menu(&mut items);
+        (title, items)
+    }
+
+    /// Whether thread `no` on the tab's board is watched.
+    fn menu_watching(&self, no: u64) -> bool {
+        self.tab.board.as_ref().is_some_and(|b| self.store.watched(&self.key(&b.uri, no)).is_some())
+    }
+
+    /// The selected post in a thread, and what's focused in it. Returns the menu's title.
+    fn thread_menu(&self, items: &mut Vec<MenuItem>) -> String {
+        use Action as A;
+        let Some(t) = &self.tab.thread else { return String::new() };
+        let Some(p) = t.current() else { return String::new() };
+        let focus = t.focus.as_ref();
+        let title = match focus {
+            Some(Part::File(k)) => p.files.get(*k).map_or(String::new(), |f| f.filename.clone()),
+            Some(Part::Link(Target::Url(u))) => crate::ui::truncate(u, 50),
+            Some(Part::Link(Target::Quote(_))) | Some(Part::Replies) | None => format!("No.{}", p.no),
+        };
+        if let Some(label) = self.enter_label() {
+            items.push(MenuItem::Enter(label));
+        }
+        match focus {
+            Some(Part::File(k)) => {
+                items.push(act(A::Download, "save this file"));
+                items.push(act(A::Copy, "copy the file's URL"));
+                items.push(act(A::Browser, "open the file in the browser"));
+                if p.files.get(*k).is_some_and(|f| f.is_image()) {
+                    items.push(act(A::ImageSearch, "search for this image"));
                 }
-                View::Sites => {
-                    match self.selected_site_row() {
-                        Some(SiteRow::Watched) => items.push(MenuItem::Enter("open Watched".into())),
-                        Some(SiteRow::History) => items.push(MenuItem::Enter("open History".into())),
-                        Some(SiteRow::Saved) => items.push(MenuItem::Enter("open Saved".into())),
-                        Some(SiteRow::Favorite(_)) => {
-                            items.push(MenuItem::Enter("open the board".into()));
-                            items.push(MenuItem::Act(A::Remove, "take it off the favorites".into()));
-                        }
-                        Some(SiteRow::Recent(_)) => {
-                            items.push(MenuItem::Enter("open the board".into()));
-                            items.push(MenuItem::Act(A::Remove, "forget it".into()));
-                        }
-                        Some(SiteRow::Site(i)) => {
-                            let name = self.sites.get(i).map_or("", |s| s.cfg.name.as_str());
-                            items.push(MenuItem::Enter(format!("open {name}'s boards")));
-                            let hidden = self.is_site_hidden(i);
-                            items.push(MenuItem::Act(A::Remove, if hidden { "show it on the home screen" } else { "hide it from the home screen" }.into()));
-                            items.push(MenuItem::Act(A::Browser, format!("open {name} in the browser")));
-                        }
-                        Some(SiteRow::HiddenSites) => {
-                            items.push(MenuItem::Enter(if self.show_hidden_sites { "hide the hidden sites" } else { "show the hidden sites" }.into()));
-                        }
-                        None => {}
-                    }
-                    items.push(act(A::Search, "filter"));
-                    items.push(act(A::Hints, "pick a row by its label"));
-                    items.push(act(A::AddSite, "add a site…"));
-                }
-                View::Boards => {
-                    if let Some(i) = self.selected_index() {
-                        let uri = self.boards().get(i).map_or(String::new(), |b| b.uri.clone());
-                        title = format!("/{uri}/");
-                        items.push(MenuItem::Enter(format!("open /{uri}/")));
-                        items.push(act(A::Favorite, "favorite it (or not)"));
-                        items.push(act(A::Browser, "open it in the browser"));
-                        if let Some(row) = self.board_images_row() {
-                            items.push(MenuItem::Act(A::BoardImages, row));
-                        }
-                    }
-                    items.push(act(A::Search, "filter the boards"));
-                    items.push(act(A::Hints, "pick a board by its label"));
-                    let site = &self.current_site().cfg;
-                    if site.kind == crate::config::SiteKind::Vichan && site.boards.is_some() && site.url.is_some() {
-                        items.push(act(A::UpdateBoards, "update the board list…"));
-                    }
-                    items.push(act(A::Reload, "reload"));
-                }
-                View::Watched | View::History => {
-                    if self.selected_index().is_some() {
-                        items.push(MenuItem::Enter("open the thread".into()));
-                        items.push(act(A::NewTab, "open it in a new tab"));
-                        items.push(act(A::Remove, if self.tab.view == View::Watched { "stop watching it" } else { "forget it" }));
-                        items.push(act(A::Copy, "copy its subject and link"));
-                        items.push(act(A::CopyLink, "copy its link"));
-                        items.push(act(A::Browser, "open it in the browser"));
-                        items.push(act(A::Follow, "follow it as a general"));
-                    }
-                    items.push(act(A::Search, "filter"));
-                    items.push(act(A::Hints, "pick a thread by its label"));
-                }
-                View::Saved => {
-                    if let Some(i) = self.selected_index() {
-                        title = format!("No.{}", self.store.saved[i].key.no);
-                        items.push(MenuItem::Enter("read the saved copy".into()));
-                        items.push(act(A::Remove, "remove the saved copy"));
-                        items.push(act(A::Copy, "copy its subject and link"));
-                        items.push(act(A::CopyLink, "copy its link"));
-                        items.push(act(A::Browser, "open it in the browser"));
-                    }
-                    items.push(act(A::Search, "filter"));
-                    items.push(act(A::SearchSaved, "search inside the saved threads…"));
-                    items.push(act(A::Hints, "pick a thread by its label"));
-                }
-                View::Search => {
-                    if self.selected_index().is_some() {
-                        items.push(MenuItem::Enter("open the thread".into()));
-                    }
-                    if self.more_results() {
-                        items.push(MenuItem::Act(A::NextMatch, "more results".into()));
-                    }
-                }
-                View::Settings => items.push(MenuItem::Enter("change it".into())),
+            }
+            Some(Part::Link(Target::Url(_))) => items.push(act(A::Copy, "copy the URL")),
+            Some(Part::Link(Target::Quote(_))) => {
+                items.push(act(A::Copy, "copy its address"));
+                items.push(act(A::Browser, "open it in the browser"));
+            }
+            Some(Part::Replies) | None => {}
+        }
+        if !p.files.is_empty() {
+            items.push(act(A::View, "view the post's images"));
+            if !matches!(focus, Some(Part::File(_))) {
+                items.push(act(A::DownloadPost, if p.files.len() == 1 { "save the post's file" } else { "save the post's files" }));
             }
         }
+        if focus.is_none() {
+            items.push(act(A::Copy, "copy the post's text"));
+        }
+        items.push(act(A::CopyLink, "copy the post's link"));
+        if focus.is_none() {
+            items.push(act(A::Browser, "open the post in the browser"));
+        }
+        if !p.anchors.is_empty() || !p.files.is_empty() {
+            items.push(act(A::Links, "list its links and files"));
+        }
+        if !p.quotes.is_empty() {
+            items.push(act(A::Preview, "preview the posts it quotes"));
+        }
+        if t.backlinks.get(t.selected).is_some_and(|b| !b.is_empty()) {
+            items.push(act(A::Replies, "go to the first reply"));
+            let open = t.entries.get(t.entry()).is_some_and(|e| t.expanded.contains(&e.path));
+            items.push(act(A::Expand, if open { "hide its replies" } else { "show its replies under it" }));
+        }
+        if p.body.iter().flat_map(|l| &l.spans).any(|s| crate::markup::is_spoiler(s.style)) {
+            items.push(act(A::Spoiler, "show its spoilers"));
+        }
+        items.push(act(A::Mine, if t.mine.contains(&p.no) { "it's not yours" } else { "mark it as yours" }));
+        let hidden = t.marks.get(t.selected).is_some_and(|m| m.hidden.is_some());
+        items.push(act(A::Hide, if hidden { "unhide it" } else { "hide it" }));
+        items.push(act(A::Filter, "hide or highlight posts like it…"));
+        if t.conversation.is_some() {
+            items.push(act(A::Conversation, "the whole thread again"));
+        } else if t.backlinks[t.selected].len() + p.quotes.iter().filter(|q| t.index.contains_key(q)).count() > 0 {
+            items.push(act(A::Conversation, "its conversation alone"));
+        }
+        items.push(act(A::Watch, if self.menu_watching(t.no) { "stop watching the thread" } else { "watch the thread" }));
+        items.push(act(A::Follow, "follow the thread as a general"));
+        if t.posts.iter().any(|p| !p.files.is_empty()) {
+            items.push(act(A::Gallery, "all the thread's files"));
+            items.push(act(A::DownloadThread, "save all the thread's files…"));
+        }
+        if !t.jumps.is_empty() || !self.tab.trail.is_empty() {
+            items.push(act(A::JumpBack, "go back"));
+        }
+        if (0..t.posts.len()).any(|i| t.is_new(i)) {
+            items.push(act(A::Unread, "the first unread post"));
+        }
+        if self.outgoing_link().is_some() {
+            items.push(act(A::NewTab, "open its link in a new tab"));
+        }
+        if self.tab.archive_offer.is_some() {
+            items.push(act(A::Archive, "open the thread in the archive"));
+        }
+        items.push(act(A::Search, "search the thread"));
+        items.push(act(A::Hints, "pick a link or post by its label"));
+        if let Some(row) = self.board_images_row() {
+            items.push(MenuItem::Act(A::BoardImages, row));
+        }
+        items.push(act(A::Export, "save the thread as a page…"));
+        match self.tab.saved() {
+            Some(o) if o.dead => {}
+            Some(_) => items.push(act(A::Reload, "open the live thread")),
+            None => items.push(act(A::Reload, "reload")),
+        }
+        title
+    }
+
+    fn catalog_menu(&self, items: &mut Vec<MenuItem>) -> String {
+        use Action as A;
+        let mut title = String::new();
+        if let Some(p) = self.selected_post() {
+            title = format!("No.{}", p.no);
+            items.push(MenuItem::Enter("open the thread".into()));
+            items.push(act(A::NewTab, "open it in a new tab"));
+            if !p.files.is_empty() {
+                items.push(act(A::View, "view its images"));
+            }
+            items.push(act(A::Watch, if self.menu_watching(p.no) { "stop watching it" } else { "watch it" }));
+            items.push(act(A::Follow, "follow it as a general"));
+            items.push(act(A::Hide, "hide it (or unhide)"));
+            items.push(act(A::Filter, "hide or highlight threads like it…"));
+            if !p.anchors.is_empty() || !p.files.is_empty() {
+                items.push(act(A::Links, "list its links and files"));
+            }
+            items.push(act(A::Copy, "copy its text"));
+            items.push(act(A::CopyLink, "copy its link"));
+            items.push(act(A::Browser, "open it in the browser"));
+        }
+        items.push(act(A::ShowHidden, if self.show_hidden { "leave out hidden threads" } else { "show hidden threads" }));
+        let sort = self.tab.catalog_sort;
+        items.push(MenuItem::Act(A::Sort, format!("sort by {} (now {})", sort.next().as_str(), sort.as_str())));
+        let layout = self.layout();
+        items.push(MenuItem::Act(A::Compact, format!("{} layout (now {})", layout.next().as_str(), layout.as_str())));
+        items.push(act(A::Favorite, "favorite the board (or not)"));
+        if let Some(row) = self.board_images_row() {
+            items.push(MenuItem::Act(A::BoardImages, row));
+        }
+        if self.archive_site().is_some() {
+            items.push(act(A::ArchiveSearch, "search the board's archive"));
+        }
+        items.push(act(A::Search, "filter the threads"));
+        items.push(act(A::Hints, "pick a thread by its label"));
+        items.push(act(A::Reload, "reload"));
+        title
+    }
+
+    fn sites_menu(&self, items: &mut Vec<MenuItem>) -> String {
+        use Action as A;
+        match self.selected_site_row() {
+            Some(SiteRow::Watched) => items.push(MenuItem::Enter("open Watched".into())),
+            Some(SiteRow::History) => items.push(MenuItem::Enter("open History".into())),
+            Some(SiteRow::Saved) => items.push(MenuItem::Enter("open Saved".into())),
+            Some(SiteRow::Favorite(_)) => {
+                items.push(MenuItem::Enter("open the board".into()));
+                items.push(MenuItem::Act(A::Remove, "take it off the favorites".into()));
+            }
+            Some(SiteRow::Recent(_)) => {
+                items.push(MenuItem::Enter("open the board".into()));
+                items.push(MenuItem::Act(A::Remove, "forget it".into()));
+            }
+            Some(SiteRow::Site(i)) => {
+                let name = self.sites.get(i).map_or("", |s| s.cfg.name.as_str());
+                items.push(MenuItem::Enter(format!("open {name}'s boards")));
+                let hidden = self.is_site_hidden(i);
+                items.push(MenuItem::Act(A::Remove, if hidden { "show it on the home screen" } else { "hide it from the home screen" }.into()));
+                items.push(MenuItem::Act(A::Browser, format!("open {name} in the browser")));
+            }
+            Some(SiteRow::HiddenSites) => {
+                items.push(MenuItem::Enter(if self.show_hidden_sites { "hide the hidden sites" } else { "show the hidden sites" }.into()));
+            }
+            None => {}
+        }
+        items.push(act(A::Search, "filter"));
+        items.push(act(A::Hints, "pick a row by its label"));
+        items.push(act(A::AddSite, "add a site…"));
+        String::new()
+    }
+
+    fn boards_menu(&self, items: &mut Vec<MenuItem>) -> String {
+        use Action as A;
+        let mut title = String::new();
+        if let Some(i) = self.selected_index() {
+            let uri = self.boards().get(i).map_or(String::new(), |b| b.uri.clone());
+            title = format!("/{uri}/");
+            items.push(MenuItem::Enter(format!("open /{uri}/")));
+            items.push(act(A::Favorite, "favorite it (or not)"));
+            items.push(act(A::Browser, "open it in the browser"));
+            if let Some(row) = self.board_images_row() {
+                items.push(MenuItem::Act(A::BoardImages, row));
+            }
+        }
+        items.push(act(A::Search, "filter the boards"));
+        items.push(act(A::Hints, "pick a board by its label"));
+        let site = &self.current_site().cfg;
+        if site.kind == crate::config::SiteKind::Vichan && site.boards.is_some() && site.url.is_some() {
+            items.push(act(A::UpdateBoards, "update the board list…"));
+        }
+        items.push(act(A::Reload, "reload"));
+        title
+    }
+
+    /// Watched and History.
+    fn watched_menu(&self, items: &mut Vec<MenuItem>) -> String {
+        use Action as A;
+        if self.selected_index().is_some() {
+            items.push(MenuItem::Enter("open the thread".into()));
+            items.push(act(A::NewTab, "open it in a new tab"));
+            items.push(act(A::Remove, if self.tab.view == View::Watched { "stop watching it" } else { "forget it" }));
+            items.push(act(A::Copy, "copy its subject and link"));
+            items.push(act(A::CopyLink, "copy its link"));
+            items.push(act(A::Browser, "open it in the browser"));
+            items.push(act(A::Follow, "follow it as a general"));
+        }
+        items.push(act(A::Search, "filter"));
+        items.push(act(A::Hints, "pick a thread by its label"));
+        String::new()
+    }
+
+    fn saved_menu(&self, items: &mut Vec<MenuItem>) -> String {
+        use Action as A;
+        let mut title = String::new();
+        if let Some(i) = self.selected_index() {
+            title = format!("No.{}", self.store.saved[i].key.no);
+            items.push(MenuItem::Enter("read the saved copy".into()));
+            items.push(act(A::Remove, "remove the saved copy"));
+            items.push(act(A::Copy, "copy its subject and link"));
+            items.push(act(A::CopyLink, "copy its link"));
+            items.push(act(A::Browser, "open it in the browser"));
+        }
+        items.push(act(A::Search, "filter"));
+        items.push(act(A::SearchSaved, "search inside the saved threads…"));
+        items.push(act(A::Hints, "pick a thread by its label"));
+        title
+    }
+
+    fn search_menu(&self, items: &mut Vec<MenuItem>) -> String {
+        if self.selected_index().is_some() {
+            items.push(MenuItem::Enter("open the thread".into()));
+        }
+        if self.more_results() {
+            items.push(MenuItem::Act(Action::NextMatch, "more results".into()));
+        }
+        String::new()
+    }
+
+    /// What every menu ends with: the tabs, and the ways out.
+    fn everywhere_menu(&self, items: &mut Vec<MenuItem>) {
+        use Action as A;
         if self.tabs.len() > 1 {
             items.push(act(A::NextTab, "next tab"));
             items.push(act(A::PrevTab, "previous tab"));
@@ -454,7 +486,6 @@ impl App {
         items.push(act(A::Settings, "settings"));
         items.push(act(A::Help, "every key"));
         items.push(act(A::Quit, "quit"));
-        (title, items)
     }
 
     /// The key that runs a menu row, as shown.
@@ -624,4 +655,29 @@ impl App {
             }
         }
     }
+}
+
+fn act(a: Action, label: &str) -> MenuItem {
+    MenuItem::Act(a, label.to_string())
+}
+
+/// The file open in the viewer. Returns the menu's title.
+fn viewer_menu(v: &Viewer, items: &mut Vec<MenuItem>) -> String {
+    use Action as A;
+    items.push(act(A::OpenFile, "open it outside ck"));
+    items.push(act(A::Download, "save it"));
+    items.push(act(A::ImageSearch, "search for this image"));
+    items.push(act(A::Copy, "copy the file's URL"));
+    items.push(act(A::CopyLink, "copy the post's link"));
+    v.files.get(v.index).map(|f| f.filename.clone()).unwrap_or_default()
+}
+
+/// The file selected in the gallery.
+fn gallery_menu(items: &mut Vec<MenuItem>) -> String {
+    use Action as A;
+    items.push(MenuItem::Enter("view it".into()));
+    items.push(act(A::Download, "save it"));
+    items.push(act(A::Copy, "copy the file's URL"));
+    items.push(act(A::CopyLink, "copy the post's link"));
+    "Gallery".into()
 }
