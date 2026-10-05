@@ -1,6 +1,5 @@
 ---
 source: src/ui_tests.rs
-assertion_line: 741
 expression: snapshot(&mut a)
 ---
  ck  Settings
@@ -32,4 +31,4 @@ expression: snapshot(&mut a)
     Changed keys are saved in [keys]; navigation keys are fixed. Without a key: in the . menu.
 
   There's no config file to save to (no home directory); changes last until ck quits.
- enter change   esc back   , settings   ? help
+ enter change   esc back   ? help

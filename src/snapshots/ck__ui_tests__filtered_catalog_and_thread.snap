@@ -31,4 +31,4 @@ expression: snapshot(&mut a)
 
 
 
- enter open   f hints   . more   / filter   v view   w watch   s sort   c compact   r reload   , set
+ enter open   f hints   . more   / filter   v view   w watch   s sort   c layout   ? help

@@ -1,6 +1,5 @@
 ---
 source: src/ui_tests.rs
-assertion_line: 1146
 expression: snapshot(&mut a)
 ---
  ck  4chan  ›  /g/  ›  Snapshot thread                             5 posts  ·  2 new  ·  images off
@@ -32,4 +31,4 @@ expression: snapshot(&mut a)
     fn main() {
         println!("snapshot");
     }
- j/k post   tab images & links   f hints   . more   enter quote   c conversation   u back   / search
+ j/k post   tab images & links   f hints   . more   enter quote   c conversation   ? help
