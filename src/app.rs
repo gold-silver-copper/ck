@@ -125,12 +125,12 @@ pub struct Site {
 
 /// A filterable list with a selection.
 #[derive(Default)]
-pub struct Picker {
+pub struct FilteredList {
     pub state: ListState,
     pub filter: String,
 }
 
-impl Picker {
+impl FilteredList {
     /// An empty filter, with the first row selected.
     fn top() -> Self {
         Self { state: ListState::default().with_selected(Some(0)), filter: String::new() }
@@ -307,7 +307,7 @@ impl Msg {
 
 pub struct App {
     pub sites: Vec<Site>,
-    pub site_list: Picker,
+    pub site_list: FilteredList,
     /// Favorite boards (from the config), and board titles for the home screen.
     pub favorites: Vec<BoardRef>,
     pub home_titles: HashMap<String, String>,
@@ -320,7 +320,7 @@ pub struct App {
     pub grid_cols: usize,
     /// The popup over the screen, if any: one at a time.
     pub popup: Option<Popup>,
-    pub settings_list: Picker,
+    pub settings_list: FilteredList,
     /// The current theme's name, and the config's custom themes.
     pub theme_name: String,
     pub themes: BTreeMap<String, ThemeDef>,
@@ -328,9 +328,9 @@ pub struct App {
     /// Draw 24-bit colors (else the nearest of 256).
     pub truecolor: bool,
     pub images_mode: ImagesMode,
-    pub watched_list: Picker,
-    pub history_list: Picker,
-    pub saved_list: Picker,
+    pub watched_list: FilteredList,
+    pub history_list: FilteredList,
+    pub saved_list: FilteredList,
     /// The saved copy `x` was pressed on once: a second `x` removes it.
     pub saved_confirm: Option<ThreadKey>,
     /// The search of saved threads that's wanted; a running one stops when it changes.
@@ -463,7 +463,7 @@ impl App {
         let (tx, rx) = channel();
         let mut app = Self {
             sites,
-            site_list: Picker::top(),
+            site_list: FilteredList::top(),
             favorites: cfg.favorites.iter().filter_map(|f| BoardRef::parse(f)).collect(),
             home_titles: HashMap::new(),
             hidden_sites: cfg.hidden_sites.iter().cloned().collect(),
@@ -474,15 +474,15 @@ impl App {
                 Some(false) => CatalogLayout::Cards,
                 None => layout,
             }),
-            settings_list: Picker::top(),
+            settings_list: FilteredList::top(),
             theme_name,
             themes,
             color_mode: cfg.color,
             truecolor: cfg.color.truecolor(),
             images_mode: cfg.images,
-            watched_list: Picker::top(),
-            history_list: Picker::top(),
-            saved_list: Picker::top(),
+            watched_list: FilteredList::top(),
+            history_list: FilteredList::top(),
+            saved_list: FilteredList::top(),
             saved_confirm: None,
             saved_search: Arc::default(),
             removed_sites: Default::default(),
@@ -633,12 +633,13 @@ impl App {
 
     /// Keep the current list's selection on a row that exists.
     fn clamp_list(&mut self) {
-        if let Some((p, len)) = self.picker() {
+        if let Some((p, len)) = self.filtered_list() {
             p.clamp(len);
         }
     }
 
-    fn picker(&mut self) -> Option<(&mut Picker, usize)> {
+    /// The current view's list, and how many rows it has.
+    fn filtered_list(&mut self) -> Option<(&mut FilteredList, usize)> {
         Some(match self.tab.view {
             View::Sites => (self.visible_sites().len(), &mut self.site_list),
             View::Boards => (self.visible_boards().len(), &mut self.tab.board_list),
@@ -1248,7 +1249,7 @@ impl App {
     /// background), so going back to Boards shows it.
     fn switch_site(&mut self, site: usize) {
         if site != self.tab.site {
-            self.tab.board_list = Picker::top();
+            self.tab.board_list = FilteredList::top();
             self.tab.site = site;
         }
         // Also for the site it's on already (the first, at startup: `ck 4chan` showed none).
@@ -1530,14 +1531,14 @@ impl App {
         self.tab.board = Some(board);
         self.tab.catalog.clear();
         self.tab.catalog_cached = None;
-        self.tab.catalog_list = Picker::top();
+        self.tab.catalog_list = FilteredList::top();
         self.tab.view = View::Catalog;
         self.load_catalog();
     }
 
     fn enter_site(&mut self, i: usize) {
         if i != self.tab.site {
-            self.tab.board_list = Picker::default();
+            self.tab.board_list = FilteredList::default();
         }
         self.tab.site = i;
         self.tab.view = View::Boards;

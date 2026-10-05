@@ -4,7 +4,7 @@ use ratatui::crossterm::event::{KeyCode, KeyEvent};
 
 use std::sync::atomic::Ordering;
 
-use super::{App, Picker, View};
+use super::{App, FilteredList, View};
 use crate::store::ThreadKey;
 use crate::backend::SearchPage;
 use crate::config::SiteKind;
@@ -102,7 +102,7 @@ impl App {
         };
         self.switch_site(archive);
         self.tab.search = Some(Search { saved: None, board, query, hits: Vec::new(), total: None, pages: 0, back });
-        self.tab.search_list = Picker::top();
+        self.tab.search_list = FilteredList::top();
         self.tab.view = View::Search;
         self.load_search_page();
     }
@@ -124,7 +124,7 @@ impl App {
         }
         let saved = SavedSearch { keys: Vec::new(), done: 0, of, skipped: 0, finished: of == 0, id };
         self.tab.search = Some(Search { saved: Some(saved), board: String::new(), query: query.clone(), hits: Vec::new(), total: None, pages: 0, back });
-        self.tab.search_list = Picker::top();
+        self.tab.search_list = FilteredList::top();
         self.tab.view = View::Search;
         // Saving waits for nothing: copies being written are read as they were.
         let (later, current) = (self.later(), self.saved_search.clone());
