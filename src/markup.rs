@@ -483,10 +483,13 @@ fn style_ranges(spans: Vec<Span<'static>>, ranges: &[(usize, usize)]) -> Vec<Spa
 /// flags) are one glyph in some terminals and several in others. Where a terminal and the
 /// layout disagree, the rest of the line lands in the wrong cells and what was drawn there
 /// before shows through. So: a joined sequence's first emoji, no skin tones or selectors,
-/// a flag as its two letters. Never wider than the original.
+/// a flag as its two letters. No bidi controls either. Never wider than the original.
 pub fn for_terminal(s: &str) -> std::borrow::Cow<'_, str> {
     let odd = |c: char| {
         matches!(c, '\u{200d}' | '\u{fe0e}' | '\u{fe0f}' | '\u{20e3}' | '\u{1f3fb}'..='\u{1f3ff}' | '\u{1f1e6}'..='\u{1f1ff}' | '\u{e0020}'..='\u{e007f}')
+            // Bidi embeddings, overrides and isolates: they'd turn the rest of the text
+            // around (a file name ending "gpj.exe" shown as "exe.jpg").
+            || matches!(c, '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
     };
     if !s.chars().any(odd) {
         return std::borrow::Cow::Borrowed(s);
@@ -933,6 +936,8 @@ mod tests {
             ("🇯🇵 and 🇺🇸", "JP and US"),
             ("1\u{fe0f}\u{20e3}", "1"),
             ("plain text, 日本語, é", "plain text, 日本語, é"),
+            ("cat\u{202e}gpj.exe", "catgpj.exe"),
+            ("\u{2067}isolated\u{2069} and \u{202a}embedded\u{202c}", "isolated and embedded"),
         ] {
             let got = for_terminal(raw);
             assert_eq!(got, safe);
