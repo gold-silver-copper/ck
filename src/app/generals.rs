@@ -147,9 +147,12 @@ impl App {
         self.save();
         let msg = format!("New {pattern} thread on /{}/: {}", key.board, subject.chars().take(60).collect::<String>());
         let method = crate::notify::method(self.notify_mode, self.notify_command.as_deref(), &|k| std::env::var(k).ok());
-        let _ = crate::notify::send(&method, "ck", &msg);
+        let sent = crate::notify::send(&method, "ck", &msg);
         self.notified.push(msg.clone());
-        self.info(msg);
+        match sent {
+            Ok(()) => self.info(msg),
+            Err(e) => self.error(format!("{msg} (couldn't notify: {e:#})")),
+        }
     }
 }
 
