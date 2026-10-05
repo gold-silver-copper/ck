@@ -38,9 +38,11 @@ nsfw_images = "show"
 
 # Colors. Press `,` in ck to pick a theme (with a live preview) or change any color; the
 # settings screen saves to this file. Built-in themes: material, material-light, nord,
-# gruvbox, catppuccin, tokyo-night, solarized-light, and terminal (keeps the terminal's
-# own background and 16 colors). Custom themes are [themes.NAME] tables, see the end.
-theme = "material"
+# gruvbox, catppuccin, tokyo-night, solarized-light, terminal (keeps the terminal's own
+# background and 16 colors) and mono (no colors at all). Without a theme here it's
+# material, or mono when the NO_COLOR environment variable is set. Custom themes are
+# [themes.NAME] tables, see the end.
+# theme = "material"
 
 # New posts in watched threads, and replies to posts you marked as yours (m): "auto" (a
 # desktop notification in terminals known to show them, else the bell), "bell", or "off".

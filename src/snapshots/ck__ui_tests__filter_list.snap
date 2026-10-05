@@ -5,7 +5,7 @@ expression: snapshot(&mut a)
  ck  Settings
 
   Appearance
-    Theme             material                          Live preview while choosing
+  ▌ Theme             material                          Live preview while choosing
     Colors            as the theme has them             Change any color of the current theme
     Color depth       auto (24-bit)                     24-bit color, or the nearest of 256
     Reading position  30% from the edges                How far from the edges the selected post…
@@ -15,7 +15,7 @@ expression: snapshot(&mut a)
     Filters                             enter edit · space on/off · a add · x remove · esc close
 
      hide        crypto                subject+comment   everywhere          (?i)…  nothing here
-     highlight   Named !Trip           name              /g/ on 4chan        ^Named !Tr…  1 post
+  ▌  highlight   Named !Trip           name              /g/ on 4chan        ^Named !Tr…  1 post
      off         implying              comment           everywhere          implying     1 post
 
 

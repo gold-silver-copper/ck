@@ -1,13 +1,12 @@
 ---
 source: src/ui_tests.rs
-assertion_line: 1161
 expression: snapshot(&mut a)
 ---
  ck  Saved  ›  Search: rust                                                               2 results
 
     searching… 2 of 5 saved threads
 
-    Anonymous  4chan/g/1000                                                   No.1002  ·  1h ago
+  ▌ Anonymous  4chan/g/1000                                                   No.1002  ·  1h ago
     we were talking about rust and the borrow checker today
 
 

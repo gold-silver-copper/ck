@@ -437,7 +437,7 @@ impl App {
         // ck 0.2's [theme] table of overrides becomes a theme of its own, "legacy".
         let mut themes = cfg.themes.clone();
         let theme_name = match &cfg.theme {
-            None => theme::DEFAULT_THEME.to_string(),
+            None => theme::default_name().to_string(),
             Some(ThemeSetting::Name(n)) => n.clone(),
             Some(ThemeSetting::Legacy(old)) => {
                 let colors = old

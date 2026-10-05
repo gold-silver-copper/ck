@@ -4,7 +4,7 @@ expression: snapshot(&mut a)
 ---
  ck  desuarchive  ›  /g/  ›  Search: rust borrow checker                          4 of 4290 results
 
-    Anonymous  in thread 109914360                                       No.109920091  ·  0s ago
+  ▌ Anonymous  in thread 109914360                                       No.109920091  ·  0s ago
     >>109918208  c have no borrow checking  it takes less mental capacity to follow and write
     types and you can interact with memory as you wish, not as rust wish.  also borrow checker …
 

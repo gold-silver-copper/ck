@@ -543,8 +543,10 @@ selected row, card or post is tinted and marked by a stripe in the theme's accen
 and the file is created from the default if you don't have one yet:
 
 - **Theme**: pick from the built-in themes (material, material-light, nord, gruvbox,
-  catppuccin, tokyo-night, solarized-light, and terminal, which uses your terminal's own
-  colors) and your own. The screen changes as you move through the list; `enter` keeps
+  catppuccin, tokyo-night, solarized-light, terminal, which uses your terminal's own
+  colors, and mono, which uses none: the default when `NO_COLOR` is set) and your own.
+  Nothing depends on color alone: the selection has a bar, a focused part is bold and
+  underlined, and spoilers are shaded out until revealed. The screen changes as you move through the list; `enter` keeps
   the theme, `esc` goes back.
 - **Colors**: every color the theme uses, with a swatch and what it's for. `enter` edits
   one (`#rrggbb`, a name, or a 256-color index), `x` resets it. Changing a built-in theme

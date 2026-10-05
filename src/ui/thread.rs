@@ -397,7 +397,7 @@ pub(super) fn post_ctx(t: &ThreadView, i: usize, clock: Clock) -> PostCtx<'_> {
 
 pub(super) fn search_hl() -> Style {
     let t = theme();
-    Style::new().fg(t.on_search).bg(t.search)
+    Style::new().fg(t.on_search).bg(t.search).add_modifier(Modifier::UNDERLINED)
 }
 
 /// A post as wrapped lines, and where its parts landed in them. Parts are drawn with a
@@ -459,6 +459,13 @@ pub(super) fn post_lines(p: &Post, ctx: &PostCtx, width: usize) -> (Vec<Line<'st
             markup::restyle(line, &ranges, |style, r| tag(style, links[r].2))
         };
         let mut line = if ctx.reveal { markup::reveal(&line) } else { line };
+        // A hidden spoiler's text isn't drawn at all (hidden by color alone, it would show in
+        // a monochrome terminal, to a screen reader, or in a copy of the screen).
+        for s in &mut line.spans {
+            if markup::is_spoiler(s.style) {
+                s.content = markup::masked(&s.content).into();
+            }
+        }
         // Mark quotes of the OP like 4chan does. Quote links are always their own span.
         for s in &mut line.spans {
             if markup::is_quote_link(s.style) {
@@ -502,7 +509,7 @@ pub(super) fn post_lines(p: &Post, ctx: &PostCtx, width: usize) -> (Vec<Line<'st
                 let k = (hi as usize) << 8 | lo as usize;
                 if let Some(part) = parts.get(k) {
                     if focused == Some(k) {
-                        s.style = s.style.fg(t.on_primary).bg(t.primary);
+                        s.style = s.style.fg(t.on_primary).bg(t.primary).add_modifier(Modifier::BOLD | Modifier::UNDERLINED);
                     }
                     match spots.last_mut() {
                         Some(last) if last.part == *part && last.line == row && last.col + last.width == col => last.width += w,

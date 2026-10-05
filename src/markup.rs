@@ -581,6 +581,11 @@ pub fn is_spoiler(style: Style) -> bool {
     style.bg == SPOILER.bg && style.fg == SPOILER.fg
 }
 
+/// Spoilered text as it's shown until revealed: a shade in each cell it would take.
+pub fn masked(text: &str) -> String {
+    text.chars().map(|c| "░".repeat(unicode_width::UnicodeWidthChar::width(c).unwrap_or(0))).collect()
+}
+
 /// Show spoilered text in a line (still marked by its background).
 pub fn reveal(line: &Line<'static>) -> Line<'static> {
     let mut l = line.clone();
