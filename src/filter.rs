@@ -176,9 +176,23 @@ struct Filter {
 /// What filters (and manual hiding) say about a thread or post.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
 pub struct Mark {
-    /// Hidden: by the filter with this label, or by hand (`""`).
-    pub hidden: Option<String>,
+    pub hidden: Option<Hidden>,
     pub highlight: Option<String>,
+}
+
+/// Why a thread or post is hidden.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum Hidden {
+    ByHand,
+    /// By the filter (or hidden word) with this label.
+    ByFilter(String),
+}
+
+impl Hidden {
+    /// The label of the filter that hides it, if one does.
+    pub fn filter(&self) -> Option<&str> {
+        if let Self::ByFilter(label) = self { Some(label) } else { None }
+    }
 }
 
 /// Hidden words: one case-insensitive pattern, a group per word (to say which caught a post).
@@ -261,10 +275,11 @@ impl Filters {
     /// What the filters say about a post on `site`'s `board`.
     pub fn check(&self, site: &str, board: &str, p: &Post) -> Mark {
         let mut mark = Mark::default();
+        let mut hidden: Option<String> = None;
         let mut comment: Option<String> = None;
         for f in &self.0 {
             let slot = match f.action {
-                FilterAction::Hide => &mut mark.hidden,
+                FilterAction::Hide => &mut hidden,
                 FilterAction::Highlight => &mut mark.highlight,
             };
             if slot.is_some()
@@ -290,7 +305,7 @@ impl Filters {
                 *slot = Some(f.label.clone());
             }
         }
-        if mark.hidden.is_none()
+        if hidden.is_none()
             && let Some(w) = &self.1
         {
             let comment = comment.get_or_insert_with(|| {
@@ -302,11 +317,13 @@ impl Filters {
                 if let Some(c) = w.re.captures(text)
                     && let Some(i) = (1..c.len()).find(|&i| c.get(i).is_some())
                 {
-                    mark.hidden = Some(format!("hidden word: {}", w.words.get(i - 1).map_or("", String::as_str)));
+                    hidden = Some(format!("hidden word: {}", w.words.get(i - 1).map_or("", String::as_str)));
                     break;
                 }
             }
         }
+        // A filter labelled "" (only by hand, in the config) has always passed for hiding by hand.
+        mark.hidden = hidden.map(|label| if label.is_empty() { Hidden::ByHand } else { Hidden::ByFilter(label) });
         mark
     }
 }
@@ -365,7 +382,7 @@ pub mod tests {
         assert_eq!(f.len(), 4);
         // Subject, case-insensitive by the pattern's own flag.
         let m = f.check("lainchan", "b", &post("CRYPTO general", "hi"));
-        assert_eq!(m.hidden.as_deref(), Some("crypto"));
+        assert_eq!(m.hidden, Some(Hidden::ByFilter("crypto".into())));
         // Comments match line by line with (?m)-less anchors over the whole text; the first
         // highlight wins.
         let m = f.check("lainchan", "g", &post("", ">be me"));
@@ -374,7 +391,7 @@ pub mod tests {
         let m = f.check("lainchan", "b", &post("", ">be me"));
         assert_eq!(m.highlight.as_deref(), Some("png"));
         // MD5s compare exactly, on the listed sites only.
-        assert_eq!(f.check("4chan", "b", &post("", "x")).hidden.as_deref(), Some("u8Vh17KxaDvUJ6bBcmE/eg=="));
+        assert_eq!(f.check("4chan", "b", &post("", "x")).hidden, Some(Hidden::ByFilter("u8Vh17KxaDvUJ6bBcmE/eg==".into())));
     }
 
     #[test]
@@ -449,7 +466,7 @@ mod word_tests {
     }
 
     fn hidden(f: &Filters, p: &Post) -> Option<String> {
-        f.check("s", "b", p).hidden
+        f.check("s", "b", p).hidden?.filter().map(String::from)
     }
 
     #[test]

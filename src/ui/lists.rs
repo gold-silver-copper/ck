@@ -332,12 +332,12 @@ pub(super) fn draw_catalog(f: &mut Frame, app: &mut App, area: Rect) {
 }
 
 /// A hidden item's chip: by which filter, or by hand.
-pub(super) fn hidden_label(filter: &str) -> String {
-    match filter {
-        "" => "hidden".into(),
+pub(super) fn hidden_label(why: &Hidden) -> String {
+    match why {
+        Hidden::ByHand => "hidden".into(),
         // "hidden word: crypto" says it already.
-        f if f.starts_with("hidden word: ") => f.into(),
-        f => format!("hidden: {f}"),
+        Hidden::ByFilter(f) if f.starts_with("hidden word: ") => f.clone(),
+        Hidden::ByFilter(f) => format!("hidden: {f}"),
     }
 }
 

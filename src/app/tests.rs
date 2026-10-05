@@ -2350,7 +2350,7 @@ fn hidden_words_hide_posts_everywhere() {
     app.on_key(KeyEvent::from(KeyCode::Enter));
     assert!(app.status.as_ref().unwrap().text.starts_with("Hiding posts with \"crypto\" (2 here)"), "{:?}", app.status);
     let hidden = |app: &App| app.tab.thread.as_ref().unwrap().marks.iter().map(|m| m.hidden.clone()).collect::<Vec<_>>();
-    let label = Some("hidden word: crypto".to_string());
+    let label = Some(Hidden::ByFilter("hidden word: crypto".into()));
     assert_eq!(hidden(&app), [None, label.clone(), label.clone(), None]);
     // Saved, the file's comments kept; a config without it loads as before.
     let text = std::fs::read_to_string(&path).unwrap();
@@ -2373,7 +2373,7 @@ fn hidden_words_hide_posts_everywhere() {
     app.on_key(KeyEvent::from(KeyCode::Enter));
     assert!(app.filter_add().is_none());
     assert_eq!(app.hidden_words, ["free"]);
-    assert_eq!(hidden(&app)[1], Some("hidden word: free".into()));
+    assert_eq!(hidden(&app)[1], Some(Hidden::ByFilter("hidden word: free".into())));
     app.on_key(KeyEvent::from(KeyCode::Char('u')));
     assert!(app.hidden_words.is_empty() && hidden(&app)[1].is_none());
     // Catalogs too.

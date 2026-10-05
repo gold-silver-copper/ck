@@ -17,7 +17,7 @@ pub use crate::config::Sort;
 use crate::config::{CatalogLayout, ColorMode, Config, ImagesMode, SiteConfig};
 use crate::disk_cache::DiskCache;
 use crate::download;
-use crate::filter::{Filters, Mark};
+use crate::filter::{Filters, Hidden, Mark};
 use crate::http;
 use crate::images::Images;
 use crate::keys::{Action, KeyMap, Scope};
@@ -1049,7 +1049,7 @@ impl App {
             let mut m = self.filters.check(site, &board, p);
             let by_hand = hidden.entry(board).or_insert_with_key(|b| self.store.hidden_on(site, b));
             if m.hidden.is_none() && by_hand.contains(&p.no) {
-                m.hidden = Some(String::new());
+                m.hidden = Some(Hidden::ByHand);
             }
             m
         };
@@ -1115,7 +1115,7 @@ impl App {
             }
             _ => return,
         };
-        if let Some(label) = mark.and_then(|m| m.hidden).filter(|l| !l.is_empty()) {
+        if let Some(Hidden::ByFilter(label)) = mark.and_then(|m| m.hidden) {
             self.info(format!("Hidden by the filter \"{label}\"; Settings › Filters changes it"));
             return;
         }
