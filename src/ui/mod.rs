@@ -350,7 +350,7 @@ fn location(app: &App) -> (Vec<String>, Vec<Span<'static>>) {
             }
         }
         View::Watched => {
-            let unread: usize = app.store.watched.iter().map(|w| w.unread).sum();
+            let unread = app.store.watched.iter().fold(0usize, |n, w| n.saturating_add(w.unread));
             meta.push(plural(app.store.watched.len(), "thread"));
             if unread > 0 {
                 meta.push(format!("{unread} new"));
@@ -363,7 +363,7 @@ fn location(app: &App) -> (Vec<String>, Vec<Span<'static>>) {
         }
         View::Saved => {
             meta.push(plural(app.store.saved.len(), "thread"));
-            meta.push(human_size(app.store.saved.iter().map(|m| m.bytes).sum()));
+            meta.push(human_size(app.store.saved.iter().fold(0u64, |n, m| n.saturating_add(m.bytes))));
             vec!["Saved".into()]
         }
         View::Settings => vec!["Settings".into()],

@@ -729,7 +729,7 @@ impl App {
             [n] if n.replies == 1 => messages.push(format!("New reply to your post in {}", place(n))),
             [n] => messages.push(format!("{} new replies to your posts in {}", n.replies, place(n))),
             many => {
-                let total: usize = many.iter().map(|n| n.replies).sum();
+                let total = many.iter().fold(0usize, |t, n| t.saturating_add(n.replies));
                 messages.push(format!("{total} new replies to your posts in {} threads", many.len()));
             }
         }
