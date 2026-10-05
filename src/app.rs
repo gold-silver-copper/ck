@@ -355,6 +355,11 @@ pub struct App {
     pub refresh_backoff: bool,
     /// Background refreshes in flight.
     pub refreshing: HashSet<ThreadKey>,
+    /// Where watched threads' boards (site, board) have their threads, by index page; when
+    /// each board was last asked (once a `refresh_watched` round), and the asks in flight.
+    pub board_pages: HashMap<(String, String), backend::ThreadPages>,
+    pages_asked: HashMap<(String, String), Instant>,
+    pub pages_asking: HashSet<(String, String)>,
     /// The newest post seen in each watched thread by a refresh this session; notifications
     /// are for posts past it.
     notified_max: HashMap<ThreadKey, u64>,
@@ -514,6 +519,9 @@ impl App {
             watched_quiet: HashMap::new(),
             refresh_backoff: cfg.refresh_backoff,
             refreshing: HashSet::new(),
+            board_pages: HashMap::new(),
+            pages_asked: HashMap::new(),
+            pages_asking: HashSet::new(),
             notified_max: HashMap::new(),
             board_notified_max: HashMap::new(),
             generals_checked: HashMap::new(),
@@ -955,7 +963,8 @@ impl App {
         self.error(format!("{done} for now; couldn't save it: {e:#}"));
     }
 
-    fn key(&self, board: &str, no: u64) -> ThreadKey {
+    /// A thread of the current site.
+    pub fn key(&self, board: &str, no: u64) -> ThreadKey {
         ThreadKey { site: self.current_site().cfg.name.clone(), board: board.to_string(), no }
     }
 

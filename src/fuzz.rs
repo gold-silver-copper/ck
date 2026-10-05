@@ -401,6 +401,8 @@ fn fixtures_for(kind: SiteKind) -> &'static [&'static str] {
             "vichan_thread.json",
             "leftypol_thread.json",
             "4chan_spoiler_post.json",
+            "4chan_pages.json",
+            "vichan_pages.json",
         ],
         SiteKind::Lynxchan => &[
             "lynxchan_boards.json",
@@ -510,6 +512,8 @@ pub fn fake_site(kind: SiteKind, seed: u64, percent: u64) -> http::TestHost {
                     want("boards") || want("archives")
                 } else if url.contains("search") {
                     want("search")
+                } else if url.ends_with("/threads.json") {
+                    want("pages")
                 } else if url.contains("/post/") || url.contains("chan/post") {
                     want("post")
                 } else if url.contains("catalog") || url.contains("index") || url.ends_with("/1.json") {
@@ -570,6 +574,7 @@ fn backends_once(seed: u64) {
         if let Ok(cat) = b.catalog(&board, &|p| look(p)) {
             look(&cat);
             let no = cat.first().map_or(1, |p| p.no);
+            let _ = b.thread_pages(&board);
             if let Ok(posts) = b.thread(&board, no) {
                 look(&posts);
                 let _ = b.find_thread(&board, posts.last().map_or(no, |p| p.no));

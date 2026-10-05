@@ -414,6 +414,13 @@ minutes, unless the interval itself is longer); new posts, opening the thread or
 over. `refresh_backoff = false` (or Settings › Background refresh › Quiet threads) keeps
 the intervals fixed.
 
+On 4chan and vichan sites, Watched also shows which page of its board's index each thread
+is on ("p7/10"), and the open thread's top bar says it too. A thread on the last page is
+next to fall off, so it's marked "last page 10/10". That's one request per board
+(`threads.json`), asked along with its watched threads' refreshes, at most once a
+`refresh_watched_secs` round however many of its threads you watch. Other engines have no
+such list, and show nothing.
+
 Posts that arrived since your last visit are marked "new", and a "new posts" line sits
 between the last post you'd read and the first new one; `U` jumps to the first one.
 

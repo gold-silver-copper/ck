@@ -504,9 +504,12 @@ impl App {
         self.check_generals(self.clock.instant());
     }
 
-    fn refresh_in_background(&mut self, key: ThreadKey) {
+    pub(super) fn refresh_in_background(&mut self, key: ThreadKey) {
         let Some(site) = self.site_named(&key.site) else { return };
         let backend = site.backend.clone();
+        if self.store.watched(&key).is_some() {
+            self.refresh_pages(&key.site, &key.board, backend.clone());
+        }
         let later = self.later();
         self.refreshing.insert(key.clone());
         // The open thread's copy is kept up to date too (a watched one's is its saved copy).
@@ -521,6 +524,46 @@ impl App {
             }
             later.run(move |app| app.refreshed(key, res));
         });
+    }
+
+    /// Ask where a watched thread's board has its threads (`thread_pages`), along with the
+    /// thread's refresh: once a `refresh_watched` round for each board, however many of its
+    /// threads are watched.
+    fn refresh_pages(&mut self, site: &str, board: &str, backend: Arc<dyn Backend>) {
+        let at = (site.to_string(), board.to_string());
+        let now = self.clock.instant();
+        if self.pages_asking.contains(&at) || self.pages_asked.get(&at).is_some_and(|t| now.saturating_duration_since(*t) < self.refresh_watched) {
+            return;
+        }
+        self.pages_asked.insert(at.clone(), now);
+        self.pages_asking.insert(at.clone());
+        let later = self.later();
+        std::thread::spawn(move || {
+            let res = crate::guard::result(|| http::background_at(now, || backend.thread_pages(&at.1)));
+            later.run(move |app| {
+                app.pages_asking.remove(&at);
+                match res {
+                    Ok(Some(pages)) => {
+                        app.board_pages.insert(at, pages);
+                    }
+                    // The engine can't tell, or the site doesn't: nothing to show. Other
+                    // failures keep what was known, until the next round.
+                    Ok(None) => {
+                        app.board_pages.remove(&at);
+                    }
+                    Err(e) if http::is_not_found(&e) => {
+                        app.board_pages.remove(&at);
+                    }
+                    Err(_) => {}
+                }
+            });
+        });
+    }
+
+    /// The index page a thread is on, and how many pages its board has, as last asked.
+    pub fn thread_page(&self, key: &ThreadKey) -> Option<(u32, u32)> {
+        let pages = self.board_pages.get(&(key.site.clone(), key.board.clone()))?;
+        pages.page.get(&key.no).map(|&p| (p, pages.of))
     }
 
     pub(super) fn refreshed(&mut self, key: ThreadKey, res: Result<Vec<Post>>) {

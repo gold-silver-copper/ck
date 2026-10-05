@@ -2949,3 +2949,53 @@ fn quiet_threads_are_refreshed_less_often() {
     app.refresh_thread = Duration::from_secs(10);
     assert!(app.thread_every() >= crate::http::MIN_REFETCH);
 }
+
+#[test]
+fn watched_threads_know_their_page_once_a_round_per_board() {
+    // A vichan site: threads.json says where each thread is.
+    let asked = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    let log = asked.clone();
+    crate::http::serve_test_host(
+        "pages.invalid",
+        Some(Arc::new(move |url: &str, _| {
+            http::lock(&log).push(url.to_string());
+            let fixture = if url.ends_with("/threads.json") { "vichan_pages.json" } else { "vichan_thread.json" };
+            let body = std::fs::read_to_string(format!("{}/tests/fixtures/{fixture}", env!("CARGO_MANIFEST_DIR"))).unwrap();
+            http::Raw { status: 200, last_modified: None, body }
+        })),
+    );
+    let mut app = app_with("[[site]]\nname = \"p\"\nkind = \"vichan\"\nurl = \"https://pages.invalid\"\nboards = [\"tech\"]");
+    let t0 = Instant::now();
+    app.clock = Clock { instant: Some(t0), ..Default::default() };
+    let key = |no| ThreadKey { site: "p".into(), board: "tech".into(), no };
+    app.store.toggle_watch(key(30364), "First".into(), 2, 2);
+    app.store.toggle_watch(key(39212), "Last".into(), 2, 2);
+    let pages = |asked: &Arc<std::sync::Mutex<Vec<String>>>| http::lock(asked).iter().filter(|u| u.ends_with("/threads.json")).count();
+    // Both threads refresh (one at a time), and the board's pages are asked for once.
+    for _ in 0..2 {
+        app.background();
+        settle_until(&mut app, |a| a.refreshing.is_empty() && a.pages_asking.is_empty());
+    }
+    assert_eq!(http::lock(&asked).len(), 3, "{:?}", http::lock(&asked));
+    assert_eq!(pages(&asked), 1);
+    assert_eq!((app.thread_page(&key(30364)), app.thread_page(&key(39212))), (Some((1, 13)), Some((13, 13))));
+    // Not a thread there: nothing to say.
+    assert_eq!(app.thread_page(&key(2)), None);
+    // The next round asks again.
+    app.clock = Clock { instant: Some(t0 + Duration::from_secs(61)), ..Default::default() };
+    app.background();
+    settle_until(&mut app, |a| a.refreshing.is_empty() && a.pages_asking.is_empty());
+    assert_eq!(pages(&asked), 2);
+    // A thread that isn't watched (open, say) doesn't ask.
+    app.store.toggle_watch(key(30364), String::new(), 0, 0);
+    app.store.toggle_watch(key(39212), String::new(), 0, 0);
+    app.clock = Clock { instant: Some(t0 + Duration::from_secs(200)), ..Default::default() };
+    app.refresh_in_background(key(30364));
+    settle_until(&mut app, |a| a.refreshing.is_empty() && a.pages_asking.is_empty());
+    assert_eq!(pages(&asked), 2);
+    crate::http::serve_test_host("pages.invalid", None);
+
+    // An engine that can't tell says so without asking.
+    let archive = crate::backend::build(&toml::from_str("name = \"f\"\nkind = \"foolfuuka\"\nurl = \"https://127.0.0.1:3\"").unwrap());
+    assert_eq!(archive.thread_pages("a").unwrap(), None);
+}
