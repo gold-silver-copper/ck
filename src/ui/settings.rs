@@ -47,118 +47,125 @@ pub(super) fn draw_settings(f: &mut Frame, app: &mut App, area: Rect) {
 }
 
 pub(super) fn draw_settings_popup(f: &mut Frame, app: &App) {
-    let t = theme();
-    let popup = match &app.popup {
-        Some(Popup::Settings(p)) => Some(p),
-        _ => None,
-    };
+    let Some(Popup::Settings(popup)) = &app.popup else { return };
     match popup {
-        Some(SettingsPopup::Themes { list, names, .. }) => {
-            let inner = panel(f, 52, cells(names.len()).saturating_add(3), "Theme", "enter keep · esc cancel");
-            list_rows(f, inner, 0, names.len(), list.selected().or(Some(0)), |k| {
-                let name = &names[k];
-                let mut spans = vec![Span::styled(format!("{name:<22}"), Style::new().fg(t.text))];
-                // A row of colored cells: the theme at a glance.
-                if let Ok(th) = theme::resolve(name, &app.themes) {
-                    let colors = [th.background, th.surface, th.selection, th.primary, th.primary_container, th.greentext, th.quotelink, th.heading, th.new];
-                    spans.extend(colors.map(|c| Span::styled("  ", Style::new().bg(c))));
-                }
-                Line::from(spans)
-            });
-        }
-        Some(SettingsPopup::Colors { list, editing }) => {
-            let title = format!("Colors · {}", app.theme_name);
-            let hint = if editing.is_some() { "enter save · esc cancel" } else { "enter edit · x reset · esc close" };
-            let h = (cells(ROLES.len()).saturating_add(5)).min(f.area().height.saturating_sub(4));
-            let inner = panel(f, 96, h, &title, hint);
-            let rows = inner.height.saturating_sub(2) as usize;
-            let sel = list.selected().unwrap_or(0);
-            let first = sel.saturating_sub(rows.saturating_sub(1));
-            list_rows(f, Rect { height: rows as u16, ..inner }, first, ROLES.len(), Some(sel), |k| {
-                let (role, desc) = ROLES[k];
-                let c = t.get(role).unwrap_or(Color::Reset);
-                Line::from(vec![
-                    Span::styled("    ", Style::new().bg(c)),
-                    Span::styled(format!("  {role:<22}"), Style::new().fg(t.text)),
-                    Span::styled(format!("{:<10}", theme::color_string(c)), bold(t.text)),
-                    Span::styled(desc, dim()),
-                ])
-            });
-            let y = inner.bottom().saturating_sub(1);
-            let line = match editing {
-                Some(text) => Line::from(vec![
-                    Span::styled(format!("New {} color: ", ROLES.get(sel).map_or("", |r| r.0)), Style::new().fg(t.text)),
-                    Span::styled(text.clone(), bold(t.text)),
-                    Span::styled("▏", Style::new().fg(t.primary)),
-                    Span::styled("   #rrggbb, a name, 0-255, or default", dim()),
-                ]),
-                None => Line::styled("Changing a color of a built-in theme saves it as a copy: NAME-custom.", dim()),
-            };
-            put(f, inner.x, y, inner.width, line);
-        }
-        Some(SettingsPopup::Keys { list, capture }) => {
-            let rows = key_rows();
-            let hint = if capture.is_some() { "press a key · esc cancel" } else { "enter rebind · a add · u unbind · x reset · esc close" };
-            let h = (cells(rows.len()).saturating_add(5)).min(f.area().height.saturating_sub(4));
-            let inner = panel(f, 96, h, "Keys", hint);
-            let view = inner.height.saturating_sub(2) as usize;
-            let sel = list.selected().unwrap_or(0);
-            let first = (sel + 2).saturating_sub(view).min(rows.len().saturating_sub(view));
-            // Group titles are never selected, so never painted.
-            list_rows(f, Rect { height: view as u16, ..inner }, first, rows.len(), Some(sel), |k| {
-                let i = match rows[k] {
-                    Err(title) => return Line::styled(title.to_string(), bold(t.primary)),
-                    Ok(i) => i,
-                };
-                let (action, name, _, scopes, desc) = keys::ACTIONS[i];
-                let changed = !app.keys.is_default(action);
-                let key_style = if changed { bold(t.primary) } else { bold(t.text) };
-                let scopes = scopes.iter().map(|s| s.label()).collect::<Vec<_>>().join(", ");
-                let label = app.keys.label(action);
-                let mut spans = match label.as_str() {
-                    "" => vec![Span::styled(format!("  {:<16}", "menu"), dim())],
-                    _ => vec![Span::styled(format!("  {:<16}", truncate(&label, 15)), key_style)],
-                };
-                // Narrow: just the key and what it does.
-                if inner.width >= 80 {
-                    spans.push(Span::styled(format!("{name:<17}"), dim()));
-                    spans.push(Span::styled(format!("{:<37}", truncate(desc, 36)), Style::new().fg(t.text)));
-                    spans.push(Span::styled(truncate(&scopes, (inner.width as usize).saturating_sub(72)), dim()));
-                } else {
-                    spans.push(Span::styled(truncate(desc, (inner.width as usize).saturating_sub(18)), Style::new().fg(t.text)));
-                }
-                Line::from(spans)
-            });
-            let y = inner.bottom().saturating_sub(1);
-            let line = match (capture, rows.get(sel)) {
-                (Some(add), Some(Ok(i))) => {
-                    let verb = if *add { "Press a key to add to" } else { "Press the new key for" };
-                    Line::from(vec![
-                        Span::styled(format!("{verb} "), Style::new().fg(t.text)),
-                        Span::styled(keys::ACTIONS[*i].1, bold(t.primary)),
-                        Span::styled("   esc cancels", dim()),
-                    ])
-                }
-                _ => Line::styled("Changed keys are saved in [keys]; navigation keys are fixed. Without a key: in the . menu.", dim()),
-            };
-            put(f, inner.x, y, inner.width, line);
-        }
-        Some(SettingsPopup::Filters { list, counts }) => draw_filter_list(f, app, list, counts),
-        Some(SettingsPopup::Sites(m)) => draw_my_sites(f, m),
-        Some(SettingsPopup::BoardImages { list }) => draw_board_images(f, app, list),
-        Some(SettingsPopup::HiddenWords { list, typing }) => draw_hidden_words(f, app, list, typing.as_deref()),
-        Some(SettingsPopup::FilterEdit { index, draft, row, typing }) => draw_filter_edit(f, app, *index, draft, *row, typing.as_deref()),
-        Some(SettingsPopup::Folder { value }) => {
-            let inner = panel(f, 90, 7, "Download folder", "enter save · esc cancel");
-            let field = Rect::new(inner.x, inner.y, inner.width, 1);
-            fill(f, field, t.surface);
-            let line = Line::from(vec![Span::styled(value.clone(), Style::new().fg(t.text)), Span::styled("▏", Style::new().fg(t.primary))]);
-            put(f, inner.x + 1, inner.y, inner.width.saturating_sub(2), line);
-            let help = "{site}, {board}, {thread} and {downloads} are filled in. Empty for the default.";
-            put(f, inner.x, inner.y + 2, inner.width, Line::styled(help, dim()));
-        }
-        None => {}
+        SettingsPopup::Themes { list, names, .. } => draw_themes(f, app, list, names),
+        SettingsPopup::Colors { list, editing } => draw_colors(f, app, list, editing.as_deref()),
+        SettingsPopup::Keys { list, capture } => draw_keys(f, app, list, *capture),
+        SettingsPopup::Filters { list, counts } => draw_filter_list(f, app, list, counts),
+        SettingsPopup::Sites(m) => draw_my_sites(f, m),
+        SettingsPopup::BoardImages { list } => draw_board_images(f, app, list),
+        SettingsPopup::HiddenWords { list, typing } => draw_hidden_words(f, app, list, typing.as_deref()),
+        SettingsPopup::FilterEdit { index, draft, row, typing } => draw_filter_edit(f, app, *index, draft, *row, typing.as_deref()),
+        SettingsPopup::Folder { value } => draw_folder(f, value),
     }
+}
+
+fn draw_themes(f: &mut Frame, app: &App, list: &ListState, names: &[String]) {
+    let t = theme();
+    let inner = panel(f, 52, cells(names.len()).saturating_add(3), "Theme", "enter keep · esc cancel");
+    list_rows(f, inner, 0, names.len(), list.selected().or(Some(0)), |k| {
+        let name = &names[k];
+        let mut spans = vec![Span::styled(format!("{name:<22}"), Style::new().fg(t.text))];
+        // A row of colored cells: the theme at a glance.
+        if let Ok(th) = theme::resolve(name, &app.themes) {
+            let colors = [th.background, th.surface, th.selection, th.primary, th.primary_container, th.greentext, th.quotelink, th.heading, th.new];
+            spans.extend(colors.map(|c| Span::styled("  ", Style::new().bg(c))));
+        }
+        Line::from(spans)
+    });
+}
+
+fn draw_colors(f: &mut Frame, app: &App, list: &ListState, editing: Option<&str>) {
+    let t = theme();
+    let title = format!("Colors · {}", app.theme_name);
+    let hint = if editing.is_some() { "enter save · esc cancel" } else { "enter edit · x reset · esc close" };
+    let h = (cells(ROLES.len()).saturating_add(5)).min(f.area().height.saturating_sub(4));
+    let inner = panel(f, 96, h, &title, hint);
+    let rows = inner.height.saturating_sub(2) as usize;
+    let sel = list.selected().unwrap_or(0);
+    let first = sel.saturating_sub(rows.saturating_sub(1));
+    list_rows(f, Rect { height: rows as u16, ..inner }, first, ROLES.len(), Some(sel), |k| {
+        let (role, desc) = ROLES[k];
+        let c = t.get(role).unwrap_or(Color::Reset);
+        Line::from(vec![
+            Span::styled("    ", Style::new().bg(c)),
+            Span::styled(format!("  {role:<22}"), Style::new().fg(t.text)),
+            Span::styled(format!("{:<10}", theme::color_string(c)), bold(t.text)),
+            Span::styled(desc, dim()),
+        ])
+    });
+    let y = inner.bottom().saturating_sub(1);
+    let line = match editing {
+        Some(text) => Line::from(vec![
+            Span::styled(format!("New {} color: ", ROLES.get(sel).map_or("", |r| r.0)), Style::new().fg(t.text)),
+            Span::styled(text.to_string(), bold(t.text)),
+            Span::styled("▏", Style::new().fg(t.primary)),
+            Span::styled("   #rrggbb, a name, 0-255, or default", dim()),
+        ]),
+        None => Line::styled("Changing a color of a built-in theme saves it as a copy: NAME-custom.", dim()),
+    };
+    put(f, inner.x, y, inner.width, line);
+}
+
+fn draw_keys(f: &mut Frame, app: &App, list: &ListState, capture: Option<bool>) {
+    let t = theme();
+    let rows = key_rows();
+    let hint = if capture.is_some() { "press a key · esc cancel" } else { "enter rebind · a add · u unbind · x reset · esc close" };
+    let h = (cells(rows.len()).saturating_add(5)).min(f.area().height.saturating_sub(4));
+    let inner = panel(f, 96, h, "Keys", hint);
+    let view = inner.height.saturating_sub(2) as usize;
+    let sel = list.selected().unwrap_or(0);
+    let first = (sel + 2).saturating_sub(view).min(rows.len().saturating_sub(view));
+    // Group titles are never selected, so never painted.
+    list_rows(f, Rect { height: view as u16, ..inner }, first, rows.len(), Some(sel), |k| {
+        let i = match rows[k] {
+            Err(title) => return Line::styled(title.to_string(), bold(t.primary)),
+            Ok(i) => i,
+        };
+        let (action, name, _, scopes, desc) = keys::ACTIONS[i];
+        let changed = !app.keys.is_default(action);
+        let key_style = if changed { bold(t.primary) } else { bold(t.text) };
+        let scopes = scopes.iter().map(|s| s.label()).collect::<Vec<_>>().join(", ");
+        let label = app.keys.label(action);
+        let mut spans = match label.as_str() {
+            "" => vec![Span::styled(format!("  {:<16}", "menu"), dim())],
+            _ => vec![Span::styled(format!("  {:<16}", truncate(&label, 15)), key_style)],
+        };
+        // Narrow: just the key and what it does.
+        if inner.width >= 80 {
+            spans.push(Span::styled(format!("{name:<17}"), dim()));
+            spans.push(Span::styled(format!("{:<37}", truncate(desc, 36)), Style::new().fg(t.text)));
+            spans.push(Span::styled(truncate(&scopes, (inner.width as usize).saturating_sub(72)), dim()));
+        } else {
+            spans.push(Span::styled(truncate(desc, (inner.width as usize).saturating_sub(18)), Style::new().fg(t.text)));
+        }
+        Line::from(spans)
+    });
+    let y = inner.bottom().saturating_sub(1);
+    let line = match (capture, rows.get(sel)) {
+        (Some(add), Some(Ok(i))) => {
+            let verb = if add { "Press a key to add to" } else { "Press the new key for" };
+            Line::from(vec![
+                Span::styled(format!("{verb} "), Style::new().fg(t.text)),
+                Span::styled(keys::ACTIONS[*i].1, bold(t.primary)),
+                Span::styled("   esc cancels", dim()),
+            ])
+        }
+        _ => Line::styled("Changed keys are saved in [keys]; navigation keys are fixed. Without a key: in the . menu.", dim()),
+    };
+    put(f, inner.x, y, inner.width, line);
+}
+
+fn draw_folder(f: &mut Frame, value: &str) {
+    let t = theme();
+    let inner = panel(f, 90, 7, "Download folder", "enter save · esc cancel");
+    let field = Rect::new(inner.x, inner.y, inner.width, 1);
+    fill(f, field, t.surface);
+    let line = Line::from(vec![Span::styled(value.to_string(), Style::new().fg(t.text)), Span::styled("▏", Style::new().fg(t.primary))]);
+    put(f, inner.x + 1, inner.y, inner.width.saturating_sub(2), line);
+    let help = "{site}, {board}, {thread} and {downloads} are filled in. Empty for the default.";
+    put(f, inner.x, inner.y + 2, inner.width, Line::styled(help, dim()));
 }
 
 // ----- filters -----
