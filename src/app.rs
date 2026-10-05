@@ -204,6 +204,9 @@ struct Note {
     new: usize,
     /// Of those, replies to your posts.
     replies: usize,
+    /// Posts (or a new thread) a `notify` filter caught, and the first one's label.
+    caught: usize,
+    filter: String,
 }
 
 /// A popup over the whole screen. One at a time: each opens from a key or the menu, with
@@ -346,6 +349,9 @@ pub struct App {
     /// The newest post seen in each watched thread by a refresh this session; notifications
     /// are for posts past it.
     notified_max: HashMap<ThreadKey, u64>,
+    /// The same for followed generals' boards (site, board): the newest thread seen there,
+    /// for `notify` filters.
+    board_notified_max: HashMap<(String, String), u64>,
     /// Followed generals: when each one's board was last searched, and searches running.
     generals_checked: HashMap<ThreadKey, Instant>,
     generals_searching: HashSet<ThreadKey>,
@@ -494,6 +500,7 @@ impl App {
             watched_checked: HashMap::new(),
             refreshing: HashSet::new(),
             notified_max: HashMap::new(),
+            board_notified_max: HashMap::new(),
             generals_checked: HashMap::new(),
             generals_searching: HashSet::new(),
             general_boards: HashMap::new(),
@@ -626,6 +633,11 @@ impl App {
             Sort::Newest => v.sort_by_key(|&i| std::cmp::Reverse((c[i].time, c[i].no))),
             Sort::Oldest => v.sort_by_key(|&i| (c[i].time, c[i].no)),
         }
+        // What a `top` filter highlights first, in that order.
+        let top = |i: &usize| self.tab.catalog_marks.get(*i).is_some_and(|m| m.top);
+        if v.iter().any(top) {
+            v.sort_by_key(|i| !top(i));
+        }
         v
     }
 
@@ -734,6 +746,15 @@ impl App {
             many => {
                 let total = many.iter().fold(0usize, |t, n| t.saturating_add(n.replies));
                 messages.push(format!("{total} new replies to your posts in {} threads", many.len()));
+            }
+        }
+        let caught: Vec<&Note> = notes.iter().filter(|n| n.caught > 0).collect();
+        match caught.as_slice() {
+            [] => {}
+            [n] => messages.push(format!("{} caught by \"{}\" in {}", if n.caught == 1 { "A new post".to_string() } else { format!("{} new posts", n.caught) }, n.filter, place(n))),
+            many => {
+                let total = many.iter().fold(0usize, |t, n| t.saturating_add(n.caught));
+                messages.push(format!("{total} new posts caught by your filters in {} threads", many.len()));
             }
         }
         let others: Vec<&Note> = notes.iter().filter(|n| n.new > n.replies).collect();
@@ -946,25 +967,26 @@ impl App {
     // ----- filters and hiding -----
 
     /// What filters and hiding by hand say about posts (on the board `board_of` gives each).
-    fn marks(&self, posts: &[Post], board_of: impl Fn(&Post) -> String) -> Vec<Mark> {
+    /// (`thread`: the posts of one thread, the first its OP; else a catalog's OPs.)
+    fn marks(&self, posts: &[Post], thread: bool, board_of: impl Fn(&Post) -> String) -> Vec<Mark> {
         let site = &self.current_site().cfg.name;
         let mut hidden: HashMap<String, HashSet<u64>> = HashMap::new();
-        let mark = |p: &Post| {
+        let mark = |(i, p): (usize, &Post)| {
             let board = board_of(p);
-            let mut m = self.filters.check(site, &board, p);
+            let mut m = self.filters.check(site, &board, p, !thread || i == 0);
             let by_hand = hidden.entry(board).or_insert_with_key(|b| self.store.hidden_on(site, b));
             if m.hidden.is_none() && by_hand.contains(&p.no) {
                 m.hidden = Some(Hidden::ByHand);
             }
             m
         };
-        posts.iter().map(mark).collect()
+        posts.iter().enumerate().map(mark).collect()
     }
 
     /// What filters and hiding say about a thread's posts, replies to hidden ones included
     /// (`recursive_hiding`, or a `recursive` filter).
     fn thread_marks(&self, t: &ThreadView) -> Vec<Mark> {
-        let mut marks = self.marks(&t.posts, |_| t.board.clone());
+        let mut marks = self.marks(&t.posts, true, |_| t.board.clone());
         let all = self.recursive_hiding;
         crate::filter::spread_hiding(&mut marks, &t.posts, &t.index, &t.backlinks, |m| all || m.recursive);
         marks
@@ -988,7 +1010,7 @@ impl App {
     }
 
     pub fn remark_catalog(&mut self) {
-        let marks = self.marks(&self.tab.catalog, |p| self.board_of(p));
+        let marks = self.marks(&self.tab.catalog, false, |p| self.board_of(p));
         self.tab.catalog_marks = marks;
     }
 

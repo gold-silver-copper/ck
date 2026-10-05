@@ -519,11 +519,15 @@ impl App {
                 // Tell about posts newer than this session's last refresh (not on the first
                 // one, which may find posts from long ago).
                 let fresh: Vec<&&Post> = unread.iter().filter(|p| prev.is_some_and(|m| p.no > m)).collect();
+                // Those a `notify` filter catches.
+                let caught: Vec<String> = fresh.iter().filter_map(|p| self.filters.check(&key.site, &key.board, p, p.no == key.no).notify).collect();
                 let note = Note {
                     key: key.clone(),
                     subject: if w.subject.is_empty() { subject.clone() } else { w.subject.clone() },
                     new: fresh.len(),
                     replies: fresh.iter().filter(|p| to_you(p)).count(),
+                    caught: caught.len(),
+                    filter: caught.into_iter().next().unwrap_or_default(),
                 };
                 w.posts = posts.len();
                 w.dead = false;

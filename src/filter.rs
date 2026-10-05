@@ -17,6 +17,18 @@ pub enum Field {
     Filename,
     /// A file's MD5 in base64 (`pattern` is compared exactly, not as a regex).
     Md5,
+    /// The poster ID.
+    Id,
+    /// The flag's code, or its name (`US`, `United States`).
+    Flag,
+    Tripcode,
+    Capcode,
+    /// A file's width and height, as `1920x1080`.
+    Dimensions,
+    /// A file's size against a range (not a regex): `>2MB`, `<=100KB`, `1MB-5MB`.
+    Filesize,
+    /// The post's number, in digits.
+    Postno,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
@@ -57,6 +69,18 @@ pub struct FilterConfig {
     /// `recursive_hiding` does for every hidden post.
     #[serde(default)]
     pub recursive: bool,
+    /// Only OPs (threads), or only replies.
+    #[serde(default)]
+    pub op: bool,
+    #[serde(default)]
+    pub reply: bool,
+    /// A desktop notification when a watched thread's refresh (or a followed general's
+    /// board) brings a post it catches.
+    #[serde(default)]
+    pub notify: bool,
+    /// What it highlights comes first in catalogs, whatever the sort.
+    #[serde(default)]
+    pub top: bool,
 }
 
 fn yes() -> bool {
@@ -64,7 +88,20 @@ fn yes() -> bool {
 }
 
 impl Field {
-    pub const ALL: [Field; 5] = [Field::Subject, Field::Comment, Field::Name, Field::Filename, Field::Md5];
+    pub const ALL: [Field; 12] = [
+        Field::Subject,
+        Field::Comment,
+        Field::Name,
+        Field::Filename,
+        Field::Md5,
+        Field::Id,
+        Field::Flag,
+        Field::Tripcode,
+        Field::Capcode,
+        Field::Dimensions,
+        Field::Filesize,
+        Field::Postno,
+    ];
 
     pub fn as_str(self) -> &'static str {
         match self {
@@ -73,7 +110,54 @@ impl Field {
             Field::Name => "name",
             Field::Filename => "filename",
             Field::Md5 => "md5",
+            Field::Id => "id",
+            Field::Flag => "flag",
+            Field::Tripcode => "tripcode",
+            Field::Capcode => "capcode",
+            Field::Dimensions => "dimensions",
+            Field::Filesize => "filesize",
+            Field::Postno => "postno",
         }
+    }
+
+    /// Whether `pattern` is a regex for it (not an MD5 or a size range).
+    fn is_regex(self) -> bool {
+        !matches!(self, Field::Md5 | Field::Filesize)
+    }
+}
+
+/// A `filesize` pattern as the sizes it takes in, bytes, both ends included: `>2MB`,
+/// `>=2MB`, `<100KB`, `<=100KB`, `1MB-5MB`, or one size exactly. Units B, KB, MB, GB (of
+/// 1024), any case, `K`/`M`/`G` too, bytes when left out.
+pub fn size_range(pattern: &str) -> Option<(u64, u64)> {
+    let size = |s: &str| -> Option<u64> {
+        let s = s.trim().to_ascii_lowercase();
+        let digits = s.find(|c: char| !(c.is_ascii_digit() || c == '.')).unwrap_or(s.len());
+        let (n, unit) = s.split_at(digits);
+        let n: f64 = n.parse().ok().filter(|n: &f64| n.is_finite())?;
+        let unit = match unit.trim() {
+            "" | "b" => 1u64,
+            "k" | "kb" | "kib" => 1 << 10,
+            "m" | "mb" | "mib" => 1 << 20,
+            "g" | "gb" | "gib" => 1 << 30,
+            _ => return None,
+        };
+        // (A float past u64 saturates.)
+        Some((n * unit as f64).round() as u64)
+    };
+    let p = pattern.trim();
+    if let Some(s) = p.strip_prefix(">=") {
+        Some((size(s)?, u64::MAX))
+    } else if let Some(s) = p.strip_prefix("<=") {
+        Some((0, size(s)?))
+    } else if let Some(s) = p.strip_prefix('>') {
+        Some((size(s)?.saturating_add(1), u64::MAX))
+    } else if let Some(s) = p.strip_prefix('<') {
+        Some((0, size(s)?.checked_sub(1)?))
+    } else if let Some((a, b)) = p.split_once('-') {
+        Some((size(a)?, size(b)?)).filter(|(a, b)| a <= b)
+    } else {
+        size(p).map(|s| (s, s))
     }
 }
 
@@ -97,6 +181,10 @@ impl FilterConfig {
             label: None,
             enabled: true,
             recursive: false,
+            op: false,
+            reply: false,
+            notify: false,
+            top: false,
         };
         c.set_fields(fields);
         c
@@ -168,7 +256,15 @@ impl FilterConfig {
                 }
             }
         }
-        for (key, now, before, default) in [("enabled", self.enabled, old.map(|o| o.enabled), true), ("recursive", self.recursive, old.map(|o| o.recursive), false)] {
+        let flags = [
+            ("enabled", self.enabled, old.map(|o| o.enabled), true),
+            ("recursive", self.recursive, old.map(|o| o.recursive), false),
+            ("op", self.op, old.map(|o| o.op), false),
+            ("reply", self.reply, old.map(|o| o.reply), false),
+            ("notify", self.notify, old.map(|o| o.notify), false),
+            ("top", self.top, old.map(|o| o.top), false),
+        ];
+        for (key, now, before, default) in flags {
             if before != Some(now) {
                 if now == default {
                     t.remove(key);
@@ -182,6 +278,8 @@ impl FilterConfig {
 
 struct Filter {
     re: Option<Regex>,
+    /// For `filesize`.
+    sizes: Option<(u64, u64)>,
     pattern: String,
     fields: Vec<Field>,
     sites: Vec<String>,
@@ -189,6 +287,10 @@ struct Filter {
     action: FilterAction,
     label: String,
     recursive: bool,
+    op: bool,
+    reply: bool,
+    notify: bool,
+    top: bool,
 }
 
 /// What filters (and manual hiding) say about a thread or post.
@@ -198,6 +300,10 @@ pub struct Mark {
     pub highlight: Option<String>,
     /// Its replies are hidden with it (a `recursive` filter hides it).
     pub recursive: bool,
+    /// The label of a `notify` filter that catches it.
+    pub notify: Option<String>,
+    /// A `top` filter highlights it: first in catalogs.
+    pub top: bool,
 }
 
 /// Why a thread or post is hidden.
@@ -252,16 +358,26 @@ impl Filters {
                 Some(Fields::Many(v)) if v.is_empty() => bail!("[[filter]] #{}: `field` is empty", i + 1),
                 Some(Fields::Many(v)) => v.clone(),
             };
-            let re = if fields.iter().any(|&f| f != Field::Md5) {
+            let re = if fields.iter().any(|f| f.is_regex()) {
                 Some(Regex::new(&c.pattern).with_context(|| format!("[[filter]] #{} (pattern = {:?})", i + 1, c.pattern))?)
             } else {
                 None
             };
+            let sizes = match fields.contains(&Field::Filesize) {
+                true => Some(size_range(&c.pattern).with_context(|| {
+                    format!("[[filter]] #{}: {:?} isn't a file size range (try \">2MB\", \"<100KB\", \"1MB-5MB\")", i + 1, c.pattern)
+                })?),
+                false => None,
+            };
+            if c.op && c.reply {
+                bail!("[[filter]] #{}: `op` and `reply` together catch nothing (leave both out for all posts)", i + 1);
+            }
             if !c.enabled {
                 continue;
             }
             out.push(Filter {
                 re,
+                sizes,
                 pattern: c.pattern.clone(),
                 fields,
                 sites: c.sites.clone(),
@@ -269,6 +385,10 @@ impl Filters {
                 action: c.action,
                 label: c.label.clone().unwrap_or_else(|| c.pattern.clone()),
                 recursive: c.recursive,
+                op: c.op,
+                reply: c.reply,
+                notify: c.notify,
+                top: c.top,
             });
         }
         Ok(Self(out, None))
@@ -287,8 +407,8 @@ impl Filters {
         Ok(self)
     }
 
-    /// What the filters say about a post on `site`'s `board`.
-    pub fn check(&self, site: &str, board: &str, p: &Post) -> Mark {
+    /// What the filters say about a post on `site`'s `board` (an OP, or a reply).
+    pub fn check(&self, site: &str, board: &str, p: &Post, is_op: bool) -> Mark {
         let mut mark = Mark::default();
         let mut hidden: Option<String> = None;
         let mut comment: Option<String> = None;
@@ -297,9 +417,13 @@ impl Filters {
                 FilterAction::Hide => &mut hidden,
                 FilterAction::Highlight => &mut mark.highlight,
             };
-            // A recursive filter still counts on a post another filter hid first.
+            // A recursive filter still counts on a post another filter hid first, and so do
+            // ones that notify or put it first.
             let spreads = f.action == FilterAction::Hide && f.recursive && !mark.recursive;
-            if (slot.is_some() && !spreads)
+            let more = spreads || (f.notify && mark.notify.is_none()) || (f.top && f.action == FilterAction::Highlight && !mark.top);
+            if (slot.is_some() && !more)
+                || (f.op && !is_op)
+                || (f.reply && is_op)
                 || (!f.sites.is_empty() && !f.sites.iter().any(|s| s.eq_ignore_ascii_case(site)))
                 || (!f.boards.is_empty() && !f.boards.iter().any(|b| b == board))
             {
@@ -316,11 +440,22 @@ impl Filters {
                     Field::Comment => re(comment.get_or_insert_with(|| {
                         p.body.iter().map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect::<String>()).collect::<Vec<_>>().join("\n")
                     })),
+                    Field::Id => p.id.as_deref().is_some_and(re),
+                    Field::Flag => p.flag.as_ref().is_some_and(|fl| (!fl.code.is_empty() && re(&fl.code)) || (!fl.name.is_empty() && re(&fl.name))),
+                    Field::Tripcode => p.trip.as_deref().is_some_and(re),
+                    Field::Capcode => p.capcode.as_deref().is_some_and(re),
+                    Field::Dimensions => p.files.iter().any(|file| file.width.zip(file.height).is_some_and(|(w, h)| re(&format!("{w}x{h}")))),
+                    Field::Filesize => p.files.iter().any(|file| file.size.zip(f.sizes).is_some_and(|(s, (lo, hi))| (lo..=hi).contains(&s))),
+                    Field::Postno => re(&p.no.to_string()),
                 }
             });
             if hit {
                 slot.get_or_insert_with(|| f.label.clone());
                 mark.recursive |= spreads;
+                if f.notify {
+                    mark.notify.get_or_insert_with(|| f.label.clone());
+                }
+                mark.top |= f.top && f.action == FilterAction::Highlight;
             }
         }
         if hidden.is_none()
@@ -424,17 +559,93 @@ pub mod tests {
         .unwrap();
         assert_eq!(f.0.len(), 4);
         // Subject, case-insensitive by the pattern's own flag.
-        let m = f.check("lainchan", "b", &post("CRYPTO general", "hi"));
+        let m = f.check("lainchan", "b", &post("CRYPTO general", "hi"), false);
         assert_eq!(m.hidden, Some(Hidden::ByFilter("crypto".into())));
         // Comments match line by line with (?m)-less anchors over the whole text; the first
         // highlight wins.
-        let m = f.check("lainchan", "g", &post("", ">be me"));
+        let m = f.check("lainchan", "g", &post("", ">be me"), false);
         assert_eq!((m.hidden, m.highlight.as_deref()), (None, Some("^>be me$")));
         // Other boards don't get the /g/-only filter; files and names are checked.
-        let m = f.check("lainchan", "b", &post("", ">be me"));
+        let m = f.check("lainchan", "b", &post("", ">be me"), false);
         assert_eq!(m.highlight.as_deref(), Some("png"));
         // MD5s compare exactly, on the listed sites only.
-        assert_eq!(f.check("4chan", "b", &post("", "x")).hidden, Some(Hidden::ByFilter("u8Vh17KxaDvUJ6bBcmE/eg==".into())));
+        assert_eq!(f.check("4chan", "b", &post("", "x"), false).hidden, Some(Hidden::ByFilter("u8Vh17KxaDvUJ6bBcmE/eg==".into())));
+    }
+
+    #[test]
+    fn ids_flags_trips_capcodes_files_and_numbers() {
+        use crate::model::Flag;
+        let p = Post {
+            no: 487211260,
+            id: Some("Ab3dEf+g".into()),
+            flag: Some(Flag { code: "PL".into(), name: "Poland".into() }),
+            trip: Some("!!Fz3mQwerty".into()),
+            capcode: Some("mod".into()),
+            files: vec![Attachment { width: Some(1920), height: Some(1080), size: Some(3 << 20), ..Default::default() }],
+            ..post("", "")
+        };
+        let catches = |field: &str, pattern: &str| {
+            let f = filters(&format!("[[filter]]\npattern = {pattern:?}\nfield = {field:?}")).unwrap();
+            f.check("4chan", "pol", &p, false).hidden.is_some()
+        };
+        assert!(catches("id", "^Ab3dEf\\+g$") && !catches("id", "^Zq9"));
+        // A flag by its code or its name.
+        assert!(catches("flag", "^PL$") && catches("flag", "(?i)^poland$") && !catches("flag", "^US$"));
+        assert!(catches("tripcode", "^!!Fz3m") && !catches("tripcode", "Kot"));
+        assert!(catches("capcode", "^mod$") && !catches("capcode", "admin"));
+        assert!(catches("dimensions", "^1920x1080$") && !catches("dimensions", "^1080x"));
+        assert!(catches("filesize", ">2MB") && catches("filesize", "1MB-4MB") && !catches("filesize", "<3mb") && !catches("filesize", ">3MB"));
+        assert!(catches("filesize", ">=3MB") && catches("filesize", "<=3.0 mb") && catches("filesize", "3145728"));
+        assert!(catches("postno", "260$") && catches("postno", "^4872") && !catches("postno", "^1"));
+        // A post without them isn't caught by them.
+        let plain = post("", "");
+        for field in ["id", "flag", "tripcode", "capcode", "dimensions"] {
+            let f = filters(&format!("[[filter]]\npattern = \".\"\nfield = {field:?}")).unwrap();
+            assert!(f.check("4chan", "g", &plain, false).hidden.is_none(), "{field}");
+        }
+        // A size range that isn't one is reported.
+        let err = filters("[[filter]]\npattern = \"big\"\nfield = \"filesize\"").err().unwrap();
+        assert!(format!("{err:#}").contains("isn't a file size range"), "{err:#}");
+    }
+
+    #[test]
+    fn size_ranges() {
+        assert_eq!(size_range(">2MB"), Some((2 * 1024 * 1024 + 1, u64::MAX)));
+        assert_eq!(size_range(">= 2 mb"), Some((2 << 20, u64::MAX)));
+        assert_eq!(size_range("<100KB"), Some((0, 100 * 1024 - 1)));
+        assert_eq!(size_range("<=1.5k"), Some((0, 1536)));
+        assert_eq!(size_range("1MB-2GB"), Some((1 << 20, 2 << 30)));
+        assert_eq!(size_range("500"), Some((500, 500)));
+        for bad in ["", ">", "<0", "2MB-1MB", "big", "1TB", ">-1", "1e3", "NaN", "--1"] {
+            assert_eq!(size_range(bad), None, "{bad}");
+        }
+        // Huge numbers saturate.
+        assert_eq!(size_range(&format!(">={}GB", "9".repeat(40))), Some((u64::MAX, u64::MAX)));
+    }
+
+    #[test]
+    fn ops_replies_notify_and_top() {
+        let f = filters(
+            "[[filter]]\npattern = \"x\"\nop = true\nlabel = \"ops\"\n\
+             [[filter]]\npattern = \"y\"\nreply = true\nlabel = \"replies\"\n\
+             [[filter]]\npattern = \"x|y\"\naction = \"highlight\"\nnotify = true\ntop = true\nlabel = \"watch\"",
+        )
+        .unwrap();
+        let hidden = |p: &Post, op: bool| f.check("4chan", "g", p, op).hidden.and_then(|h| h.filter().map(String::from));
+        assert_eq!((hidden(&post("x", ""), true), hidden(&post("x", ""), false)), (Some("ops".into()), None));
+        assert_eq!((hidden(&post("y", ""), true), hidden(&post("y", ""), false)), (None, Some("replies".into())));
+        // Notify and top still count when another filter got there first.
+        let m = f.check("4chan", "g", &post("x", ""), true);
+        assert_eq!((m.highlight.as_deref(), m.notify.as_deref(), m.top), (Some("watch"), Some("watch"), true));
+        let f = filters("[[filter]]\npattern = \"x\"\naction = \"highlight\"\n[[filter]]\npattern = \"x\"\nnotify = true\ntop = true\nlabel = \"n\"").unwrap();
+        let m = f.check("4chan", "g", &post("x", ""), false);
+        // Top is for what it highlights; this one hides.
+        assert_eq!((m.highlight.as_deref(), m.notify.as_deref(), m.top, m.hidden.is_some()), (Some("x"), Some("n"), false, true));
+        assert!(f.check("4chan", "g", &post("z", ""), false).notify.is_none());
+        // Both catch nothing: that's a mistake, said so.
+        let err = filters("[[filter]]\npattern = \"x\"\nop = true\nreply = true").err().unwrap();
+        assert!(format!("{err:#}").contains("`op` and `reply` together"), "{err:#}");
+        assert!(filters("[[filter]]\npattern = \"x\"\nnotfy = true").is_err());
     }
 
     #[test]
@@ -450,7 +661,7 @@ pub mod tests {
     fn disabled_filters_are_kept_but_not_applied() {
         let f = filters("[[filter]]\npattern = \"crypto\"\nenabled = false\n[[filter]]\npattern = \"x\"").unwrap();
         assert_eq!(f.0.len(), 1);
-        assert!(f.check("4chan", "g", &post("crypto", "")).hidden.is_none());
+        assert!(f.check("4chan", "g", &post("crypto", ""), false).hidden.is_none());
         // A disabled filter must still be a valid one.
         assert!(filters("[[filter]]\npattern = \"(\"\nenabled = false").is_err());
     }
@@ -464,6 +675,9 @@ pub mod tests {
         every.boards = vec!["g".into(), "v".into()];
         every.enabled = false;
         every.recursive = true;
+        every.op = true;
+        every.notify = true;
+        every.top = true;
         for c in [FilterConfig::new("p".into(), &[Field::Subject, Field::Comment]), FilterConfig::new("q".into(), &[Field::Filename]), every] {
             let mut t = toml_edit::Table::new();
             c.write(&mut t, None);
@@ -540,11 +754,11 @@ pub mod tests {
     #[test]
     fn recursive_filters_say_so_even_after_another_hides() {
         let f = filters("[[filter]]\npattern = \"crypto\"\n[[filter]]\npattern = \"crypto|nft\"\nrecursive = true\n[[filter]]\npattern = \"x\"\naction = \"highlight\"\nrecursive = true").unwrap();
-        let m = f.check("4chan", "g", &post("crypto", ""));
+        let m = f.check("4chan", "g", &post("crypto", ""), false);
         assert_eq!((m.hidden, m.recursive), (Some(Hidden::ByFilter("crypto".into())), true));
-        assert!(f.check("4chan", "g", &post("nft", "")).recursive);
+        assert!(f.check("4chan", "g", &post("nft", ""), false).recursive);
         // Highlighting doesn't hide, so nothing spreads.
-        let m = f.check("4chan", "g", &post("x", ""));
+        let m = f.check("4chan", "g", &post("x", ""), false);
         assert!(m.highlight.is_some() && !m.recursive);
     }
 
@@ -555,7 +769,7 @@ pub mod tests {
         let text = "lorem ipsum dolor sit amet consectetur adipiscing elit ".repeat(20);
         let posts: Vec<Post> = (0..300).map(|i| post(&format!("thread {i}"), &text)).collect();
         let start = std::time::Instant::now();
-        let hidden = posts.iter().filter(|p| f.check("4chan", "g", p).hidden.is_some()).count();
+        let hidden = posts.iter().filter(|p| f.check("4chan", "g", p, false).hidden.is_some()).count();
         let took = start.elapsed();
         eprintln!("20 filters over 300 posts: {took:?}");
         assert_eq!(hidden, 0);
@@ -581,7 +795,7 @@ mod word_tests {
     }
 
     fn hidden(f: &Filters, p: &Post) -> Option<String> {
-        f.check("s", "b", p).hidden?.filter().map(String::from)
+        f.check("s", "b", p, false).hidden?.filter().map(String::from)
     }
 
     #[test]

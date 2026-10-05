@@ -403,6 +403,57 @@ fn notifies_about_new_posts_and_replies_to_yours() {
 }
 
 #[test]
+fn notify_filters_tell_about_what_they_catch_once() {
+    let mut app = local_app();
+    let cfg = "[[filter]]\npattern = \"^Ab3d$\"\nfield = \"id\"\naction = \"highlight\"\nnotify = true\nlabel = \"that guy\"\n\
+               [[filter]]\npattern = \"(?i)/lmg/\"\nfield = \"subject\"\nop = true\naction = \"highlight\"\nnotify = true\nlabel = \"lmg\"";
+    app.filters = crate::filter::tests::filters(cfg).unwrap();
+    let key = |no| ThreadKey { site: "a".into(), board: "x".into(), no };
+    let post = |no, id: &str| Post { no, id: Some(id.into()), ..Default::default() };
+    app.store.toggle_watch(key(1), "One".into(), 1, 1);
+    // The first refresh of the session tells nothing, though it catches one.
+    app.refreshed(key(1), Ok(vec![post(1, "x"), post(2, "Ab3d")]));
+    app.flush_notes(Instant::now());
+    assert!(app.notified.is_empty());
+    // A new post it catches: told, once.
+    app.refreshed(key(1), Ok(vec![post(1, "x"), post(2, "Ab3d"), post(3, "Ab3d"), post(4, "zz")]));
+    app.flush_notes(Instant::now());
+    assert_eq!(app.notified, ["A new post caught by \"that guy\" in /x/ One", "2 new posts in /x/ One"]);
+    app.notified.clear();
+    app.refreshed(key(1), Ok(vec![post(1, "x"), post(2, "Ab3d"), post(3, "Ab3d"), post(4, "zz")]));
+    app.flush_notes(Instant::now());
+    assert!(app.notified.is_empty());
+    // A followed general's board: new threads it catches, after the first look.
+    let op = |no, subject: &str| Post { no, subject: Some(subject.into()), ..Default::default() };
+    app.general_catalog(&key(1), Ok(vec![op(10, "/lmg/ old"), op(11, "other")]));
+    app.flush_notes(Instant::now());
+    assert!(app.notified.is_empty());
+    app.general_catalog(&key(1), Ok(vec![op(10, "/lmg/ old"), op(12, "/LMG/ - Local Models General"), op(13, "other")]));
+    app.general_catalog(&key(1), Ok(vec![op(12, "/LMG/ - Local Models General")]));
+    app.flush_notes(Instant::now());
+    assert_eq!(app.notified, ["A new post caught by \"lmg\" in /x/ /LMG/ - Local Models General"]);
+}
+
+#[test]
+fn top_filters_put_highlighted_threads_first() {
+    let mut app = local_app();
+    let cfg = "[[filter]]\npattern = \"rust\"\naction = \"highlight\"\ntop = true\n[[filter]]\npattern = \"go\"\naction = \"highlight\"";
+    app.filters = crate::filter::tests::filters(cfg).unwrap();
+    app.tab.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
+    app.tab.catalog_board = Some("x".into());
+    let op = |no, subject: &str, replies| Post { no, subject: Some(subject.into()), replies: Some(replies), time: no as i64, ..Default::default() };
+    app.tab.catalog = vec![op(1, "go", 5), op(2, "rust 1", 1), op(3, "c", 9), op(4, "rust 2", 3)];
+    app.remark_catalog();
+    app.tab.view = View::Catalog;
+    // Bump order, with the top ones first (in that order).
+    assert_eq!(app.visible_catalog(), [1, 3, 0, 2]);
+    app.tab.catalog_sort = crate::app::Sort::Replies;
+    assert_eq!(app.visible_catalog(), [3, 1, 2, 0]);
+    app.tab.catalog_sort = crate::app::Sort::Newest;
+    assert_eq!(app.visible_catalog(), [3, 1, 2, 0]);
+}
+
+#[test]
 fn marking_posts_as_yours_watches_the_thread() {
     let mut app = local_app();
     app.tab.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
@@ -1433,6 +1484,17 @@ fn the_filter_list_edits_turns_off_and_removes() {
     }
     app.on_key(KeyEvent::from(KeyCode::Enter));
     assert_eq!(app.status.as_ref().unwrap().text, "A filter needs at least one field");
+    // Posts: OPs only (the named posts are replies), replies only, all again.
+    if let Some(SettingsPopup::FilterEdit { row: r, .. }) = app.settings_popup_mut() {
+        *r = crate::app::EDIT_ROWS.iter().position(|r| *r == crate::app::EditRow::Posts).unwrap();
+    }
+    let hidden = |app: &App| app.tab.thread.as_ref().unwrap().marks[1].hidden.is_some();
+    app.on_key(KeyEvent::from(KeyCode::Enter));
+    assert!(config_text(&app).contains("op = true") && !hidden(&app));
+    app.on_key(KeyEvent::from(KeyCode::Enter));
+    assert!(config_text(&app).contains("reply = true") && !config_text(&app).contains("op = ") && hidden(&app));
+    app.on_key(KeyEvent::from(KeyCode::Enter));
+    assert!(!config_text(&app).contains("reply = ") && hidden(&app));
     // Back to the list: it counts what it catches; space turns it off (kept in the file).
     app.on_key(KeyEvent::from(KeyCode::Esc));
     let Some(SettingsPopup::Filters { counts, list }) = app.settings_popup() else { panic!("not the list") };

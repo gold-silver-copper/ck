@@ -164,7 +164,7 @@ ones for where you are.
 | `.` menu | save all the post's files / all the thread's files / the thread as a page; the last two ask first [`download_post`, `download_thread`, `export`: no key unless you give one] |
 | `w` / `T` | watch / unwatch; follow the quote `enter` would follow in a new tab [`watch`, `new_tab`] |
 | `H` / `Z` | hide / unhide the post; show hidden posts [`hide`, `show_hidden`] |
-| `X`  | hide or highlight posts like this one: by name and tripcode, image, file name, or (on the OP) subject (a filter) [`filter`] |
+| `X`  | hide or highlight posts like this one: by poster ID, name and tripcode, flag, image, file name, or (on the OP) subject (a filter) [`filter`] |
 | `m`  | mark the post as yours, to be told about replies [`mine`] |
 | `F`  | follow the thread as a general: when it dies or fills up, the next one is watched [`follow`] |
 | `a`  | after a 404: open the thread in the site's archive [`archive`] |
@@ -320,15 +320,17 @@ counts (everyone quotes it), and catalogs aren't affected.
 
 Filters hide or highlight automatically. The quickest way to make one is `X` (or "hide or
 highlight posts like it…" in the `.` menu) on a post or catalog thread: it offers what
-the post can be caught by (its name with the tripcode, its image's MD5, its file's name,
-and an OP's subject; never the site's anonymous name), whether to hide or highlight
+the post can be caught by (its poster ID, its name with the tripcode, the tripcode alone,
+its flag, its image's MD5, its file's name, and an OP's subject; never the site's
+anonymous name), whether to hide or highlight
 (`a`), where (`s`: this board, this site, or everywhere) and a label (`e`). `enter` adds
 it: it's written to the config as a `[[filter]]`, applies at once, and the footer says
 what it caught; `u` as the next key takes it back.
 
 Settings › Filters lists every filter with what it catches in the open catalog and thread.
-`enter` edits one (pattern, label, action, the fields it looks at, sites and boards; a
-pattern that isn't a valid regex says why and isn't saved), `space` turns it off or on
+`enter` edits one (pattern, label, action, the fields it looks at, sites and boards, OPs
+or replies only, and its options; a pattern that isn't a valid regex says why and isn't
+saved), `space` turns it off or on
 (`enabled = false`), `a` adds one and `x` removes one. Each change is written at once;
 the rest of the config, comments included, stays as it was. In the config:
 
@@ -340,16 +342,45 @@ label = "crypto"               # shown on what it hides or highlights
 [[filter]]
 pattern = "(?i)rust"
 action = "highlight"           # "hide" (the default) or "highlight"
-field = ["subject", "comment"] # subject, comment, name, filename, md5; default subject + comment
+field = ["subject", "comment"] # see below; default subject + comment
 sites = ["4chan"]              # optional: only these sites
 boards = ["g"]                 #           and these boards
+op = true                      # only OPs (threads); reply = true: only replies
 enabled = false                # kept, but not applied
 recursive = true               # replies to what it hides are hidden too (and theirs)
+notify = true                  # a notification when a watched thread brings one
+top = true                     # what it highlights comes first in catalogs
 
 [[filter]]
 pattern = "u8Vh17KxaDvUJ6bBcmE/eg=="   # field = "md5": a file's MD5 (base64, as 4chan shows it)
 field = "md5"
+
+[[filter]]
+pattern = ">4MB"               # field = "filesize": a range, not a regex
+field = "filesize"
 ```
+
+The fields:
+
+| field | what the pattern is matched against |
+|-------|-------------------------------------|
+| `subject`, `comment` | the subject; the comment's text, a line per line, spoilers included |
+| `name` | the name as shown, with the tripcode and capcode |
+| `filename`, `md5` | each file's name; each file's MD5 in base64, compared exactly (not a regex) |
+| `id` | the poster ID, on boards that have them |
+| `flag` | the country or board flag: its code (`US`) or its name (`United States`) |
+| `tripcode`, `capcode` | the tripcode alone (`!!Fz3mQwerty`); the capcode (`mod`, `Admin`, …) |
+| `dimensions` | each file's width and height, as `1920x1080` |
+| `filesize` | each file's size against a range, not a regex: `>2MB`, `>=2MB`, `<100KB`, `<=100KB`, `1MB-5MB`, or one size; units `B`, `KB`, `MB`, `GB` (of 1024; any case), bytes without one |
+| `postno` | the post's number, in digits (`(\d)\1$` for dubs) |
+
+`notify = true` sends a desktop notification (the way `notify` says: see Watched threads) when
+a watched thread refreshed in the background brings a new post the filter catches, or a
+followed general's board has a new thread it catches, once each, together with the other
+news of that round. (Not on ck's first look at a thread or board each session, which may
+find old posts, nor for the thread you have open.) `top = true` on a highlighting filter
+puts the threads it highlights at the top of the catalog, in the order the sort gives them.
+`op = true` and `reply = true` together catch nothing, and are refused.
 
 ### Hidden words
 
