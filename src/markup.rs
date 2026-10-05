@@ -1,5 +1,7 @@
 //! Turning post comments into styled ratatui lines, and wrapping them.
 
+use std::collections::HashSet;
+
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use unicode_width::UnicodeWidthStr;
@@ -20,6 +22,11 @@ const CODE: Style = Style::new().fg(mark::CODE);
 /// Line style marking a line of a code block: `wrap` keeps its whitespace and never word-wraps it.
 pub const CODE_LINE: Style = Style::new().fg(mark::CODE);
 const CONTINUATION: &str = "↪";
+/// Comments are cut off past this many bytes of markup (no imageboard allows posts near it;
+/// a longer one is broken or hostile), and tags nested deeper than this are ignored.
+const MAX_COMMENT: usize = 64 * 1024;
+const MAX_DEPTH: usize = 64;
+const CUT_OFF: &str = " [comment cut off: too long]";
 
 /// Parsed comment: styled lines plus what it links to.
 pub struct Parsed {
@@ -69,6 +76,7 @@ struct Open {
 pub fn parse_html(html: &str, flavor: Flavor) -> Parsed {
     let mut b = Builder::default();
     let mut stack: Vec<Open> = Vec::new();
+    let (html, cut) = cut_off(html);
     let mut rest = html;
 
     while !rest.is_empty() {
@@ -132,10 +140,8 @@ pub fn parse_html(html: &str, flavor: Flavor) -> Parsed {
                     (h.starts_with("http://") || h.starts_with("https://"))
                         && !["quote", "backlink", "reply"].iter().any(|c| class.contains(c))
                 });
-                if let Some(h) = web
-                    && !b.urls.iter().any(|u| u == h)
-                {
-                    b.urls.push(h.to_string());
+                if let Some(h) = web {
+                    b.url(h);
                 }
                 let style = match name.as_str() {
                     _ if block => base.patch(CODE),
@@ -162,6 +168,9 @@ pub fn parse_html(html: &str, flavor: Flavor) -> Parsed {
                     },
                     _ => base,
                 };
+                if stack.len() >= MAX_DEPTH {
+                    continue;
+                }
                 if block {
                     b.end_line();
                 }
@@ -169,13 +178,26 @@ pub fn parse_html(html: &str, flavor: Flavor) -> Parsed {
             }
         }
     }
+    if cut {
+        b.text(CUT_OFF, Style::new(), None);
+    }
     b.finish()
+}
+
+/// `s` up to `MAX_COMMENT` bytes (on a character boundary), and whether it was cut.
+fn cut_off(s: &str) -> (&str, bool) {
+    if s.len() <= MAX_COMMENT {
+        return (s, false);
+    }
+    let end = (0..=MAX_COMMENT).rev().find(|&i| s.is_char_boundary(i)).unwrap_or(0);
+    (s.get(..end).unwrap_or_default(), true)
 }
 
 /// Parse LynxChan's plain-text `message` field (markup is in-band). Used when a post has no
 /// rendered `markdown`.
 pub fn parse_plain(text: &str) -> Parsed {
     let mut b = Builder::default();
+    let (text, cut) = cut_off(text);
     for (i, line) in text.lines().enumerate() {
         if i > 0 {
             b.newline();
@@ -191,6 +213,9 @@ pub fn parse_plain(text: &str) -> Parsed {
         };
         b.text(line, style, None);
     }
+    if cut {
+        b.text(CUT_OFF, Style::new(), None);
+    }
     b.finish()
 }
 
@@ -198,6 +223,8 @@ pub fn parse_plain(text: &str) -> Parsed {
 struct Builder {
     lines: Vec<Line<'static>>,
     cur: Vec<Span<'static>>,
+    /// The bytes in `cur`.
+    cur_len: usize,
     /// The current line is part of a code block.
     cur_code: bool,
     /// Don't merge the next text into the last span (it's a quote link).
@@ -206,12 +233,24 @@ struct Builder {
     links: Vec<Link>,
     urls: Vec<String>,
     anchors: Vec<Anchor>,
+    /// What's in `quotes`, `links` and `urls`, to add each once without searching them.
+    seen_quotes: HashSet<u64>,
+    seen_links: HashSet<Link>,
+    seen_urls: HashSet<String>,
 }
 
 impl Builder {
     /// Where the next text goes: the line, and the byte offset in it.
     fn at(&self) -> (usize, usize) {
-        (self.lines.len(), self.cur.iter().map(|s| s.content.len()).sum())
+        (self.lines.len(), self.cur_len)
+    }
+
+    /// A web link, if it's new.
+    fn url(&mut self, url: &str) {
+        if !self.seen_urls.contains(url) {
+            self.seen_urls.insert(url.to_string());
+            self.urls.push(url.to_string());
+        }
     }
 
     /// Note a link over the text just pushed from `start` (joined to the previous piece of
@@ -256,15 +295,16 @@ impl Builder {
             // `>>>/b/123` names a board; only a bare `>>123` can be in this thread.
             if let Some(n) = link.post
                 && !quote.starts_with(">>>")
-                && !self.quotes.contains(&n)
+                && self.seen_quotes.insert(n)
             {
                 self.quotes.push(n);
             }
-            if !self.links.contains(&link) {
+            if self.seen_links.insert(link.clone()) {
                 self.links.push(link.clone());
             }
             let at = self.at();
             self.cur.push(Span::styled(quote.to_string(), style.patch(QUOTELINK)));
+            self.cur_len += quote.len();
             self.anchor(at, Target::Quote(link));
             self.sealed = true;
             rest = after;
@@ -297,11 +337,13 @@ impl Builder {
             Some(last) if last.style == style && !self.sealed => last.content.to_mut().push_str(text),
             _ => self.cur.push(Span::styled(text.to_string(), style)),
         }
+        self.cur_len += text.len();
         self.sealed = false;
     }
 
     fn newline(&mut self) {
         let mut line = Line::from(std::mem::take(&mut self.cur));
+        self.cur_len = 0;
         if std::mem::take(&mut self.cur_code) {
             line.style = CODE_LINE;
         }
@@ -325,24 +367,32 @@ impl Builder {
         while self.lines.last().is_some_and(|l| l.width() == 0) {
             self.lines.pop();
         }
-        // Bare URLs: found per line, after <wbr> and the like have been joined up.
+        // Bare URLs: found per line, after <wbr> and the like have been joined up. The links
+        // so far are in order and don't overlap, so each line's are found by bisecting.
+        self.anchors.sort_by_key(|a| (a.line, a.start));
+        let (mut found, mut bare) = (Vec::new(), Vec::new());
         for (n, line) in self.lines.iter_mut().enumerate().filter(|(_, l)| l.style != CODE_LINE) {
             let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
             let ranges = find_urls(&text);
+            let all = &self.anchors;
+            let on_line = all.get(all.partition_point(|x| x.line < n)..all.partition_point(|x| x.line <= n)).unwrap_or_default();
             for &(a, b) in &ranges {
                 let Some(url) = text.get(a..b) else { continue };
-                if !self.urls.iter().any(|u| u == url) {
-                    self.urls.push(url.to_string());
-                }
+                found.push(url.to_string());
                 // A link whose text is its URL is noted once.
-                if !self.anchors.iter().any(|x| x.line == n && x.start < b && a < x.end) {
-                    self.anchors.push(Anchor { line: n, start: a, end: b, to: Target::Url(url.to_string()) });
+                let overlaps = on_line.get(on_line.partition_point(|x| x.end <= a)).is_some_and(|x| x.start < b);
+                if !overlaps {
+                    bare.push(Anchor { line: n, start: a, end: b, to: Target::Url(url.to_string()) });
                 }
             }
             if !ranges.is_empty() {
                 line.spans = style_ranges(std::mem::take(&mut line.spans), &ranges);
             }
         }
+        for url in found {
+            self.url(&url);
+        }
+        self.anchors.extend(bare);
         // Lines dropped from the end take their links along.
         let lines = self.lines.len();
         self.anchors.retain(|a| a.line < lines);
@@ -357,20 +407,30 @@ fn find_urls(s: &str) -> Vec<(usize, usize)> {
     let mut out = Vec::new();
     let mut from = 0;
     while let Some(tail) = s.get(from..)
-        && let Some(i) = [tail.find("http://"), tail.find("https://")].into_iter().flatten().min()
+        && let Some(i) = tail.find("http")
     {
         let start = from + i;
+        let Some(here) = s.get(start..).filter(|u| u.starts_with("http://") || u.starts_with("https://")) else {
+            from = start + 4;
+            continue;
+        };
         let url_end = |c: char| c.is_whitespace() || matches!(c, '<' | '>' | '"' | '`');
-        let end = s.get(start..).and_then(|u| u.find(url_end)).map_or(s.len(), |e| start + e);
+        let end = here.find(url_end).map_or(s.len(), |e| start + e);
         let mut url = s.get(start..end).unwrap_or_default();
         // Trailing punctuation, and closing brackets without an opening one, aren't part of it.
+        // The brackets are counted once, and the counts kept as the end comes off.
+        let count = |c| url.bytes().filter(|&b| b == c).count();
+        let (mut parens, mut brackets) = ((count(b'('), count(b')')), (count(b'['), count(b']')));
         loop {
-            let unbalanced = |open, close| url.ends_with(close) && url.matches(open).count() < url.matches(close).count();
-            if url.ends_with(['.', ',', ';', ':', '!', '?', '\'', '*']) || unbalanced('(', ')') || unbalanced('[', ']') {
-                url = url.get(..url.len() - 1).unwrap_or_default();
+            if url.ends_with(['.', ',', ';', ':', '!', '?', '\'', '*']) {
+            } else if url.ends_with(')') && parens.0 < parens.1 {
+                parens.1 -= 1;
+            } else if url.ends_with(']') && brackets.0 < brackets.1 {
+                brackets.1 -= 1;
             } else {
                 break;
             }
+            url = url.get(..url.len() - 1).unwrap_or_default();
         }
         let host = url.split_once("://").map_or("", |(_, h)| h);
         if !host.is_empty() && !host.starts_with('/') {
@@ -386,16 +446,26 @@ fn find_urls(s: &str) -> Vec<(usize, usize)> {
 fn style_ranges(spans: Vec<Span<'static>>, ranges: &[(usize, usize)]) -> Vec<Span<'static>> {
     let mut out = Vec::new();
     let mut off = 0;
+    // The ranges are in order and don't overlap: the first one not yet behind this span.
+    let mut first = 0;
     for s in spans {
         let len = s.content.len();
         let keep = is_spoiler(s.style) || is_quote_link(s.style) || s.style.fg == Some(mark::LINK);
-        let mut cuts: Vec<usize> = ranges.iter().flat_map(|&(a, b)| [a, b]).filter(|&c| c > off && c < off + len).map(|c| c - off).collect();
+        while ranges.get(first).is_some_and(|&(_, b)| b <= off) {
+            first += 1;
+        }
+        let near = ranges.get(first..).unwrap_or_default();
+        let near = near.get(..near.partition_point(|&(a, _)| a < off + len)).unwrap_or_default();
+        let mut cuts: Vec<usize> = near.iter().flat_map(|&(a, b)| [a, b]).filter(|&c| c > off && c < off + len).map(|c| c - off).collect();
         cuts.sort_unstable();
         cuts.dedup();
-        let mut at = 0;
+        let (mut at, mut k) = (0, 0);
         for end in cuts.into_iter().chain([len]) {
             let piece = s.content.get(at..end).unwrap_or_default();
-            let inside = ranges.iter().any(|&(a, b)| off + at >= a && off + at < b);
+            while near.get(k).is_some_and(|&(_, b)| b <= off + at) {
+                k += 1;
+            }
+            let inside = near.get(k).is_some_and(|&(a, b)| off + at >= a && off + at < b);
             let style = if inside && !keep { s.style.patch(LINK) } else { s.style };
             out.push(Span::styled(piece.to_string(), style));
             at = end;
@@ -666,6 +736,34 @@ mod tests {
 
     fn link(board: Option<&str>, thread: Option<u64>, post: Option<u64>) -> Link {
         Link { board: board.map(String::from), thread, post }
+    }
+
+    #[test]
+    fn hostile_comments_parse_quickly_and_are_cut_off() {
+        let distinct: String = (0..150_000).map(|i| format!(">>{i} ")).collect();
+        let hostile = [
+            "<b>x".repeat(250_000),
+            "http://a ".repeat(120_000),
+            format!("http://a/{}", ")".repeat(1_000_000)),
+            ">>1 ".repeat(250_000),
+            distinct,
+            "<a href=\"https://x.invalid/\">https://x.invalid/</a> ".repeat(20_000),
+        ];
+        for html in &hostile {
+            let start = std::time::Instant::now();
+            let p = parse_html(html, Flavor::Fourchan);
+            let took = start.elapsed();
+            assert!(took < std::time::Duration::from_secs(1), "{took:?} for {}…", html.get(..20).unwrap_or_default());
+            assert!(p.lines.last().is_some_and(|l| text(l).ends_with(CUT_OFF)), "{}…", html.get(..20).unwrap_or_default());
+        }
+        let p = parse_plain(&"a".repeat(MAX_COMMENT + 1));
+        assert!(text(&p.lines[0]).ends_with(CUT_OFF));
+        // Cut on a character boundary.
+        let p = parse_html(&"é".repeat(MAX_COMMENT), Flavor::Fourchan);
+        assert!(text(&p.lines[0]).starts_with("éé"));
+        // Past the depth limit tags are ignored; what's under them is still read.
+        let deep = format!("{}deep{}", "<b>".repeat(MAX_DEPTH + 10), "</b>".repeat(MAX_DEPTH + 10));
+        assert_eq!(text(&parse_html(&deep, Flavor::Fourchan).lines[0]), "deep");
     }
 
     #[test]
