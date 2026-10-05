@@ -5,7 +5,7 @@ use super::*;
 /// The thread's files (`V`): thumbnails with their post number and type.
 pub(super) fn draw_gallery(f: &mut Frame, app: &mut App, area: Rect) {
     let t = theme();
-    let off = app.tab.thread.as_ref().is_some_and(|t| !app.images_on(app.tab.site, &t.board));
+    let off = !app.thread_images_on();
     let Some(g) = &mut app.tab.gallery else { return };
     let (card_w, card_h) = (THUMB.width + 4, THUMB.height + 1);
     let (cell_w, cell_h) = (card_w + 2, card_h + 1);

@@ -4,7 +4,7 @@
 use super::*;
 
 pub(super) fn draw_thread(f: &mut Frame, app: &mut App, area: Rect) {
-    let off = app.tab.thread.as_ref().is_some_and(|t| !app.images_on(app.tab.site, &t.board));
+    let off = !app.thread_images_on();
     let Some(t) = &mut app.tab.thread else {
         if app.tab.loading.is_some() {
             return;

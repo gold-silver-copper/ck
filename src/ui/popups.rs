@@ -337,6 +337,7 @@ fn help_sections(keys: &KeyMap) -> Vec<(&'static str, Vec<(String, &'static str)
                 (pair(Action::Spoiler, Action::AllSpoilers), "spoilers: post / all"),
                 (pair(Action::Expand, Action::Conversation), "expand / conversation"),
                 (k(Action::Poster), "the poster's posts (by ID)"),
+                (k(Action::Media), "posts with files / no images"),
                 (pair(Action::View, Action::Gallery), "view images / gallery"),
                 (pair(Action::OpenFile, Action::ImageSearch), "open file / image search"),
                 (k(Action::Links), "the post's links and files"),

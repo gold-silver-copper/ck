@@ -6,7 +6,7 @@ use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::{Position, Rect};
 use ratatui::widgets::ListState;
 
-use super::{App, Hit, Part, Popup, SiteRow, TabPopup, View, Viewer, list_move};
+use super::{App, Hit, Media, Part, Popup, SiteRow, TabPopup, View, Viewer, list_move};
 use crate::download;
 use crate::keys::{Action, Scope};
 use crate::model::{Link, Target};
@@ -317,6 +317,14 @@ impl App {
         } else if t.backlinks[t.selected].len() + p.quotes.iter().filter(|q| t.index.contains_key(q)).count() > 0 {
             items.push(act(A::Conversation, "its conversation alone"));
         }
+        items.push(act(
+            A::Media,
+            match t.media.next() {
+                Media::Files => "only the posts with files",
+                Media::NoImages => "all posts, images hidden",
+                Media::All => "all posts and images again",
+            },
+        ));
         items.push(act(A::Watch, if self.menu_watching(t.no) { "stop watching the thread" } else { "watch the thread" }));
         items.push(act(A::Follow, "follow the thread as a general"));
         if t.posts.iter().any(|p| !p.files.is_empty()) {

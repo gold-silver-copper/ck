@@ -69,7 +69,7 @@ pub use search::Search;
 #[cfg(test)]
 pub use search::SavedSearch;
 pub use saving::Downloads;
-pub use thread_view::{LineCache, Part, Reveal, Spot, ThreadLayout, ThreadView, parts};
+pub use thread_view::{LineCache, Media, Part, Reveal, Spot, ThreadLayout, ThreadView, parts};
 #[cfg(test)]
 pub use thread_view::{CONVERSATION_MAX, conversation_of};
 pub use sites::{Adding, MySites, origin as site_origin};
@@ -1254,6 +1254,27 @@ impl App {
             }
             Err(e) => self.info(e),
         }
+    }
+
+    /// `M`: all posts, only those with files, all with their images hidden, and round again.
+    fn cycle_media(&mut self) {
+        let Some(t) = self.tab.thread.as_mut().filter(|_| self.tab.view == View::Thread && self.tab.gallery.is_none()) else { return };
+        let next = t.media.next();
+        let n = t.set_media(next);
+        let talking = t.conversation.is_some();
+        let again = self.keys.key(Action::Media);
+        self.info(match next {
+            Media::Files if talking => format!("Only posts with files, once you leave the conversation; {again} again hides images"),
+            Media::Files => format!("{} with files; {again} again shows all, images hidden", plural_posts(n)),
+            Media::NoImages => format!("All posts, images hidden (none are asked for); {again} again shows them"),
+            Media::All => "All posts and images".into(),
+        });
+    }
+
+    /// Whether the open thread's images are shown: its board's setting, unless `M` hides
+    /// them here.
+    pub fn thread_images_on(&self) -> bool {
+        self.tab.thread.as_ref().is_none_or(|t| t.media != Media::NoImages && self.images_on(self.tab.site, &t.board))
     }
 
     /// Keep a copy of a thread's posts in the data directory (a watched thread's, or with

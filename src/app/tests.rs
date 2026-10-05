@@ -2999,3 +2999,65 @@ fn watched_threads_know_their_page_once_a_round_per_board() {
     let archive = crate::backend::build(&toml::from_str("name = \"f\"\nkind = \"foolfuuka\"\nurl = \"https://127.0.0.1:3\"").unwrap());
     assert_eq!(archive.thread_pages("a").unwrap(), None);
 }
+
+#[test]
+fn m_shows_posts_with_files_then_hides_images() {
+    let mut app = local_app();
+    app.goto_str("a/x/1");
+    // 1 (the OP, no file), 2 with a file quoting 3, 3 without, 4 with.
+    let mut posts = posts_saying(&[(1, "op"), (3, "three")]);
+    posts.insert(1, Post { quotes: vec![3], ..with_file(2, None) });
+    posts.push(with_file(4, None));
+    app.handle(answer(app.tab.req.unwrap(), App::thread_arrived, Ok(posts.clone())));
+    let shown = |app: &App| {
+        let t = app.tab.thread.as_ref().unwrap();
+        t.entries.iter().map(|e| t.posts[e.post].no).collect::<Vec<_>>()
+    };
+    let media = |app: &App| app.tab.thread.as_ref().unwrap().media;
+    // In the menu, then by key: the OP and the posts with files.
+    let t = app.tab.thread.as_mut().unwrap();
+    t.select(2);
+    t.set_search("t".into());
+    run_menu_row(&mut app, "only the posts with files");
+    assert_eq!((media(&app), shown(&app)), (Media::Files, vec![1, 2, 4]));
+    assert_eq!(app.status.as_ref().unwrap().text, "3 posts with files; M again shows all, images hidden");
+    // The selected post had none: the next one that has is selected. Search finds what's
+    // shown (not "three").
+    let t = app.tab.thread.as_ref().unwrap();
+    assert_eq!((t.current().unwrap().no, t.matches.clone()), (4, vec![1, 3]));
+    app.tab.thread.as_mut().unwrap().set_search(String::new());
+    // A refresh keeps it, with what it brings.
+    posts.push(with_file(5, None));
+    posts.push(posts_saying(&[(6, "six")]).remove(0));
+    app.refreshed(app.key("x", 1), Ok(posts.clone()));
+    assert_eq!(shown(&app), [1, 2, 4, 5]);
+    // A quote to a post without files: everything again, there.
+    let t = app.tab.thread.as_mut().unwrap();
+    t.select(1);
+    assert!(t.jump_to(3));
+    assert_eq!((media(&app), shown(&app).len(), app.tab.thread.as_ref().unwrap().current().unwrap().no), (Media::All, 6, 3));
+    // M twice: images hidden, on every post; the viewer isn't opened for them.
+    app.act(Action::Media);
+    app.act(Action::Media);
+    assert_eq!((media(&app), shown(&app).len()), (Media::NoImages, 6));
+    assert!(!app.thread_images_on() && app.images_on(app.tab.site, "x"));
+    app.images = crate::images::Images::offline();
+    app.tab.thread.as_mut().unwrap().select(1);
+    app.act(Action::View);
+    assert!(app.tab.viewer().is_none());
+    assert!(app.status.as_ref().unwrap().text.starts_with("Images are hidden in this thread (M shows them)"));
+    app.act(Action::Media);
+    assert!(media(&app) == Media::All && app.thread_images_on());
+    // In a conversation, its posts whatever they have; leaving it, those with files.
+    app.tab.thread.as_mut().unwrap().select(2);
+    app.act(Action::Conversation);
+    app.act(Action::Media);
+    assert_eq!(shown(&app), [2, 3]);
+    assert!(app.status.as_ref().unwrap().text.starts_with("Only posts with files, once you leave the conversation"));
+    app.on_key(KeyEvent::from(KeyCode::Esc));
+    assert_eq!(shown(&app), [1, 2, 4, 5]);
+    // Another thread starts with everything.
+    app.goto_str("a/x/7");
+    app.handle(answer(app.tab.req.unwrap(), App::thread_arrived, Ok(nos(&[7, 8]))));
+    assert_eq!((media(&app), shown(&app)), (Media::All, vec![7, 8]));
+}

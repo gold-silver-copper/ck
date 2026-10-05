@@ -69,6 +69,35 @@ pub fn conversation_of(posts: &[Post], index: &HashMap<u64, usize>, backlinks: &
     (depth, capped)
 }
 
+/// Which posts a thread shows by their files (`M`, in turn): all of them, only those with
+/// files (and the OP, which is the thread), or all of them with their images hidden.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Media {
+    #[default]
+    All,
+    Files,
+    NoImages,
+}
+
+impl Media {
+    pub fn next(self) -> Self {
+        match self {
+            Media::All => Media::Files,
+            Media::Files => Media::NoImages,
+            Media::NoImages => Media::All,
+        }
+    }
+
+    /// The top bar's chip.
+    pub fn label(self) -> Option<&'static str> {
+        match self {
+            Media::All => None,
+            Media::Files => Some("with files"),
+            Media::NoImages => Some("images hidden"),
+        }
+    }
+}
+
 /// A refresh with fewer posts than 1/`SHRUNK` of those shown is more likely a broken answer
 /// (cut short, or a page the site sent while in trouble) than moderators deleting most of
 /// the thread: it's shown as it came, and the posts it leaves out aren't kept as deleted.
@@ -166,6 +195,8 @@ pub struct ThreadView {
     pub shrinks: u32,
     /// How many posts each poster ID has in the thread.
     ids: HashMap<String, usize>,
+    /// Only the posts with files, or images hidden (`M`).
+    pub media: Media,
 }
 
 /// How the selection comes into view.
@@ -383,9 +414,24 @@ impl ThreadView {
         }
     }
 
-    /// Whether post `i` is shown: always, unless a conversation is, without it.
+    /// Whether post `i` is shown: a conversation's posts while one is (all of them, files or
+    /// not); else all, or with `Media::Files` the OP and the posts with files.
     pub fn in_view(&self, i: usize) -> bool {
-        self.conversation.as_ref().is_none_or(|c| c.depth.contains_key(&i))
+        match &self.conversation {
+            Some(c) => c.depth.contains_key(&i),
+            None => self.media != Media::Files || i == 0 || self.posts.get(i).is_some_and(|p| !p.files.is_empty()),
+        }
+    }
+
+    /// Show the posts `media` says, keeping the selected post if it's still shown (else the
+    /// next one that is). How many posts are shown.
+    pub fn set_media(&mut self, media: Media) -> usize {
+        self.media = media;
+        self.focus = None;
+        self.rebuild_entries();
+        self.set_search(self.search.clone());
+        self.reveal = Some(Reveal::Jump);
+        self.entries.iter().filter(|e| e.path.len() == 1).count()
     }
 
     /// `c`: show the selected post's conversation alone.
@@ -546,7 +592,7 @@ impl ThreadView {
         }
         let shown: Vec<(usize, i32)> = match &self.conversation {
             Some(c) => c.depth.iter().map(|(&i, &d)| (i, d)).collect(),
-            None => (0..self.posts.len()).map(|i| (i, 0)).collect(),
+            None => (0..self.posts.len()).filter(|&i| self.in_view(i)).map(|i| (i, 0)).collect(),
         };
         let mut out = Vec::with_capacity(shown.len());
         for (i, d) in shown {
@@ -560,12 +606,13 @@ impl ThreadView {
         self.layout = None;
         match path.and_then(|p| self.entries.iter().position(|e| e.path == p)) {
             Some(e) => self.set_cursor(e),
-            // The selected post, if it's still shown.
-            None => match self.entries.iter().position(|e| e.path.len() == 1 && e.post == self.selected) {
+            // The selected post, if it's still shown; else the next one that is (or the last).
+            None => match self.entries.iter().position(|e| e.path.len() == 1 && e.post >= self.selected) {
                 Some(e) => self.set_cursor(e),
+                None if !self.entries.is_empty() => self.set_cursor(self.entries.len() - 1),
                 None => {
                     self.cursor = 0;
-                    self.selected = self.entries.first().map_or(0, |e| e.post);
+                    self.selected = 0;
                 }
             },
         }
@@ -643,6 +690,12 @@ impl ThreadView {
         let i = i.min(self.posts.len().saturating_sub(1));
         if !self.in_view(i) {
             self.leave_conversation();
+        }
+        // A post without files, with only those shown: all of them again.
+        if !self.in_view(i) {
+            self.media = Media::All;
+            self.rebuild_entries();
+            self.set_search(self.search.clone());
         }
         let e = self.entries.iter().position(|e| e.path.len() == 1 && e.post == i).unwrap_or(0);
         self.set_cursor(e.min(self.entries.len().saturating_sub(1)));

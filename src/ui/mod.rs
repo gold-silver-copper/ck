@@ -411,6 +411,10 @@ fn location(app: &App) -> (Vec<String>, Vec<Span<'static>>) {
     if let Some((p, of)) = last_page.filter(|(p, of)| p >= of) {
         spans.extend([chip(format!("last page {p}/{of}"), t.background, t.warning), Span::raw("  ")]);
     }
+    // Only the posts with files, or images hidden (`M`).
+    if let Some(label) = app.tab.thread.as_ref().filter(|_| app.tab.view == View::Thread).and_then(|th| th.media.label()) {
+        spans.extend([chip(label, t.on_primary_container, t.primary_container), Span::raw("  ")]);
+    }
     // A saved copy, read offline; or the last copy kept, shown while it loads.
     let copy = match app.tab.view {
         View::Thread => app.tab.copy.map(|c| match c {

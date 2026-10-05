@@ -95,6 +95,7 @@ actions! {
     Expand, "expand", Some(Key::char('e')), &[Scope::Thread], "show / hide the post's replies under it";
     Conversation, "conversation", Some(Key::char('c')), &[Scope::Thread], "the post's conversation alone: what it replies to, and its replies";
     Poster, "poster", Some(Key::char('I')), &[Scope::Thread], "the post's poster's posts alone (by poster ID)";
+    Media, "media", Some(Key::char('M')), &[Scope::Thread], "show all posts, only those with files, or all with images hidden (in turn)";
     Mine, "mine", Some(Key::char('m')), &[Scope::Thread], "mark the post as yours (notified of replies)";
     NewTab, "new_tab", Some(Key::char('T')), &[Scope::Catalog, Scope::Thread, Scope::Saved], "open the thread (or link) in a new tab";
     Favorite, "favorite", Some(Key::char('*')), &[Scope::Lists, Scope::Catalog], "favorite board: on / off";

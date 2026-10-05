@@ -353,8 +353,10 @@ impl App {
                 tv.selected = old.current().and_then(|p| tv.index.get(&p.no)).copied().unwrap_or(0);
                 // Expanded replies, the selected entry and the one at the top stay put.
                 tv.expanded.clone_from(&old.expanded);
-                // A conversation stays, with any new replies that belong in it.
+                // A conversation stays, with any new replies that belong in it, and so do
+                // the posts shown by their files.
                 tv.conversation.clone_from(&old.conversation);
+                tv.media = old.media;
                 let cursor_path = old.entries.get(old.entry()).map(|e| e.path.clone());
                 tv.rebuild_entries();
                 if let Some(e) = cursor_path.and_then(|p| tv.entries.iter().position(|e| e.path == p)) {
