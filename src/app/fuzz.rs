@@ -1152,8 +1152,13 @@ struct Before {
     reading: Option<(usize, String, u64, usize, bool, u64)>,
     /// The open tab's thread as fetched (not a copy): its board and number, its posts'
     /// numbers, and how many refreshes of it came back too small to keep what they left out.
-    live: Option<(usize, String, u64, Vec<u64>, u32)>,
+    /// (Its tab by place and the number of tabs: closing one moves the others.)
+    live: Option<Live>,
 }
+
+/// The open tab's place and the number of tabs, its thread's board and number, its posts'
+/// numbers, and its shrunk refreshes.
+type Live = ((usize, usize), String, u64, Vec<u64>, u32);
 
 impl Before {
     fn of(app: &App, gate: &Gate) -> Self {
@@ -1175,7 +1180,7 @@ impl Before {
             .thread
             .as_ref()
             .filter(|_| app.tab.copy.is_none())
-            .map(|t| (app.active, t.board.clone(), t.no, t.posts.iter().map(|p| p.no).collect(), t.shrinks));
+            .map(|t| ((app.active, app.tabs.len()), t.board.clone(), t.no, t.posts.iter().map(|p| p.no).collect(), t.shrinks));
         Before { saved, in_saved_view: app.tab.view == View::Saved, offline_dead, log: gate.log_len(), filters: app.filter_cfgs.clone(), recursive_hiding: app.recursive_hiding, reading, live }
     }
 }
@@ -1279,7 +1284,7 @@ fn check_deleted(app: &App, before: &Before) {
         panic!("deleted posts {:?} aren't (reply) posts of the thread", t.deleted);
     }
     let Some((tab, board, no, nos, shrinks)) = &before.live else { return };
-    if app.active != *tab || app.tab.copy.is_some() || t.board != *board || t.no != *no || t.shrinks != *shrinks {
+    if (app.active, app.tabs.len()) != *tab || app.tab.copy.is_some() || t.board != *board || t.no != *no || t.shrinks != *shrinks {
         return;
     }
     if let Some(lost) = nos.iter().find(|n| !t.index.contains_key(n)) {
@@ -1383,4 +1388,25 @@ fn fuzz_app_long() {
     let steps = std::env::var("FUZZ_STEPS").ok().and_then(|v| v.parse().ok()).unwrap_or(2_000);
     let shrinking = std::env::var("FUZZ_SHRINK").map_or(true, |v| v != "0");
     fuzz::run("fuzz_app", true, 0, 200, |seed| episode(seed, steps, shrinking));
+}
+
+/// Found by fuzzing: two tabs on one thread, the first with more posts; closing it brings
+/// the second to its place, which isn't a refresh that lost posts.
+#[test]
+fn closing_a_tab_isnt_a_refresh() {
+    let mut app = crate::test_fixtures::local_app();
+    let open = |app: &mut App, n: u64| {
+        app.tab.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
+        app.tab.view = View::Thread;
+        app.set_thread(crate::test_fixtures::posts_upto(n));
+    };
+    open(&mut app, 5);
+    app.tabs.push(Tab::new(0, Instant::now()));
+    app.switch_tab(1);
+    open(&mut app, 2);
+    app.switch_tab(0);
+    let before = Before::of(&app, &Gate::default());
+    app.close_tab();
+    assert_eq!((app.active, app.tab.thread.as_ref().unwrap().posts.len()), (0, 2));
+    check_deleted(&app, &before);
 }
