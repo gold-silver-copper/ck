@@ -3030,6 +3030,12 @@ fn watched_threads_know_their_page_once_a_round_per_board() {
     app.refresh_in_background(key(30364));
     settle_until(&mut app, |a| a.refreshing.is_empty() && a.pages_asking.is_empty());
     assert_eq!(pages(&asked), 2);
+    // Nor is what was known shown for long after.
+    app.background();
+    assert!(app.thread_page(&key(30364)).is_some());
+    app.clock = Clock { instant: Some(t0 + Duration::from_secs(61 + 1201)), ..Default::default() };
+    app.background();
+    assert_eq!(app.thread_page(&key(30364)), None);
     crate::http::serve_test_host("pages.invalid", None);
 
     // An engine that can't tell says so without asking.

@@ -474,6 +474,11 @@ impl App {
         // A saved copy open isn't refreshed (a watched thread still is, below, unless it's dead).
         let open = self.tab.thread.as_ref().filter(|_| self.tab.view == View::Thread && self.tab.saved().is_none()).map(|t| self.key(&t.board, t.no));
         let now = self.clock.instant();
+        // Pages of a board none of whose watched threads has been refreshed for two of the
+        // longest rounds (all unwatched, say) are too old to show.
+        let old = self.refresh_watched.max(QUIET_MAX).saturating_mul(2);
+        let asked = &self.pages_asked;
+        self.board_pages.retain(|at, _| asked.get(at).is_some_and(|t| now.saturating_duration_since(*t) <= old));
         // Fetched for any tab (or as a watched thread) counts too.
         let fetched_since = |key: &ThreadKey, every: Duration| {
             self.watched_checked.get(key).is_none_or(|t| now.saturating_duration_since(*t) >= every)
