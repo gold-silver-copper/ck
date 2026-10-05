@@ -809,6 +809,25 @@ impl App {
         });
     }
 
+    /// SIGTERM, SIGHUP (the terminal went away) and SIGQUIT quit as `q` does, so what ck
+    /// has is saved and the terminal restored. A second one, if ck is stuck, ends it at once.
+    #[cfg(unix)]
+    pub fn quit_on_signals(&self) -> std::io::Result<()> {
+        use signal_hook::consts::{SIGHUP, SIGQUIT, SIGTERM};
+        let mut signals = signal_hook::iterator::Signals::new([SIGTERM, SIGHUP, SIGQUIT])?;
+        let later = self.later();
+        std::thread::spawn(move || {
+            let mut forever = signals.forever();
+            if forever.next().is_some() {
+                later.run(|app| app.quit = true);
+            }
+            if let Some(again) = forever.next() {
+                let _ = signal_hook::low_level::emulate_default_handler(again);
+            }
+        });
+        Ok(())
+    }
+
     fn handle(&mut self, msg: Msg) {
         // A response to another request: another tab's is handled there, the rest are stale
         // (but a finished board list is worth keeping anyway).
