@@ -1,5 +1,6 @@
 //! What a site runs, worked out from its APIs: adding a site from a link to one of its
 //! pages. Each engine is asked once, through the rate limiter like any request.
+#![deny(clippy::indexing_slicing, clippy::arithmetic_side_effects, clippy::cast_possible_truncation)]
 
 use anyhow::{Result, bail};
 use serde_json::Value;
@@ -89,14 +90,14 @@ pub fn boardlist(html: &str, host: &str) -> Vec<BoardConfig> {
 fn attr(tag: &str, name: &str) -> Option<String> {
     let key = format!("{name}=\"");
     let mut from = 0;
-    while let Some(i) = tag.get(from..)?.find(&key).map(|i| i + from) {
+    while let Some(i) = tag.get(from..)?.find(&key).map(|i| i.saturating_add(from)) {
         // Not the end of another attribute's name (`data-title`); right after another
         // attribute's quote counts (8kun writes `class="a"src="b"`).
         if tag.get(..i)?.ends_with(|c: char| c.is_whitespace() || c == '"' || c == '\'') {
-            let value = tag.get(i + key.len()..)?;
+            let value = tag.get(i.saturating_add(key.len())..)?;
             return Some(crate::markup::decode(value.get(..value.find('"')?)?));
         }
-        from = i + key.len();
+        from = i.saturating_add(key.len());
     }
     None
 }
@@ -115,7 +116,7 @@ pub fn files_from_page(html: &str, board: &str, host: &str) -> (Option<Option<St
         let flat = if dir == "src" { "/file_store/".to_string() } else { format!("/file_store/{dir}/") };
         let (prefix, name) = [format!("/{board}/{dir}/"), flat].iter().find_map(|m| {
             let at = url.rfind(m.as_str())?;
-            Some((url.get(..at)?.to_string(), url.get(at + m.len()..)?.to_string()))
+            Some((url.get(..at)?.to_string(), url.get(at.saturating_add(m.len())..)?.to_string()))
         })?;
         if name.contains('/') {
             return None;

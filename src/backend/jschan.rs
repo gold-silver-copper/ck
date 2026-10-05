@@ -1,9 +1,10 @@
 //! jschan engine JSON API (zzzchan, ...).
+#![deny(clippy::indexing_slicing, clippy::arithmetic_side_effects, clippy::cast_possible_truncation)]
 
 use anyhow::Result;
 use serde_json::Value;
 
-use super::{Backend, Partial};
+use super::{Backend, Partial, as_u32};
 use crate::http::{as_bool, as_i64, as_str, as_u64, encode_segment as enc, get_json, items};
 use crate::markup::{self, Flavor};
 use crate::model::{Attachment, Board, Post};
@@ -35,8 +36,8 @@ pub fn parse_boards(v: &Value) -> (Vec<Board>, bool) {
         .filter_map(|b| {
             Some(Board {
                 uri: as_str(&b["_id"])?,
-                title: as_str(&b["settings"]["name"]).unwrap_or_default(),
-                nsfw: b["settings"]["sfw"].as_bool().map(|sfw| !sfw),
+                title: b.get("settings").and_then(|s| as_str(&s["name"])).unwrap_or_default(),
+                nsfw: b.get("settings").and_then(|s| s["sfw"].as_bool()).map(|sfw| !sfw),
             })
         })
         .collect();
@@ -76,8 +77,8 @@ pub fn post(base: &str, v: &Value) -> Post {
         subject: as_str(&v["subject"]),
         time,
         files,
-        replies: as_u64(&v["replyposts"]).map(|n| n as u32),
-        images: as_u64(&v["replyfiles"]).map(|n| n as u32),
+        replies: as_u32(&v["replyposts"]),
+        images: as_u32(&v["replyfiles"]),
         sticky: as_bool(&v["sticky"]),
         board: as_str(&v["board"]),
         locked: as_bool(&v["locked"]),
@@ -100,8 +101,8 @@ fn attachment(base: &str, f: &Value) -> Option<Attachment> {
         url: format!("{base}/file/{filename}"),
         thumb,
         spoiler,
-        width: as_u64(&f["geometry"]["width"]).map(|n| n as u32),
-        height: as_u64(&f["geometry"]["height"]).map(|n| n as u32),
+        width: f.get("geometry").and_then(|g| as_u32(&g["width"])),
+        height: f.get("geometry").and_then(|g| as_u32(&g["height"])),
         size: as_u64(&f["size"]),
         md5: None,
     })
@@ -117,7 +118,7 @@ impl Backend for Jschan {
             let v = get_json(&format!("{}/boards.json?local_first=true&page={page}", self.base))?;
             let (boards, done) = parse_boards(&v);
             out.extend(boards);
-            if done || page >= as_u64(&v["maxPage"]).unwrap_or(1) {
+            if done || page >= v.get("maxPage").and_then(as_u64).unwrap_or(1) {
                 break;
             }
             partial(&out);

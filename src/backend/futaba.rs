@@ -1,9 +1,10 @@
 //! 4chan's JSON API, and the vichan family that clones it.
+#![deny(clippy::indexing_slicing, clippy::arithmetic_side_effects, clippy::cast_possible_truncation)]
 
 use anyhow::{Result, bail};
 use serde_json::Value;
 
-use super::{Backend, Partial};
+use super::{Backend, Partial, as_u32};
 use crate::http::{as_bool, as_i64, as_str, as_u64, encode_segment as enc, get_json, items};
 use crate::markup;
 use crate::model::{Attachment, Board, Post};
@@ -83,8 +84,8 @@ impl Futaba {
             url: format!("{}{path}", self.media),
             thumb: as_str(&f["thumb_path"]).filter(|_| !spoiler).map(|t| format!("{}{t}", self.media)),
             spoiler,
-            width: as_u64(&f["w"]).map(|n| n as u32),
-            height: as_u64(&f["h"]).map(|n| n as u32),
+            width: as_u32(&f["w"]),
+            height: as_u32(&f["h"]),
             size: as_u64(&f["fsize"]),
             md5: as_str(&f["md5"]),
         })
@@ -105,8 +106,8 @@ impl Futaba {
             url: self.file_url(board, &tim, &ext, flat),
             thumb: if spoiler { None } else { self.thumb_url(board, &tim, &ext, flat) },
             spoiler,
-            width: as_u64(&v["w"]).map(|n| n as u32),
-            height: as_u64(&v["h"]).map(|n| n as u32),
+            width: as_u32(&v["w"]),
+            height: as_u32(&v["h"]),
             size: as_u64(&v["fsize"]),
             md5: as_str(&v["md5"]),
         })
@@ -136,8 +137,8 @@ impl Futaba {
             subject: as_str(&v["sub"]).map(|s| markup::decode(&s)),
             time: as_i64(&v["time"]).unwrap_or(0),
             files,
-            replies: as_u64(&v["replies"]).map(|n| n as u32),
-            images: as_u64(&v["images"]).map(|n| n as u32),
+            replies: as_u32(&v["replies"]),
+            images: as_u32(&v["images"]),
             sticky: as_bool(&v["sticky"]),
             board: own_board,
             locked: as_bool(&v["closed"]) || as_bool(&v["locked"]),

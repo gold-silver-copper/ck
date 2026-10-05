@@ -1,5 +1,6 @@
 //! Where a URL or a short form like `4chan/g/123#456` leads: a site, and a board, thread
 //! and post on it.
+#![deny(clippy::indexing_slicing, clippy::arithmetic_side_effects, clippy::cast_possible_truncation)]
 
 use anyhow::{Result, bail};
 
@@ -72,7 +73,7 @@ pub fn resolve(input: &str, sites: &[SiteInfo], here: (usize, Option<&str>)) -> 
     if let Some(i) = parts.first().and_then(|first| sites.iter().position(|s| s.name.eq_ignore_ascii_case(first))) {
         site = i;
         parts.remove(0);
-    } else if parts.len() == 1 && let Some(n) = number(&parts[0]) {
+    } else if let [only] = parts.as_slice() && let Some(n) = number(only) {
         // A bare number: a thread on the current board.
         let Some(board) = here.1 else { bail!("Open a board first, or type BOARD/{n}") };
         return Ok(Target { site, board: Some(board.to_string()), thread: Some(n), post });
@@ -99,9 +100,10 @@ pub fn parse_path(path: &str, fragment: &str) -> (Option<String>, Option<u64>, O
     let mut thread = None;
     let mut post = number(fragment.trim_start_matches(['p', 'q']));
     for w in parts.windows(2) {
-        match w[0].as_str() {
-            "thread" | "res" if thread.is_none() => thread = number(&w[1]),
-            "post" => post = number(&w[1]),
+        let [key, value] = w else { continue };
+        match key.as_str() {
+            "thread" | "res" if thread.is_none() => thread = number(value),
+            "post" => post = number(value),
             _ => {}
         }
     }
@@ -116,20 +118,19 @@ fn number(s: &str) -> Option<u64> {
 
 /// Undo percent-encoding (`%CE%BB` is λ).
 pub(crate) fn decode(s: &str) -> String {
-    let b = s.as_bytes();
-    let mut out = Vec::with_capacity(b.len());
-    let mut i = 0;
-    while i < b.len() {
-        let hex = |c: u8| (c as char).to_digit(16);
-        if b[i] == b'%'
-            && i + 2 < b.len()
-            && let (Some(h), Some(l)) = (hex(b[i + 1]), hex(b[i + 2]))
+    let mut rest = s.as_bytes();
+    let mut out = Vec::with_capacity(rest.len());
+    let hex = |c: u8| (c as char).to_digit(16).and_then(|d| u8::try_from(d).ok());
+    while let Some((&c, tail)) = rest.split_first() {
+        if c == b'%'
+            && let [h, l, after @ ..] = tail
+            && let (Some(h), Some(l)) = (hex(*h), hex(*l))
         {
-            out.push((h * 16 + l) as u8);
-            i += 3;
+            out.push((h << 4) | l);
+            rest = after;
         } else {
-            out.push(b[i]);
-            i += 1;
+            out.push(c);
+            rest = tail;
         }
     }
     String::from_utf8_lossy(&out).into_owned()
