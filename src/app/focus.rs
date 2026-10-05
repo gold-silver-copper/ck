@@ -234,8 +234,14 @@ impl App {
     }
 
     /// Whether thread `no` on the tab's board is watched.
-    fn menu_watching(&self, no: u64) -> bool {
+    /// Whether thread `no` on the tab's board is watched.
+    pub(crate) fn menu_watching(&self, no: u64) -> bool {
         self.tab.board.as_ref().is_some_and(|b| self.store.watched(&self.key(&b.uri, no)).is_some())
+    }
+
+    /// Whether `u` has somewhere to go back to: an earlier post, or the thread before.
+    pub(crate) fn can_jump_back(&self) -> bool {
+        self.tab.thread.as_ref().is_some_and(|t| !t.jumps.is_empty()) || !self.tab.trail.is_empty()
     }
 
     /// The selected post in a thread, and what's focused in it. Returns the menu's title.
@@ -310,7 +316,7 @@ impl App {
             items.push(act(A::Gallery, "all the thread's files"));
             items.push(act(A::DownloadThread, "save all the thread's files…"));
         }
-        if !t.jumps.is_empty() || !self.tab.trail.is_empty() {
+        if self.can_jump_back() {
             items.push(act(A::JumpBack, "go back"));
         }
         if (0..t.posts.len()).any(|i| t.is_new(i)) {

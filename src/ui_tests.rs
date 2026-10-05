@@ -1410,3 +1410,22 @@ fn huge_counts_from_the_data_files_dont_overflow() {
     a.tab.view = View::Watched;
     render(&mut a);
 }
+
+#[test]
+fn footer_offers_what_the_selected_post_has() {
+    let footer = |a: &mut App| render(a).0.lines().last().unwrap().to_string();
+    let mut a = thread_app(false);
+    // The OP has a file: v views it.
+    a.tab.thread.as_mut().unwrap().selected = 0;
+    let f = footer(&mut a);
+    assert!(f.contains("v view image") && !f.contains("enter quote"), "{f}");
+    // A reply quoting the OP, without files: enter follows the quote.
+    let t = a.tab.thread.as_mut().unwrap();
+    let i = t.posts.iter().position(|p| p.files.is_empty() && !p.quotes.is_empty()).unwrap();
+    t.select(i);
+    let f = footer(&mut a);
+    assert!(f.contains("enter quote") && !f.contains("view image"), "{f}");
+    // The catalog: v views the OP's image.
+    let mut a = catalog_app(false);
+    assert!(footer(&mut a).contains("v view image"));
+}

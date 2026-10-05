@@ -31,4 +31,4 @@ expression: snapshot(&mut c)
 
 
 
- enter open   f hints   . more   / filter   v view   w watch   s sort   c layout   ? help
+ enter open   v view image   w watch   / filter   . more   f hints   s sort   c layout   ? help
