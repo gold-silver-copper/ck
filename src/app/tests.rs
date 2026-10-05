@@ -2666,3 +2666,62 @@ fn deleted_posts_are_never_new_or_counted() {
     app.set_thread(nos(&[1, 2, 3]));
     assert_eq!(app.store.history[0].last_seen, seen);
 }
+
+#[test]
+fn replies_to_hidden_posts_hide_with_them() {
+    use crate::filter::Hidden;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    let cfg = "[[filter]]\npattern = \"recurse\"\nlabel = \"deep\"\nrecursive = true\n";
+    std::fs::write(&path, cfg).unwrap();
+    let mut app = app_with(&format!("{cfg}[[site]]\nname = \"a\"\nkind = \"vichan\"\nurl = \"http://127.0.0.1:3\"\nboards = [\"x\"]\n"));
+    app.config_path = Some(path);
+    app.tab.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
+    app.tab.view = View::Thread;
+    let quoting = |no, q: &[u64], text: &str| Post { no, quotes: q.to_vec(), body: vec![Line::from(text.to_string())], ..Default::default() };
+    // 3 replies to 2, 4 to 3, 5 to the OP; 7 replies to 6, which a recursive filter hides.
+    app.set_thread(vec![
+        quoting(1, &[], "op"),
+        quoting(2, &[1], "two"),
+        quoting(3, &[2], "three"),
+        quoting(4, &[3, 1], "four"),
+        quoting(5, &[1], "five"),
+        quoting(6, &[], "recurse"),
+        quoting(7, &[6], "seven"),
+    ]);
+    let hidden = |app: &App| app.tab.thread.as_ref().unwrap().marks.iter().map(|m| m.hidden.clone()).collect::<Vec<_>>();
+    let r = |no| Some(Hidden::Reply(no));
+    let deep = Some(Hidden::ByFilter("deep".into()));
+    assert_eq!(hidden(&app), [None, None, None, None, None, deep.clone(), r(6)]);
+    // Hidden by hand, without the setting: alone.
+    app.tab.thread.as_mut().unwrap().selected = 1;
+    app.act(Action::Hide);
+    assert_eq!(hidden(&app), [None, Some(Hidden::ByHand), None, None, None, deep.clone(), r(6)]);
+    // With it (Settings, saved in the config): its replies, and theirs, collapse too.
+    app.open_settings();
+    app.settings_list.state.select(settings::position("Hidden replies"));
+    app.enter();
+    assert!(app.recursive_hiding && config_text(&app).contains("recursive_hiding = true"));
+    app.tab.view = View::Thread;
+    assert_eq!(hidden(&app), [None, Some(Hidden::ByHand), r(2), r(3), None, deep.clone(), r(6)]);
+    let screen: String = draw_at(&mut app, 100, 40).content.iter().map(|c| c.symbol()).collect();
+    assert!(screen.contains("No.3  hidden: a reply to hidden No.2"), "{screen}");
+    // H on a reply says where it comes from; unhiding the post it replies to shows it.
+    app.tab.thread.as_mut().unwrap().selected = 3;
+    app.act(Action::Hide);
+    assert!(app.status.as_ref().unwrap().text.contains("reply to No.3"), "{:?}", app.status);
+    app.tab.thread.as_mut().unwrap().selected = 1;
+    app.act(Action::Hide);
+    assert_eq!(hidden(&app), [None, None, None, None, None, deep, r(6)]);
+    // A refresh hides new replies too.
+    app.tab.thread.as_mut().unwrap().selected = 1;
+    app.act(Action::Hide);
+    let mut more = app.tab.thread.as_ref().unwrap().posts.clone();
+    more.push(quoting(8, &[4], "eight"));
+    app.set_thread(more);
+    assert_eq!(hidden(&app).last().unwrap(), &r(4));
+    // The catalog's threads aren't replies to anything.
+    app.tab.catalog = vec![quoting(6, &[], "recurse"), quoting(10, &[6], "x")];
+    app.remark_catalog();
+    assert!(app.tab.catalog_marks[1].hidden.is_none());
+}

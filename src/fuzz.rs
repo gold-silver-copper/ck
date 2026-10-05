@@ -831,6 +831,7 @@ fn config_once(seed: u64) {
                 f.boards = (0..rng.below(3)).map(|_| rng.pick(&["g", "λ", "b"]).to_string()).collect();
                 f.label = rng.chance(50).then(|| html(&mut rng, 1));
                 f.enabled = rng.chance(70);
+                f.recursive = rng.chance(30);
                 let mut t = toml_edit::Table::new();
                 f.write(&mut t, None);
                 doc["filter"].or_insert(toml_edit::Item::ArrayOfTables(Default::default()));

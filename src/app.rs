@@ -371,6 +371,8 @@ pub struct App {
     pub filter_cfgs: Vec<crate::filter::FilterConfig>,
     /// `hidden_words`: posts with one are hidden everywhere.
     pub hidden_words: Vec<String>,
+    /// `recursive_hiding`: in a thread, replies to a hidden post are hidden with it.
+    pub recursive_hiding: bool,
     /// The filter just added (and where): `u` as the next key takes it back.
     pub filter_undo: Option<filters::Undo>,
     /// Show hidden threads and posts (dimmed) instead of leaving them out.
@@ -504,6 +506,7 @@ impl App {
             boards_tried: HashMap::new(),
             filters,
             hidden_words: cfg.hidden_words.clone(),
+            recursive_hiding: cfg.recursive_hiding,
             filter_cfgs: cfg.filters.clone(),
             scroll_margin: if cfg.scroll_margin.is_finite() { cfg.scroll_margin.clamp(0.0, 0.5) } else { 0.3 },
             pages: crate::pages::Pages::default_dir()
@@ -958,6 +961,15 @@ impl App {
         posts.iter().map(mark).collect()
     }
 
+    /// What filters and hiding say about a thread's posts, replies to hidden ones included
+    /// (`recursive_hiding`, or a `recursive` filter).
+    fn thread_marks(&self, t: &ThreadView) -> Vec<Mark> {
+        let mut marks = self.marks(&t.posts, |_| t.board.clone());
+        let all = self.recursive_hiding;
+        crate::filter::spread_hiding(&mut marks, &t.posts, &t.index, &t.backlinks, |m| all || m.recursive);
+        marks
+    }
+
     /// Note which catalog threads are new since the last visit (and remember them all).
     fn catalog_seen(&mut self) {
         let nos: Vec<u64> = self.tab.catalog.iter().map(|p| p.no).collect();
@@ -987,7 +999,7 @@ impl App {
 
     pub fn remark_thread(&mut self) {
         let Some(t) = &self.tab.thread else { return };
-        let marks = self.marks(&t.posts, |_| t.board.clone());
+        let marks = self.thread_marks(t);
         let mine = self.store.watched(&self.key(&t.board, t.no)).map(|w| w.mine.iter().copied().collect()).unwrap_or_default();
         let show = self.show_hidden;
         if let Some(t) = &mut self.tab.thread {
@@ -1017,9 +1029,10 @@ impl App {
             }
             _ => return,
         };
-        if let Some(Hidden::ByFilter(label)) = mark.and_then(|m| m.hidden) {
-            self.info(format!("Hidden by the filter \"{label}\"; Settings › Filters changes it"));
-            return;
+        match mark.and_then(|m| m.hidden) {
+            Some(Hidden::ByFilter(label)) => return self.info(format!("Hidden by the filter \"{label}\"; Settings › Filters changes it")),
+            Some(Hidden::Reply(to)) => return self.info(format!("Hidden as a reply to No.{to}, which is hidden; unhiding that one shows it")),
+            _ => {}
         }
         let site = self.current_site().cfg.name.clone();
         let hidden = self.store.toggle_hidden(&site, &board, no);

@@ -1,5 +1,7 @@
 //! `[[filter]]` rules: hide or highlight threads and posts by regex (or file MD5).
 
+use std::collections::{HashMap, VecDeque};
+
 use anyhow::{Context, Result, bail};
 use regex::Regex;
 use serde::Deserialize;
@@ -51,6 +53,10 @@ pub struct FilterConfig {
     /// `false` keeps the filter in the config without applying it.
     #[serde(default = "yes")]
     pub enabled: bool,
+    /// What it hides in a thread, its replies are hidden with (and theirs), as
+    /// `recursive_hiding` does for every hidden post.
+    #[serde(default)]
+    pub recursive: bool,
 }
 
 fn yes() -> bool {
@@ -82,7 +88,16 @@ impl FilterAction {
 
 impl FilterConfig {
     pub fn new(pattern: String, fields: &[Field]) -> Self {
-        let mut c = FilterConfig { pattern, field: None, sites: Vec::new(), boards: Vec::new(), action: FilterAction::Hide, label: None, enabled: true };
+        let mut c = FilterConfig {
+            pattern,
+            field: None,
+            sites: Vec::new(),
+            boards: Vec::new(),
+            action: FilterAction::Hide,
+            label: None,
+            enabled: true,
+            recursive: false,
+        };
         c.set_fields(fields);
         c
     }
@@ -153,11 +168,13 @@ impl FilterConfig {
                 }
             }
         }
-        if changed(&|o| o.enabled == self.enabled) {
-            if self.enabled {
-                t.remove("enabled");
-            } else {
-                t["enabled"] = value(false);
+        for (key, now, before, default) in [("enabled", self.enabled, old.map(|o| o.enabled), true), ("recursive", self.recursive, old.map(|o| o.recursive), false)] {
+            if before != Some(now) {
+                if now == default {
+                    t.remove(key);
+                } else {
+                    t[key] = value(now);
+                }
             }
         }
     }
@@ -171,6 +188,7 @@ struct Filter {
     boards: Vec<String>,
     action: FilterAction,
     label: String,
+    recursive: bool,
 }
 
 /// What filters (and manual hiding) say about a thread or post.
@@ -178,6 +196,8 @@ struct Filter {
 pub struct Mark {
     pub hidden: Option<Hidden>,
     pub highlight: Option<String>,
+    /// Its replies are hidden with it (a `recursive` filter hides it).
+    pub recursive: bool,
 }
 
 /// Why a thread or post is hidden.
@@ -186,6 +206,8 @@ pub enum Hidden {
     ByHand,
     /// By the filter (or hidden word) with this label.
     ByFilter(String),
+    /// It replies to this hidden post (recursive hiding).
+    Reply(u64),
 }
 
 impl Hidden {
@@ -246,6 +268,7 @@ impl Filters {
                 boards: c.boards.clone(),
                 action: c.action,
                 label: c.label.clone().unwrap_or_else(|| c.pattern.clone()),
+                recursive: c.recursive,
             });
         }
         Ok(Self(out, None))
@@ -274,7 +297,9 @@ impl Filters {
                 FilterAction::Hide => &mut hidden,
                 FilterAction::Highlight => &mut mark.highlight,
             };
-            if slot.is_some()
+            // A recursive filter still counts on a post another filter hid first.
+            let spreads = f.action == FilterAction::Hide && f.recursive && !mark.recursive;
+            if (slot.is_some() && !spreads)
                 || (!f.sites.is_empty() && !f.sites.iter().any(|s| s.eq_ignore_ascii_case(site)))
                 || (!f.boards.is_empty() && !f.boards.iter().any(|b| b == board))
             {
@@ -294,7 +319,8 @@ impl Filters {
                 }
             });
             if hit {
-                *slot = Some(f.label.clone());
+                slot.get_or_insert_with(|| f.label.clone());
+                mark.recursive |= spreads;
             }
         }
         if hidden.is_none()
@@ -317,6 +343,31 @@ impl Filters {
         // A filter labelled "" (only by hand, in the config) has always passed for hiding by hand.
         mark.hidden = hidden.map(|label| if label.is_empty() { Hidden::ByHand } else { Hidden::ByFilter(label) });
         mark
+    }
+}
+
+/// Recursive hiding: in a thread, the replies to a hidden post that `spreads` (posts that
+/// quote it), and the replies to those, on down, are hidden too, as `Hidden::Reply` of the
+/// hidden post they quote. A post hidden otherwise keeps its own reason. The OP is never
+/// hidden this way, and never spreads it: everyone quotes it. Gone through once each, so
+/// quote loops end, and without recursion, so a long chain doesn't overflow the stack.
+pub fn spread_hiding(marks: &mut [Mark], posts: &[Post], index: &HashMap<u64, usize>, backlinks: &[Vec<u64>], spreads: impl Fn(&Mark) -> bool) {
+    let mut seen = vec![false; marks.len()];
+    let mut queue: VecDeque<usize> = marks.iter().enumerate().skip(1).filter(|(_, m)| m.hidden.is_some() && spreads(m)).map(|(i, _)| i).collect();
+    for &i in &queue {
+        seen[i] = true;
+    }
+    while let Some(i) = queue.pop_front() {
+        let (Some(parent), Some(replies)) = (posts.get(i), backlinks.get(i)) else { continue };
+        for no in replies {
+            let Some(&j) = index.get(no).filter(|&&j| j != 0) else { continue };
+            let (Some(s), Some(m)) = (seen.get_mut(j), marks.get_mut(j)) else { continue };
+            if std::mem::replace(s, true) {
+                continue;
+            }
+            m.hidden.get_or_insert(Hidden::Reply(parent.no));
+            queue.push_back(j);
+        }
     }
 }
 
@@ -412,6 +463,7 @@ pub mod tests {
         every.sites = vec!["4chan".into()];
         every.boards = vec!["g".into(), "v".into()];
         every.enabled = false;
+        every.recursive = true;
         for c in [FilterConfig::new("p".into(), &[Field::Subject, Field::Comment]), FilterConfig::new("q".into(), &[Field::Filename]), every] {
             let mut t = toml_edit::Table::new();
             c.write(&mut t, None);
@@ -423,6 +475,77 @@ pub mod tests {
             let back: FilterConfig = toml::from_str(&toml_edit::DocumentMut::from(t).to_string()).unwrap();
             assert_eq!(back, plain);
         }
+    }
+
+    /// Posts numbered from 1, each quoting the posts listed for it; their index and backlinks.
+    fn quoting(quotes: &[&[u64]]) -> (Vec<Post>, HashMap<u64, usize>, Vec<Vec<u64>>) {
+        let posts: Vec<Post> = quotes.iter().enumerate().map(|(i, q)| Post { no: i as u64 + 1, quotes: q.to_vec(), ..Default::default() }).collect();
+        let index: HashMap<u64, usize> = posts.iter().enumerate().map(|(i, p)| (p.no, i)).collect();
+        let mut backlinks = vec![Vec::new(); posts.len()];
+        for p in &posts {
+            for q in &p.quotes {
+                if let Some(&i) = index.get(q) {
+                    backlinks[i].push(p.no);
+                }
+            }
+        }
+        (posts, index, backlinks)
+    }
+
+    fn hidden_by(marks: &[Mark]) -> Vec<Option<Hidden>> {
+        marks.iter().map(|m| m.hidden.clone()).collect()
+    }
+
+    #[test]
+    fn hiding_spreads_to_replies_and_theirs() {
+        // 2 is hidden; 3 replies to it, 4 to 3, 5 to the OP only; 6 replies to 5 and 4.
+        let (posts, index, backlinks) = quoting(&[&[], &[1], &[2], &[3, 1], &[1], &[5, 4]]);
+        let mut marks = vec![Mark::default(); posts.len()];
+        marks[1].hidden = Some(Hidden::ByHand);
+        // The OP's own replies aren't caught by it being hidden.
+        marks[0].hidden = Some(Hidden::ByHand);
+        let before = marks.clone();
+        spread_hiding(&mut marks, &posts, &index, &backlinks, |_| false);
+        assert_eq!(marks, before);
+        spread_hiding(&mut marks, &posts, &index, &backlinks, |_| true);
+        let r = |no| Some(Hidden::Reply(no));
+        assert_eq!(hidden_by(&marks), [Some(Hidden::ByHand), Some(Hidden::ByHand), r(2), r(3), None, r(4)]);
+        // A post hidden for its own reason keeps it, and passes it on.
+        let mut marks = vec![Mark::default(); posts.len()];
+        marks[1].hidden = Some(Hidden::ByHand);
+        marks[2].hidden = Some(Hidden::ByFilter("x".into()));
+        spread_hiding(&mut marks, &posts, &index, &backlinks, |m| m.hidden == Some(Hidden::ByHand));
+        assert_eq!(hidden_by(&marks), [None, Some(Hidden::ByHand), Some(Hidden::ByFilter("x".into())), r(3), None, r(4)]);
+    }
+
+    #[test]
+    fn spreading_ends_in_quote_loops_and_long_chains() {
+        // 2 and 3 quote each other.
+        let (posts, index, backlinks) = quoting(&[&[], &[3], &[2], &[3]]);
+        let mut marks = vec![Mark::default(); posts.len()];
+        marks[1].hidden = Some(Hidden::ByHand);
+        spread_hiding(&mut marks, &posts, &index, &backlinks, |_| true);
+        assert_eq!(hidden_by(&marks), [None, Some(Hidden::ByHand), Some(Hidden::Reply(2)), Some(Hidden::Reply(3))]);
+        // Each post replying to the one before, far deeper than a stack would go.
+        let chain: Vec<Vec<u64>> = (0..200_000u64).map(|i| if i == 0 { vec![] } else { vec![i] }).collect();
+        let refs: Vec<&[u64]> = chain.iter().map(Vec::as_slice).collect();
+        let (posts, index, backlinks) = quoting(&refs);
+        let mut marks = vec![Mark::default(); posts.len()];
+        marks[1].hidden = Some(Hidden::ByHand);
+        spread_hiding(&mut marks, &posts, &index, &backlinks, |_| true);
+        assert!(marks.iter().skip(1).all(|m| m.hidden.is_some()));
+        assert_eq!(marks.last().unwrap().hidden, Some(Hidden::Reply(199_999)));
+    }
+
+    #[test]
+    fn recursive_filters_say_so_even_after_another_hides() {
+        let f = filters("[[filter]]\npattern = \"crypto\"\n[[filter]]\npattern = \"crypto|nft\"\nrecursive = true\n[[filter]]\npattern = \"x\"\naction = \"highlight\"\nrecursive = true").unwrap();
+        let m = f.check("4chan", "g", &post("crypto", ""));
+        assert_eq!((m.hidden, m.recursive), (Some(Hidden::ByFilter("crypto".into())), true));
+        assert!(f.check("4chan", "g", &post("nft", "")).recursive);
+        // Highlighting doesn't hide, so nothing spreads.
+        let m = f.check("4chan", "g", &post("x", ""));
+        assert!(m.highlight.is_some() && !m.recursive);
     }
 
     #[test]

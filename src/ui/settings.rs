@@ -285,6 +285,14 @@ fn draw_filter_edit(f: &mut Frame, app: &App, index: Option<usize>, draft: &crat
             EditRow::Pattern => ("Pattern".into(), draft.pattern.clone()),
             EditRow::Label => ("Label".into(), draft.label.clone().unwrap_or_else(|| "(the pattern)".into())),
             EditRow::Action => ("Action".into(), draft.action.as_str().into()),
+            EditRow::Recursive => (
+                "Replies".into(),
+                match (draft.recursive, draft.action) {
+                    (true, crate::filter::FilterAction::Hide) => "hidden too (and theirs, in threads)".into(),
+                    (true, _) => "hidden too, when it hides".into(),
+                    (false, _) => "as they are".into(),
+                },
+            ),
             EditRow::Field(field) => (format!("  {}", field.as_str()), if fields.contains(field) { "✓ looked at".into() } else { "·".into() }),
             EditRow::Sites => ("Sites".into(), if draft.sites.is_empty() { "(any)".into() } else { draft.sites.join(", ") }),
             EditRow::Boards => ("Boards".into(), if draft.boards.is_empty() { "(any)".into() } else { draft.boards.join(", ") }),

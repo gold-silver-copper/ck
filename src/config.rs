@@ -82,6 +82,9 @@ pub struct Config {
     /// Posts and threads with any of these words are hidden, everywhere.
     #[serde(default)]
     pub hidden_words: Vec<String>,
+    /// In a thread, replies to a hidden post (and theirs) are hidden too.
+    #[serde(default)]
+    pub recursive_hiding: bool,
     /// `[[filter]]`: hide or highlight threads and posts.
     #[serde(default, rename = "filter")]
     pub filters: Vec<crate::filter::FilterConfig>,
