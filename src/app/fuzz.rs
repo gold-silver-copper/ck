@@ -413,6 +413,9 @@ enum Act {
     FilterList(u64),
     /// `j` until the end of the thread (drawing each time): it must get there.
     ReadToEnd,
+    /// In a thread, preview a post's quotes, then let the thread refresh (the sites drop
+    /// posts now and then) and draw with the preview still open.
+    PreviewRefresh,
 }
 
 impl std::fmt::Display for Act {
@@ -432,6 +435,7 @@ impl std::fmt::Display for Act {
             Act::Filter(k, opts) => write!(f, "filter like this: candidate #{k}, options {opts:03b}"),
             Act::FilterList(_) => write!(f, "keys in Settings › Filters"),
             Act::ReadToEnd => write!(f, "j to the end of the thread"),
+            Act::PreviewRefresh => write!(f, "preview quotes, then refresh"),
         }
     }
 }
@@ -535,7 +539,7 @@ fn random_act(rng: &mut Rng, hot: &[KeyEvent]) -> Act {
         93..95 => Act::Saved(rng.below(1000)),
         95..97 => Act::Filter(rng.below(1000), rng.below(8) as u8),
         97..98 => Act::FilterList(rng.next()),
-        98..99 => Act::ReadToEnd,
+        98..99 => if rng.chance(50) { Act::ReadToEnd } else { Act::PreviewRefresh },
         _ => Act::Pick(rng.below(1000)),
     }
 }
@@ -741,6 +745,20 @@ impl World {
                     app.on_key(KeyEvent::from(KeyCode::Char('j')));
                 }
                 panic!("j never reached the end of the thread");
+            }
+            Act::PreviewRefresh => {
+                if app.tab.view != View::Thread || app.modal_open().is_some() {
+                    return;
+                }
+                if let Some(t) = &mut app.tab.thread
+                    && let Some(i) = t.posts.iter().rposition(|p| !p.quotes.is_empty())
+                {
+                    t.select(i);
+                }
+                app.act(Action::Preview);
+                self.tick(Duration::from_secs(61));
+                settle(&mut self.app, &self.gate);
+                draw(&mut self.app, w, h);
             }
             Act::FilterList(seed) => {
                 let mut rng = Rng::new(*seed);
