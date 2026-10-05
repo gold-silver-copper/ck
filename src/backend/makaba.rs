@@ -50,13 +50,15 @@ impl Makaba {
     fn post(&self, v: &Value) -> Post {
         let parsed = markup::parse_html(v["comment"].as_str().unwrap_or(""), Flavor::Makaba);
         let mut name = as_str(&v["name"]).map(|n| strip_tags(&n)).unwrap_or_else(|| "Аноним".into());
-        if let Some(trip) = as_str(&v["trip"]) {
+        let trip = as_str(&v["trip"]).map(|t| strip_tags(&t)).filter(|t| !t.is_empty());
+        if let Some(trip) = &trip {
             name.push(' ');
-            name.push_str(&strip_tags(&trip));
+            name.push_str(trip);
         }
         Post {
             no: as_u64(&v["num"]).unwrap_or(0),
             name,
+            trip,
             subject: as_str(&v["subject"]).map(|s| strip_tags(&s)).filter(|s| !s.is_empty()),
             time: as_i64(&v["timestamp"]).unwrap_or(0),
             files: items(&v["files"]).filter_map(|f| self.attachment(f)).collect(),

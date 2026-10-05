@@ -9,7 +9,7 @@ use serde_json::Value;
 use super::{Backend, Partial, as_u32};
 use crate::http::{as_bool, as_i64, as_str, as_u64, encode_segment as enc, get_json, items};
 use crate::markup;
-use crate::model::{Attachment, Board, Post};
+use crate::model::{Attachment, Board, Flag, Post};
 
 pub struct Futaba {
     api: String,
@@ -119,13 +119,18 @@ impl Futaba {
         let flavor = if self.is_4chan { markup::Flavor::Fourchan } else { markup::Flavor::Vichan };
         let parsed = markup::parse_html(v["com"].as_str().unwrap_or(""), flavor);
         let mut name = as_str(&v["name"]).map(|n| markup::decode(&n)).unwrap_or_else(|| "Anonymous".into());
-        if let Some(trip) = as_str(&v["trip"]) {
+        let (trip, capcode) = (as_str(&v["trip"]), as_str(&v["capcode"]));
+        if let Some(trip) = &trip {
             name.push(' ');
-            name.push_str(&trip);
+            name.push_str(trip);
         }
-        if let Some(cap) = as_str(&v["capcode"]) {
+        if let Some(cap) = &capcode {
             let _ = write!(name, " ## {cap}");
         }
+        // A country's flag, else a board's own (4chan's /pol/); vichan forks use `country`
+        // for custom flags too.
+        let text = |k: &str| as_str(&v[k]).map(|s| markup::decode(&s));
+        let flag = Flag::new(text("country"), text("country_name")).or_else(|| Flag::new(text("board_flag"), text("flag_name")));
         // On an overboard, files live under the thread's own board.
         let own_board = as_str(&v["board"]);
         let board = own_board.as_deref().unwrap_or(board);
@@ -139,6 +144,10 @@ impl Futaba {
             subject: as_str(&v["sub"]).map(|s| markup::decode(&s)),
             time: as_i64(&v["time"]).unwrap_or(0),
             files,
+            id: text("id"),
+            flag,
+            trip,
+            capcode,
             replies: as_u32(&v["replies"]),
             images: as_u32(&v["images"]),
             sticky: as_bool(&v["sticky"]),
@@ -304,6 +313,38 @@ mod tests {
         // Videos get jpg thumbnails, images keep their extension (checked live).
         assert!(f(".mp4").thumb.unwrap().ends_with(".jpg"));
         assert!(f(".webp").thumb.unwrap().ends_with(".webp"));
+    }
+
+    #[test]
+    fn poster_ids_flags_trips_and_capcodes() {
+        use crate::model::Flag;
+        let flag = |code: &str, name: &str| Some(Flag { code: code.into(), name: name.into() });
+        let posts = Futaba::fourchan(None).parse_thread("pol", &fixture("4chan_pol_thread.json"));
+        let by = |no: u64| posts.iter().find(|p| p.no == no).unwrap();
+        let op = by(487211034);
+        assert_eq!((op.id.as_deref(), &op.flag), (Some("Ab3dEf+g"), &flag("US", "United States")));
+        assert_eq!(posts.iter().filter(|p| p.id.as_deref() == Some("Ab3dEf+g")).count(), 2);
+        // A board flag where there's no country.
+        assert_eq!(by(487211201).flag, flag("AC", "Anarcho-Capitalist"));
+        // The tripcode and capcode stay in the name, and are kept apart too.
+        let named = by(487211260);
+        assert_eq!((named.name.as_str(), named.trip.as_deref(), named.capcode.as_deref()), ("Kot !!Fz3mQwerty", Some("!!Fz3mQwerty"), None));
+        let modpost = by(487211333);
+        assert_eq!((modpost.name.as_str(), modpost.capcode.as_deref(), modpost.flag.as_ref()), ("Anonymous ## mod", Some("mod"), None));
+        // /g/ has none of them.
+        let g = Futaba::fourchan(None).parse_thread("g", &fixture("4chan_thread.json"));
+        assert!(g.iter().all(|p| p.id.is_none() && p.flag.is_none() && p.trip.is_none()));
+
+        // vichan: 8kun's IDs, and leftypol's custom flags in `country` (its files' `id`s
+        // aren't posters').
+        let cat = Futaba::vichan("https://8kun.top".into(), None, None, None).parse_catalog("v", &fixture("8kun_catalog.json"));
+        assert_eq!(cat[0].id.as_deref(), Some("f8502e"));
+        let posts = Futaba::vichan("https://leftypol.org".into(), None, None, None).parse_thread("leftypol", &fixture("leftypol_thread.json"));
+        assert!(posts.iter().all(|p| p.id.is_none()));
+        let p = posts.iter().find(|p| p.no == 2923530).unwrap();
+        assert_eq!(p.flag, flag("naxalite", "Naxalite"));
+        assert_eq!(p.flag.as_ref().unwrap().short(), "Naxalite");
+        assert_eq!(by(487211102).flag.as_ref().unwrap().short(), "GB");
     }
 
     #[test]

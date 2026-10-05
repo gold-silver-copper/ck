@@ -355,6 +355,7 @@ impl App {
             Action::Reload => self.refresh(),
             Action::Filter => self.open_add_filter(),
             Action::Conversation => self.toggle_conversation(),
+            Action::Poster => self.toggle_poster(),
             Action::Browser => match self.focused_url() {
                 Some((_, url)) => self.open_url(&url),
                 None => self.open_in_browser(),

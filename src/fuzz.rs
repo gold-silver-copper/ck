@@ -397,6 +397,7 @@ fn fixtures_for(kind: SiteKind) -> &'static [&'static str] {
             "leftypol_catalog.json",
             "leftypol_overboard.json",
             "4chan_thread.json",
+            "4chan_pol_thread.json",
             "vichan_thread.json",
             "leftypol_thread.json",
             "4chan_spoiler_post.json",

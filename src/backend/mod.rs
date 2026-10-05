@@ -228,6 +228,7 @@ pub fn fixture_threads() -> Vec<(&'static str, Vec<Post>)> {
     let dvach = makaba::Makaba::new("https://2ch.hk".into(), Some("https://2ch.su".into()), None);
     vec![
         ("4chan", fourchan.parse_thread("g", &fixture("4chan_thread.json"))),
+        ("4chan /pol/", fourchan.parse_thread("pol", &fixture("4chan_pol_thread.json"))),
         ("vichan", lain.parse_thread("λ", &fixture("vichan_thread.json"))),
         ("leftypol", leftypol.parse_thread("leftypol", &fixture("leftypol_thread.json"))),
         ("lynxchan", end.parse_thread(&fixture("lynxchan_thread.json"))),

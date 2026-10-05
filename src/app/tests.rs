@@ -1533,6 +1533,61 @@ fn c_shows_a_conversation_until_esc() {
 }
 
 #[test]
+fn i_shows_a_posters_posts_until_esc() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = local_app();
+    app.store = Store::load(Some(dir.path().to_path_buf())).0;
+    app.goto_str("a/x/1");
+    let post = |no: u64, id: Option<&str>| Post { no, id: id.map(String::from), quotes: if no > 1 { vec![no - 1] } else { vec![] }, ..Default::default() };
+    let posts = || vec![post(1, Some("aa")), post(2, Some("bb")), post(3, Some("aa")), post(4, None), post(5, Some("bb"))];
+    app.handle(answer(app.tab.req.unwrap(), App::thread_arrived, Ok(posts())));
+    let shown = |app: &App| app.tab.thread.as_ref().unwrap().entries.iter().map(|e| app.tab.thread.as_ref().unwrap().posts[e.post].no).collect::<Vec<_>>();
+    let t = app.tab.thread.as_mut().unwrap();
+    assert_eq!(t.id_count("aa"), 2);
+    t.scroll = 5;
+    t.select(1);
+    app.on_key(KeyEvent::from(KeyCode::Char('I')));
+    assert_eq!(shown(&app), [2, 5]);
+    assert!(app.status.as_ref().unwrap().text.contains("2 posts by ID:bb"), "{:?}", app.status);
+    // A refresh keeps it, with the poster's new posts.
+    let mut more = posts();
+    more.push(post(6, Some("bb")));
+    more.push(post(7, Some("aa")));
+    app.set_thread(more);
+    assert_eq!(shown(&app), [2, 5, 6]);
+    // It isn't kept in the session (a conversation is).
+    app.save_session(None);
+    assert_eq!(app.store.load_session().map(|s| s.tabs[0].conversation), Some(None));
+    // esc: the whole thread, scrolled where it was.
+    app.on_key(KeyEvent::from(KeyCode::Esc));
+    let t = app.tab.thread.as_ref().unwrap();
+    assert!(t.conversation.is_none() && t.entries.len() == 7 && t.scroll == 5);
+    // A post without an ID has no poster to show.
+    app.tab.thread.as_mut().unwrap().select(3);
+    app.act(Action::Poster);
+    assert!(app.tab.thread.as_ref().unwrap().conversation.is_none());
+    assert!(app.status.as_ref().unwrap().text.contains("has no poster ID"));
+    // The ID is the post's first part: tab focuses it, enter shows the poster's posts, and
+    // again (or I) goes back.
+    app.tab.thread.as_mut().unwrap().select(0);
+    app.act(Action::NextPart);
+    assert_eq!(app.focused(), Some(&Part::Poster));
+    app.on_key(KeyEvent::from(KeyCode::Enter));
+    assert_eq!(shown(&app), [1, 3, 7]);
+    app.act(Action::Poster);
+    assert_eq!(shown(&app).len(), 7);
+    // From a conversation: back is still the whole thread.
+    let t = app.tab.thread.as_mut().unwrap();
+    t.scroll = 3;
+    t.select(2);
+    app.act(Action::Conversation);
+    run_menu_row(&mut app, "only this poster's posts (ID:aa, 3)");
+    assert_eq!(shown(&app), [1, 3, 7]);
+    app.on_key(KeyEvent::from(KeyCode::Esc));
+    assert_eq!((app.tab.thread.as_ref().unwrap().scroll, app.tab.thread.as_ref().unwrap().conversation.is_none()), (3, true));
+}
+
+#[test]
 fn a_conversation_is_remembered_in_the_session() {
     let dir = tempfile::tempdir().unwrap();
     let mut app = local_app();
