@@ -79,6 +79,7 @@ pub fn from_copies<T>(copies: &[Copy], f: impl FnOnce() -> T) -> T {
 }
 
 /// Whether this thread is answering from copies (`from_copies`): no request can be made.
+#[cfg(test)]
 pub fn from_copies_only() -> bool {
     COPIES.with(|c| c.borrow().is_some())
 }

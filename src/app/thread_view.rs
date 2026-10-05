@@ -236,10 +236,6 @@ impl ThreadLayout {
         self.starts.last().copied().unwrap_or(0)
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
-
     /// Line `i`, and the entry it's in.
     pub fn line(&self, i: usize) -> Option<(usize, &Line<'static>)> {
         let e = self.starts.partition_point(|&s| s <= i).checked_sub(1)?;
@@ -598,11 +594,6 @@ impl ThreadView {
     fn margin_lines(&self) -> usize {
         let view = self.viewport;
         ((view as f32 * self.margin.clamp(0.0, 0.5)) as usize).min(view.saturating_sub(1) / 2)
-    }
-
-    /// Adjust scroll so the selected entry is visible (its top, if it's taller than the view).
-    pub fn scroll_to_selected(&mut self) {
-        self.scroll_to(Reveal::Visible);
     }
 
     /// Scroll the selected entry into view, `how`.

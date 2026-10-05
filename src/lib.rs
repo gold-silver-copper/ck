@@ -27,39 +27,54 @@ pub fn sandboxed() -> bool {
     cfg!(test) || std::env::var_os("CK_NO_EXTERNAL").is_some()
 }
 
-pub mod app;
-pub mod backend;
-pub mod clipboard;
+pub(crate) mod app;
+pub(crate) mod backend;
+pub(crate) mod clipboard;
 #[cfg(test)]
 mod bench;
-pub mod config;
-pub mod disk_cache;
-pub mod download;
+pub(crate) mod config;
+pub(crate) mod disk_cache;
+pub(crate) mod download;
 #[cfg(test)]
 mod e2e;
-pub mod export;
-pub mod filter;
+pub(crate) mod export;
+pub(crate) mod filter;
 #[doc(hidden)]
 pub mod fuzzing;
 #[cfg(test)]
 mod fuzz;
-pub mod guard;
-pub mod http;
-pub mod images;
+pub(crate) mod guard;
+pub(crate) mod http;
+pub(crate) mod images;
 pub mod input_log;
-pub mod keys;
-pub mod markup;
-pub mod model;
-pub mod pages;
-pub mod notify;
-pub mod route;
-pub mod saved;
-pub mod saved_search;
-pub mod store;
+pub(crate) mod keys;
+pub(crate) mod markup;
+pub(crate) mod model;
+pub(crate) mod pages;
+pub(crate) mod notify;
+pub(crate) mod route;
+pub(crate) mod saved;
+pub(crate) mod saved_search;
+pub(crate) mod store;
 #[cfg(test)]
 mod test_fixtures;
-pub mod theme;
-pub mod ui;
-pub mod writer;
+pub(crate) mod theme;
+pub(crate) mod ui;
+pub(crate) mod writer;
 #[cfg(test)]
 mod ui_tests;
+
+// What the binary (`main.rs`) uses. Everything else is the crate's own, so the compiler
+// can tell what nothing uses.
+pub use app::{App, start_error};
+pub use config::{Config, ImagesMode, builtin_sites_text, fresh as fresh_config};
+pub use disk_cache::DiskCache;
+pub use download::default_root as download_root;
+pub use filter::Filters;
+pub use guard::catching;
+pub use images::choose_protocol;
+pub use keys::KeyMap;
+pub use pages::Pages;
+pub use store::Store;
+pub use theme::{from_config as theme_from_config, set as set_theme};
+pub use ui::draw;
