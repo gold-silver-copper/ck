@@ -1491,10 +1491,12 @@ impl App {
             }
             View::Saved => {
                 let key = self.store.saved[i].key.clone();
-                // Asked first: a copy can't be fetched again once the thread is gone.
-                if self.saved_confirm.take().as_ref() != Some(&key) {
-                    let x = self.keys.key(Action::Remove);
-                    self.info(format!("Press {x} again to remove the saved copy of thread {}", key.no));
+                // Asked first: a copy can't be fetched again once the thread is gone. The
+                // second press counts only while the question is still showing.
+                let ask = format!("Press {} again to remove the saved copy of thread {}", self.keys.key(Action::Remove), key.no);
+                let asked = self.status.as_ref().is_some_and(|s| s.text == ask);
+                if self.saved_confirm.take().as_ref() != Some(&key) || !asked {
+                    self.info(ask);
                     self.saved_confirm = Some(key);
                     return;
                 }

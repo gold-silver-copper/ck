@@ -2526,3 +2526,20 @@ fn new_posts_wait_for_notifying_by_the_app_clock() {
     app.refreshed(key.clone(), Ok(vec![post(1), post(2)]));
     assert_eq!(app.notes_since, Some(later));
 }
+
+#[test]
+fn removing_a_saved_copy_asks_again_once_the_question_is_gone() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = saving_app(dir.path(), 1000);
+    let key = ThreadKey { site: "a".into(), board: "x".into(), no: 3 };
+    app.store.keep_thread(&key, "thread 3", "u", &nos(&[3]), 100);
+    app.tab.view = View::Saved;
+    app.saved_list.state.select(Some(0));
+    app.act(Action::Remove);
+    // The question goes (it expired, or something else was said): x asks again.
+    app.status = None;
+    app.act(Action::Remove);
+    assert!(app.store.saved(&key).is_some());
+    app.act(Action::Remove);
+    assert!(app.store.saved(&key).is_none());
+}
