@@ -102,6 +102,12 @@ const SAVE_EVERY: Duration = Duration::from_secs(2);
 /// Watched-thread refreshes running at once.
 const MAX_REFRESHING: usize = 2;
 
+/// A thread's refreshes slow down while it's quiet (`refresh_backoff`): each one that brings
+/// no new post makes the next wait half as long again, up to `QUIET_TIMES` the interval set
+/// and at most `QUIET_MAX` (unless the interval set is longer). New posts start over.
+const QUIET_TIMES: u32 = 10;
+const QUIET_MAX: Duration = Duration::from_secs(600);
+
 /// A row of the home screen (the Sites view): Watched and History, favorite boards, then
 /// the sites.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -344,6 +350,9 @@ pub struct App {
     refresh_thread: Duration,
     refresh_watched: Duration,
     watched_checked: HashMap<ThreadKey, Instant>,
+    /// Refreshes of each watched thread in a row that brought nothing (`refresh_backoff`).
+    watched_quiet: HashMap<ThreadKey, u32>,
+    pub refresh_backoff: bool,
     /// Background refreshes in flight.
     pub refreshing: HashSet<ThreadKey>,
     /// The newest post seen in each watched thread by a refresh this session; notifications
@@ -502,6 +511,8 @@ impl App {
             refresh_thread,
             refresh_watched,
             watched_checked: HashMap::new(),
+            watched_quiet: HashMap::new(),
+            refresh_backoff: cfg.refresh_backoff,
             refreshing: HashSet::new(),
             notified_max: HashMap::new(),
             board_notified_max: HashMap::new(),
@@ -813,13 +824,13 @@ impl App {
             after(*since, s.ttl());
         }
         if self.tab.view == View::Thread && self.tab.thread.is_some() && self.tab.loading.is_none() && self.tab.saved().is_none() {
-            after(self.tab.thread_checked, self.refresh_thread);
+            after(self.tab.thread_checked, self.thread_every());
         }
         // At capacity, a finished refresh wakes the loop anyway (and due ones mustn't spin it).
         if self.refreshing.len() < MAX_REFRESHING {
             for w in self.store.watched.iter().filter(|w| !w.dead && !self.refreshing.contains(&w.key)) {
                 match self.watched_checked.get(&w.key) {
-                    Some(&t) => after(t, self.refresh_watched),
+                    Some(&t) => after(t, self.watched_every(&w.key)),
                     None => after(now, Duration::ZERO),
                 }
             }
@@ -1198,6 +1209,7 @@ impl App {
         if self.watched_checked.get(&key).is_none_or(|t| now.saturating_duration_since(*t) >= http::MIN_REFETCH) {
             self.watched_checked.remove(&key);
         }
+        self.watched_quiet.remove(&key);
         self.info(if watching { format!("Watching thread {no}") } else { format!("Stopped watching thread {no}") });
         self.save_now();
     }

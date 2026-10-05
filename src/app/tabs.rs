@@ -49,6 +49,8 @@ pub struct Tab {
     /// Where `back` goes from a thread opened from Watched or History.
     pub return_to: Option<View>,
     pub thread_checked: Instant,
+    /// Background refreshes of the thread in a row that brought nothing (`refresh_backoff`).
+    pub thread_quiet: u32,
     pub site: usize,
     pub board: Option<Board>,
     pub catalog: Vec<Post>,
@@ -130,6 +132,7 @@ impl Tab {
             catalog_sort: Sort::default(),
             return_to: None,
             thread_checked: now,
+            thread_quiet: 0,
             site,
             board: None,
             catalog: Vec::new(),

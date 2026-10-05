@@ -609,6 +609,9 @@ impl World {
             doc["recursive_hiding"] = toml_edit::value(true);
         }
         if rng.chance(30) {
+            doc["refresh_backoff"] = toml_edit::value(false);
+        }
+        if rng.chance(30) {
             doc["hidden_words"] = toml_edit::value(toml_edit::Array::from_iter(["the", "c++", "free money", "λ"]));
         }
         let mut text = doc.to_string();
@@ -1074,6 +1077,18 @@ fn check(app: &App) {
     }
     if !unique(app.store.history.iter().map(|v| &v.key).collect()) {
         fail("a thread twice in history".into());
+    }
+    // Quiet threads wait longer, but never under the refetch floor nor past the cap.
+    let cap = |every: Duration| every.max(super::QUIET_MAX);
+    let open = app.thread_every();
+    if open < crate::http::MIN_REFETCH || open > cap(app.refresh_thread) {
+        fail(format!("the open thread refreshes every {open:?}"));
+    }
+    for w in &app.store.watched {
+        let every = app.watched_every(&w.key);
+        if every < crate::http::MIN_REFETCH || every > cap(app.refresh_watched) {
+            fail(format!("{:?} refreshes every {every:?}", w.key));
+        }
     }
     // The site's text never reaches the terminal's title as an escape.
     if let Some(t) = app.terminal_title().filter(|t| t.chars().any(char::is_control)) {
