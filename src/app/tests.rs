@@ -2881,3 +2881,71 @@ fn the_terminal_title_says_where_and_whats_new() {
     assert!(!app.set_title && app.terminal_title().is_none());
     app.show_title();
 }
+
+#[test]
+fn quiet_threads_are_refreshed_less_often() {
+    let mut app = local_app();
+    let t0 = Instant::now();
+    let at = |app: &mut App, secs: u64| app.clock = Clock { instant: Some(t0 + Duration::from_secs(secs)), ..Default::default() };
+    let key = |no| ThreadKey { site: "a".into(), board: "x".into(), no };
+    let secs = |d: Duration| d.as_secs_f64();
+    at(&mut app, 0);
+    // A watched thread: each refresh that brings nothing waits half as long again, up to
+    // ten times the setting (60s) and 10 minutes; a new post starts over.
+    app.store.toggle_watch(key(1), "One".into(), 2, 2);
+    let mut every = Vec::new();
+    for _ in 0..9 {
+        app.refreshed(key(1), Ok(nos(&[1, 2])));
+        every.push(secs(app.watched_every(&key(1))));
+    }
+    assert_eq!(every, [60.0, 90.0, 135.0, 202.5, 303.75, 455.625, 600.0, 600.0, 600.0]);
+    app.refreshed(key(1), Ok(nos(&[1, 2, 3])));
+    assert_eq!(app.watched_every(&key(1)), Duration::from_secs(60));
+    // The next one waits for it, on the app's clock.
+    app.refreshed(key(1), Ok(nos(&[1, 2, 3])));
+    app.refreshed(key(1), Ok(nos(&[1, 2, 3])));
+    app.watched_checked.insert(key(1), t0);
+    at(&mut app, 134);
+    app.background();
+    assert!(app.refreshing.is_empty());
+    at(&mut app, 135);
+    assert_eq!(app.next_wake(t0 + Duration::from_secs(135)), Duration::ZERO);
+    app.background();
+    assert!(app.refreshing.contains(&key(1)));
+    app.refreshing.clear();
+    // Off: the interval set, whatever.
+    app.refresh_backoff = false;
+    assert_eq!(app.watched_every(&key(1)), Duration::from_secs(60));
+    app.refresh_backoff = true;
+    app.store.toggle_watch(key(1), String::new(), 0, 0);
+
+    // The open thread the same, from 10s up to 100s; opening it (or r) starts over.
+    at(&mut app, 1000);
+    app.goto_str("a/x/5");
+    app.handle(answer(app.tab.req.unwrap(), App::thread_arrived, Ok(nos(&[5, 6]))));
+    let mut every = Vec::new();
+    for _ in 0..8 {
+        app.refreshed(key(5), Ok(nos(&[5, 6])));
+        every.push(secs(app.thread_every()));
+    }
+    assert_eq!(every, [15.0, 22.5, 33.75, 50.625, 75.9375, 100.0, 100.0, 100.0]);
+    // A deleted post isn't news.
+    app.refreshed(key(5), Ok(nos(&[5])));
+    assert_eq!(app.thread_every(), Duration::from_secs(100));
+    app.refreshed(key(5), Ok(nos(&[5, 7])));
+    assert_eq!(app.thread_every(), Duration::from_secs(10));
+    app.refreshed(key(5), Ok(nos(&[5, 7])));
+    app.tab.thread_checked = t0 + Duration::from_secs(1000);
+    at(&mut app, 1014);
+    app.background();
+    assert!(app.refreshing.is_empty());
+    at(&mut app, 1015);
+    app.background();
+    assert!(app.refreshing.contains(&key(5)));
+    app.refreshing.clear();
+    app.act(Action::Reload);
+    assert_eq!(app.thread_every(), Duration::from_secs(10));
+    // Never under the refetch floor, whatever the settings.
+    app.refresh_thread = Duration::from_secs(10);
+    assert!(app.thread_every() >= crate::http::MIN_REFETCH);
+}

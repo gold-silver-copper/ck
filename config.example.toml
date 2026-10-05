@@ -62,6 +62,11 @@ color = "auto"
 # Lower values are raised to the minimums (10 and 60).
 refresh_thread_secs = 10
 refresh_watched_secs = 60
+# A thread that's quiet is refreshed less often: each refresh that brings no new post makes
+# the next wait half as long again, up to 10 times the interval (10 minutes at most, unless
+# the interval is longer). New posts (or r) start over. false keeps the intervals as they
+# are. Also in Settings.
+refresh_backoff = true
 
 # Watched threads are saved as they refresh, and kept when they die; saving a thread as a
 # page (the . menu) saves one too. They open from the Saved row on the home screen, offline. Past this many megabytes,

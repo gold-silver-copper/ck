@@ -245,6 +245,8 @@ impl App {
             self.tab.copy = None;
         }
         self.tab.thread_checked = self.clock.instant();
+        // Asked for: refreshes start over at the interval set.
+        self.tab.thread_quiet = 0;
         let key = self.key(&board.uri, no);
         // A watched thread's saved copy is its copy (kept once, not in the page cache too).
         let saved = self.store.saved(&key).map(|m| m.saved);
@@ -425,6 +427,7 @@ impl App {
         // A visit is an open, or a refresh that brought new posts.
         if shown_max.is_none_or(|m| max_no > m) {
             self.store.visit(key, &subject, posts.len(), max_no, self.clock.now());
+            self.watched_quiet.remove(key);
         }
         self.store.opened(&key.site, &key.board, key.no, posts.len().saturating_sub(1) as u32, self.clock.now());
         if let Some(w) = self.store.watched_mut(key) {
@@ -434,8 +437,36 @@ impl App {
         self.save();
     }
 
+    /// `every`, stretched for `quiet` refreshes in a row that brought nothing (see
+    /// `QUIET_TIMES`).
+    fn stretched(&self, every: Duration, quiet: u32) -> Duration {
+        if !self.refresh_backoff {
+            return every;
+        }
+        let cap = every.saturating_mul(QUIET_TIMES).min(QUIET_MAX).max(every);
+        let mut d = every;
+        for _ in 0..quiet {
+            if d >= cap {
+                break;
+            }
+            d = d.saturating_mul(3) / 2;
+        }
+        d.min(cap)
+    }
+
+    /// How long the open thread waits between refreshes now.
+    pub(super) fn thread_every(&self) -> Duration {
+        self.stretched(self.refresh_thread, self.tab.thread_quiet)
+    }
+
+    /// How long a watched thread waits between refreshes now.
+    pub(super) fn watched_every(&self, key: &ThreadKey) -> Duration {
+        self.stretched(self.refresh_watched, self.watched_quiet.get(key).copied().unwrap_or(0))
+    }
+
     /// Start background refreshes that are due: the open thread every `refresh_thread`, and
-    /// each watched thread every `refresh_watched`, a couple at a time.
+    /// each watched thread every `refresh_watched` (longer while they're quiet), a couple at
+    /// a time.
     pub(super) fn background(&mut self) {
         self.know_nsfw(self.tab.site);
         // A saved copy open isn't refreshed (a watched thread still is, below, unless it's dead).
@@ -445,10 +476,11 @@ impl App {
         let fetched_since = |key: &ThreadKey, every: Duration| {
             self.watched_checked.get(key).is_none_or(|t| now.saturating_duration_since(*t) >= every)
         };
+        let every = self.thread_every();
         if let Some(key) = &open
             && self.tab.loading.is_none()
-            && now.saturating_duration_since(self.tab.thread_checked) >= self.refresh_thread
-            && fetched_since(key, self.refresh_thread)
+            && now.saturating_duration_since(self.tab.thread_checked) >= every
+            && fetched_since(key, every)
             && !self.refreshing.contains(key)
         {
             self.tab.thread_checked = self.clock.instant();
@@ -463,7 +495,7 @@ impl App {
             !w.dead
                 && Some(&w.key) != open.as_ref()
                 && !self.refreshing.contains(&w.key)
-                && self.watched_checked.get(&w.key).is_none_or(|t| now.saturating_duration_since(*t) >= self.refresh_watched)
+                && self.watched_checked.get(&w.key).is_none_or(|t| now.saturating_duration_since(*t) >= self.watched_every(&w.key))
         });
         if let Some(key) = due.map(|w| w.key.clone()) {
             self.watched_checked.insert(key.clone(), self.clock.instant());
@@ -502,10 +534,18 @@ impl App {
             self.tab.thread_checked = self.clock.instant();
         }
         match res {
-            Ok(posts) if is_open => self.set_thread(posts),
+            Ok(posts) if is_open => {
+                let newest = |app: &App| app.tab.thread.as_ref().map_or(0, |t| max_no(&t.live_posts()));
+                let before = newest(self);
+                self.set_thread(posts);
+                self.tab.thread_quiet = if newest(self) > before { 0 } else { self.tab.thread_quiet.saturating_add(1) };
+            }
             Ok(posts) => {
                 let subject = thread_subject(&posts);
                 let prev = self.notified_max.get(&key).copied();
+                // Quiet: nothing past what the last refresh found (the first one of the
+                // session starts over).
+                let quiet = prev.is_some_and(|m| max_no(&posts) <= m);
                 let Some(w) = self.store.watched_mut(&key) else { return };
                 let max_no = max_no(&posts);
                 if w.last_seen == 0 {
@@ -535,6 +575,8 @@ impl App {
                 if w.subject.is_empty() {
                     w.subject = subject;
                 }
+                let n = if quiet { self.watched_quiet.get(&key).map_or(1, |n| n.saturating_add(1)) } else { 0 };
+                self.watched_quiet.insert(key.clone(), n);
                 self.keep_copy(&key, &posts, false);
                 self.notified_max.insert(key, max_no);
                 if note.new > 0 {

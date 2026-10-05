@@ -168,6 +168,16 @@ pub const SECTIONS: &[(&str, &[Setting])] = &[
                 a.save_config(&format!("refresh every {secs}s"), |d| d["refresh_watched_secs"] = toml_edit::value(secs as i64));
             },
         ),
+        row(
+            "Quiet threads",
+            "Slower while nothing new comes, to 10×",
+            |a| if a.refresh_backoff { "refreshed less often" } else { "at the same interval" }.into(),
+            |a| {
+                a.refresh_backoff = !a.refresh_backoff;
+                let on = a.refresh_backoff;
+                a.save_config(if on { "slowing down on quiet threads" } else { "refreshing quiet threads as often" }, |d| d["refresh_backoff"] = toml_edit::value(on));
+            },
+        ),
         row("Notifications", "New posts in watched threads, replies to yours (m)", App::notify_value, |a| {
             a.notify_mode = a.notify_mode.next();
             let mode = a.notify_mode.as_str();

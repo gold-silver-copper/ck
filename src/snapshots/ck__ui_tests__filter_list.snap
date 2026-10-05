@@ -23,6 +23,7 @@ expression: snapshot(&mut a)
 
     Open thread       every 10s                         How often the open thread updates
     Watched threads   every 60s                         How often each watched thread updates
+    Quiet threads     refreshed less often              Slower while nothing new comes, to 10×
     Notifications     auto (terminal bell)              New posts in watched threads, replies to…
     Reading the end   new posts come into view          New posts come into view while you read …
 
@@ -30,5 +31,4 @@ expression: snapshot(&mut a)
     Add a site        23 sites so far                   Paste a link to any page of it; ck finds…
     Your sites        only the built-in ones            The ones you added, or built-in ones you…
 
-  Downloads
  enter change   esc back   ? help

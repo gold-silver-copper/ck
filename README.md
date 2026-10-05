@@ -408,9 +408,14 @@ last 100 threads you opened. `x` removes an entry from either list.
 
 The open thread refreshes in the background every 10 seconds and watched threads every
 60 seconds (change with `refresh_thread_secs` / `refresh_watched_secs`; those are also the
-minimums). Posts that arrived since your last visit are marked "new", and a "new posts"
-line sits between the last post you'd read and the first new one; `U` jumps to the first
-one.
+minimums). A quiet thread is refreshed less often: each refresh that brings no new post
+makes the next wait half as long again, up to ten times the interval (no more than 10
+minutes, unless the interval itself is longer); new posts, opening the thread or `r` start
+over. `refresh_backoff = false` (or Settings › Background refresh › Quiet threads) keeps
+the intervals fixed.
+
+Posts that arrived since your last visit are marked "new", and a "new posts" line sits
+between the last post you'd read and the first new one; `U` jumps to the first one.
 
 A post the moderators delete while the thread is open stays where it was, marked
 "deleted" (the top bar counts them: "1 deleted"); its quotes, replies, previews and
@@ -652,7 +657,7 @@ The roles are listed at the end of `config.example.toml`. Terminals that don't s
 All settings are optional; see `config.example.toml` for every option with comments:
 
 - `images = "auto" | "off"`
-- `refresh_thread_secs`, `refresh_watched_secs`
+- `refresh_thread_secs`, `refresh_watched_secs`, `refresh_backoff = false`
 - `catalog_layout = "cards" | "compact" | "grid"`: the default layout (also in Settings).
   `c` in a catalog and `s` set that board's own layout and sort, which are remembered in
   the data directory (`board_prefs.json`). In the grid, `h`/`l` move between columns
