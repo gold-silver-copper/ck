@@ -78,7 +78,8 @@ Navigation (fixed):
 | mouse                   | wheel scrolls, click selects, double-click opens |
 
 Commands are remappable in Settings or the config (see [Remapping keys](#remapping-keys));
-the action name is in brackets. The `?` help lists the same, with your keys.
+the action name is in brackets. The `?` help lists them with your keys, starting with the
+ones for where you are.
 
 **Everywhere**
 
@@ -455,8 +456,8 @@ next. Archives limit how often you can search; when they say no, ck shows their 
 
 Catalog and thread views show thumbnails, and `v` opens a full-screen viewer. ck asks the
 terminal which image protocol it supports (kitty, sixel, iTerm2) and falls back to unicode
-half-blocks, which work everywhere. The detected protocol is shown at the bottom of the `?`
-help. Thumbnails are skipped in terminals narrower than 60 columns.
+half-blocks, which work everywhere. The detected protocol is shown in the `?` help's
+title bar. Thumbnails are skipped in terminals narrower than 60 columns.
 
 Animated GIFs play in the viewer, at up to 20 frames a second (frames are prepared in the
 background, and scaled down if a long GIF would take too much memory). Videos open

@@ -831,16 +831,17 @@ fn tabs_row() {
 
 
 #[test]
-fn help_fits_at_110x32_and_scrolls_when_small() {
+fn help_fits_at_110x36_and_scrolls_when_small() {
     let mut a = app(false);
     a.popup = Some(Popup::Help(0));
-    let (text, _) = render_at(&mut a, 110, 32);
+    let (text, _) = render_at(&mut a, 110, 36);
+    assert!(!text.contains("↓ more"), "{text}");
     // Two columns, everything on screen.
     for line in ["Everywhere", "Home screen", "Image viewer", "Catalog", "Thread", "mark as yours", "copy file URL / post link", "watch / quote tab / general", "favorite this board"] {
         assert!(text.contains(line), "{line} missing:\n{text}");
     }
     let (text, _) = render_at(&mut a, 60, 20);
-    assert!(text.contains("Everywhere") && !text.contains("mark as yours"), "{text}");
+    assert!(text.contains("Everywhere") && !text.contains("mark as yours") && text.contains("↓ more (j)"), "{text}");
     a.popup = Some(Popup::Help(100));
     let (text, _) = render_at(&mut a, 60, 20);
     assert!(text.contains("copy text / link"), "{text}");
@@ -1295,4 +1296,13 @@ fn counts_of_one_are_singular() {
     a.tab.catalog[0].images = Some(1);
     let text = render(&mut a).0;
     assert!(text.contains("1 reply · 1 image ·"), "{text}");
+}
+
+#[test]
+fn help_opens_on_the_keys_for_where_you_are() {
+    let mut a = thread_app(false);
+    a.popup = Some(Popup::Help(0));
+    let (text, _) = render_at(&mut a, 60, 40);
+    let at = |title| text.find(&format!("  {title}\n")).unwrap_or(usize::MAX);
+    assert!(at("Everywhere") < at("Thread") && at("Thread") < at("Home screen"), "{text}");
 }
