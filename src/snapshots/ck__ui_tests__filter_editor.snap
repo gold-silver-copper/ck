@@ -5,12 +5,12 @@ expression: snapshot(&mut a)
  ck  Settings
 
   Appearance
-    Theme             material                          Live preview while choosing
+  ▌ Theme             material                          Live preview while choosing
     Colors            as the theme has them             Change any color of the current theme
     Color depth       auto (24-bit)                     24-bit color, or the nearest of 256
     Read  Filter: Named !Trip                                      enter keep · esc cancel  post…
 
-  Catalo  Pattern     ^Named (!Trip▏
+  Catalo▌ Pattern     ^Named (!Trip▏
     Defa  Label       Named !Trip
     Imag  Action      highlight                                                             er a…
     NSFW    subject   ·

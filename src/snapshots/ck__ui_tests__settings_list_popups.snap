@@ -5,7 +5,7 @@ expression: "shots.join(\"\\n=====\\n\")"
  ck  Settings
 
   Appearance
-    Theme             material                          Live preview while choosing
+  ▌ Theme             material                          Live preview while choosing
     Colors            as the theme has them             Change any color of the current theme
     Color depth       auto (24-bit)                     24-bit color, or the nearest of 256
     R  Your sites                        a add · r update a vichan site's boards · x remove · esc close
@@ -27,13 +27,13 @@ expression: "shots.join(\"\\n=====\\n\")"
  ck  Settings
 
   Appearance
-    Theme             material                          Live preview while choosing
+  ▌ Theme             material                          Live preview while choosing
     Colors            as the theme has them             Change any color of the current theme
     C  Your sites                        a add · r update a vichan site's boards · x remove · esc close
     R
        one               vichan     https://one.example                                           added
   Cat  lainchan          vichan     https://lainchan.example                       changes the built-in
-    D  three             vichan     https://three.example                            x again removes it
+    D▌ three             vichan     https://three.example                            x again removes it
     I
     N
     B  Kept in the config as [[site]] tables; the built-in sites are always there too.                   b…
@@ -49,7 +49,7 @@ expression: "shots.join(\"\\n=====\\n\")"
  ck  Settings
 
   Appearance
-    Theme             material                          Live preview while choosing
+  ▌ Theme             material                          Live preview while choosing
     Colors            as the theme has them             Change any color of the curren…
     Color   Board images                     x back to the default · esc close  rest o…
     Readin                                                                      he sel…
@@ -67,11 +67,11 @@ expression: "shots.join(\"\\n=====\\n\")"
  ck  Settings
 
   Appearance
-    Theme             material                          Live preview while choosing
+  ▌ Theme             material                          Live preview while choosing
     Colors  Board images                     x back to the default · esc close  curren…
     Color                                                                       rest o…
     Readin  4chan/b                                                 images off  he sel…
-            4chan/g                                                  images on
+          ▌ 4chan/g                                                  images on
   Catalog
     Defaul  Boards the site marks NSFW follow the NSFW boards setting; the res  ard's …
     Images                                                                       viewe…
@@ -85,7 +85,7 @@ expression: "shots.join(\"\\n=====\\n\")"
  ck  Settings
 
   Appearance
-    Theme             material                          Live preview while choosing
+  ▌ Theme             material                          Live preview while choosing
     Colors  Hidden words                          a add · x remove · esc close  curren…
     Color                                                                       rest o…
     Readin  None yet. a adds one; so does w in a post's X.                      he sel…
@@ -103,10 +103,10 @@ expression: "shots.join(\"\\n=====\\n\")"
  ck  Settings
 
   Appearance
-    Theme   Hidden words                          a add · x remove · esc close  ing
+  ▌ Theme   Hidden words                          a add · x remove · esc close  ing
     Colors                                                                      curren…
     Color   crypto                                                              rest o…
-    Readin  free money                                                          he sel…
+    Readin▌ free money                                                          he sel…
             λ
   Catalog
     Defaul                                                                      ard's …
@@ -121,7 +121,7 @@ expression: "shots.join(\"\\n=====\\n\")"
  ck  Settings
 
   Appearance
-    Theme   Hidden words                                enter add · esc cancel  ing
+  ▌ Theme   Hidden words                                enter add · esc cancel  ing
     Colors                                                                      curren…
     Color   crypto                                                              rest o…
     Readin  free money                                                          he sel…
@@ -139,13 +139,13 @@ expression: "shots.join(\"\\n=====\\n\")"
  ck  Settings
 
   Appearan  Hidden words                          a add · x remove · esc close
-    Theme                                                                       ing
+  ▌ Theme                                                                       ing
     Colors  word20                                                              curren…
     Color   word21                                                              rest o…
     Readin  word22                                                              he sel…
             word23
   Catalog   word24
-    Defaul  word25                                                              ard's …
+    Defaul▌ word25                                                              ard's …
     Images                                                                       viewe…
     NSFW b                                                                      e mark…
     Board   Whole words, any case. Kept in the config as hidden_words.          age se…
@@ -157,7 +157,7 @@ expression: "shots.join(\"\\n=====\\n\")"
  ck  Settings
 
   Appearan  Hidden words                                enter add · esc cancel
-    Theme                                                                       ing
+  ▌ Theme                                                                       ing
     Colors  word20                                                              curren…
     Color   word21                                                              rest o…
     Readin  word22                                                              he sel…

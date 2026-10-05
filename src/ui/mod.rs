@@ -221,7 +221,11 @@ fn draw_tab_row(f: &mut Frame, app: &mut App, area: Rect) {
         if w == 0 {
             break;
         }
-        let style = if i == app.active { bold(t.on_primary_container).bg(t.primary_container) } else { Style::new().fg(t.text_dim).bg(t.surface_high) };
+        let style = if i == app.active {
+            bold(t.on_primary_container).bg(t.primary_container).add_modifier(Modifier::UNDERLINED)
+        } else {
+            Style::new().fg(t.text_dim).bg(t.surface_high)
+        };
         let r = Rect::new(x, area.y, w, 1);
         put(f, x, area.y, w, Line::styled(text, style));
         app.tab_chips.push((r, i));
@@ -623,8 +627,13 @@ fn paint_row(f: &mut Frame, row: Rect, bg: Option<Color>, selected: bool, marked
     if let Some(c) = if selected { Some(t.selection) } else { bg } {
         fill(f, row, c);
     }
-    if selected || marked {
-        fill(f, Rect { width: 1, ..row }, t.primary);
+    // A bar at the start, drawn as a glyph too: a selection shown by color alone is lost in
+    // a monochrome terminal (and in a copy of the screen).
+    if (selected || marked)
+        && row.width > 0
+        && let Some(cell) = f.buffer_mut().cell_mut((row.x, row.y))
+    {
+        cell.set_symbol(if selected { "▌" } else { "▏" }).set_fg(t.primary);
     }
 }
 

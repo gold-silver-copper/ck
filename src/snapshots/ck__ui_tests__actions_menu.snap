@@ -5,7 +5,7 @@ expression: snapshot(&mut a)
  ck  4chan  ›  /g/  ›  Snapshot thread                                 5 posts  ·  2 new, 2 below ↓
                              No.1001             enter run · esc close
 
-    Anonymous   OP  2026-09  enter  go to the post it quotes
+    Anonymous   OP  2026-09▌ enter  go to the post it quotes
     Snapshot thread          y      copy the post's text
     op.png  800x600 · 121 K  Y      copy the post's link
                              o      open the post in the browser
@@ -15,14 +15,14 @@ expression: snapshot(&mut a)
     Replies  >>1001          e      show its replies under it
                              m      mark it as yours
                              H      hide it
-                             X      hide or highlight posts like it…
-    Anonymous  2026-09-21 1  c      its conversation alone
-                             w      stop watching the thread
-    >>1000 (OP)              F      follow the thread as a general
-    >implying                V      all the thread's files
-                                    save all the thread's files…
-    Replies  >>1003          U      the first unread post
-                             /      search the thread
+  ▌                          X      hide or highlight posts like it…
+  ▌ Anonymous  2026-09-21 1  c      its conversation alone
+  ▌                          w      stop watching the thread
+  ▌ >>1000 (OP)              F      follow the thread as a general
+  ▌ >implying                V      all the thread's files
+  ▌                                 save all the thread's files…
+  ▌ Replies  >>1003          U      the first unread post
+  ▌                          /      search the thread
                              f      pick a link or post by its label
                                     images on this board: on → off
     Anonymous  2026-09-21 1         save the thread as a page…

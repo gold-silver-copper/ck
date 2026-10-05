@@ -6,7 +6,7 @@ expression: snapshot(&mut a)
 
     Colors · material                                           enter edit · x reset · esc close
 
-          background            #141218   Base of the screen, and the gaps between cards
+  ▌       background            #141218   Base of the screen, and the gaps between cards
           surface               #1d1b20   Cards: catalog entries and posts
           surface_high          #2b2930   Chips and tiles on cards
           surface_highest       #36343b   Raised panels: help, quote preview, settings pickers

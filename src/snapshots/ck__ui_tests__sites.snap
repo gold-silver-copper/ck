@@ -4,7 +4,7 @@ expression: snapshot(&mut a)
 ---
  ck  Sites                                                                                 23 sites
 
-    ◉  Watched         3 threads   2 new
+  ▌ ◉  Watched         3 threads   2 new
     ◷  History         2 recent threads
     ▤  Saved           0 threads
        4chan            4chan       https://4chan.org

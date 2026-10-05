@@ -5,7 +5,7 @@ expression: snapshot(&mut a)
  ck  Settings
 
   Appearance
-    Theme             material                          Live preview while choosing
+  ▌ Theme             material                          Live preview while choosing
     Colors            as the theme has them             Change any color of the current theme
     Color depth       auto (24-bit)                     24-bit color, or the nearest of 256
     Reading position  30% from the edges                How far from the edges the selected post…

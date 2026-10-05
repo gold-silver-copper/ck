@@ -365,8 +365,10 @@ fn long_threads_are_laid_out_near_the_view_only() {
     assert!(text.contains("post 399") && text.contains("No.2399"), "{text}");
     assert_layout_exact(&mut a);
     insta::assert_snapshot!("long_thread_end", snapshot(&mut a));
-    // Scrolling up lays out what comes into view; coming back shows the same screen.
-    let before = render(&mut a).0;
+    // Scrolling up lays out what comes into view; coming back shows the same screen (the
+    // selection may have moved, kept on screen while scrolling: the same apart from it).
+    let unselected = |a: &mut App| render(a).0.replace('▌', " ").lines().map(str::trim_end).collect::<Vec<_>>().join("\n");
+    let before = unselected(&mut a);
     for _ in 0..40 {
         a.on_key(KeyEvent::from(KeyCode::Char('K')));
         render(&mut a);
@@ -375,7 +377,7 @@ fn long_threads_are_laid_out_near_the_view_only() {
         a.on_key(KeyEvent::from(KeyCode::Char('J')));
         render(&mut a);
     }
-    assert_eq!(render(&mut a).0, before);
+    assert_eq!(unselected(&mut a), before);
     // A jump to a far post lands on it.
     let t = a.tab.thread.as_mut().unwrap();
     assert!(t.jump_to(2150));
@@ -442,7 +444,7 @@ fn j_and_k_read_tall_posts_whole() {
     assert_eq!(selected(&a), 3001);
     assert!(text.contains("tall start") && text.contains("↓ more") && !text.contains("↑") && text.contains("No.3001 (1/"), "{text}");
     // j again and again: on through it, every line seen, the same post selected.
-    let numbers = |text: &str| text.lines().filter_map(|l| l.trim().strip_prefix("line ")?.split_whitespace().next()?.parse::<u32>().ok()).collect::<Vec<_>>();
+    let numbers = |text: &str| text.lines().filter_map(|l| l.trim().trim_start_matches(['▌', '▏']).trim().strip_prefix("line ")?.split_whitespace().next()?.parse::<u32>().ok()).collect::<Vec<_>>();
     let mut seen: std::collections::BTreeSet<u32> = numbers(&text).into_iter().collect();
     let mut screens = 1;
     while render(&mut a).0.contains("↓ more") {
@@ -1317,4 +1319,32 @@ fn footer_hints_drop_whole_and_keep_help() {
         // Every hint before it is whole: a key, a space, a label, then three spaces.
         assert!(footer.split("   ").all(|h| h.trim().contains(' ')), "{w}: {footer:?}");
     }
+}
+
+#[test]
+fn hidden_spoilers_selection_and_focus_dont_rely_on_color() {
+    // The conversation fixture has a spoiler: its text isn't on screen until revealed.
+    let mut a = thread_app(false);
+    let t = a.tab.thread.as_mut().unwrap();
+    t.posts[2].body = crate::markup::parse_html("plain <s>secret</s> text", crate::markup::Flavor::Fourchan).lines;
+    t.selected = 2;
+    let (text, _) = render(&mut a);
+    assert!(!text.contains("secret") && text.contains("plain ░░░░░░ text"), "{text}");
+    a.on_key(ratatui::crossterm::event::KeyEvent::from(ratatui::crossterm::event::KeyCode::Char('S')));
+    assert!(render(&mut a).0.contains("plain secret text"));
+    // The selected post has a bar drawn as a glyph, not only a background.
+    assert!(text.lines().any(|l| l.trim_start().starts_with('▌')), "{text}");
+}
+
+#[test]
+fn no_color_means_the_mono_theme() {
+    use std::ffi::OsStr;
+    assert_eq!(crate::theme::default_for(Some(OsStr::new("1"))), "mono");
+    assert_eq!(crate::theme::default_for(Some(OsStr::new(""))), crate::theme::DEFAULT_THEME);
+    assert_eq!(crate::theme::default_for(None), crate::theme::DEFAULT_THEME);
+    let mut a = thread_app(false);
+    a.set_theme(crate::theme::BUILTIN.iter().find(|(n, _)| *n == "mono").unwrap().1);
+    let (_, buf) = render(&mut a);
+    let colored = buf.content().iter().any(|c| c.fg != ratatui::style::Color::Reset || c.bg != ratatui::style::Color::Reset);
+    assert!(!colored);
 }

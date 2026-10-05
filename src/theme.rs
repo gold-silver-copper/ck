@@ -166,7 +166,30 @@ const TERMINAL: Theme = Theme {
     spoiler: Color::DarkGray,
 };
 
+/// No colors at all, only the terminal's own (for `NO_COLOR`): what's selected, focused or
+/// a spoiler shows by glyphs and bold or underlined text instead.
+#[rustfmt::skip]
+const MONO: Theme = Theme {
+    background: Color::Reset, surface: Color::Reset, surface_high: Color::Reset, surface_highest: Color::Reset,
+    bar: Color::Reset, on_bar: Color::Reset, text: Color::Reset, text_dim: Color::Reset,
+    primary: Color::Reset, on_primary: Color::Reset, primary_container: Color::Reset, on_primary_container: Color::Reset,
+    selection: Color::Reset, greentext: Color::Reset, pinktext: Color::Reset, quotelink: Color::Reset,
+    heading: Color::Reset, code: Color::Reset, code_bg: Color::Reset, name: Color::Reset, new: Color::Reset,
+    error: Color::Reset, success: Color::Reset, warning: Color::Reset, search: Color::Reset, on_search: Color::Reset,
+    spoiler: Color::Reset,
+};
+
 pub const DEFAULT_THEME: &str = "material";
+
+/// The theme when the config names none: "mono" if `NO_COLOR` is set (and not empty, see
+/// no-color.org), else `DEFAULT_THEME`.
+pub fn default_name() -> &'static str {
+    default_for(std::env::var_os("NO_COLOR").as_deref())
+}
+
+pub(crate) fn default_for(no_color: Option<&std::ffi::OsStr>) -> &'static str {
+    if no_color.is_some_and(|v| !v.is_empty()) { "mono" } else { DEFAULT_THEME }
+}
 
 /// Built-in themes, in the order the picker lists them.
 pub const BUILTIN: &[(&str, Theme)] = &[
@@ -178,6 +201,7 @@ pub const BUILTIN: &[(&str, Theme)] = &[
     ("tokyo-night", TOKYO_NIGHT),
     ("solarized-light", SOLARIZED_LIGHT),
     ("terminal", TERMINAL),
+    ("mono", MONO),
 ];
 
 /// A custom theme from `[themes.NAME]`: start from `base` (a built-in or another custom
@@ -292,7 +316,7 @@ pub fn apply(theme: &mut Theme, colors: &BTreeMap<String, String>) -> Result<()>
 /// default theme.
 pub fn from_config(setting: Option<&ThemeSetting>, custom: &BTreeMap<String, ThemeDef>) -> Result<Theme> {
     match setting {
-        None => resolve(DEFAULT_THEME, custom),
+        None => resolve(default_name(), custom),
         Some(ThemeSetting::Name(n)) => resolve(n, custom),
         Some(ThemeSetting::Legacy(old)) => {
             let mut theme = resolve(DEFAULT_THEME, custom)?;
