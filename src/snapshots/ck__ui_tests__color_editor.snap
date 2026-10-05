@@ -30,5 +30,5 @@ expression: snapshot(&mut a)
 
     Changing a color of a built-in theme saves it as a copy: NAME-custom.
 
-
+    Folder            ~/Downloads/ck/{site}/{board}/{…  Where saved files and pages go
  enter change   esc back   ? help

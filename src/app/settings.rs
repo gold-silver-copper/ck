@@ -125,6 +125,17 @@ pub const SECTIONS: &[(&str, &[Setting])] = &[
             |a| count(a.hidden_words.len(), "word"),
             |a| open(a, SettingsPopup::HiddenWords { list: ListState::default().with_selected(Some(0)), typing: None }),
         ),
+        row(
+            "Hidden replies",
+            "In a thread, replies to a hidden post are hidden too",
+            |a| if a.recursive_hiding { "hidden with it" } else { "shown" }.into(),
+            |a| {
+                a.recursive_hiding = !a.recursive_hiding;
+                let on = a.recursive_hiding;
+                a.save_config(if on { "hiding replies to hidden posts" } else { "showing replies to hidden posts" }, |d| d["recursive_hiding"] = toml_edit::value(on));
+                a.remark_thread();
+            },
+        ),
     ]),
     ("Background refresh", &[
         row(

@@ -351,16 +351,23 @@ url = "https://arch.b4k.dev"
 # post's X (w).
 # hidden_words = ["crypto", "free money"]
 
+# In a thread, replies to a hidden post (posts that quote it), and the replies to those, are
+# hidden too. A filter can do it for what it hides alone: `recursive = true`. Also in
+# Settings.
+# recursive_hiding = true
+
 # Filters hide (or highlight) threads and posts whose text matches a regex. `field` is
 # "subject", "comment", "name", "filename" or "md5" (a file's base64 MD5, compared
 # exactly), or a list; the default is subject and comment. Optional `sites` and `boards`
 # limit where a filter applies; `label` is what's shown on what it catches; `enabled =
-# false` keeps a filter here without applying it. X on a post (or thread) adds one like
+# false` keeps a filter here without applying it; `recursive = true` hides the replies to
+# what it hides in a thread too (and theirs). X on a post (or thread) adds one like
 # it, and Settings › Filters lists, edits and removes them (comments here are kept).
 #
 # [[filter]]
 # pattern = "(?i)crypto|nft"
 # label = "crypto"
+# recursive = true
 #
 # [[filter]]
 # pattern = "(?i)rust"

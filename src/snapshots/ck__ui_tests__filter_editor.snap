@@ -17,9 +17,10 @@ expression: snapshot(&mut a)
     Boar    comment   ·                                                                     (. m…
     Filt    name      ✓ looked at                                                            one…
     Hidd    filename  ·                                                                     dden…
-            md5       ·
-  Backgr  Sites       4chan
-    Open  Boards      g
+    Hidd    md5       ·                                                                     t ar…
+          Sites       4chan
+  Backgr  Boards      g
+    Open  Replies     as they are
     Watc  On          yes                                                                   s
     Noti                                                                                    s to…
     Read                                                                                    ead …
@@ -30,5 +31,4 @@ expression: snapshot(&mut a)
 
   Downloads
     Folder            ~/Downloads/ck/{site}/{board}/{…  Where saved files and pages go
-
  enter change   esc back   ? help

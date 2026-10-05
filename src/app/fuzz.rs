@@ -386,7 +386,8 @@ impl Backend for Gated {
 
 const FILTERS: &str = "[[filter]]\npattern = \"(?i)word\"\nlabel = \"word\"\n\
     [[filter]]\npattern = \"日本\"\naction = \"highlight\"\n\
-    [[filter]]\npattern = \"(OP)\"\nfield = \"subject\"\naction = \"hide\"\n";
+    [[filter]]\npattern = \"(OP)\"\nfield = \"subject\"\naction = \"hide\"\n\
+    [[filter]]\npattern = \"^.{1,8}$\"\nfield = \"subject\"\nrecursive = true\nboards = [\"b\", \"λ\"]\n";
 
 /// The wall clock the fuzzer starts from.
 const START: i64 = 1_790_000_000;
@@ -595,6 +596,9 @@ impl World {
         }
         if rng.chance(40) {
             doc["nsfw_images"] = toml_edit::value("off");
+        }
+        if rng.chance(30) {
+            doc["recursive_hiding"] = toml_edit::value(true);
         }
         if rng.chance(30) {
             doc["hidden_words"] = toml_edit::value(toml_edit::Array::from_iter(["the", "c++", "free money", "λ"]));
@@ -1100,6 +1104,14 @@ fn check_thread(t: &ThreadView) -> Result<(), String> {
         None if top != (0..n).collect::<Vec<_>>() => return Err(format!("the whole thread shows {} of {n} posts", top.len())),
         None => {}
     }
+    // A post hidden as a reply to a hidden post quotes it, and it's hidden; the OP never is.
+    for (i, m) in t.marks.iter().enumerate() {
+        let Some(crate::filter::Hidden::Reply(to)) = m.hidden else { continue };
+        let parent = t.index.get(&to).and_then(|&k| t.marks.get(k));
+        if i == 0 || t.posts.get(i).is_none_or(|p| !p.quotes.contains(&to)) || parent.is_none_or(|p| p.hidden.is_none()) {
+            return Err(format!("post {i} is hidden as a reply to No.{to}, which it doesn't quote or isn't hidden"));
+        }
+    }
     if let Some(l) = &t.layout {
         let consistent = l.blocks.len() == t.entries.len()
             && l.starts.len() == l.blocks.len() + 1
@@ -1122,6 +1134,7 @@ struct Before {
     offline_dead: Option<(usize, ThreadKey)>,
     log: usize,
     filters: Vec<crate::filter::FilterConfig>,
+    recursive_hiding: bool,
     /// The thread on screen: its tab, thread, post count, whether its end was being read,
     /// and the post at the top of the screen.
     reading: Option<(usize, String, u64, usize, bool, u64)>,
@@ -1151,7 +1164,7 @@ impl Before {
             .as_ref()
             .filter(|_| app.tab.copy.is_none())
             .map(|t| (app.active, t.board.clone(), t.no, t.posts.iter().map(|p| p.no).collect(), t.shrinks));
-        Before { saved, in_saved_view: app.tab.view == View::Saved, offline_dead, log: gate.log_len(), filters: app.filter_cfgs.clone(), reading, live }
+        Before { saved, in_saved_view: app.tab.view == View::Saved, offline_dead, log: gate.log_len(), filters: app.filter_cfgs.clone(), recursive_hiding: app.recursive_hiding, reading, live }
     }
 }
 
@@ -1264,7 +1277,7 @@ fn check_deleted(app: &App, before: &Before) {
 
 /// After the filters change, the open catalog's and thread's marks are what they say.
 fn check_marks(app: &App, before: &Before) {
-    if app.filter_cfgs == before.filters {
+    if app.filter_cfgs == before.filters && app.recursive_hiding == before.recursive_hiding {
         return;
     }
     let tab = &app.tab;
@@ -1284,7 +1297,7 @@ fn check_marks(app: &App, before: &Before) {
         }
     }
     if let Some(t) = tab.thread.as_ref().filter(|_| tab.view == View::Thread) {
-        assert!(app.marks(&t.posts, |_| t.board.clone()) == t.marks, "thread marks don't match the filters");
+        assert!(app.thread_marks(t) == t.marks, "thread marks don't match the filters");
     }
     // And they're what's in the config file.
     if let Some(path) = &app.config_path {

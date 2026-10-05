@@ -160,10 +160,12 @@ pub enum EditRow {
     Field(Field),
     Sites,
     Boards,
+    /// What it hides, its replies are hidden with.
+    Recursive,
     Enabled,
 }
 
-pub const EDIT_ROWS: [EditRow; 11] = [
+pub const EDIT_ROWS: [EditRow; 12] = [
     EditRow::Pattern,
     EditRow::Label,
     EditRow::Action,
@@ -174,6 +176,7 @@ pub const EDIT_ROWS: [EditRow; 11] = [
     EditRow::Field(Field::Md5),
     EditRow::Sites,
     EditRow::Boards,
+    EditRow::Recursive,
     EditRow::Enabled,
 ];
 
@@ -570,6 +573,7 @@ impl App {
                         }
                     }
                     EditRow::Enabled => next.enabled = !next.enabled,
+                    EditRow::Recursive => next.recursive = !next.recursive,
                     EditRow::Field(field) => {
                         let mut fields = next.fields();
                         match fields.iter().position(|&f| f == field) {

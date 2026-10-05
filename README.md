@@ -296,6 +296,13 @@ the viewer's own commands apply.
 one line, so replies to them still make sense. What you hide is remembered per board in
 the data directory.
 
+`recursive_hiding = true` (or Settings › Hidden replies) hides the replies too: in a
+thread, posts that quote a hidden post, and the posts that quote those, on down, collapse
+to "hidden: a reply to hidden No.123". `recursive = true` on a `[[filter]]` does that for
+what the filter hides (also in Settings › Filters, as "Replies"). Unhiding the post they
+reply to shows them again; `H` on one of them says which post that is. The OP never
+counts (everyone quotes it), and catalogs aren't affected.
+
 Filters hide or highlight automatically. The quickest way to make one is `X` (or "hide or
 highlight posts like it…" in the `.` menu) on a post or catalog thread: it offers what
 the post can be caught by (its name with the tripcode, its image's MD5, its file's name,
@@ -322,6 +329,7 @@ field = ["subject", "comment"] # subject, comment, name, filename, md5; default 
 sites = ["4chan"]              # optional: only these sites
 boards = ["g"]                 #           and these boards
 enabled = false                # kept, but not applied
+recursive = true               # replies to what it hides are hidden too (and theirs)
 
 [[filter]]
 pattern = "u8Vh17KxaDvUJ6bBcmE/eg=="   # field = "md5": a file's MD5 (base64, as 4chan shows it)
@@ -560,8 +568,8 @@ and the file is created from the default if you don't have one yet:
 - **Colors**: every color the theme uses, with a swatch and what it's for. `enter` edits
   one (`#rrggbb`, a name, or a 256-color index), `x` resets it. Changing a built-in theme
   saves your changes as a copy, `[themes.NAME-custom]`.
-- Color depth, the catalog layout, images, the refresh intervals, the download folder,
-  and key bindings (see [Remapping keys](#remapping-keys)).
+- Color depth, the catalog layout, images, filters, hidden words and replies, the refresh
+  intervals, the download folder, and key bindings (see [Remapping keys](#remapping-keys)).
 
 Custom themes go in the config as `[themes.NAME]` tables. Start from a built-in theme and
 change some colors, or generate a whole theme from one color:
@@ -604,6 +612,7 @@ All settings are optional; see `config.example.toml` for every option with comme
 - `notify = "auto" | "bell" | "off"`, `notify_command = [...]`: see
   [Notifications](#notifications).
 - `[[filter]]`: hide or highlight threads and posts, see [Filters](#filters-and-hiding).
+  `recursive_hiding = true` hides replies to hidden posts too.
 - `[[image_search]]`: reverse image search engines, see
   [Reverse image search](#reverse-image-search).
 - `[[site]]`, `default_sites = false`: see [Adding sites](#adding-sites).
@@ -694,7 +703,8 @@ Nothing here leaves the machine: fake sites answer on `*.invalid` hosts or on 12
   added from a post must catch it, and after any filter change the marks and the config
   agree with the filters in use. A conversation shows exactly its posts. A post shown
   before a refresh of the same thread is still there after it (or marked deleted), unless
-  the refresh came back too small to trust, and a deleted post is never new. A failure prints
+  the refresh came back too small to trust, and a deleted post is never new. A post hidden
+  as a reply quotes a hidden post. A failure prints
   the seed that replays it and the fewest steps that still fail (`FUZZ_TRACE=1` prints the
   state after each step).
 - **The rest** (`src/fuzz.rs`): every engine's parsers on mangled responses, the markup

@@ -340,6 +340,7 @@ pub(super) fn hidden_label(why: &Hidden) -> String {
         // "hidden word: crypto" says it already.
         Hidden::ByFilter(f) if f.starts_with("hidden word: ") => f.clone(),
         Hidden::ByFilter(f) => format!("hidden: {f}"),
+        Hidden::Reply(no) => format!("hidden: replies to No.{no}"),
     }
 }
 
