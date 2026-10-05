@@ -364,23 +364,6 @@ fn help_here(app: &App) -> &'static str {
     }
 }
 
-/// Words of `text` in lines at most `width` wide.
-fn wrap_words(text: &str, width: usize) -> Vec<String> {
-    let mut lines = vec![String::new()];
-    for word in text.split(' ') {
-        let Some(line) = lines.last_mut() else { break };
-        if !line.is_empty() && line.width() + 1 + word.width() > width {
-            lines.push(word.to_string());
-        } else {
-            if !line.is_empty() {
-                line.push(' ');
-            }
-            line.push_str(word);
-        }
-    }
-    lines
-}
-
 pub(super) fn draw_help(f: &mut Frame, app: &App) {
     const COL: u16 = 50;
     // Keys take this many columns; what they do wraps in the rest.

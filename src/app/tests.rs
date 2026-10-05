@@ -2554,3 +2554,20 @@ fn where_ck_can_start_is_checked_first() {
     assert!(e.contains("No site is called `nosuchsite`"), "{e}");
     assert!(start_error(&cfg.sites, "123").unwrap().contains("Open a board first"));
 }
+
+#[test]
+fn a_failed_load_stays_on_screen_in_plain_words() {
+    let mut app = local_app();
+    app.goto_str("a/x");
+    settle_until(&mut app, |a| a.tab.loading.is_none());
+    let failed = app.tab.failed.clone().unwrap();
+    assert_eq!(failed, "Couldn't reach 127.0.0.1:3 (connection refused). r tries again");
+    // Long after the footer's message has gone, it's still where the threads would be.
+    app.status = None;
+    let screen = draw_at(&mut app, 100, 30);
+    let text: String = screen.content.iter().map(|c| c.symbol()).collect();
+    assert!(text.contains("Couldn't reach 127.0.0.1:3 (connection refused)") && !text.contains("No threads"), "{text}");
+    // Trying again clears it.
+    app.act(Action::Reload);
+    assert!(app.tab.failed.is_none());
+}

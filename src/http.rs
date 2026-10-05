@@ -197,6 +197,26 @@ impl fmt::Display for HttpError {
 
 impl std::error::Error for HttpError {}
 
+/// A failed request in plain words: what went wrong with which host, without the URL and
+/// the HTTP library's wording. Other errors as they are.
+pub fn plain(e: &anyhow::Error) -> String {
+    let url = e.chain().find_map(|c| c.to_string().strip_prefix("GET ").map(str::to_string));
+    let host = url.as_deref().map_or("the site", host);
+    if let Some(u) = e.chain().find_map(|c| c.downcast_ref::<ureq::Error>()) {
+        return match u {
+            ureq::Error::Timeout(_) => format!("{host} didn't answer in time"),
+            ureq::Error::HostNotFound => format!("Couldn't find {host}: is the address right, and are you online?"),
+            ureq::Error::ConnectionFailed => format!("Couldn't reach {host}"),
+            ureq::Error::Io(io) => format!("Couldn't reach {host} ({})", io.kind()),
+            other => format!("Couldn't load from {host} ({other})"),
+        };
+    }
+    match e.downcast_ref::<HttpError>() {
+        Some(HttpError::Status(code, url)) => format!("{} answered with an error (HTTP {code})", self::host(url)),
+        _ => format!("{e:#}"),
+    }
+}
+
 pub fn is_not_found(e: &anyhow::Error) -> bool {
     matches!(e.downcast_ref::<HttpError>(), Some(HttpError::NotFound(_)))
 }
