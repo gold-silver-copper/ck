@@ -434,7 +434,7 @@ impl Images {
         let Some(Slot::Ready { animation: Some(a), .. }) = self.slots.get_mut(url) else { return false };
         let now = Instant::now();
         match a.paused.take() {
-            Some(at) => a.start = now - at,
+            Some(at) => a.start = now.checked_sub(at).unwrap_or(now),
             None => a.paused = Some(a.at(now)),
         }
         true

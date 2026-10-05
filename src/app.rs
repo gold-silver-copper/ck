@@ -449,8 +449,9 @@ impl App {
             }
         };
         let layout = cfg.layout();
-        let refresh_thread = Duration::from_secs(cfg.refresh_thread_secs.max(10));
-        let refresh_watched = Duration::from_secs(cfg.refresh_watched_secs.max(60));
+        // At most a day: a bigger number is a typo, and would overflow the clock's arithmetic.
+        let refresh_thread = Duration::from_secs(cfg.refresh_thread_secs.clamp(10, 86400));
+        let refresh_watched = Duration::from_secs(cfg.refresh_watched_secs.clamp(60, 86400));
         let mut store = store;
         store.saved_max = cfg.saved_max_mb.saturating_mul(1024 * 1024);
         let sites = cfg
@@ -743,27 +744,35 @@ impl App {
         if animating {
             wake = wake.min(Duration::from_millis(100));
         }
-        let mut at = |t: Instant| wake = wake.min(t.saturating_duration_since(now));
+        // `t + d`, or never if that's past what the clock can hold.
+        let mut after = |t: Instant, d: Duration| {
+            if let Some(t) = t.checked_add(d) {
+                wake = wake.min(t.saturating_duration_since(now));
+            }
+        };
         if let Some(since) = self.notes_since {
-            at(since + Duration::from_secs(3));
+            after(since, Duration::from_secs(3));
         }
         if self.save_pending {
-            at(self.saved_at + SAVE_EVERY);
+            after(self.saved_at, SAVE_EVERY);
         }
         // An animated GIF in the viewer: its next frame.
         if let Some(t) = self.images.next_frame() {
-            at(t);
+            after(t, Duration::ZERO);
         }
         if let (Some(s), Some((_, since))) = (&self.status, &self.status_since) {
-            at(*since + s.ttl());
+            after(*since, s.ttl());
         }
         if self.tab.view == View::Thread && self.tab.thread.is_some() && self.tab.loading.is_none() && self.tab.offline.is_none() {
-            at(self.tab.thread_checked + self.refresh_thread);
+            after(self.tab.thread_checked, self.refresh_thread);
         }
         // At capacity, a finished refresh wakes the loop anyway (and due ones mustn't spin it).
         if self.refreshing.len() < MAX_REFRESHING {
             for w in self.store.watched.iter().filter(|w| !w.dead && !self.refreshing.contains(&w.key)) {
-                at(self.watched_checked.get(&w.key).map_or(now, |t| *t + self.refresh_watched));
+                match self.watched_checked.get(&w.key) {
+                    Some(&t) => after(t, self.refresh_watched),
+                    None => after(now, Duration::ZERO),
+                }
             }
         }
         wake

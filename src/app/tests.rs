@@ -2477,3 +2477,18 @@ fn a_quote_preview_survives_a_refresh_that_drops_posts() {
     app.on_key(KeyEvent::from(KeyCode::Enter));
     assert_eq!(app.tab.thread.as_ref().unwrap().current().unwrap().no, 5);
 }
+
+#[test]
+fn huge_refresh_intervals_in_the_config_dont_overflow_the_clock() {
+    let huge = i64::MAX;
+    let config = crate::config::DEFAULT_CONFIG
+        .replace("refresh_thread_secs = 10", &format!("refresh_thread_secs = {huge}"))
+        .replace("refresh_watched_secs = 60", &format!("refresh_watched_secs = {huge}"));
+    let mut app = app_with(&config);
+    app.tab.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
+    app.tab.view = View::Thread;
+    app.set_thread(nos(&[1, 2]));
+    let now = Instant::now();
+    assert!(app.next_wake(now) <= Duration::from_secs(1));
+    assert_eq!(app.refresh_thread, Duration::from_secs(86400));
+}
