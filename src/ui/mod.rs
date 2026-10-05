@@ -23,7 +23,7 @@ use crate::http;
 use crate::images::{Images, Kind, State};
 use crate::keys::{self, Action, KeyMap};
 use crate::config::CatalogLayout;
-use crate::filter::Mark;
+use crate::filter::{Hidden, Mark};
 use crate::markup;
 use crate::model::{Attachment, Post};
 use crate::theme::{self, ROLES, Theme, theme};

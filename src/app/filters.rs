@@ -8,7 +8,7 @@ use ratatui::widgets::ListState;
 use super::settings::SettingsPopup;
 use super::{App, Part, Popup, View, edit_text, list_move};
 use crate::config::FilterEdit;
-use crate::filter::{Field, FilterAction, FilterConfig, Filters};
+use crate::filter::{Field, FilterAction, FilterConfig, Filters, Hidden};
 use crate::model::Post;
 
 /// Where a filter applies.
@@ -376,8 +376,8 @@ impl App {
         let saved = self.write_hidden_words();
         self.apply_filters();
         let label = format!("hidden word: {word}");
-        let posts = self.tab.thread.as_ref().map_or(0, |t| t.marks.iter().filter(|m| m.hidden.as_deref() == Some(&label)).count());
-        let threads = self.tab.catalog_marks.iter().filter(|m| m.hidden.as_deref() == Some(&label)).count();
+        let posts = self.tab.thread.as_ref().map_or(0, |t| t.marks.iter().filter(|m| m.hidden.as_ref().and_then(Hidden::filter) == Some(&label)).count());
+        let threads = self.tab.catalog_marks.iter().filter(|m| m.hidden.as_ref().and_then(Hidden::filter) == Some(&label)).count();
         let here = match (posts, threads) {
             (0, 0) => String::new(),
             (p, 0) => format!(" ({p} here)"),

@@ -246,7 +246,7 @@ fn lay_out(t: &ThreadView, cache: &mut LineCache, e: usize, width: u16, thumbs: 
     let (i, p) = (entry.post, &t.posts[entry.post]);
     if t.is_collapsed(i) {
         // A hidden post is one line, so replies to it still make sense.
-        let why = t.marks.get(i).and_then(|m| m.hidden.as_deref()).filter(|l| !l.is_empty());
+        let why = t.marks.get(i).and_then(|m| m.hidden.as_ref()?.filter());
         let why = why.map_or("hidden".to_string(), |l| format!("hidden by the filter \"{l}\""));
         let block = vec![Line::styled(format!("No.{}  {why}", p.no), Style::new().fg(theme().text_dim)), Line::raw("")];
         return (block.into(), Rc::from([]), false);
