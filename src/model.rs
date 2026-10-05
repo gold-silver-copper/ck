@@ -104,6 +104,12 @@ pub struct Post {
     pub text: OnceLock<(String, String)>,
 }
 
+/// The newest post's number (the highest), or 0 with no posts: what's been seen is
+/// counted by it.
+pub fn max_no(posts: &[Post]) -> u64 {
+    posts.iter().map(|p| p.no).max().unwrap_or(0)
+}
+
 /// What searching inside a thread looks through, lowercased: the name, subject, file names
 /// and text (`plain`, hidden spoilers left out). Searching saved threads uses it too.
 pub fn search_haystack<'a>(name: &str, subject: Option<&str>, files: impl IntoIterator<Item = &'a str>, plain: &str) -> String {

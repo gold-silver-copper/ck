@@ -298,7 +298,7 @@ impl App {
     fn fetched_thread(&mut self, key: &ThreadKey, posts: &[Post], shown_max: Option<u64>) {
         // Just fetched: a watched thread's next background refresh counts from now.
         self.watched_checked.insert(key.clone(), self.clock.instant());
-        let max_no = posts.iter().map(|p| p.no).max().unwrap_or(0);
+        let max_no = max_no(posts);
         let subject = thread_subject(posts);
         // A visit is an open, or a refresh that brought new posts.
         if shown_max.is_none_or(|m| max_no > m) {
@@ -385,7 +385,7 @@ impl App {
                 let subject = thread_subject(&posts);
                 let prev = self.notified_max.get(&key).copied();
                 let Some(w) = self.store.watched_mut(&key) else { return };
-                let max_no = posts.iter().map(|p| p.no).max().unwrap_or(0);
+                let max_no = max_no(&posts);
                 if w.last_seen == 0 {
                     w.last_seen = max_no;
                 }
