@@ -546,36 +546,62 @@ fn footer_hints(app: &App) -> Vec<(String, &'static str)> {
                 }
                 hints
             }
+            // What the selected post has comes first: its images, the quote enter follows,
+            // its conversation; then what's always there.
             None => {
-                let mut hints = vec![
-                    ("j/k".into(), "post"),
-                    (k(Action::NextPart), "images & links"),
-                    (k(Action::Hints), "hints"),
-                    (k(Action::Menu), "more"),
-                    ("enter".into(), "quote"),
-                ];
-                // A post that's part of a conversation.
-                let talks = app.tab.thread.as_ref().is_some_and(|t| {
-                    t.current().is_some_and(|p| !t.backlinks[t.selected].is_empty() || p.quotes.iter().any(|q| t.index.contains_key(q)))
-                });
+                let Some(t) = app.tab.thread.as_ref() else { return vec![(k(Action::Help), "help")] };
+                let post = t.current();
+                let files = post.is_some_and(|p| !p.files.is_empty());
+                let quotes = post.is_some_and(|p| !p.links.is_empty() || !p.quotes.is_empty());
+                let parts = post.is_some_and(|p| !p.files.is_empty() || !p.links.is_empty() || !p.urls.is_empty());
+                let talks = post.is_some_and(|p| t.backlinks.get(t.selected).is_some_and(|b| !b.is_empty()) || p.quotes.iter().any(|q| t.index.contains_key(q)));
+                let mut hints = vec![("j/k".into(), "post")];
+                if files {
+                    hints.push((k(Action::View), "view image"));
+                }
+                if quotes {
+                    hints.push(("enter".into(), "quote"));
+                }
+                // The menu lists everything else, with its keys.
+                hints.push((k(Action::Menu), "more"));
+                if parts {
+                    hints.push((k(Action::NextPart), "images & links"));
+                }
                 if talks {
                     hints.push((k(Action::Conversation), "conversation"));
                 }
-                hints.extend([(k(Action::JumpBack), "back"), (k(Action::Search), "search"), (k(Action::Watch), "watch")]);
+                if quotes {
+                    hints.push((k(Action::Preview), "preview quote"));
+                }
+                if app.can_jump_back() {
+                    hints.push((k(Action::JumpBack), "back"));
+                }
+                hints.push((k(Action::Hints), "hints"));
+                hints.push((k(Action::Search), "search"));
+                hints.push((k(Action::Watch), if app.menu_watching(t.no) { "unwatch" } else { "watch" }));
+                if t.posts.iter().any(|p| !p.files.is_empty()) {
+                    hints.push((k(Action::Gallery), "gallery"));
+                }
                 hints
             }
         },
-        View::Catalog => vec![
-            ("enter".into(), "open"),
-            (k(Action::Hints), "hints"),
-            (k(Action::Menu), "more"),
-            (k(Action::Search), "filter"),
-            (k(Action::View), "view"),
-            (k(Action::Watch), "watch"),
-            (k(Action::Sort), "sort"),
-            (k(Action::Compact), "layout"),
-            (k(Action::Reload), "reload"),
-        ],
+        View::Catalog => {
+            let op = app.visible_catalog().get(app.tab.catalog_list.state.selected().unwrap_or(0)).and_then(|&i| app.tab.catalog.get(i));
+            let mut hints = vec![("enter".into(), "open")];
+            if op.is_some_and(|p| !p.files.is_empty()) {
+                hints.push((k(Action::View), "view image"));
+            }
+            hints.push((k(Action::Watch), if op.is_some_and(|p| app.menu_watching(p.no)) { "unwatch" } else { "watch" }));
+            hints.extend([
+                (k(Action::Search), "filter"),
+                (k(Action::Menu), "more"),
+                (k(Action::Hints), "hints"),
+                (k(Action::Sort), "sort"),
+                (k(Action::Compact), "layout"),
+                (k(Action::Reload), "reload"),
+            ]);
+            hints
+        }
         View::Watched | View::History => vec![
             ("enter".into(), "open"),
             (k(Action::Menu), "more"),
