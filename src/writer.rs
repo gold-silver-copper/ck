@@ -18,14 +18,15 @@ pub struct Writer<T> {
 }
 
 impl<T: Send + 'static> Writer<T> {
-    pub fn new() -> Self {
+    /// `panicked` turns a job's panic into what it reports instead.
+    pub fn new(panicked: fn(String) -> T) -> Self {
         let (tx, jobs) = channel::<Job<T>>();
         let (report, done) = channel();
         let pending = Arc::new((Mutex::new(0), Condvar::new()));
         let left = pending.clone();
         std::thread::spawn(move || {
             while let Ok(job) = jobs.recv() {
-                let result = job();
+                let result = crate::guard::catching(job).unwrap_or_else(panicked);
                 let gone = report.send(result).is_err();
                 *lock(&left.0) -= 1;
                 left.1.notify_all();
@@ -71,19 +72,13 @@ impl<T: Send + 'static> Writer<T> {
     }
 }
 
-impl<T: Send + 'static> Default for Writer<T> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn jobs_run_in_order_and_flush_waits_for_them() {
-        let w = Writer::new();
+        let w = Writer::new(|_| -1);
         for i in 0..50 {
             w.run(move || {
                 if i == 0 {
@@ -105,5 +100,10 @@ mod tests {
         assert!(!w.flush(Duration::from_millis(20)));
         assert!(w.flush(Duration::from_secs(10)));
         assert_eq!(w.results(), [99]);
+        // A job that panics reports what `panicked` makes of it, and counts as finished.
+        w.run(|| std::panic::panic_any("deliberate"));
+        w.run(|| 100);
+        assert!(w.flush(Duration::from_secs(10)));
+        assert_eq!(w.results(), [-1, 100]);
     }
 }

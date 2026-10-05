@@ -69,7 +69,10 @@ fn main() -> Result<()> {
     app.save_now();
     let _ = execute!(stdout(), DisableMouseCapture, DisableBracketedPaste);
     ratatui::restore();
-    result
+    match app.quit_because {
+        Some(why) => result.and(Err(anyhow::anyhow!("{why}"))),
+        None => result,
+    }
 }
 
 /// ratatui::init's panic hook restores the terminal, for a panic on any thread; one on a
@@ -219,7 +222,7 @@ mod tests {
             count.fetch_add(1, Ordering::SeqCst);
         }));
         super::restore_on_main_thread_panics();
-        assert!(std::thread::spawn(|| std::panic::panic_any("in the background")).join().is_err());
+        assert!(std::thread::spawn(|| std::panic::panic_any("deliberate, in the background")).join().is_err());
         assert_eq!(restored.load(Ordering::SeqCst), 0);
         assert!(std::panic::catch_unwind(|| std::panic::panic_any("on the main thread")).is_err());
         assert_eq!(restored.load(Ordering::SeqCst), 1);

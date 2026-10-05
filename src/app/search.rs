@@ -134,7 +134,7 @@ impl App {
                 if current.load(Ordering::SeqCst) != id {
                     return;
                 }
-                let found = match std::fs::read(crate::saved::path(&dir, &key)).map_err(anyhow::Error::from).and_then(|b| crate::saved_search::matching(&b, &needle)) {
+                let found = match std::fs::read(crate::saved::path(&dir, &key)).map_err(anyhow::Error::from).and_then(|b| crate::guard::result(|| crate::saved_search::matching(&b, &needle))) {
                     Ok(posts) if posts.is_empty() => SavedFound::Nothing,
                     Ok(posts) => SavedFound::Copy(key, posts),
                     Err(_) => SavedFound::Unreadable,

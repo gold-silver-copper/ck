@@ -108,7 +108,7 @@ impl App {
             self.popup = Some(Popup::Adding(Adding::Looking { id: self.next_request(), host: link.host.clone(), open }));
             let (id, later) = (self.next_id, self.later());
             std::thread::spawn(move || {
-                let res = detect::detect(&link).map(Detected::Site);
+                let res = crate::guard::result(|| detect::detect(&link)).map(Detected::Site);
                 later.run(move |app| app.detected(id, res));
             });
             return;
@@ -130,7 +130,9 @@ impl App {
         self.popup = Some(Popup::Adding(Adding::Looking { id: self.next_request(), host: link.host.clone(), open }));
         let (id, later, base) = (self.next_id, self.later(), link.base.clone());
         std::thread::spawn(move || {
-            let res = if detect::has_board(&base, &board) { Ok(Detected::Board(i, board)) } else { Err(anyhow::anyhow!("{base} has no /{board}/ (its catalog isn't there)")) };
+            let res = crate::guard::result(|| {
+                if detect::has_board(&base, &board) { Ok(Detected::Board(i, board)) } else { Err(anyhow::anyhow!("{base} has no /{board}/ (its catalog isn't there)")) }
+            });
             later.run(move |app| app.detected(id, res));
         });
     }
@@ -286,14 +288,16 @@ impl App {
         let (id, later) = (self.next_id, self.later());
         let first = list.first().map(|b| b.uri().to_string());
         std::thread::spawn(move || {
-            let bar = |path: &str| crate::http::get_text(&format!("{base}{path}")).map(|html| detect::boardlist(&html, &host)).unwrap_or_default();
-            let mut found = bar("/");
-            if found.is_empty()
-                && let Some(b) = first
-            {
-                found = bar(&format!("/{}/index.html", crate::http::encode_segment(&b)));
-            }
-            let res = if found.is_empty() { Err(anyhow::anyhow!("{host}'s pages have no board list to read")) } else { Ok(Detected::Bar(site, found)) };
+            let res = crate::guard::result(|| {
+                let bar = |path: &str| crate::http::get_text(&format!("{base}{path}")).map(|html| detect::boardlist(&html, &host)).unwrap_or_default();
+                let mut found = bar("/");
+                if found.is_empty()
+                    && let Some(b) = first
+                {
+                    found = bar(&format!("/{}/index.html", crate::http::encode_segment(&b)));
+                }
+                if found.is_empty() { Err(anyhow::anyhow!("{host}'s pages have no board list to read")) } else { Ok(Detected::Bar(site, found)) }
+            });
             later.run(move |app| app.detected(id, res));
         });
     }

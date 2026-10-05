@@ -206,7 +206,7 @@ impl Store {
     /// file is moved aside and ck starts with an empty list.
     pub fn load(dir: Option<PathBuf>) -> (Self, Vec<String>) {
         let mut warnings = Vec::new();
-        let writer = dir.is_some().then(crate::writer::Writer::new);
+        let writer = dir.is_some().then(|| crate::writer::Writer::new(|what| Wrote::Failed(format!("Couldn't save a copy: ck hit a bug ({what})"))));
         let mut store = Store { dir, writer, ..Default::default() };
         if let Some(dir) = &store.dir {
             store.watched = load_file(&dir.join("watched.json"), &mut warnings);

@@ -571,7 +571,9 @@ fn worker(q: &Queue, tx: &Sender<Done>, encode: &Sender<EncodeJob>, wake: &dyn F
                 st = q.cv.wait(st).unwrap_or_else(std::sync::PoisonError::into_inner);
             }
         };
-        let res = fetch(&url, kind, if kind == Kind::Thumb { disk } else { None }).map(|(img, frames)| (Arc::new(img), frames));
+        let res = crate::guard::catching(|| fetch(&url, kind, if kind == Kind::Thumb { disk } else { None }))
+            .unwrap_or_else(bug)
+            .map(|(img, frames)| (Arc::new(img), frames));
         if let Some(h) = host {
             lock(&q.state).busy.remove(&h);
             q.cv.notify_all();
@@ -588,12 +590,20 @@ fn worker(q: &Queue, tx: &Sender<Done>, encode: &Sender<EncodeJob>, wake: &dyn F
     }
 }
 
+/// A panic in a job, as the job's failure.
+fn bug<T>(what: String) -> Result<T, String> {
+    Err(format!("ck hit a bug: {what}"))
+}
+
 fn encoder(picker: &Picker, jobs: &Receiver<EncodeJob>, tx: &Sender<Done>, wake: &dyn Fn()) {
     while let Ok(job) = jobs.recv() {
         let done = match job {
-            EncodeJob::One(url, (size, crop), img) => Done::Encoded(url, (size, crop), encode_crop(picker, &img, size, crop)),
+            EncodeJob::One(url, (size, crop), img) => {
+                let res = crate::guard::catching(|| encode_crop(picker, &img, size, crop)).unwrap_or_else(bug);
+                Done::Encoded(url, (size, crop), res)
+            }
             EncodeJob::Frames(url, size, frames) => {
-                let res = frames.iter().map(|(f, d)| encode(picker, f, size).map(|p| (p, *d))).collect();
+                let res = crate::guard::catching(|| frames.iter().map(|(f, d)| encode(picker, f, size).map(|p| (p, *d))).collect()).unwrap_or_else(bug);
                 Done::EncodedFrames(url, size, res)
             }
         };
