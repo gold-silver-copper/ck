@@ -3104,3 +3104,52 @@ fn m_shows_posts_with_files_then_hides_images() {
     app.handle(answer(app.tab.req.unwrap(), App::thread_arrived, Ok(nos(&[7, 8]))));
     assert_eq!((media(&app), shown(&app)), (Media::All, vec![7, 8]));
 }
+
+/// Following a general end to end: the thread and the catalog come from a site (through the
+/// real fetching and parsing), not handed to the app.
+#[test]
+fn following_a_general_through_the_site() {
+    let host = "generals.invalid";
+    let thread = r#"{"posts":[{"no":100,"resto":0,"time":1000,"sub":"/lmg/ - Local Models General #5","com":"OP","bumplimit":1,"replies":1},{"no":101,"resto":100,"time":1001,"com":"reply"}]}"#;
+    let catalog = r#"[{"page":0,"threads":[{"no":100,"resto":0,"time":1000,"sub":"/lmg/ - Local Models General #5","replies":1},{"no":150,"resto":0,"time":1500,"sub":"/ldg/ - Local Diffusion General","replies":3},{"no":200,"resto":0,"time":2000,"sub":"/lmg/ - Local Models General #6","replies":0}]}]"#;
+    let asked: Asked = Default::default();
+    let log = asked.clone();
+    crate::http::serve_test_host(
+        host,
+        Some(Arc::new(move |url: &str, _| {
+            http::lock(&log).push((url.to_string(), None));
+            let body = if url.ends_with("/g/res/100.json") {
+                thread
+            } else if url.ends_with("/g/catalog.json") {
+                catalog
+            } else {
+                return http::Raw { status: 404, last_modified: None, body: String::new() };
+            };
+            http::Raw { status: 200, last_modified: None, body: body.into() }
+        })),
+    );
+    let mut app = app_with(&format!("[[site]]\nname = \"c\"\nkind = \"vichan\"\nurl = \"http://{host}\"\nboards = [\"g\"]\n"));
+    let key = |no| ThreadKey { site: "c".into(), board: "g".into(), no };
+    // Open the thread, and F: followed (and watched).
+    app.goto_str("c/g/100");
+    settle_until(&mut app, |a| a.tab.loading.is_none());
+    assert_eq!(app.tab.thread.as_ref().map(|t| t.no), Some(100));
+    app.act(Action::Follow);
+    assert_eq!(app.store.watched(&key(100)).and_then(|w| w.general.as_deref()), Some("/lmg/"));
+    // A background refresh reads the site's bump limit flag.
+    app.tab.view = View::Watched;
+    app.refresh_in_background(key(100));
+    settle_until(&mut app, |a| a.refreshing.is_empty());
+    assert!(app.store.watched(&key(100)).unwrap().at_limit);
+    // That starts a search of the board's catalog, which finds #6: watched, followed, told.
+    app.check_generals(app.clock.instant());
+    assert_eq!(app.generals_searching.len(), 1);
+    settle_until(&mut app, |a| a.generals_searching.is_empty());
+    assert_eq!(app.store.watched(&key(200)).and_then(|w| w.general.as_deref()), Some("/lmg/"));
+    assert_eq!(app.store.watched(&key(100)).map(|w| w.general.clone()), Some(None), "the full one is kept, no longer followed");
+    assert!(app.store.watched(&key(150)).is_none());
+    assert!(app.notified.iter().any(|n| n.starts_with("New /lmg/ thread on /g/")), "{:?}", app.notified);
+    let urls: Vec<String> = http::lock(&asked).iter().map(|(u, _)| u.clone()).collect();
+    assert!(urls.iter().any(|u| u.ends_with("/g/catalog.json")), "{urls:?}");
+    crate::http::serve_test_host(host, None);
+}
