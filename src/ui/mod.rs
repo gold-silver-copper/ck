@@ -414,11 +414,7 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
     } else if let Some(s) = &app.status {
         Line::from([vec![Span::raw(" ")], status_spans(s, t)].concat())
     } else {
-        let mut spans = vec![Span::raw(" ")];
-        for (key, label) in footer_hints(app) {
-            spans.extend([Span::styled(key, bold(t.primary)), Span::styled(format!(" {label}   "), dim())]);
-        }
-        Line::from(spans)
+        Line::default()
     };
     let d = &app.downloads;
     let mut right = Vec::new();
@@ -428,12 +424,32 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
     if !app.refreshing.is_empty() {
         right.extend([chip(format!("↻ {}", app.refreshing.len()), t.text, t.surface_high), Span::raw(" ")]);
     }
-    let right_w = right.iter().map(|s| s.width()).sum::<usize>() as u16;
+    let right_w = cells(right.iter().map(|s| s.width()).sum::<usize>());
+    let line = if line.spans.is_empty() { fit_hints(footer_hints(app), usize::from(area.width.saturating_sub(right_w))) } else { line };
     put(f, area.x, area.y, area.width.saturating_sub(right_w), line);
     put(f, area.right().saturating_sub(right_w), area.y, right_w, Line::from(right));
 }
 
-/// Key hints for the footer, with the configured keys.
+/// Key hints in `width` columns: the last one (help) always, and before it as many of the
+/// others, in order, as fit whole.
+fn fit_hints(mut hints: Vec<(String, &'static str)>, width: usize) -> Line<'static> {
+    let t = theme();
+    let wide = |(key, label): &(String, &str)| key.width() + 1 + label.width() + 3;
+    let last = hints.pop();
+    let mut room = width.saturating_sub(1).saturating_sub(last.as_ref().map_or(0, wide));
+    let fitting = hints.into_iter().take_while(|h| {
+        let fits = wide(h) <= room;
+        room = room.saturating_sub(wide(h));
+        fits
+    });
+    let mut spans = vec![Span::raw(" ")];
+    for (key, label) in fitting.collect::<Vec<_>>().into_iter().chain(last) {
+        spans.extend([Span::styled(key, bold(t.primary)), Span::styled(format!(" {label}   "), dim())]);
+    }
+    Line::from(spans)
+}
+
+/// Key hints for the footer, with the configured keys, most useful first; help is last.
 fn footer_hints(app: &App) -> Vec<(String, &'static str)> {
     let k = |a| app.keys.key(a).to_string();
     let mut hints: Vec<(String, &'static str)> = match app.tab.view {
@@ -516,7 +532,7 @@ fn footer_hints(app: &App) -> Vec<(String, &'static str)> {
             (k(Action::View), "view"),
             (k(Action::Watch), "watch"),
             (k(Action::Sort), "sort"),
-            (k(Action::Compact), "compact"),
+            (k(Action::Compact), "layout"),
             (k(Action::Reload), "reload"),
         ],
         View::Watched | View::History => vec![
@@ -549,7 +565,9 @@ fn footer_hints(app: &App) -> Vec<(String, &'static str)> {
     if app.tab.view == View::Thread && app.tab.gallery.is_none() && app.focused().is_none() && app.tab.offline.is_some_and(|o| !o.dead) {
         hints.insert(0, (k(Action::Reload), "live thread"));
     }
-    hints.push((k(Action::Settings), "settings"));
+    if app.tab.view != View::Settings {
+        hints.push((k(Action::Settings), "settings"));
+    }
     hints.push((k(Action::Help), "help"));
     hints
 }

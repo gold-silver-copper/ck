@@ -1306,3 +1306,15 @@ fn help_opens_on_the_keys_for_where_you_are() {
     let at = |title| text.find(&format!("  {title}\n")).unwrap_or(usize::MAX);
     assert!(at("Everywhere") < at("Thread") && at("Thread") < at("Home screen"), "{text}");
 }
+
+#[test]
+fn footer_hints_drop_whole_and_keep_help() {
+    for w in [30, 40, 60, 80] {
+        let mut a = thread_app(false);
+        let (text, _) = render_at(&mut a, w, 20);
+        let footer = text.lines().last().unwrap().trim_end();
+        assert!(footer.ends_with("? help"), "{w}: {footer:?}");
+        // Every hint before it is whole: a key, a space, a label, then three spaces.
+        assert!(footer.split("   ").all(|h| h.trim().contains(' ')), "{w}: {footer:?}");
+    }
+}

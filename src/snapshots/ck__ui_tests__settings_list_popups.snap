@@ -1,6 +1,5 @@
 ---
 source: src/ui_tests.rs
-assertion_line: 1233
 expression: "shots.join(\"\\n=====\\n\")"
 ---
  ck  Settings
@@ -22,7 +21,7 @@ expression: "shots.join(\"\\n=====\\n\")"
   Background refresh
     Open thread       every 10s                         How often the open thread updates
     Watched threads   every 60s                         How often each watched thread updates
- enter change   esc back   , settings   ? help
+ enter change   esc back   ? help
 
 =====
  ck  Settings
@@ -44,7 +43,7 @@ expression: "shots.join(\"\\n=====\\n\")"
   Background refresh
     Open thread       every 10s                         How often the open thread updates
     Watched threads   every 60s                         How often each watched thread updates
- enter change   esc back   , settings   ? help
+ enter change   esc back   ? help
 
 =====
  ck  Settings
@@ -62,7 +61,7 @@ expression: "shots.join(\"\\n=====\\n\")"
     Board images      none                              Boards with their own image se…
     Filters           0 filters, 0 hidden by hand       Hide or highlight by pattern; …
     Hidden words      none                              Posts with any of these words …
- enter change   esc back   , settings   ? help
+ enter change   esc back   ? help
 
 =====
  ck  Settings
@@ -80,7 +79,7 @@ expression: "shots.join(\"\\n=====\\n\")"
     Board images      2 boards                          Boards with their own image se…
     Filters           0 filters, 0 hidden by hand       Hide or highlight by pattern; …
     Hidden words      none                              Posts with any of these words …
- enter change   esc back   , settings   ? help
+ enter change   esc back   ? help
 
 =====
  ck  Settings
@@ -98,7 +97,7 @@ expression: "shots.join(\"\\n=====\\n\")"
     Board images      2 boards                          Boards with their own image se…
     Filters           0 filters, 0 hidden by hand       Hide or highlight by pattern; …
     Hidden words      none                              Posts with any of these words …
- enter change   esc back   , settings   ? help
+ enter change   esc back   ? help
 
 =====
  ck  Settings
@@ -116,7 +115,7 @@ expression: "shots.join(\"\\n=====\\n\")"
     Board images      2 boards                          Boards with their own image se…
     Filters           0 filters, 0 hidden by hand       Hide or highlight by pattern; …
     Hidden words      3 words                           Posts with any of these words …
- enter change   esc back   , settings   ? help
+ enter change   esc back   ? help
 
 =====
  ck  Settings
@@ -134,7 +133,7 @@ expression: "shots.join(\"\\n=====\\n\")"
     Board images      2 boards                          Boards with their own image se…
     Filters           0 filters, 0 hidden by hand       Hide or highlight by pattern; …
     Hidden words      3 words                           Posts with any of these words …
- enter change   esc back   , settings   ? help
+ enter change   esc back   ? help
 
 =====
  ck  Settings
@@ -152,7 +151,7 @@ expression: "shots.join(\"\\n=====\\n\")"
     Board   Whole words, any case. Kept in the config as hidden_words.          age se…
     Filter                                                                      tern; …
     Hidden words      30 words                          Posts with any of these words …
- enter change   esc back   , settings   ? help
+ enter change   esc back   ? help
 
 =====
  ck  Settings
@@ -170,4 +169,4 @@ expression: "shots.join(\"\\n=====\\n\")"
     Board   Whole words, any case. Kept in the config as hidden_words.          age se…
     Filter                                                                      tern; …
     Hidden words      30 words                          Posts with any of these words …
- enter change   esc back   , settings   ? help
+ enter change   esc back   ? help

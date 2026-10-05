@@ -1,6 +1,5 @@
 ---
 source: src/ui_tests.rs
-assertion_line: 698
 expression: snapshot(&mut a)
 ---
  ck  Settings
@@ -32,4 +31,4 @@ expression: snapshot(&mut a)
   Downloads
     Folder            ~/Downloads/ck/{site}/{board}/{…  Where saved files and pages go
 
- enter change   esc back   , settings   ? help
+ enter change   esc back   ? help
