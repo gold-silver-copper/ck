@@ -470,8 +470,10 @@ most 200 MB, least recently used first out), so revisiting a catalog or thread s
 at once without any requests. On sites whose images share the page's rate limit, visible
 thumbnails load top to bottom and nothing is prefetched ahead of them.
 
-Inside zellij, ck uses half-blocks: zellij answers the question for the terminal it runs
-in, and says sixel whatever that terminal is, so nothing would show in most of them. When
+Inside tmux, the question (and the images) only get through with `set -g
+allow-passthrough on`; without it ck doesn't ask, and uses half-blocks. Inside zellij, ck
+uses half-blocks: zellij answers the question for the terminal it runs in, and says sixel
+whatever that terminal is, so nothing would show in most of them. When
 the detected protocol is wrong for your setup, name one: `images = "halfblocks"`,
 `"sixel"`, `"kitty"` or `"iterm2"` (Settings cycles through them too; it takes effect at the
 next start). To turn images off entirely (no image requests at all), put `images = "off"`
