@@ -50,7 +50,7 @@ fn draw(term: &mut Terminal<TestBackend>, app: &mut App) {
 }
 
 #[test]
-#[ignore]
+#[ignore = "benchmark: timings, best run in release"]
 fn bench_thread() {
     let posts = Futaba::fourchan(None).parse_thread("g", &fixture("4chan_thread.json"));
     let posts = scale(&posts, 1000);
@@ -118,7 +118,7 @@ fn bench_thread() {
 }
 
 #[test]
-#[ignore]
+#[ignore = "benchmark: timings, best run in release"]
 fn bench_saved() {
     let posts = Futaba::fourchan(None).parse_thread("g", &fixture("4chan_thread.json"));
     let posts = scale(&posts, 1000);
@@ -147,7 +147,7 @@ fn bench_saved() {
 }
 
 #[test]
-#[ignore]
+#[ignore = "benchmark: timings, best run in release"]
 fn bench_catalog() {
     let v = fixture("4chan_catalog.json");
     let cat = scale(&Futaba::fourchan(None).parse_catalog("g", &v), 150);
@@ -173,7 +173,7 @@ fn bench_catalog() {
 /// protocol, at the default cell size and at a large real one (25x51 px, as a big font on a
 /// high-density screen reports).
 #[test]
-#[ignore]
+#[ignore = "benchmark: timings, best run in release"]
 fn bench_encoding() {
     use crate::images::Crop;
     use ratatui::layout::Size;
@@ -206,7 +206,7 @@ fn file(url: &str) -> Attachment {
 }
 
 #[test]
-#[ignore]
+#[ignore = "benchmark: timings, best run in release"]
 fn bench_images() {
     eprintln!("\n== images: UI-thread cost of the first frame showing a decoded image ==");
     for proto in [ProtocolType::Halfblocks, ProtocolType::Sixel, ProtocolType::Kitty] {
@@ -270,7 +270,7 @@ fn bench_images() {
 /// Searching saved threads (`:saved WORDS`): about 500 MB of saved copies, the most
 /// `saved_max_mb` keeps by default, read the way the search's thread reads them.
 #[test]
-#[ignore]
+#[ignore = "benchmark: timings, best run in release"]
 fn bench_saved_search() {
     use crate::saved::{SavedPost, SavedThread};
     use crate::store::ThreadKey;
@@ -306,7 +306,7 @@ fn bench_saved_search() {
 /// Hidden words: marking a 1000-post thread, a frame, and a search keystroke, with 50 words
 /// against none.
 #[test]
-#[ignore]
+#[ignore = "benchmark: timings, best run in release"]
 fn bench_hidden_words() {
     eprintln!("== hidden words, thread of 1000 posts ==");
     let posts = Futaba::fourchan(None).parse_thread("g", &fixture("4chan_thread.json"));

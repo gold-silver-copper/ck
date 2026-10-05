@@ -433,7 +433,7 @@ pub(crate) mod tests {
 /// engines are known, found from links as if they weren't.
 #[cfg(test)]
 #[test]
-#[ignore]
+#[ignore = "network: detects every built-in site"]
 fn live_detect() {
     crate::http::NETWORK.store(true, std::sync::atomic::Ordering::Relaxed);
     let cases = [

@@ -242,7 +242,7 @@ const KEYS: &[&str] = &[
 ];
 
 #[test]
-#[ignore]
+#[ignore = "slow: runs the release binary in tmux for a minute"]
 fn e2e_soak() {
     let ck = PathBuf::from(std::env::var("CK_BIN").unwrap_or_else(|_| format!("{}/target/release/ck", env!("CARGO_MANIFEST_DIR"))));
     assert!(ck.exists(), "no {} (cargo build --release first)", ck.display());

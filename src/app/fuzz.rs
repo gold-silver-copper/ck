@@ -1316,7 +1316,7 @@ fn fuzz_app() {
 }
 
 #[test]
-#[ignore]
+#[ignore = "long fuzz run"]
 fn fuzz_app_long() {
     let steps = std::env::var("FUZZ_STEPS").ok().and_then(|v| v.parse().ok()).unwrap_or(2_000);
     let shrinking = std::env::var("FUZZ_SHRINK").map_or(true, |v| v != "0");
