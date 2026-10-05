@@ -3,7 +3,7 @@
 
 use std::path::PathBuf;
 
-use super::tabs::Offline;
+use super::tabs::{Offline, ThreadCopy};
 use super::{App, View};
 use crate::images::Kind;
 use crate::model::{Attachment, Post};
@@ -37,7 +37,7 @@ impl App {
         self.switch_site(site);
         self.tab.board = Some(self.find_board(&key.board));
         // A request in flight in this tab is dropped (its answer will be ignored).
-        self.tab.req = 0;
+        self.tab.req = None;
         self.tab.loading = None;
         self.tab.from_catalog = false;
         self.tab.gallery = None;
@@ -49,13 +49,12 @@ impl App {
             self.tab.thread = None;
         }
         self.tab.view = View::Thread;
-        self.tab.offline = Some(Offline { saved: copy.saved, dead });
-        self.set_thread(posts);
+        self.show_thread(posts, Some(ThreadCopy::Saved(Offline { saved: copy.saved, dead })));
     }
 
     /// `r` on a saved copy: the live thread, unless it's known to be gone.
     pub fn refresh_saved(&mut self) {
-        let (Some(off), Some(t)) = (self.tab.offline, &self.tab.thread) else { return };
+        let (Some(off), Some(t)) = (self.tab.saved(), &self.tab.thread) else { return };
         if off.dead {
             let x = self.keys.key(crate::keys::Action::Archive);
             let archive = if self.archive_of(&t.board, t.no).is_some() { format!(" ({x} looks in the archive)") } else { String::new() };
@@ -64,7 +63,7 @@ impl App {
         }
         let no = t.no;
         // The copy stays on screen until the live thread arrives, which keeps its place.
-        self.tab.offline = None;
+        self.tab.copy = None;
         self.load_thread(no);
     }
 
@@ -79,7 +78,7 @@ impl App {
     /// A saved copy's images come from the download folder, else their cached thumbnail.
     pub fn viewer_source(&self, file: &Attachment) -> Option<(String, Kind)> {
         let thumb = || file.thumb.clone().map(|u| (u, Kind::Thumb));
-        if self.tab.offline.is_none() || self.tab.view != View::Thread {
+        if self.tab.saved().is_none() || self.tab.view != View::Thread {
             return if file.is_image() { Some((file.url.clone(), Kind::Full)) } else { thumb() };
         }
         match self.downloaded(file).filter(|_| file.is_image()) {

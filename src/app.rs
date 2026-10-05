@@ -67,7 +67,7 @@ pub use search::{SavedSearch, Search};
 pub use saving::Downloads;
 pub use thread_view::*;
 pub use sites::{Adding, BoardsUpdate, MySites, origin as site_origin};
-pub use tabs::{MAX_TABS, Offline, Tab, TabPopup};
+pub use tabs::{MAX_TABS, Offline, Tab, TabPopup, ThreadCopy};
 pub use settings::{SettingsPopup, key_rows, rows as setting_rows, settings, tilde};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -780,7 +780,7 @@ impl App {
         if let (Some(s), Some((_, since))) = (&self.status, &self.status_since) {
             after(*since, s.ttl());
         }
-        if self.tab.view == View::Thread && self.tab.thread.is_some() && self.tab.loading.is_none() && self.tab.offline.is_none() {
+        if self.tab.view == View::Thread && self.tab.thread.is_some() && self.tab.loading.is_none() && self.tab.saved().is_none() {
             after(self.tab.thread_checked, self.refresh_thread);
         }
         // At capacity, a finished refresh wakes the loop anyway (and due ones mustn't spin it).
@@ -845,7 +845,7 @@ impl App {
     fn handle(&mut self, msg: Msg) {
         // A response to another request: another tab's is handled there, the rest are stale
         // (but a finished board list is worth keeping anyway).
-        let other = msg.id().filter(|&id| id != self.tab.req);
+        let other = msg.id().filter(|&id| Some(id) != self.tab.req);
         if let Some(i) = other.and_then(|id| self.tab_of(id)) {
             self.handle_in_tab(i, msg);
             return;
@@ -918,7 +918,7 @@ impl App {
                 }
             }
             Msg::CachedThread(_, posts, fetched) => {
-                if self.tab.thread.is_none() && self.tab.view == View::Thread && self.tab.offline.is_none() {
+                if self.tab.thread.is_none() && self.tab.view == View::Thread && self.tab.saved().is_none() {
                     self.set_cached_thread(posts, fetched);
                 }
             }
@@ -961,7 +961,7 @@ impl App {
                         self.info("The thread you had open last time is gone (archived or deleted)");
                     }
                     Err(e) if http::is_not_found(&e) => {
-                        let Some(key) = self.tab.board.as_ref().map(|b| self.key(&b.uri, self.tab.pending_thread)) else {
+                        let Some(key) = self.tab.board.as_ref().map(|b| self.key(&b.uri, self.tab.pending_thread.unwrap_or_default())) else {
                             return;
                         };
                         if let Some(w) = self.store.watched_mut(&key) {
@@ -1060,7 +1060,7 @@ impl App {
     fn catalog_seen(&mut self) {
         let nos: Vec<u64> = self.tab.catalog.iter().map(|p| p.no).collect();
         let site = self.current_site().cfg.name.clone();
-        let board = self.tab.catalog_board.clone();
+        let board = self.tab.catalog_board.clone().unwrap_or_default();
         self.tab.catalog_new = self.store.catalog_seen(&site, &board, &nos, self.clock.now());
         self.store.board_opened(&site, &board);
         self.note_titles(self.tab.site);
@@ -1080,8 +1080,7 @@ impl App {
 
     /// The board a catalog thread is on (overboards mix boards).
     pub fn board_of(&self, p: &Post) -> String {
-        let loaded = Some(self.tab.catalog_board.clone()).filter(|b| !b.is_empty());
-        p.board.clone().or(loaded).or_else(|| self.tab.board.as_ref().map(|b| b.uri.clone())).unwrap_or_default()
+        p.board.clone().or_else(|| self.tab.catalog_board.clone()).or_else(|| self.tab.board.as_ref().map(|b| b.uri.clone())).unwrap_or_default()
     }
 
     pub fn remark_thread(&mut self) {
@@ -1151,7 +1150,7 @@ impl App {
 
     /// The open catalog's board, as `site/board` (for its own sort and layout).
     fn board_key(&self) -> String {
-        let board = Some(self.tab.catalog_board.clone()).filter(|b| !b.is_empty()).or_else(|| self.tab.board.as_ref().map(|b| b.uri.clone()));
+        let board = self.tab.catalog_board.clone().or_else(|| self.tab.board.as_ref().map(|b| b.uri.clone()));
         format!("{}/{}", self.current_site().cfg.name, board.unwrap_or_default())
     }
 
@@ -1211,8 +1210,7 @@ impl App {
         let shown = self.tab.thread.as_ref().is_some_and(|t| t.no == key.no && t.board == key.board);
         let text = match saved {
             Some(at) if shown => {
-                self.tab.cached = None;
-                self.tab.offline = Some(tabs::Offline { saved: at, dead: true });
+                self.tab.copy = Some(ThreadCopy::Saved(tabs::Offline { saved: at, dead: true }));
                 format!("Thread was deleted or archived: this is its saved copy{}", in_archive.map(|a| format!(" ({a})")).unwrap_or_default())
             }
             Some(at) => {
@@ -1222,7 +1220,7 @@ impl App {
             }
             None => {
                 // A copy shown while it loaded stays, marked as gone.
-                if let Some(c) = self.tab.cached.as_mut().filter(|_| shown) {
+                if let Some(ThreadCopy::Cached(c)) = self.tab.copy.as_mut().filter(|_| shown) {
                     c.dead = true;
                 }
                 format!("Thread was deleted or archived{}", in_archive.map(|a| format!(": {a}")).unwrap_or_default())
@@ -1296,13 +1294,13 @@ impl App {
     /// copy open is kept as it is (a copy saved under another number, when the site answered
     /// with another thread, is kept under this one too).
     fn keep_open_thread(&mut self, key: &ThreadKey) {
-        if self.tab.view != View::Thread || (self.tab.offline.is_some() && self.store.saved(key).is_some()) {
+        if self.tab.view != View::Thread || (self.tab.saved().is_some() && self.store.saved(key).is_some()) {
             return;
         }
         let Some(t) = self.tab.thread.as_ref().filter(|t| self.key(&t.board, t.no) == *key) else { return };
         let posts = t.posts.clone();
         self.keep_copy(key, &posts, false);
-        if self.tab.offline.is_some_and(|o| o.dead) {
+        if self.tab.saved().is_some_and(|o| o.dead) {
             self.store.saved_dead(key);
         }
     }
@@ -1575,7 +1573,7 @@ impl App {
             (View::Catalog, Some(i)) => {
                 let no = self.tab.catalog[i].no;
                 // On an overboard the thread lives on its own board.
-                if let Some(uri) = self.tab.catalog[i].board.clone().filter(|b| *b != self.tab.catalog_board) {
+                if let Some(uri) = self.tab.catalog[i].board.clone().filter(|b| Some(b) != self.tab.catalog_board.as_ref()) {
                     self.tab.board = Some(self.find_board(&uri));
                 }
                 self.tab.thread = None;
@@ -1644,14 +1642,14 @@ impl App {
         // After following links to another board (or a board of the same name on another
         // site), the loaded catalog is for the old one.
         if self.tab.view == View::Catalog
-            && let Some(board) = self.tab.board.clone().filter(|b| b.uri != self.tab.catalog_board || self.tab.site != self.tab.catalog_site)
+            && let Some(board) = self.tab.board.clone().filter(|b| Some(&b.uri) != self.tab.catalog_board.as_ref() || self.tab.site != self.tab.catalog_site)
         {
             self.open_catalog(board);
             return;
         }
         // Navigating away cancels any in-flight request (its response will be ignored).
         if self.tab.loading.is_some() {
-            self.tab.req = 0;
+            self.tab.req = None;
             self.tab.loading = None;
         }
     }
@@ -1668,7 +1666,7 @@ impl App {
             }
             View::Boards => self.load_boards(),
             View::Catalog => self.load_catalog(),
-            View::Thread if self.tab.offline.is_some() => self.refresh_saved(),
+            View::Thread if self.tab.saved().is_some() => self.refresh_saved(),
             View::Thread => {
                 if let Some(no) = self.tab.thread.as_ref().map(|t| t.no) {
                     self.load_thread(no);

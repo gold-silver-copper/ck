@@ -111,7 +111,7 @@ fn wakes_as_soon_as_a_message_arrives() {
 fn partial_pages_show_while_loading_continues() {
     let mut app = test_app();
     let board = |uri: &str| Board { uri: uri.into(), title: String::new(), nsfw: None };
-    app.tab.req = 7;
+    app.tab.req = Some(7);
     app.tab.loading = Some("Loading boards".into());
     app.handle(Msg::BoardsPartial(7, 0, vec![board("a")]));
     assert_eq!(app.sites[0].boards.as_ref().unwrap().len(), 1);
@@ -123,7 +123,7 @@ fn partial_pages_show_while_loading_continues() {
     assert_eq!(app.sites[0].boards.as_ref().unwrap().len(), 2);
     assert!(app.tab.loading.is_none());
 
-    app.tab.req = 8;
+    app.tab.req = Some(8);
     app.tab.loading = Some("Loading /a/".into());
     app.handle(Msg::CatalogPartial(8, vec![Post { no: 1, ..Default::default() }]));
     assert_eq!((app.tab.catalog.len(), app.tab.loading.is_some()), (1, true));
@@ -140,7 +140,7 @@ fn overboard_threads_open_on_their_board_and_back_returns() {
     app.tab.view = View::Catalog;
     app.enter();
     assert_eq!((app.tab.view, app.tab.board.as_ref().unwrap().uri.as_str()), (View::Thread, "tech"));
-    assert_eq!(app.tab.pending_thread, 5);
+    assert_eq!(app.tab.pending_thread.unwrap(), 5);
     app.back();
     assert_eq!((app.tab.view, app.tab.board.as_ref().unwrap().uri.as_str()), (View::Catalog, "ob"));
     // The overboard's catalog is still there; nothing was reloaded.
@@ -225,7 +225,7 @@ fn copies_text_and_links() {
 fn goto_opens_places_and_u_comes_back() {
     let mut app = local_app();
     app.goto_str("b/y/5#6");
-    assert_eq!((app.tab.site, app.tab.view, app.tab.pending_thread, app.tab.pending_post), (1, View::Thread, 5, Some(6)));
+    assert_eq!((app.tab.site, app.tab.view, app.tab.pending_thread.unwrap(), app.tab.pending_post), (1, View::Thread, 5, Some(6)));
     assert_eq!(app.tab.board.as_ref().unwrap().uri, "y");
     // Esc from there returns to where : was typed.
     assert_eq!(app.tab.return_to, Some(View::Sites));
@@ -233,14 +233,14 @@ fn goto_opens_places_and_u_comes_back() {
     app.tab.thread = Some(ThreadView::new("y".into(), 5, vec![Post { no: 5, ..Default::default() }, Post { no: 6, ..Default::default() }]));
     app.tab.thread.as_mut().unwrap().selected = 1;
     app.goto_str("http://127.0.0.1:3/x/res/3.html#4");
-    assert_eq!((app.tab.site, app.tab.pending_thread, app.tab.board.as_ref().unwrap().uri.as_str()), (0, 3, "x"));
+    assert_eq!((app.tab.site, app.tab.pending_thread.unwrap(), app.tab.board.as_ref().unwrap().uri.as_str()), (0, 3, "x"));
     app.tab.thread = None;
     app.act(Action::JumpBack);
     assert!(app.tab.thread.is_none());
     // (JumpBack needs a loaded thread; simulate the arrival of thread 3.)
     app.tab.thread = Some(ThreadView::new("x".into(), 3, vec![Post { no: 3, ..Default::default() }]));
     app.act(Action::JumpBack);
-    assert_eq!((app.tab.site, app.tab.pending_thread, app.tab.pending_post, app.tab.board.as_ref().unwrap().uri.as_str()), (1, 5, Some(6), "y"));
+    assert_eq!((app.tab.site, app.tab.pending_thread.unwrap(), app.tab.pending_post, app.tab.board.as_ref().unwrap().uri.as_str()), (1, 5, Some(6), "y"));
     // A board opens its catalog; a site its boards.
     app.goto_str("a/xy");
     assert_eq!((app.tab.site, app.tab.view, app.tab.board.as_ref().unwrap().uri.as_str()), (0, View::Catalog, "xy"));
@@ -313,7 +313,7 @@ fn links_panel_lists_and_opens() {
     // Enter on the quote opens its thread, and `u` will come back.
     app.act(Action::Links);
     app.on_key(KeyEvent::from(KeyCode::Enter));
-    assert_eq!((app.tab.board.as_ref().unwrap().uri.as_str(), app.tab.pending_thread, app.tab.pending_post), ("xy", 9, Some(10)));
+    assert_eq!((app.tab.board.as_ref().unwrap().uri.as_str(), app.tab.pending_thread.unwrap(), app.tab.pending_post), ("xy", 9, Some(10)));
     assert_eq!(app.tab.trail.len(), 1);
     // A post without links says so.
     app.tab.thread = Some(ThreadView::new("x".into(), 1, vec![Post { no: 1, ..Default::default() }]));
@@ -327,7 +327,7 @@ fn filters_and_hiding() {
     let cfg = "[[filter]]\npattern = \"(?i)spam\"\nlabel = \"spam\"\n[[filter]]\npattern = \"rust\"\naction = \"highlight\"";
     app.filters = crate::filter::tests::filters(cfg).unwrap();
     app.tab.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
-    app.tab.catalog_board = "x".into();
+    app.tab.catalog_board = Some("x".into());
     let op = |no, subject: &str| Post { no, subject: Some(subject.into()), ..Default::default() };
     app.tab.catalog = vec![op(1, "SPAM here"), op(2, "rust thread"), op(3, "other")];
     app.remark_catalog();
@@ -418,12 +418,12 @@ fn catalogs_mark_new_threads_and_replies() {
     app.tab.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
     let op = |no, replies| Post { no, replies: Some(replies), ..Default::default() };
     app.load_catalog();
-    app.handle(Msg::Catalog(app.tab.req, Ok(vec![op(1, 3), op(2, 0)])));
+    app.handle(Msg::Catalog(app.tab.req.unwrap(), Ok(vec![op(1, 3), op(2, 0)])));
     assert!(app.tab.catalog_new.is_empty());
     // Thread 1 is opened with 3 replies.
     app.set_thread(vec![Post { no: 1, ..Default::default() }, Post { no: 5, ..Default::default() }, Post { no: 6, ..Default::default() }, Post { no: 7, ..Default::default() }]);
     app.load_catalog();
-    app.handle(Msg::Catalog(app.tab.req, Ok(vec![op(9, 0), op(1, 8), op(2, 1)])));
+    app.handle(Msg::Catalog(app.tab.req.unwrap(), Ok(vec![op(9, 0), op(1, 8), op(2, 1)])));
     assert_eq!(app.tab.catalog_new, [9].into());
     assert_eq!(app.new_replies(&app.tab.catalog[1]), Some(5));
     // Threads never opened don't count replies.
@@ -573,20 +573,20 @@ fn archive_search_and_back() {
     app.on_key(KeyEvent::from(KeyCode::Enter));
     assert_eq!((app.tab.view, app.tab.site), (View::Search, 1));
     let v = crate::backend::fixture("foolfuuka_search.json");
-    app.handle(Msg::Search(app.tab.req, 1, crate::backend::foolfuuka::parse_search(&v)));
+    app.handle(Msg::Search(app.tab.req.unwrap(), 1, crate::backend::foolfuuka::parse_search(&v)));
     assert_eq!(app.tab.search.as_ref().unwrap().hits.len(), 4);
     // Going down to the end asks for the next page.
-    let req = app.tab.req;
+    let req = app.tab.req.unwrap();
     for _ in 0..4 {
         app.on_key(KeyEvent::from(KeyCode::Down));
     }
-    assert_eq!(app.tab.req, req + 1);
-    app.handle(Msg::Search(app.tab.req, 2, Err(anyhow::anyhow!("You're searching too fast."))));
+    assert_eq!(app.tab.req.unwrap(), req + 1);
+    app.handle(Msg::Search(app.tab.req.unwrap(), 2, Err(anyhow::anyhow!("You're searching too fast."))));
     assert!(app.status.as_ref().is_some_and(|s| s.error && s.text.contains("too fast")));
     // Enter: the thread, on the archive, with the post selected.
     app.tab.search_list.state.select(Some(1));
     app.enter();
-    assert_eq!((app.tab.view, app.tab.pending_thread, app.tab.pending_post), (View::Thread, 109912686, Some(109914413)));
+    assert_eq!((app.tab.view, app.tab.pending_thread.unwrap(), app.tab.pending_post), (View::Thread, 109912686, Some(109914413)));
     app.back();
     assert_eq!(app.tab.view, View::Search);
     app.back();
@@ -653,12 +653,12 @@ fn sessions_save_and_restore() {
     let mut next = local_app();
     next.store = Store::load(Some(dir.path().to_path_buf())).0;
     next.restore_session();
-    assert_eq!((next.tab.site, next.tab.view, next.tab.pending_thread, next.tab.pending_post, next.tab.catalog_sort), (1, View::Thread, 5, Some(6), Sort::Newest));
+    assert_eq!((next.tab.site, next.tab.view, next.tab.pending_thread.unwrap(), next.tab.pending_post, next.tab.catalog_sort), (1, View::Thread, 5, Some(6), Sort::Newest));
     // If the thread is gone, its catalog instead.
-    next.handle(Msg::Thread(next.tab.req, Err(anyhow::Error::new(http::HttpError::NotFound("x".into())))));
+    next.handle(Msg::Thread(next.tab.req.unwrap(), Err(anyhow::Error::new(http::HttpError::NotFound("x".into())))));
     assert_eq!(next.tab.view, View::Catalog);
     // A catalog with its selected thread.
-    next.handle(Msg::Catalog(next.tab.req, Ok(vec![])));
+    next.handle(Msg::Catalog(next.tab.req.unwrap(), Ok(vec![])));
     next.tab.catalog = (1..4).map(|no| Post { no, ..Default::default() }).collect();
     next.tab.catalog_list.state.select(Some(2));
     // (The board has no sort of its own, so its catalog is in bump order: index 2 is thread 3.)
@@ -666,7 +666,7 @@ fn sessions_save_and_restore() {
     assert_eq!((place.view.as_str(), place.selected), ("catalog", Some(3)));
     let mut third = local_app();
     third.go_to_place(&place);
-    third.handle(Msg::Catalog(third.tab.req, Ok((1..4).map(|no| Post { no, time: no as i64, ..Default::default() }).collect())));
+    third.handle(Msg::Catalog(third.tab.req.unwrap(), Ok((1..4).map(|no| Post { no, time: no as i64, ..Default::default() }).collect())));
     assert_eq!(third.selected_index().map(|i| third.tab.catalog[i].no), Some(3));
 }
 
@@ -675,33 +675,33 @@ fn tabs_keep_their_own_place_and_responses() {
     let mut app = local_app();
     // Tab 0 loads a catalog on site a.
     app.goto_str("a/x");
-    let first_req = app.tab.req;
+    let first_req = app.tab.req.unwrap();
     // Tab 1 opens a thread on site b while that's still loading.
     app.tabs.push(Tab::new(0, Instant::now()));
     app.switch_tab(1);
     assert_eq!((app.tab.view, app.tab.thread.is_none()), (View::Sites, true));
     app.goto_str("b/y/5");
-    assert_eq!((app.tab.site, app.tab.view, app.tab.pending_thread), (1, View::Thread, 5));
+    assert_eq!((app.tab.site, app.tab.view, app.tab.pending_thread.unwrap()), (1, View::Thread, 5));
     // Tab 0's catalog arrives: it goes to tab 0, not here.
     app.handle(Msg::Catalog(first_req, Ok(vec![Post { no: 1, ..Default::default() }])));
     assert!(app.tab.catalog.is_empty());
-    app.handle(Msg::Thread(app.tab.req, Ok(vec![Post { no: 5, ..Default::default() }])));
+    app.handle(Msg::Thread(app.tab.req.unwrap(), Ok(vec![Post { no: 5, ..Default::default() }])));
     assert_eq!(app.tab.thread.as_ref().unwrap().no, 5);
     app.switch_tab(0);
     assert_eq!((app.tab.site, app.tab.view, app.tab.catalog.len(), app.tab.loading.is_none()), (0, View::Catalog, 1, true));
     assert!(app.tab.thread.is_none());
     // A thread with no posts at all is an error, and what was shown stays.
-    app.handle(Msg::Catalog(app.tab.req, Ok(vec![])));
+    app.handle(Msg::Catalog(app.tab.req.unwrap(), Ok(vec![])));
     app.goto_str("a/x/1");
-    app.handle(Msg::Thread(app.tab.req, Ok(vec![Post { no: 1, ..Default::default() }])));
+    app.handle(Msg::Thread(app.tab.req.unwrap(), Ok(vec![Post { no: 1, ..Default::default() }])));
     app.act(Action::Reload);
-    app.handle(Msg::Thread(app.tab.req, Ok(vec![])));
+    app.handle(Msg::Thread(app.tab.req.unwrap(), Ok(vec![])));
     assert!(app.tab.thread.as_ref().is_some_and(|t| t.posts.len() == 1) && app.status.as_ref().is_some_and(|s| s.error));
     // A post's thread found while the settings are open opens behind them.
     app.goto_str("a/x/1#77");
     app.act(Action::Settings);
-    app.handle(Msg::Found(app.tab.req, Board { uri: "x".into(), title: String::new(), nsfw: None }, 77, Ok(Some(3))));
-    assert_eq!((app.tab.view, app.tab.settings_back, app.tab.pending_thread), (View::Settings, Some(View::Thread), 3));
+    app.handle(Msg::Found(app.tab.req.unwrap(), Board { uri: "x".into(), title: String::new(), nsfw: None }, 77, Ok(Some(3))));
+    assert_eq!((app.tab.view, app.tab.settings_back, app.tab.pending_thread.unwrap()), (View::Settings, Some(View::Thread), 3));
     // Tab chips don't switch tabs under a settings popup (it isn't the tab's).
     app.tabs.push(Tab::new(0, Instant::now()));
     app.tab_chips = vec![(Rect::new(0, 0, 5, 1), 1)];
@@ -712,7 +712,7 @@ fn tabs_keep_their_own_place_and_responses() {
     app.tabs.pop();
     app.tab.view = View::Catalog;
     // A response for a tab that's gone is dropped.
-    let stale = app.tabs[1].req;
+    let stale = app.tabs[1].req.unwrap();
     app.tabs.truncate(1);
     app.handle(Msg::Thread(stale, Ok(vec![Post { no: 9, ..Default::default() }])));
     assert!(app.tab.thread.is_none());
@@ -724,12 +724,12 @@ fn new_tabs_switching_closing_and_the_session() {
     let mut app = local_app();
     app.store = Store::load(Some(dir.path().to_path_buf())).0;
     app.goto_str("a/x");
-    app.handle(Msg::Catalog(app.tab.req, Ok((1..=3).map(|no| Post { no, ..Default::default() }).collect())));
+    app.handle(Msg::Catalog(app.tab.req.unwrap(), Ok((1..=3).map(|no| Post { no, ..Default::default() }).collect())));
     app.tab.catalog_list.state.select(Some(1));
     let key = |c| KeyEvent::from(KeyCode::Char(c));
     // T: thread 2 in a new tab after this one.
     app.on_key(key('T'));
-    assert_eq!((app.tabs.len(), app.active, app.tab.view, app.tab.pending_thread), (2, 1, View::Thread, 2));
+    assert_eq!((app.tabs.len(), app.active, app.tab.view, app.tab.pending_thread.unwrap()), (2, 1, View::Thread, 2));
     assert_eq!(app.tab_label(0), "/x/");
     // ] / [ switch; each tab keeps its place.
     app.on_key(key(']'));
@@ -755,7 +755,7 @@ fn new_tabs_switching_closing_and_the_session() {
     let mut next = local_app();
     next.store = Store::load(Some(dir.path().to_path_buf())).0;
     next.restore_session();
-    assert_eq!((next.tabs.len(), next.active, next.tab.view, next.tab.pending_thread), (2, 1, View::Thread, 2));
+    assert_eq!((next.tabs.len(), next.active, next.tab.view, next.tab.pending_thread.unwrap()), (2, 1, View::Thread, 2));
     next.switch_tab(0);
     assert_eq!((next.tab.view, next.tab.board.as_ref().unwrap().uri.as_str()), (View::Catalog, "x"));
 }
@@ -801,7 +801,7 @@ fn recent_boards_on_the_home_screen() {
     let mut app = local_app();
     for board in ["a/x", "b/y", "a/xy"] {
         app.goto_str(board);
-        app.handle(Msg::Catalog(app.tab.req, Ok(vec![])));
+        app.handle(Msg::Catalog(app.tab.req.unwrap(), Ok(vec![])));
     }
     assert_eq!(app.store.recent_boards, ["a/xy", "b/y", "a/x"]);
     // Favorites aren't repeated as recent.
@@ -1011,7 +1011,7 @@ fn tab_focuses_parts_and_the_verbs_follow_it() {
     let html = r##"<a href="#p1" class="quotelink">&gt;&gt;1</a> see https://example.com/a"##;
     let file = |name: &str| Attachment { filename: name.into(), url: format!("http://127.0.0.1:3/x/src/{name}"), ..Default::default() };
     let reply = Post { no: 2, files: vec![file("a.png"), file("b.webm")], ..crate::markup::parse_html(html, crate::markup::Flavor::Vichan).into() };
-    app.handle(Msg::Thread(app.tab.req, Ok(vec![Post { no: 1, ..Default::default() }, reply, Post { no: 3, ..Default::default() }])));
+    app.handle(Msg::Thread(app.tab.req.unwrap(), Ok(vec![Post { no: 1, ..Default::default() }, reply, Post { no: 3, ..Default::default() }])));
     let tab = |app: &mut App, shift: bool| app.on_key(if shift { KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT) } else { KeyEvent::from(KeyCode::Tab) });
     let focus = |app: &App| app.tab.thread.as_ref().unwrap().focus.clone();
     let selected = |app: &App| app.tab.thread.as_ref().unwrap().selected;
@@ -1066,7 +1066,7 @@ fn tab_focuses_parts_and_the_verbs_follow_it() {
 fn the_menu_runs_what_it_lists() {
     let mut app = local_app();
     app.goto_str("a/x/1");
-    app.handle(Msg::Thread(app.tab.req, Ok(vec![Post { no: 1, files: vec![Attachment { filename: "a.png".into(), url: "http://127.0.0.1:3/a.png".into(), ..Default::default() }], ..Default::default() }])));
+    app.handle(Msg::Thread(app.tab.req.unwrap(), Ok(vec![Post { no: 1, files: vec![Attachment { filename: "a.png".into(), url: "http://127.0.0.1:3/a.png".into(), ..Default::default() }], ..Default::default() }])));
     app.on_key(KeyEvent::from(KeyCode::Char('.')));
     let m = app.menu().unwrap();
     let has = |a: Action| m.items.iter().any(|i| matches!(i, MenuItem::Act(x, _) if *x == a));
@@ -1100,7 +1100,7 @@ fn watched_threads_are_saved_as_posts_arrive() {
     let file = |no: u64| dir.path().join(format!("threads/a/x/{no}.json"));
     // Not watched: not saved.
     app.goto_str("a/x/1");
-    app.handle(Msg::Thread(app.tab.req, Ok(nos(&[1, 2]))));
+    app.handle(Msg::Thread(app.tab.req.unwrap(), Ok(nos(&[1, 2]))));
     assert!(!file(1).exists());
     // Watching a loaded thread saves it at once; refreshes save the changes only.
     app.act(Action::Watch);
@@ -1131,21 +1131,21 @@ fn a_dead_thread_offers_its_saved_copy() {
     app.store.toggle_watch(key.clone(), "one".into(), 2, 2);
     app.store.keep_thread(&key, "one", "u", &nos(&[1, 2]), 10_000 - 7200);
     app.goto_str("a/x/1");
-    assert_eq!(app.tab.cached, Some(tabs::Offline { saved: 10_000 - 7200, dead: false }));
+    assert_eq!(app.tab.cached(), Some(tabs::Offline { saved: 10_000 - 7200, dead: false }));
     assert!(app.tab.loading.is_some() && app.tab.thread.as_ref().unwrap().posts.len() == 2);
-    app.handle(Msg::Thread(app.tab.req, Err(gone())));
+    app.handle(Msg::Thread(app.tab.req.unwrap(), Err(gone())));
     assert!(app.store.watched(&key).unwrap().dead && app.store.saved(&key).unwrap().dead);
-    assert_eq!((app.tab.cached, app.tab.offline.map(|o| o.dead)), (None, Some(true)));
+    assert_eq!((app.tab.cached(), app.tab.saved().map(|o| o.dead)), (None, Some(true)));
     // An exported copy of a thread that isn't watched: offered when the thread is gone.
     app.store.toggle_watch(key.clone(), String::new(), 0, 0);
     app.goto_str("a/x");
     app.goto_str("a/x/1");
     assert!(app.tab.thread.is_none());
-    app.handle(Msg::Thread(app.tab.req, Err(gone())));
+    app.handle(Msg::Thread(app.tab.req.unwrap(), Err(gone())));
     let text = &app.status.as_ref().unwrap().text;
     assert!(text.contains("A saved copy from 2h ago: enter opens it"), "{text}");
     app.on_key(KeyEvent::from(KeyCode::Enter));
-    assert_eq!(app.tab.offline, Some(tabs::Offline { saved: 10_000 - 7200, dead: true }));
+    assert_eq!(app.tab.saved(), Some(tabs::Offline { saved: 10_000 - 7200, dead: true }));
     assert_eq!(app.tab.thread.as_ref().unwrap().posts.len(), 2);
     // Read offline: r says so, and nothing is fetched, however long it stays open.
     app.act(Action::Reload);
@@ -1153,7 +1153,7 @@ fn a_dead_thread_offers_its_saved_copy() {
     for _ in 0..3 {
         app.clock = Clock { fixed: Some(app.clock.now() + 600), instant: Some(app.clock.instant() + Duration::from_secs(600)) };
         app.poll();
-        assert!(app.tab.loading.is_none() && app.refreshing.is_empty() && app.tab.req == 0);
+        assert!(app.tab.loading.is_none() && app.refreshing.is_empty() && app.tab.req.is_none());
     }
     assert!(app.next_wake(app.clock.instant()) > Duration::from_millis(500));
     // Opening it isn't a visit, nor a save (which would bring the dead copy back to life).
@@ -1166,17 +1166,17 @@ fn a_thread_dying_on_screen_becomes_its_saved_copy() {
     let mut app = saving_app(dir.path(), 1000);
     let key = ThreadKey { site: "a".into(), board: "x".into(), no: 1 };
     app.goto_str("a/x/1");
-    app.handle(Msg::Thread(app.tab.req, Ok(nos(&[1, 2]))));
+    app.handle(Msg::Thread(app.tab.req.unwrap(), Ok(nos(&[1, 2]))));
     app.act(Action::Watch);
     app.refreshed(key.clone(), Err(gone()));
-    assert_eq!(app.tab.offline, Some(tabs::Offline { saved: 1000, dead: true }));
+    assert_eq!(app.tab.saved(), Some(tabs::Offline { saved: 1000, dead: true }));
     assert!(app.status.as_ref().unwrap().text.contains("this is its saved copy"));
     assert_eq!(app.tab.thread.as_ref().unwrap().posts.len(), 2);
     // Without a copy, as before.
     let mut app = saving_app(dir.path(), 1000);
     app.goto_str("a/x/5");
-    app.handle(Msg::Thread(app.tab.req, Err(gone())));
-    assert!(app.tab.saved_offer.is_none() && app.tab.offline.is_none());
+    app.handle(Msg::Thread(app.tab.req.unwrap(), Err(gone())));
+    assert!(app.tab.saved_offer.is_none() && app.tab.saved().is_none());
     assert_eq!(app.status.as_ref().unwrap().text, "Thread was deleted or archived");
 }
 
@@ -1189,12 +1189,12 @@ fn a_saved_copy_of_a_live_thread_goes_live_with_r() {
     app.tab.view = View::Saved;
     app.saved_list.state.select(Some(0));
     app.enter();
-    assert_eq!(app.tab.offline, Some(tabs::Offline { saved: 900, dead: false }));
+    assert_eq!(app.tab.saved(), Some(tabs::Offline { saved: 900, dead: false }));
     app.tab.thread.as_mut().unwrap().selected = 1;
     app.act(Action::Reload);
-    assert!(app.tab.offline.is_none() && app.tab.loading.is_some());
+    assert!(app.tab.saved().is_none() && app.tab.loading.is_some());
     // The copy stays up, and the live thread arrives in its place, keeping the selection.
-    app.handle(Msg::Thread(app.tab.req, Ok(nos(&[1, 2, 3]))));
+    app.handle(Msg::Thread(app.tab.req.unwrap(), Ok(nos(&[1, 2, 3]))));
     let t = app.tab.thread.as_ref().unwrap();
     assert_eq!((t.posts.len(), t.current().unwrap().no), (3, 2));
     // Back goes to the Saved view.
@@ -1245,7 +1245,7 @@ fn export_saves_a_copy() {
     let mut app = saving_app(&dir.path().join("data"), 1000);
     app.download_dir = Some(dir.path().join("dl").display().to_string());
     app.goto_str("a/x/1");
-    app.handle(Msg::Thread(app.tab.req, Ok(nos(&[1, 2]))));
+    app.handle(Msg::Thread(app.tab.req.unwrap(), Ok(nos(&[1, 2]))));
     // It asks first; enter saves.
     app.act(Action::Export);
     assert!(!dir.path().join("dl/thread.json").exists());
@@ -1268,7 +1268,7 @@ fn a_saved_copy_is_remembered_in_the_session() {
     assert_eq!((place.view.as_str(), place.thread, place.selected), ("saved", Some(5), Some(6)));
     let mut next = saving_app(dir.path(), 1000);
     next.go_to_place(&place);
-    assert!(next.tab.offline.is_some() && next.tab.loading.is_none());
+    assert!(next.tab.saved().is_some() && next.tab.loading.is_none());
     assert_eq!(next.tab.thread.as_ref().unwrap().current().unwrap().no, 6);
     // The Saved view itself.
     next.tab.view = View::Saved;
@@ -1303,7 +1303,7 @@ fn filter_app(dir: &std::path::Path) -> App {
     app.config_path = Some(path);
     app.goto_str("a/x/1");
     let named = |no, name: &str| Post { no, name: name.into(), ..Default::default() };
-    app.handle(Msg::Thread(app.tab.req, Ok(vec![named(1, "Anonymous"), named(2, "Named !Trip"), named(3, "Anonymous"), named(4, "Named !Trip")])));
+    app.handle(Msg::Thread(app.tab.req.unwrap(), Ok(vec![named(1, "Anonymous"), named(2, "Named !Trip"), named(3, "Anonymous"), named(4, "Named !Trip")])));
     app
 }
 
@@ -1369,7 +1369,7 @@ fn filters_from_a_catalog_by_subject_and_image() {
     app.goto_str("a/x");
     let file = Attachment { filename: "cat.png".into(), md5: Some("q1w2e3==".into()), ..Default::default() };
     let op = |no, subject: &str| Post { no, subject: Some(subject.into()), name: "Anonymous".into(), files: vec![file.clone()], ..Default::default() };
-    app.handle(Msg::Catalog(app.tab.req, Ok(vec![op(1, "Daily (thread)"), op(2, "Other"), op(3, "Daily (thread)")])));
+    app.handle(Msg::Catalog(app.tab.req.unwrap(), Ok(vec![op(1, "Daily (thread)"), op(2, "Other"), op(3, "Daily (thread)")])));
     app.act(Action::Filter);
     let a = app.filter_add().unwrap();
     let fields: Vec<_> = a.candidates.iter().map(|c| c.field).collect();
@@ -1491,7 +1491,7 @@ fn c_shows_a_conversation_until_esc() {
     app.goto_str("a/x/1");
     let posts = [(1, vec![]), (2, vec![1]), (3, vec![2]), (4, vec![3]), (5, vec![2]), (6, vec![99])];
     let post = |&(no, ref quotes): &(u64, Vec<u64>)| Post { no, quotes: quotes.clone(), ..Default::default() };
-    app.handle(Msg::Thread(app.tab.req, Ok(posts.iter().map(post).collect())));
+    app.handle(Msg::Thread(app.tab.req.unwrap(), Ok(posts.iter().map(post).collect())));
     let t = app.tab.thread.as_mut().unwrap();
     t.scroll = 7;
     t.select(2);
@@ -1533,7 +1533,7 @@ fn a_conversation_is_remembered_in_the_session() {
     app.store = Store::load(Some(dir.path().to_path_buf())).0;
     app.goto_str("a/x/1");
     let posts = || vec![Post { no: 1, ..Default::default() }, Post { no: 2, quotes: vec![1], ..Default::default() }, Post { no: 3, quotes: vec![2], ..Default::default() }, Post { no: 4, quotes: vec![1], ..Default::default() }];
-    app.handle(Msg::Thread(app.tab.req, Ok(posts())));
+    app.handle(Msg::Thread(app.tab.req.unwrap(), Ok(posts())));
     app.tab.thread.as_mut().unwrap().select(1);
     app.act(Action::Conversation);
     app.tab.thread.as_mut().unwrap().select(2);
@@ -1545,7 +1545,7 @@ fn a_conversation_is_remembered_in_the_session() {
     assert_eq!(old.conversation, None);
     let mut next = local_app();
     next.go_to_place(&place);
-    next.handle(Msg::Thread(next.tab.req, Ok(posts())));
+    next.handle(Msg::Thread(next.tab.req.unwrap(), Ok(posts())));
     let t = next.tab.thread.as_ref().unwrap();
     assert_eq!((t.conversation.as_ref().map(|c| c.anchor), t.current().unwrap().no, t.entries.len()), (Some(2), 3, 3));
 }
@@ -1558,7 +1558,7 @@ fn back_to_a_catalog_of_the_same_board_name_on_another_site_loads_it() {
          [[site]]\nname = \"b\"\nkind = \"vichan\"\nurl = \"http://localhost:3\"\nboards = [\"g\"]",
     );
     app.goto_str("a/g");
-    app.handle(Msg::Catalog(app.tab.req, Ok(vec![Post { no: 1, ..Default::default() }])));
+    app.handle(Msg::Catalog(app.tab.req.unwrap(), Ok(vec![Post { no: 1, ..Default::default() }])));
     app.goto_str("b/g/5");
     app.back();
     assert_eq!((app.tab.view, app.tab.site, app.tab.catalog_site), (View::Catalog, 1, 1));
@@ -1573,7 +1573,7 @@ fn the_viewer_goes_through_the_whole_thread_and_zooms() {
     app.goto_str("a/x/1");
     let file = |name: &str| Attachment { filename: name.into(), url: format!("http://127.0.0.1:9/{name}"), ..Default::default() };
     let post = |no, files: Vec<Attachment>| Post { no, files, ..Default::default() };
-    app.handle(Msg::Thread(app.tab.req, Ok(vec![post(1, vec![file("a.png")]), post(2, vec![]), post(3, vec![file("b.png"), file("c.png")]), post(4, vec![file("d.png")])])));
+    app.handle(Msg::Thread(app.tab.req.unwrap(), Ok(vec![post(1, vec![file("a.png")]), post(2, vec![]), post(3, vec![file("b.png"), file("c.png")]), post(4, vec![file("d.png")])])));
     app.tab.thread.as_mut().unwrap().select(2);
     // v: every file of the thread, from the selected post's.
     app.act(Action::View);
@@ -1602,7 +1602,7 @@ fn the_viewer_goes_through_the_whole_thread_and_zooms() {
     assert_eq!(app.tab.thread.as_ref().unwrap().current().unwrap().no, 1);
     // In a catalog, it's still the one thread's files.
     app.goto_str("a/x");
-    app.handle(Msg::Catalog(app.tab.req, Ok(vec![post(1, vec![file("a.png"), file("e.png")])])));
+    app.handle(Msg::Catalog(app.tab.req.unwrap(), Ok(vec![post(1, vec![file("a.png"), file("e.png")])])));
     app.act(Action::View);
     let v = app.tab.viewer().unwrap();
     assert!(v.files.len() == 2 && v.posts.is_empty());
@@ -1675,7 +1675,7 @@ fn threads_open_from_their_last_copy_then_refresh() {
     app.goto_str("c/g/30364");
     settle_until(&mut app, |a| a.tab.loading.is_none());
     let n = app.tab.thread.as_ref().unwrap().posts.len();
-    assert!(n > 3 && app.tab.cached.is_none());
+    assert!(n > 3 && app.tab.cached().is_none());
     assert_eq!(site.asked(), [None]);
     // A restart: shown at once from the copy (no request for that), marked cached.
     http::forget_host(host);
@@ -1683,7 +1683,7 @@ fn threads_open_from_their_last_copy_then_refresh() {
     site.hold(true);
     app.goto_str("c/g/30364");
     settle_until(&mut app, |a| a.tab.thread.is_some());
-    assert_eq!(app.tab.cached, Some(tabs::Offline { saved: 5000, dead: false }));
+    assert_eq!(app.tab.cached(), Some(tabs::Offline { saved: 5000, dead: false }));
     assert!(app.tab.loading.is_some());
     // Nothing is new against the last visit; reading on while it loads.
     let t = app.tab.thread.as_mut().unwrap();
@@ -1694,7 +1694,7 @@ fn threads_open_from_their_last_copy_then_refresh() {
     site.hold(false);
     settle_until(&mut app, |a| a.tab.loading.is_none());
     let t = app.tab.thread.as_ref().unwrap();
-    assert_eq!((t.selected, t.posts.len(), app.tab.cached), (3, n, None));
+    assert_eq!((t.selected, t.posts.len(), app.tab.cached()), (3, n, None));
     assert_eq!(site.asked(), [None, Some("day 1".into())]);
     // A failing refresh leaves the copy shown, still marked.
     for (mode, dead) in [(500, false), (404, true)] {
@@ -1703,7 +1703,7 @@ fn threads_open_from_their_last_copy_then_refresh() {
         *http::lock(&site.mode) = mode;
         app.goto_str("c/g/30364");
         settle_until(&mut app, |a| a.tab.loading.is_none());
-        assert_eq!(app.tab.cached.map(|c| c.dead), Some(dead), "{mode}");
+        assert_eq!(app.tab.cached().map(|c| c.dead), Some(dead), "{mode}");
         assert!(app.status.as_ref().unwrap().error);
     }
     // One request per open, whatever came from the copy.
@@ -1750,7 +1750,7 @@ fn saving_needs_a_target_or_asks_first() {
         Post { no: 2, files: vec![file("b.png"), file("c.png")], ..Default::default() },
         Post { no: 3, ..Default::default() },
     ];
-    app.handle(Msg::Thread(app.tab.req, Ok(posts)));
+    app.handle(Msg::Thread(app.tab.req.unwrap(), Ok(posts)));
     let press = |app: &mut App, c: char| app.on_key(KeyEvent::from(KeyCode::Char(c)));
     let total = |app: &App| app.downloads.total;
     // d on a post with nothing focused saves nothing, and says how.
@@ -1807,7 +1807,7 @@ fn an_action_without_a_key_is_in_the_menu() {
     app.download_dir = Some(dir.path().display().to_string());
     app.goto_str("a/x/1");
     let file = Attachment { filename: "a.png".into(), url: "http://127.0.0.1:3/x/src/a.png".into(), ..Default::default() };
-    app.handle(Msg::Thread(app.tab.req, Ok(vec![Post { no: 1, files: vec![file], ..Default::default() }])));
+    app.handle(Msg::Thread(app.tab.req.unwrap(), Ok(vec![Post { no: 1, files: vec![file], ..Default::default() }])));
     app.on_key(KeyEvent::from(KeyCode::Tab));
     app.on_key(KeyEvent::from(KeyCode::Char('d')));
     assert_eq!(app.downloads.total, 0);
@@ -1859,7 +1859,7 @@ fn a_link_to_a_new_site_adds_it_then_goes_there() {
     assert_eq!((app.sites[new].cfg.name.as_str(), app.sites[new].cfg.url.as_deref()), ("mychan", Some("https://newchan.invalid")));
     let saved: Config = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
     assert_eq!(saved.sites, [app.sites[new].cfg.clone()]);
-    assert_eq!((app.tab.site, app.tab.view, app.tab.pending_thread, app.tab.pending_post), (new, View::Thread, 5, Some(7)));
+    assert_eq!((app.tab.site, app.tab.view, app.tab.pending_thread.unwrap(), app.tab.pending_post), (new, View::Thread, 5, Some(7)));
     assert!(app.visible_sites().contains(&SiteRow::Site(new)));
     // From now on its links just open.
     app.goto_str("https://newchan.invalid/tech/");
@@ -2169,7 +2169,7 @@ fn an_overboard_follows_each_threads_board() {
     app.nsfw_images = NsfwImages::Off;
     app.tab.view = View::Catalog;
     app.tab.catalog_site = 0;
-    app.tab.catalog_board = "all".into();
+    app.tab.catalog_board = Some("all".into());
     app.tab.catalog = (1..=6).map(|no| with_file(no, Some(if no % 2 == 0 { "x" } else { "xy" }))).collect();
     app.tab.catalog_marks = vec![Default::default(); 6];
     app.tab.catalog_list.state.select(Some(0));
@@ -2233,7 +2233,7 @@ fn searching_inside_saved_threads() {
     app.tab.search_list.state.select(Some(2));
     app.on_key(KeyEvent::from(KeyCode::Enter));
     let t = app.tab.thread.as_ref().unwrap();
-    assert!(app.tab.offline.is_some());
+    assert!(app.tab.saved().is_some());
     assert_eq!((t.no, t.current().unwrap().no, t.search.as_str(), t.matches.len()), (1, 3, "rust", 2));
     // esc: back to the results, then where the search started.
     app.on_key(KeyEvent::from(KeyCode::Esc));
@@ -2380,7 +2380,7 @@ fn hidden_words_hide_posts_everywhere() {
     app.hidden_words = vec!["crypto".into()];
     app.apply_filters();
     app.tab.catalog = posts_saying(&[(10, "crypto thread"), (11, "a thread")]);
-    app.tab.catalog_board = "x".into();
+    app.tab.catalog_board = Some("x".into());
     app.remark_catalog();
     assert_eq!(app.tab.catalog_marks.iter().map(|m| m.hidden.clone()).collect::<Vec<_>>(), [label, None]);
 }
