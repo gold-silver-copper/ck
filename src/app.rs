@@ -672,6 +672,17 @@ impl App {
         &self.sites[self.tab.site]
     }
 
+    /// Where the site of this name is in `sites`: saved keys name their site, and it
+    /// may have been removed from the config since.
+    pub fn site_index(&self, name: &str) -> Option<usize> {
+        self.sites.iter().position(|s| s.cfg.name == name)
+    }
+
+    /// The site of this name, if it's still in the config.
+    pub fn site_named(&self, name: &str) -> Option<&Site> {
+        self.site_index(name).map(|i| &self.sites[i])
+    }
+
     /// What's typed after `:`, while it's being typed.
     pub fn goto_text(&self) -> Option<&str> {
         match &self.typing {
@@ -1203,8 +1214,8 @@ impl App {
     /// With a saved copy, that comes first: a thread still on screen becomes its saved copy,
     /// and otherwise `enter` opens it.
     pub(crate) fn thread_gone(&mut self, key: &ThreadKey) {
-        let archive = self.sites.iter().find(|s| s.cfg.name == key.site).and_then(|s| s.cfg.archive.clone());
-        self.tab.archive_offer = archive.filter(|a| self.sites.iter().any(|s| s.cfg.name == *a)).map(|a| ThreadKey { site: a, board: key.board.clone(), no: key.no });
+        let archive = self.site_named(&key.site).and_then(|s| s.cfg.archive.clone());
+        self.tab.archive_offer = archive.filter(|a| self.site_index(a).is_some()).map(|a| ThreadKey { site: a, board: key.board.clone(), no: key.no });
         let in_archive = self.tab.archive_offer.as_ref().map(|a| format!("{} opens it in {}", self.keys.key(Action::Archive), a.site));
         let saved = self.store.saved(key).map(|m| m.saved);
         let shown = self.tab.thread.as_ref().is_some_and(|t| t.no == key.no && t.board == key.board);
@@ -1330,7 +1341,7 @@ impl App {
 
     /// Open a thread from Watched or History, switching site and board as needed.
     fn open_key(&mut self, key: ThreadKey) {
-        let Some(site) = self.sites.iter().position(|s| s.cfg.name == key.site) else {
+        let Some(site) = self.site_index(&key.site) else {
             self.error(format!("No site named {} in the config", key.site));
             return;
         };
@@ -1715,7 +1726,7 @@ impl App {
 
     /// A link to a thread (and post) on its site.
     fn thread_link(&self, key: &ThreadKey, post: Option<u64>) -> Option<String> {
-        let site = self.sites.iter().find(|s| s.cfg.name == key.site)?;
+        let site = self.site_named(&key.site)?;
         Some(match post {
             Some(p) if p != key.no => site.backend.post_url(&key.board, key.no, p),
             _ => site.backend.thread_url(&key.board, key.no),

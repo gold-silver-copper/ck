@@ -99,7 +99,7 @@ impl App {
             if fetched.is_some_and(|t| now.saturating_duration_since(*t) < crate::http::MIN_REFETCH) {
                 continue;
             }
-            let Some(s) = self.sites.iter().find(|s| s.cfg.name == site) else { continue };
+            let Some(s) = self.site_named(&site) else { continue };
             let backend = s.backend.clone();
             let later = self.later();
             self.general_boards.insert((site, board.clone()), now);

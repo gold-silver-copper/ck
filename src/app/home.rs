@@ -50,7 +50,7 @@ impl App {
 
     /// Open a board's catalog from the home screen.
     pub fn open_board(&mut self, b: &BoardRef) {
-        match self.sites.iter().position(|s| s.cfg.name == b.site) {
+        match self.site_index(&b.site) {
             Some(site) => self.go(Target { site, board: Some(b.board.clone()), thread: None, post: None }),
             None => self.error(format!("No site named {} in the config", b.site)),
         }

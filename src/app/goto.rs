@@ -169,7 +169,7 @@ impl App {
         match matches.as_slice() {
             [] => self.info(format!("Nothing starts with \"{partial}\"")),
             [one] => {
-                let slash = if site.is_none() && self.sites.iter().any(|s| s.cfg.name == **one) { "/" } else { "" };
+                let slash = if site.is_none() && self.site_index(one).is_some() { "/" } else { "" };
                 self.typing = Some(super::Typing::Goto(format!("{prefix}{one}{slash}")));
             }
             many => {
