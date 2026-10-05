@@ -103,6 +103,10 @@ restore_session = true
 # that board's own (and `s` its sort), kept in the data directory.
 catalog_layout = "cards"
 
+# Threads you watch (marked ◉) come first in catalogs, then the rest in the sort's order;
+# threads a `top = true` filter highlights still come before them. Also in Settings.
+watched_first = false
+
 # Where saved files and pages go. {site}, {board} and {thread} are filled in, and {downloads}
 # is your Downloads folder. "~/" works too.
 # download_dir = "{downloads}/ck/{site}/{board}/{thread}"

@@ -323,6 +323,8 @@ pub struct App {
     /// Sites left off the home screen (from the config), and whether they're shown anyway.
     pub hidden_sites: std::collections::BTreeSet<String>,
     pub show_hidden_sites: bool,
+    /// Watched threads come first in catalogs (`watched_first`).
+    pub watched_first: bool,
     /// The catalog layout for boards without their own (`catalog_layout` in the config).
     pub default_layout: CatalogLayout,
     /// Columns of the catalog grid as last drawn (0: not a grid).
@@ -494,6 +496,7 @@ impl App {
             home_titles: HashMap::new(),
             hidden_sites: cfg.hidden_sites.iter().cloned().collect(),
             show_hidden_sites: false,
+            watched_first: cfg.watched_first,
             grid_cols: 0,
             default_layout: store.settings.catalog_layout.unwrap_or(match store.settings.compact_catalog {
                 Some(true) => CatalogLayout::Compact,
@@ -658,12 +661,26 @@ impl App {
             Sort::Newest => v.sort_by_key(|&i| std::cmp::Reverse((c[i].time, c[i].no))),
             Sort::Oldest => v.sort_by_key(|&i| (c[i].time, c[i].no)),
         }
-        // What a `top` filter highlights first, in that order.
+        // What a `top` filter highlights first, then (`watched_first`) the threads you watch,
+        // each in the sort's order. The filters are rules written to come first whatever the
+        // sort; watching is a sort of its own.
         let top = |i: &usize| self.tab.catalog_marks.get(*i).is_some_and(|m| m.top);
-        if v.iter().any(top) {
-            v.sort_by_key(|i| !top(i));
+        let site = self.sites.get(self.tab.catalog_site).map_or("", |s| s.cfg.name.as_str());
+        let watched: HashSet<(&str, u64)> = match self.watched_first {
+            true => self.store.watched.iter().filter(|w| w.key.site == site).map(|w| (w.key.board.as_str(), w.key.no)).collect(),
+            false => HashSet::new(),
+        };
+        let watching = |i: &usize| !watched.is_empty() && watched.contains(&(self.board_of(&c[*i]).as_str(), c[*i].no));
+        if v.iter().any(|i| top(i) || watching(i)) {
+            v.sort_by_cached_key(|i| (!top(i), !watching(i)));
         }
         v
+    }
+
+    /// Whether a thread in the tab's catalog is watched.
+    pub fn catalog_watching(&self, p: &Post) -> bool {
+        let Some(site) = self.sites.get(self.tab.catalog_site) else { return false };
+        self.store.watched(&ThreadKey { site: site.cfg.name.clone(), board: self.board_of(p), no: p.no }).is_some()
     }
 
     /// What's on screen, broadly: when it changes, the screen is painted whole.

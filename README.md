@@ -393,7 +393,8 @@ a watched thread refreshed in the background brings a new post the filter catche
 followed general's board has a new thread it catches, once each, together with the other
 news of that round. (Not on ck's first look at a thread or board each session, which may
 find old posts, nor for the thread you have open.) `top = true` on a highlighting filter
-puts the threads it highlights at the top of the catalog, in the order the sort gives them.
+puts the threads it highlights at the top of the catalog, in the order the sort gives them
+(before watched threads, with `watched_first`).
 `op = true` and `reply = true` together catch nothing, and are refused.
 
 ### Hidden words
@@ -502,6 +503,12 @@ Catalogs mark threads that weren't there on your previous visit with "new" (the 
 counts them), and threads you've opened before show how many replies they've gained since,
 like `+12`. This is kept per board in the data directory (threads are forgotten a week
 after they leave the catalog) and needs no extra requests.
+
+Threads you watch are marked ◉. `watched_first = true` (or Settings › Watched first) puts
+them first in every catalog, then the rest, each in the order the sort gives them. Threads
+a `top = true` filter highlights still come before them: a filter is a rule you wrote to
+come first whatever the sort, and watching is more of a sort of its own (a top thread you
+watch comes first among the top ones).
 
 ### Notifications
 
@@ -678,6 +685,8 @@ All settings are optional; see `config.example.toml` for every option with comme
 
 - `images = "auto" | "off"`
 - `refresh_thread_secs`, `refresh_watched_secs`, `refresh_backoff = false`
+- `watched_first = true` puts watched threads first in catalogs (see
+  [What's new in a catalog](#whats-new-in-a-catalog)).
 - `catalog_layout = "cards" | "compact" | "grid"`: the default layout (also in Settings).
   `c` in a catalog and `s` set that board's own layout and sort, which are remembered in
   the data directory (`board_prefs.json`). In the grid, `h`/`l` move between columns

@@ -636,6 +636,9 @@ impl World {
         if rng.chance(30) {
             doc["refresh_backoff"] = toml_edit::value(false);
         }
+        if rng.chance(40) {
+            doc["watched_first"] = toml_edit::value(true);
+        }
         if rng.chance(30) {
             doc["hidden_words"] = toml_edit::value(toml_edit::Array::from_iter(["the", "c++", "free money", "λ"]));
         }
@@ -1347,10 +1350,15 @@ fn check_deleted(app: &App, before: &Before) {
 
 /// After the filters change, the open catalog's and thread's marks are what they say.
 fn check_marks(app: &App, before: &Before) {
-    // Threads a `top` filter highlights come first, whatever the sort.
+    // Threads a `top` filter highlights come first, whatever the sort; then (`watched_first`)
+    // the watched ones.
     if app.tab.catalog_marks.len() == app.tab.catalog.len() {
-        let tops: Vec<bool> = app.visible_catalog().iter().map(|&i| app.tab.catalog_marks[i].top).collect();
-        assert!(tops.windows(2).all(|w| w[0] || !w[1]), "a top thread after another: {tops:?}");
+        let firsts: Vec<(bool, bool)> = app
+            .visible_catalog()
+            .iter()
+            .map(|&i| (app.tab.catalog_marks[i].top, app.watched_first && app.catalog_watching(&app.tab.catalog[i])))
+            .collect();
+        assert!(firsts.windows(2).all(|w| w[0] >= w[1]), "a top or watched thread after another (top, watched): {firsts:?}");
     }
     if app.filter_cfgs == before.filters && app.recursive_hiding == before.recursive_hiding {
         return;

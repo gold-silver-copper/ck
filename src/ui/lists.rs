@@ -225,6 +225,9 @@ pub(super) fn draw_catalog(f: &mut Frame, app: &mut App, area: Rect) {
         let p = &app.tab.catalog[i];
         let mark = app.tab.catalog_marks.get(i).cloned().unwrap_or_default();
         let mut head = Vec::new();
+        if app.catalog_watching(p) {
+            head.push(Span::styled(WATCHING, bold(t.primary)));
+        }
         if let Some(label) = &mark.hidden {
             head.extend([chip(hidden_label(label), t.text_dim, t.surface_high), Span::raw(" ")]);
         }
@@ -338,6 +341,9 @@ pub(super) fn draw_catalog(f: &mut Frame, app: &mut App, area: Rect) {
         }
     }
 }
+
+/// Before a catalog thread you watch.
+const WATCHING: &str = "◉ ";
 
 /// A hidden item's chip: by which filter, or by hand.
 pub(super) fn hidden_label(why: &Hidden) -> String {
@@ -483,6 +489,9 @@ fn draw_grid(f: &mut Frame, app: &mut App, area: Rect) {
         }
         let w = GRID_CARD.width - PAD - 1;
         let mut head = Vec::new();
+        if app.catalog_watching(p) {
+            head.push(Span::styled(WATCHING, bold(t.primary)));
+        }
         if app.tab.catalog_new.contains(&p.no) {
             head.extend([chip("new", t.background, t.new), Span::raw(" ")]);
         }

@@ -88,6 +88,16 @@ pub const SECTIONS: &[(&str, &[Setting])] = &[
     ("Catalog", &[
         row("Default layout", "c in a catalog sets a board's own", |a| a.default_layout.as_str().into(), App::cycle_default_layout),
         row(
+            "Watched first",
+            "Threads you watch at the top of catalogs",
+            |a| if a.watched_first { "watched threads first" } else { "in the sort's order" }.into(),
+            |a| {
+                a.watched_first = !a.watched_first;
+                let on = a.watched_first;
+                a.save_config(if on { "watched threads first in catalogs" } else { "watched threads in the sort's order" }, |d| d["watched_first"] = toml_edit::value(on));
+            },
+        ),
+        row(
             "Images",
             "Thumbnails and the image viewer (after a restart)",
             |a| match a.images_mode {
