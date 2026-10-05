@@ -66,6 +66,43 @@ pub fn conversation_of(posts: &[Post], index: &HashMap<u64, usize>, backlinks: &
     (depth, capped)
 }
 
+/// A refresh with fewer posts than 1/`SHRUNK` of those shown is more likely a broken answer
+/// (cut short, or a page the site sent while in trouble) than moderators deleting most of
+/// the thread: it's shown as it came, and the posts it leaves out aren't kept as deleted.
+pub const SHRUNK: usize = 2;
+
+/// A refresh of `old`'s thread, with the posts shown before that it leaves out put back
+/// where they were (by number), and their numbers: deleted on the site. Posts still deleted
+/// stay; one back again isn't any more. True when it came back too small to trust
+/// (`SHRUNK`): then it's as it came.
+pub fn keep_deleted(old: &ThreadView, fetched: Vec<Post>) -> (Vec<Post>, HashSet<u64>, bool) {
+    let live = old.posts.len().saturating_sub(old.deleted.len());
+    if fetched.len().saturating_mul(SHRUNK) < live {
+        return (fetched, HashSet::new(), true);
+    }
+    let have: HashSet<u64> = fetched.iter().map(|p| p.no).collect();
+    // (The OP is the thread: a refresh without it is another thread.)
+    let mut gone: Vec<&Post> = old.posts.iter().skip(1).filter(|p| !have.contains(&p.no)).collect();
+    if gone.is_empty() {
+        return (fetched, HashSet::new(), false);
+    }
+    gone.sort_by_key(|p| p.no);
+    let deleted = gone.iter().map(|p| p.no).collect();
+    // Merged in, the fetched posts keep their order (the OP first).
+    let mut out = Vec::with_capacity(fetched.len() + gone.len());
+    let mut gone = gone.into_iter().peekable();
+    let mut fetched = fetched.into_iter();
+    out.extend(fetched.next());
+    for p in fetched {
+        while let Some(g) = gone.next_if(|g| g.no < p.no) {
+            out.push(g.clone());
+        }
+        out.push(p);
+    }
+    out.extend(gone.cloned());
+    (out, deleted, false)
+}
+
 #[derive(Default)]
 pub struct ThreadView {
     pub board: String,
@@ -119,6 +156,11 @@ pub struct ThreadView {
     pub conversation: Option<Conversation>,
     /// Scroll the focused part into view at the next draw.
     pub follow_focus: bool,
+    /// Posts (by number) shown before that a refresh left out: deleted on the site, kept
+    /// here as they were. In memory only.
+    pub deleted: HashSet<u64>,
+    /// Refreshes that came back too small to keep what they left out (`SHRUNK`).
+    pub shrinks: u32,
 }
 
 /// How the selection comes into view.
@@ -362,8 +404,25 @@ impl ThreadView {
         self.set_search(self.search.clone());
     }
 
+    /// Whether post `i` arrived since the last visit. A deleted one never counts: it was
+    /// shown before.
     pub fn is_new(&self, i: usize) -> bool {
-        self.new_after > 0 && self.posts[i].no > self.new_after
+        self.new_after > 0 && self.posts[i].no > self.new_after && !self.is_deleted(i)
+    }
+
+    /// Whether post `i` is kept after the site deleted it.
+    pub fn is_deleted(&self, i: usize) -> bool {
+        !self.deleted.is_empty() && self.posts.get(i).is_some_and(|p| self.deleted.contains(&p.no))
+    }
+
+    /// The posts as the site has them, without the deleted ones kept: what's counted,
+    /// watched and saved.
+    pub fn live_posts(&self) -> std::borrow::Cow<'_, [Post]> {
+        if self.deleted.is_empty() {
+            std::borrow::Cow::Borrowed(&self.posts)
+        } else {
+            std::borrow::Cow::Owned(self.posts.iter().filter(|p| !self.deleted.contains(&p.no)).cloned().collect())
+        }
     }
 
     /// The selected entry: the cursor if it's on the selected post, else the post's

@@ -328,6 +328,21 @@ fn thread_from_its_last_copy() {
     insta::assert_snapshot!(snapshot(&mut a));
 }
 
+#[test]
+fn deleted_post() {
+    use ratatui::crossterm::event::{KeyCode, KeyEvent};
+    let mut a = thread_app(false);
+    // No.1001 deleted: kept, marked, and its reply still links to it.
+    a.tab.thread.as_mut().unwrap().deleted.insert(1001);
+    insta::assert_snapshot!(snapshot(&mut a));
+    assert_layout_exact(&mut a);
+    a.tab.thread.as_mut().unwrap().select(1);
+    a.on_key(KeyEvent::from(KeyCode::Char('c')));
+    let (text, _) = render(&mut a);
+    assert!(text.contains(" deleted ") && text.contains("No.1003"), "{text}");
+    assert_layout_exact(&mut a);
+}
+
 /// A long thread: posts of different lengths, every one numbered in its text.
 fn long_thread_app(n: u64) -> App {
     let mut a = app(false);

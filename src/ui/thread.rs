@@ -359,7 +359,7 @@ fn shown_with(t: &ThreadView, i: usize, p: &Post, ctx: &PostCtx) -> u64 {
     let s = ctx.search.as_str();
     let in_added = !s.is_empty() && (s.contains(['(', ')']) || " (op)".contains(s) || " (you)".contains(s));
     let highlighted = t.matches.binary_search(&i).is_ok() || (quotes_marked && in_added);
-    (ago(p.time, ctx.clock), ctx.is_op, ctx.is_new, ctx.reveal, ctx.mark, ctx.mine.contains(&p.no), &marked, ctx.backlinks).hash(&mut h);
+    (ago(p.time, ctx.clock), ctx.is_op, ctx.is_new, ctx.deleted, ctx.reveal, ctx.mark, ctx.mine.contains(&p.no), &marked, ctx.backlinks).hash(&mut h);
     // The post itself, which a refresh may bring changed (a file deleted, say).
     (&p.name, &p.subject, p.plain_text(), p.body.len()).hash(&mut h);
     for f in &p.files {
@@ -376,6 +376,8 @@ fn shown_with(t: &ThreadView, i: usize, p: &Post, ctx: &PostCtx) -> u64 {
 pub(super) struct PostCtx<'a> {
     is_op: bool,
     is_new: bool,
+    /// Deleted on the site since it was shown.
+    deleted: bool,
     backlinks: &'a [u64],
     op_no: u64,
     reveal: bool,
@@ -396,6 +398,7 @@ pub(super) fn post_ctx(t: &ThreadView, i: usize, clock: Clock) -> PostCtx<'_> {
         clock,
         is_op: i == 0,
         is_new: t.is_new(i),
+        deleted: t.is_deleted(i),
         backlinks: &t.backlinks[i],
         op_no: t.no,
         reveal: t.is_revealed(i),
@@ -425,6 +428,9 @@ pub(super) fn post_lines(p: &Post, ctx: &PostCtx, width: usize) -> (Vec<Line<'st
     }
     if ctx.is_new {
         head.extend([chip("new", t.background, t.new), Span::raw(" ")]);
+    }
+    if ctx.deleted {
+        head.extend([chip("deleted", t.background, t.error), Span::raw(" ")]);
     }
     if ctx.anchor {
         head.extend([chip("conversation", t.on_primary, t.primary), Span::raw(" ")]);

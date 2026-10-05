@@ -326,16 +326,24 @@ impl App {
         }
         let no = posts.first().map(|p| p.no).unwrap_or(0);
         let key = self.key(&board, no);
+        let old = self.tab.thread.take().filter(|t| t.no == no && t.board == board);
+        // Fetched again: posts shown before that it leaves out were deleted, and stay.
+        let (posts, deleted, shrank) = match &old {
+            Some(old) if copy.is_none() && !replacing => thread_view::keep_deleted(old, posts),
+            _ => (posts, HashSet::new(), false),
+        };
         let mut tv = ThreadView::new(board, no, posts);
         tv.margin = self.scroll_margin;
+        tv.deleted = deleted;
+        tv.shrinks = old.as_ref().map_or(0, |o| o.shrinks) + u32::from(shrank);
         // On a refresh, the newest post already shown.
         let mut shown_max = None;
         // Reading the end: the last entry shown, to go on from once the posts are marked.
         let mut follow = None;
-        match self.tab.thread.take().filter(|t| t.no == no && t.board == tv.board) {
+        match old {
             // On refresh, keep the selected post and what's at the top of the view.
             Some(old) => {
-                shown_max = old.posts.iter().map(|p| p.no).max().filter(|_| !replacing);
+                shown_max = old.posts.iter().filter(|p| !old.deleted.contains(&p.no)).map(|p| p.no).max().filter(|_| !replacing);
                 // Reading the end: posts this brings come into view.
                 if self.follow_new_posts && !replacing && old.at_end() {
                     follow = old.entries.last().map(|e| e.path.clone());
@@ -390,7 +398,7 @@ impl App {
         }
         // A saved or cached copy isn't a visit, and isn't saved again.
         if copy.is_none() && self.tab.copy.is_none() {
-            self.fetched_thread(&key, &tv.posts, shown_max);
+            self.fetched_thread(&key, &tv.live_posts(), shown_max);
         }
         self.tab.thread = Some(tv);
         self.remark_thread();

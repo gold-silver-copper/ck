@@ -902,6 +902,9 @@ fn replay(seed: u64, acts: &[Act]) -> Result<(), (String, String)> {
             let calls = if Arc::ptr_eq(&gate, &world.gate) { world.gate.log_since(before.log) } else { Vec::new() };
             check_saved(&world.app, &before, &calls, &mut removed);
             check_marks(&world.app, &before);
+            if !matches!(act, Act::Restart(_)) {
+                check_deleted(&world.app, &before);
+            }
             if matches!(act, Act::Answer(_) | Act::AnswerAll | Act::Wait(_)) {
                 check_follow(&world.app, &before);
             }
@@ -1122,6 +1125,9 @@ struct Before {
     /// The thread on screen: its tab, thread, post count, whether its end was being read,
     /// and the post at the top of the screen.
     reading: Option<(usize, String, u64, usize, bool, u64)>,
+    /// The open tab's thread as fetched (not a copy): its board and number, its posts'
+    /// numbers, and how many refreshes of it came back too small to keep what they left out.
+    live: Option<(usize, String, u64, Vec<u64>, u32)>,
 }
 
 impl Before {
@@ -1139,7 +1145,13 @@ impl Before {
             let top = t.posts[t.entries.get(t.layout.as_ref()?.entry_at(t.scroll))?.post].no;
             Some((app.active, t.board.clone(), t.no, t.posts.len(), t.at_end(), top))
         });
-        Before { saved, in_saved_view: app.tab.view == View::Saved, offline_dead, log: gate.log_len(), filters: app.filter_cfgs.clone(), reading }
+        let live = app
+            .tab
+            .thread
+            .as_ref()
+            .filter(|_| app.tab.copy.is_none())
+            .map(|t| (app.active, t.board.clone(), t.no, t.posts.iter().map(|p| p.no).collect(), t.shrinks));
+        Before { saved, in_saved_view: app.tab.view == View::Saved, offline_dead, log: gate.log_len(), filters: app.filter_cfgs.clone(), reading, live }
     }
 }
 
@@ -1227,6 +1239,26 @@ fn check_layout(app: &mut App) {
     let cursor = t.entry();
     if cursor < top || cursor > bottom {
         panic!("the selected entry {cursor} is off screen ({top}..={bottom} shown)");
+    }
+}
+
+/// A post shown before a refresh of the same thread is still there after it: kept, or
+/// marked deleted when the refresh left it out; unless the refresh came back too small to
+/// trust. Deleted posts are never new, and the rest of the posts are what was fetched.
+fn check_deleted(app: &App, before: &Before) {
+    let Some(t) = &app.tab.thread else { return };
+    if let Some(i) = (0..t.posts.len()).find(|&i| t.is_deleted(i) && t.is_new(i)) {
+        panic!("No.{} is deleted and new", t.posts[i].no);
+    }
+    if t.deleted.iter().any(|no| !t.index.contains_key(no)) || t.deleted.contains(&t.no) {
+        panic!("deleted posts {:?} aren't (reply) posts of the thread", t.deleted);
+    }
+    let Some((tab, board, no, nos, shrinks)) = &before.live else { return };
+    if app.active != *tab || app.tab.copy.is_some() || t.board != *board || t.no != *no || t.shrinks != *shrinks {
+        return;
+    }
+    if let Some(lost) = nos.iter().find(|n| !t.index.contains_key(n)) {
+        panic!("No.{lost} was shown before a refresh of /{board}/{no} and is gone after it, not marked deleted");
     }
 }
 

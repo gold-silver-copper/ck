@@ -1134,8 +1134,8 @@ impl App {
         let (board, no, subject, posts, last_seen) = match (self.tab.view, &self.tab.board) {
             (View::Thread, _) => {
                 let Some(t) = &self.tab.thread else { return };
-                let max_no = max_no(&t.posts);
-                (t.board.clone(), t.no, thread_subject(&t.posts), t.posts.len(), max_no)
+                let posts = t.live_posts();
+                (t.board.clone(), t.no, thread_subject(&posts), posts.len(), max_no(&posts))
             }
             (View::Catalog, Some(b)) => {
                 let Some(i) = self.selected_index() else { return };
@@ -1198,7 +1198,7 @@ impl App {
             return;
         }
         let Some(t) = self.tab.thread.as_ref().filter(|t| self.key(&t.board, t.no) == *key) else { return };
-        let posts = t.posts.clone();
+        let posts = t.live_posts().into_owned();
         self.keep_copy(key, &posts, false);
         if self.tab.saved().is_some_and(|o| o.dead) {
             self.store.saved_dead(key);
@@ -1212,8 +1212,9 @@ impl App {
         let key = self.key(&t.board, t.no);
         let Some(no) = t.current().map(|p| p.no) else { return };
         if self.store.watched(&key).is_none() {
-            let max_no = max_no(&t.posts);
-            self.store.toggle_watch(key.clone(), thread_subject(&t.posts), t.posts.len(), max_no);
+            let posts = t.live_posts();
+            let (subject, len, max_no) = (thread_subject(&posts), posts.len(), max_no(&posts));
+            self.store.toggle_watch(key.clone(), subject, len, max_no);
             self.keep_open_thread(&key);
         }
         let Some(w) = self.store.watched_mut(&key) else { return };

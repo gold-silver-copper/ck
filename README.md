@@ -356,6 +356,13 @@ The open thread refreshes in the background every 10 seconds and watched threads
 minimums). Posts that arrived since your last visit are marked "new"; `U` jumps to the
 first one.
 
+A post the moderators delete while the thread is open stays where it was, marked
+"deleted" (the top bar counts them: "1 deleted"); its quotes, replies, previews and
+conversation still work, and it's never counted as new. That's kept in memory, for the
+open thread: saved copies, exports and post counts are the thread as the site has it. A
+refresh that comes back with fewer than half the posts shown is more likely a broken
+answer than mass deletion, so it's shown as it came, without keeping what it left out.
+
 ### Opening what you've seen before
 
 ck keeps the last copy of each catalog and thread you open in its cache directory
@@ -685,7 +692,9 @@ Nothing here leaves the machine: fake sites answer on `*.invalid` hosts or on 12
   again. Threads die for good now and then: a watched thread that was ever loaded must
   keep its saved copy, and a dead thread's copy being read is never fetched. A filter
   added from a post must catch it, and after any filter change the marks and the config
-  agree with the filters in use. A conversation shows exactly its posts. A failure prints
+  agree with the filters in use. A conversation shows exactly its posts. A post shown
+  before a refresh of the same thread is still there after it (or marked deleted), unless
+  the refresh came back too small to trust, and a deleted post is never new. A failure prints
   the seed that replays it and the fewest steps that still fail (`FUZZ_TRACE=1` prints the
   state after each step).
 - **The rest** (`src/fuzz.rs`): every engine's parsers on mangled responses, the markup
