@@ -1075,6 +1075,10 @@ fn check(app: &App) {
     if !unique(app.store.history.iter().map(|v| &v.key).collect()) {
         fail("a thread twice in history".into());
     }
+    // The site's text never reaches the terminal's title as an escape.
+    if let Some(t) = app.terminal_title().filter(|t| t.chars().any(char::is_control)) {
+        fail(format!("a control character in the terminal's title: {t:?}"));
+    }
 }
 
 fn check_thread(t: &ThreadView) -> Result<(), String> {

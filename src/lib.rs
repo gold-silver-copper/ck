@@ -59,6 +59,7 @@ pub(crate) mod store;
 #[cfg(test)]
 mod test_fixtures;
 pub(crate) mod theme;
+pub(crate) mod title;
 pub(crate) mod ui;
 pub(crate) mod writer;
 #[cfg(test)]

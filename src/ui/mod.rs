@@ -216,7 +216,9 @@ fn draw_tab_row(f: &mut Frame, app: &mut App, area: Rect) {
     let mut x = area.x;
     for i in 0..n {
         let label = app.tab_label(i);
-        let text = format!(" {} {} ", i + 1, truncate(&label, each.saturating_sub(5)));
+        // A watched thread's new posts, kept whatever the label is cut to.
+        let unread = app.tab_unread(i).map_or(String::new(), |n| format!(" ({n})"));
+        let text = format!(" {} {}{unread} ", i + 1, truncate(&label, each.saturating_sub(5 + unread.width())));
         let w = (text.width() as u16).min(area.right().saturating_sub(x));
         if w == 0 {
             break;
@@ -321,7 +323,7 @@ fn location(app: &App) -> (Vec<String>, Vec<Span<'static>>) {
                     meta.push(format!("{deleted} deleted"));
                 }
                 let new = (0..th.posts.len()).filter(|&i| th.is_new(i)).count();
-                match th.new_below() {
+                match th.new_below().0 {
                     0 if new > 0 => meta.push(format!("{new} new")),
                     0 => {}
                     below => meta.push(format!("{new} new, {below} below ↓")),

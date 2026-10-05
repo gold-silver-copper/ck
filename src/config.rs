@@ -50,6 +50,9 @@ pub struct Config {
     /// Reading the end of a thread, new posts from a refresh come into view.
     #[serde(default = "default_true")]
     pub follow_new_posts: bool,
+    /// The terminal's title says where ck is and what's new.
+    #[serde(default = "default_true")]
+    pub set_title: bool,
     /// Catalog layout (cycled with `c`).
     #[serde(default)]
     pub catalog_layout: Option<CatalogLayout>,

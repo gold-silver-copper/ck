@@ -392,6 +392,93 @@ fn poster_ids_and_flags() {
     assert_layout_exact(&mut a);
 }
 
+/// The rows of a rendering, and the row of the first one containing `needle`.
+fn row_of(text: &str, needle: &str) -> Option<usize> {
+    text.lines().position(|l| l.contains(needle))
+}
+
+#[test]
+fn the_unread_line_sits_between_read_and_new_posts() {
+    let mut a = thread_app(false);
+    let (text, buf) = render_at(&mut a, 100, 60);
+    // In the gap above No.1003's card, the first post after the last visit (No.1002).
+    let line = row_of(&text, "new posts").unwrap();
+    assert!(row_of(&text, "No.1002").unwrap() < line && line + 2 == row_of(&text, "No.1003").unwrap(), "{text}");
+    assert_eq!(text.matches("new posts").count(), 1);
+    let x = text.lines().nth(line).unwrap().find("new posts").unwrap() as u16;
+    assert_eq!(buf[(x, line as u16)].bg, theme().new);
+    assert_layout_exact(&mut a);
+    // Nothing new, or everything but the OP: no line, or the line right under the OP.
+    for (after, below) in [(0, None), (1004, None), (1000, Some("No.1001"))] {
+        let t = a.tab.thread.as_mut().unwrap();
+        t.new_after = after;
+        t.cache.clear();
+        t.layout = None;
+        let (text, _) = render_at(&mut a, 100, 60);
+        match below {
+            None => assert!(!text.contains("new posts"), "{text}"),
+            Some(no) => assert_eq!(row_of(&text, "new posts").unwrap() + 2, row_of(&text, no).unwrap(), "{text}"),
+        }
+    }
+}
+
+#[test]
+fn the_unread_line_keeps_long_threads_exact() {
+    use ratatui::crossterm::event::{KeyCode, KeyEvent};
+    let mut a = long_thread_app(400);
+    let t = a.tab.thread.as_mut().unwrap();
+    // (A jump lands with the post at the margin, so the line above it is on screen.)
+    (t.new_after, t.margin) = (2250, 0.3);
+    render(&mut a);
+    // U: the first new post, with the line right above it, all laid out exactly.
+    a.on_key(KeyEvent::from(KeyCode::Char('U')));
+    let (text, _) = render(&mut a);
+    assert_eq!(row_of(&text, "new posts").unwrap() + 2, row_of(&text, "No.2251").unwrap(), "{text}");
+    assert_layout_exact(&mut a);
+    // Reading on to the end and back, and from the end: the line moves with its post.
+    a.on_key(KeyEvent::from(KeyCode::Char('G')));
+    render(&mut a);
+    assert_layout_exact(&mut a);
+    for _ in 0..30 {
+        a.on_key(KeyEvent::from(KeyCode::Char('K')));
+        render(&mut a);
+    }
+    a.on_key(KeyEvent::from(KeyCode::Char('U')));
+    let (text, _) = render(&mut a);
+    assert_eq!(row_of(&text, "new posts").unwrap() + 2, row_of(&text, "No.2251").unwrap(), "{text}");
+    assert_layout_exact(&mut a);
+    // In the end, a full layout to the line: the line took none.
+    a.on_key(KeyEvent::from(KeyCode::Char('g')));
+    for _ in 0..400 {
+        a.on_key(KeyEvent::from(KeyCode::Char('j')));
+        render(&mut a);
+    }
+    let clock = a.clock;
+    let t = a.tab.thread.as_mut().unwrap();
+    let l = t.layout.as_ref().map(|l| (l.width, l.thumbs_on)).unwrap();
+    let full = crate::ui::layout_all(t, l.0, l.1, clock);
+    assert_eq!(t.layout.as_ref().unwrap().starts, full.starts);
+}
+
+#[test]
+fn a_tab_counts_its_watched_threads_new_posts() {
+    let mut a = catalog_app(false);
+    a.tab.catalog_list.state.select(Some(1));
+    a.new_tab();
+    a.tab.thread = Some(thread());
+    a.switch_tab(0);
+    let (text, _) = render(&mut a);
+    assert!(text.lines().nth(1).unwrap().contains("2 Snapshot thread (2)"), "{text}");
+    // Read (or not watched): no count.
+    a.store.watched[0].unread = 0;
+    let (text, _) = render(&mut a);
+    assert!(!text.lines().nth(1).unwrap().contains('('), "{text}");
+    // A narrow tab keeps the count and cuts the subject.
+    a.store.watched[0].unread = 12;
+    let (text, _) = render_at(&mut a, 30, 20);
+    assert!(text.lines().nth(1).unwrap().contains("(12)"), "{text}");
+}
+
 /// A long thread: posts of different lengths, every one numbered in its text.
 fn long_thread_app(n: u64) -> App {
     let mut a = app(false);
@@ -1468,11 +1555,13 @@ fn huge_counts_from_the_data_files_dont_overflow() {
     for no in [1, 2] {
         let key = ThreadKey { site: "4chan".into(), board: "g".into(), no };
         a.store.toggle_watch(key.clone(), "t".into(), 1, 1);
-        a.store.watched_mut(&key).unwrap().unread = usize::MAX;
+        let w = a.store.watched_mut(&key).unwrap();
+        (w.unread, w.replies) = (usize::MAX, usize::MAX);
     }
     render(&mut a);
     a.tab.view = View::Watched;
     render(&mut a);
+    assert!(a.terminal_title().unwrap().starts_with(&format!("ck: ({}) (You) ", usize::MAX)));
 }
 
 #[test]

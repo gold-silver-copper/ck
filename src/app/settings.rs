@@ -74,6 +74,16 @@ pub const SECTIONS: &[(&str, &[Setting])] = &[
             },
             App::next_scroll_margin,
         ),
+        row(
+            "Terminal title",
+            "Where you are and how many posts are new, in the window's title",
+            |a| if a.set_title { "set by ck" } else { "left alone" }.into(),
+            |a| {
+                a.set_title = !a.set_title;
+                let on = a.set_title;
+                a.save_config(if on { "setting the terminal's title" } else { "leaving the terminal's title alone" }, |d| d["set_title"] = toml_edit::value(on));
+            },
+        ),
     ]),
     ("Catalog", &[
         row("Default layout", "c in a catalog sets a board's own", |a| a.default_layout.as_str().into(), App::cycle_default_layout),

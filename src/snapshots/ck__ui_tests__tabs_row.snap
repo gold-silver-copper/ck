@@ -3,7 +3,7 @@ source: src/ui_tests.rs
 expression: snapshot(&mut a)
 ---
  ck  4chan  ›  /g/  ›  Snapshot thread                                            5 posts  ·  2 new
-   1 /g/   2 Snapshot thread
+   1 /g/   2 Snapshot thread (2)
   ▌
   ▌ Anonymous   OP  2026-09-21 09:13 · 5h ago  No.1000
   ▌ Snapshot thread

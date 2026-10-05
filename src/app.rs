@@ -393,6 +393,10 @@ pub struct App {
     pub restore_session: bool,
     /// Reading the end of a thread, new posts come into view (`follow_new_posts`).
     pub follow_new_posts: bool,
+    /// `set_title`: the terminal's title says where ck is and what's new; and the title as
+    /// last written.
+    pub set_title: bool,
+    title_shown: Option<String>,
     /// Images on boards the site marks NSFW (`nsfw_images`).
     pub nsfw_images: crate::config::NsfwImages,
     /// NSFW boards of sites whose board list isn't loaded, from their saved lists; and the
@@ -533,6 +537,8 @@ impl App {
             image_search: if cfg.image_search.is_empty() { crate::config::ImageSearch::defaults() } else { cfg.image_search.clone() },
             restore_session: cfg.restore_session,
             follow_new_posts: cfg.follow_new_posts,
+            set_title: cfg.set_title,
+            title_shown: None,
             nsfw_images: cfg.nsfw_images,
             nsfw_saved: HashMap::new(),
             nsfw_asked: HashSet::new(),

@@ -77,13 +77,18 @@ pub(super) fn draw_thread(f: &mut Frame, app: &mut App, area: Rect) {
         settle(t, clock);
     }
     let Some(l) = t.layout.as_ref() else { return };
+    let unread = t.unread_line();
     // Where the text on the first and last rows ends, for the markers of a tall post.
     let mut ends = (area.x, area.x);
     for row in 0..area.height {
         let i = t.scroll + row as usize;
         let Some((e, line)) = l.line(i) else { break };
-        // Each entry's last line is the gap before the next card.
+        // Each entry's last line is the gap before the next card: the unread line is
+        // drawn there, between what was read and what's new.
         if i + 1 == l.starts[e + 1] {
+            if unread == Some(e + 1) {
+                put(f, area.x + PAD, area.y + row, area.width.saturating_sub(PAD), Line::from(chip("new posts", th.background, th.new)));
+            }
             continue;
         }
         let entry = &t.entries[e];
