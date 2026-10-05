@@ -454,6 +454,43 @@ fn top_filters_put_highlighted_threads_first() {
 }
 
 #[test]
+fn watched_threads_first_after_top_ones() {
+    let mut app = local_app();
+    app.filters = crate::filter::tests::filters("[[filter]]\npattern = \"rust\"\naction = \"highlight\"\ntop = true").unwrap();
+    app.tab.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
+    app.tab.catalog_board = Some("x".into());
+    let op = |no, subject: &str, replies| Post { no, subject: Some(subject.into()), replies: Some(replies), time: no as i64, ..Default::default() };
+    app.tab.catalog = vec![op(1, "go", 5), op(2, "rust 1", 1), op(3, "c", 9), op(4, "rust 2", 3), op(5, "d", 7)];
+    app.remark_catalog();
+    app.tab.view = View::Catalog;
+    let key = |site: &str, board: &str, no| ThreadKey { site: site.into(), board: board.into(), no };
+    // Watched: 3 and 4 here; 1 on another board, 5 on another site.
+    for k in [key("a", "x", 3), key("a", "x", 4), key("a", "xy", 1), key("b", "x", 5)] {
+        app.store.toggle_watch(k, String::new(), 0, 0);
+    }
+    // Off: the sort, with the top ones first.
+    assert!(!app.watched_first);
+    assert_eq!(app.visible_catalog(), [1, 3, 0, 2, 4]);
+    // On (Settings, saved): top ones, then the watched ones, then the rest, each in the
+    // sort's order, watched ones first among the top ones too.
+    let dir = tempfile::tempdir().unwrap();
+    app.config_path = Some(dir.path().join("config.toml"));
+    app.open_settings();
+    app.settings_list.state.select(settings::position("Watched first"));
+    app.enter();
+    assert!(app.watched_first);
+    assert!(std::fs::read_to_string(dir.path().join("config.toml")).unwrap().contains("watched_first = true"));
+    app.tab.view = View::Catalog;
+    assert_eq!(app.visible_catalog(), [3, 1, 2, 0, 4]);
+    app.tab.catalog_sort = crate::app::Sort::Replies;
+    assert_eq!(app.visible_catalog(), [3, 1, 2, 4, 0]);
+    assert!(app.catalog_watching(&app.tab.catalog[2]) && !app.catalog_watching(&app.tab.catalog[0]));
+    // A list filter still filters.
+    app.tab.catalog_list.filter = "rust".into();
+    assert_eq!(app.visible_catalog(), [3, 1]);
+}
+
+#[test]
 fn marking_posts_as_yours_watches_the_thread() {
     let mut app = local_app();
     app.tab.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });

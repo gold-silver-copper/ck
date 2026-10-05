@@ -56,6 +56,10 @@ pub struct Config {
     /// The terminal's title says where ck is and what's new.
     #[serde(default = "default_true")]
     pub set_title: bool,
+    /// Threads you watch come first in catalogs (after those a `top` filter puts first), then
+    /// the rest in the sort's order.
+    #[serde(default)]
+    pub watched_first: bool,
     /// Catalog layout (cycled with `c`).
     #[serde(default)]
     pub catalog_layout: Option<CatalogLayout>,
