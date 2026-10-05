@@ -280,9 +280,63 @@ impl App {
         places
     }
 
+    /// Tab `i`, the active one or another.
+    fn tab_at(&self, i: usize) -> &Tab {
+        if i == self.active { &self.tab } else { self.tabs.get(i).unwrap_or(&self.tab) }
+    }
+
+    /// Posts a watched thread shown in tab `i` has gained since it was read (its count in
+    /// Watched), when there are any.
+    pub fn tab_unread(&self, i: usize) -> Option<usize> {
+        let t = self.tab_at(i);
+        let th = t.thread.as_ref().filter(|_| t.view == View::Thread)?;
+        let site = self.sites.get(t.site)?.cfg.name.clone();
+        let w = self.store.watched(&ThreadKey { site, board: th.board.clone(), no: th.no })?;
+        (w.unread > 0 && !w.dead).then_some(w.unread)
+    }
+
+    /// The terminal's title: "ck: (3) /g/ Subject" in a thread, with the new posts below the
+    /// screen; elsewhere where ck is, with the watched threads' unread posts. "(You)" when
+    /// some of those reply to yours. `None` with `set_title` off.
+    pub fn terminal_title(&self) -> Option<String> {
+        if !self.set_title {
+            return None;
+        }
+        let (new, yours) = match self.tab.thread.as_ref().filter(|_| self.tab.view == View::Thread) {
+            Some(th) => th.new_below(),
+            None => self.store.watched.iter().filter(|w| !w.dead).fold((0, 0), |(n, y): (usize, usize), w| (n.saturating_add(w.unread), y.saturating_add(w.replies))),
+        };
+        let new = if new > 0 { format!("({new}) ") } else { String::new() };
+        let yours = if yours > 0 { "(You) " } else { "" };
+        let place = match self.tab.thread.as_ref().filter(|_| self.tab.view == View::Thread) {
+            Some(th) => format!("/{}/ {}", th.board, thread_subject(&th.posts)),
+            None => self.tab_label(self.active),
+        };
+        Some(crate::title::clean(&format!("ck: {new}{yours}{place}")))
+    }
+
+    /// Write the terminal's title if it changed (or put the old one back once it's off).
+    pub fn show_title(&mut self) {
+        let title = self.terminal_title();
+        if title == self.title_shown {
+            return;
+        }
+        match &title {
+            Some(t) => crate::title::set(t),
+            None => crate::title::restore(),
+        }
+        self.title_shown = title;
+    }
+
+    /// On exit: the terminal's title as it was before ck.
+    pub fn restore_title(&mut self) {
+        crate::title::restore();
+        self.title_shown = None;
+    }
+
     /// What a tab shows, in a few words.
     pub fn tab_label(&self, i: usize) -> String {
-        let t = if i == self.active { &self.tab } else { self.tabs.get(i).unwrap_or(&self.tab) };
+        let t = self.tab_at(i);
         let board = t.board.as_ref().map_or("", |b| b.uri.as_str());
         match t.view {
             View::Thread => match &t.thread {

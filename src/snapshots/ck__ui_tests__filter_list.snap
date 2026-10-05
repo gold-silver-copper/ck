@@ -9,9 +9,9 @@ expression: snapshot(&mut a)
     Colors            as the theme has them             Change any color of the current theme
     Color depth       auto (24-bit)                     24-bit color, or the nearest of 256
     Reading position  30% from the edges                How far from the edges the selected post…
+    Terminal title    set by ck                         Where you are and how many posts are new…
 
   Catalog
-    Default layout    cards                             c in a catalog sets a board's own
     Filters                             enter edit · space on/off · a add · x remove · esc close
 
      hide        crypto                subject+comment   everywhere          (?i)…  nothing here
@@ -21,6 +21,7 @@ expression: snapshot(&mut a)
 
     Counts are for the open catalog and thread. Kept in the config as [[filter]] tables.
 
+    Open thread       every 10s                         How often the open thread updates
     Watched threads   every 60s                         How often each watched thread updates
     Notifications     auto (terminal bell)              New posts in watched threads, replies to…
     Reading the end   new posts come into view          New posts come into view while you read …
@@ -30,5 +31,4 @@ expression: snapshot(&mut a)
     Your sites        only the built-in ones            The ones you added, or built-in ones you…
 
   Downloads
-    Folder            ~/Downloads/ck/{site}/{board}/{…  Where saved files and pages go
  enter change   esc back   ? help

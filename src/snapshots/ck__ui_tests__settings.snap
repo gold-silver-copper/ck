@@ -9,6 +9,7 @@ expression: snapshot(&mut a)
     Colors            as the theme has them             Change any color of the current theme
     Color depth       auto (24-bit)                     24-bit color, or the nearest of 256
     Reading position  30% from the edges                How far from the edges the selected post…
+    Terminal title    set by ck                         Where you are and how many posts are new…
 
   Catalog
     Default layout    cards                             c in a catalog sets a board's own
@@ -30,5 +31,4 @@ expression: snapshot(&mut a)
     Your sites        only the built-in ones            The ones you added, or built-in ones you…
 
   Downloads
-    Folder            ~/Downloads/ck/{site}/{board}/{…  Where saved files and pages go
  enter change   esc back   ? help

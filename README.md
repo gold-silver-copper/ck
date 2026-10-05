@@ -257,7 +257,8 @@ one brings it back.
 quoted thread `enter` would go to). Each tab has its own place: view, board, catalog,
 thread, and jump trail. The tabs show as chips under the top bar when there's more than
 one; `]` and `[` move between them (or click one), `ctrl-w` closes one (not
-the last). Up to 9. Only the tab on screen refreshes its thread in the background;
+the last). A tab on a watched thread counts the posts it has gained since you read it,
+like `2 Thread subject (5)`. Up to 9. Only the tab on screen refreshes its thread in the background;
 another tab's thread is refreshed when you come back to it (watched threads are refreshed
 anyway). The tabs are part of the session that's restored at the next start.
 
@@ -407,8 +408,9 @@ last 100 threads you opened. `x` removes an entry from either list.
 
 The open thread refreshes in the background every 10 seconds and watched threads every
 60 seconds (change with `refresh_thread_secs` / `refresh_watched_secs`; those are also the
-minimums). Posts that arrived since your last visit are marked "new"; `U` jumps to the
-first one.
+minimums). Posts that arrived since your last visit are marked "new", and a "new posts"
+line sits between the last post you'd read and the first new one; `U` jumps to the first
+one.
 
 A post the moderators delete while the thread is open stays where it was, marked
 "deleted" (the top bar counts them: "1 deleted"); its quotes, replies, previews and
@@ -489,6 +491,13 @@ instead (no shell; `{title}` and `{body}` are filled in):
 ```toml
 notify_command = ["notify-send", "{title}", "{body}"]
 ```
+
+The terminal's title says where you are and what's new, for when ck is in a tab or window
+in the background: in a thread, the new posts below the screen ("ck: (3) /g/ Thread
+subject"), elsewhere the watched threads' unread posts ("ck: (5) Watched"), with "(You)"
+when some of them reply to your posts. The title from before is put back when ck quits
+(terminals that can't do that are left with an empty one). `set_title = false` (or
+Settings › Terminal title) leaves the title alone.
 
 ck never posts, so it can't know which posts are yours: `m` marks the selected post as
 yours (and watches the thread). Replies to it are counted in Watched ("1 reply to you"),
@@ -614,7 +623,7 @@ and the file is created from the default if you don't have one yet:
 - **Colors**: every color the theme uses, with a swatch and what it's for. `enter` edits
   one (`#rrggbb`, a name, or a 256-color index), `x` resets it. Changing a built-in theme
   saves your changes as a copy, `[themes.NAME-custom]`.
-- Color depth, the catalog layout, images, filters, hidden words and replies, the refresh
+- Color depth, the terminal title, the catalog layout, images, filters, hidden words and replies, the refresh
   intervals, the download folder, and key bindings (see [Remapping keys](#remapping-keys)).
 
 Custom themes go in the config as `[themes.NAME]` tables. Start from a built-in theme and
@@ -657,6 +666,8 @@ All settings are optional; see `config.example.toml` for every option with comme
   [The home screen](#the-home-screen).
 - `notify = "auto" | "bell" | "off"`, `notify_command = [...]`: see
   [Notifications](#notifications).
+- `set_title = false` to leave the terminal's title alone (see
+  [Notifications](#notifications)).
 - `[[filter]]`: hide or highlight threads and posts, see [Filters](#filters-and-hiding).
   `recursive_hiding = true` hides replies to hidden posts too.
 - `[[image_search]]`: reverse image search engines, see

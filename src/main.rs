@@ -79,6 +79,8 @@ fn main() -> Result<()> {
     app.save_session(None);
     app.flush_writes();
     app.save_now();
+    // (A panic or a signal ends up here too.)
+    app.restore_title();
     let _ = execute!(stdout(), DisableMouseCapture, DisableBracketedPaste);
     ratatui::restore();
     match app.quit_because {
@@ -213,6 +215,7 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
             screen = now;
         }
         let frame = terminal.draw(|f| ck::draw(f, app))?;
+        app.show_title();
         ck::input_log::note(|| "frame".into());
         if let Some(path) = &dump {
             let _ = std::fs::write(path, frame_text(frame.buffer));

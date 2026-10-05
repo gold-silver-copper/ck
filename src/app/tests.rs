@@ -2082,7 +2082,7 @@ fn reading_the_end_new_posts_come_into_view() {
     let m = ((t.viewport as f32 * t.margin) as isize).min((t.viewport as isize - 1) / 2);
     assert_eq!(selected_row(&app), m);
     // They're new now (a first visit had nothing new), and nothing is left below.
-    assert!(t.is_new(t.selected) && t.new_below() < 5);
+    assert!(t.is_new(t.selected) && t.new_below().0 < 5);
     // Reading on to the end, the next refresh follows again.
     for _ in 0..5 {
         app.on_key(KeyEvent::from(KeyCode::Char('j')));
@@ -2110,7 +2110,7 @@ fn reading_higher_up_nothing_moves() {
     let t = app.tab.thread.as_ref().unwrap();
     assert_eq!((t.selected, t.scroll), (selected, scroll));
     // The top bar says how many are below; U goes to the first.
-    assert_eq!(t.new_below(), 5);
+    assert_eq!(t.new_below().0, 5);
     app.act(Action::Unread);
     draw_at(&mut app, 100, 30);
     assert_eq!(app.tab.thread.as_ref().unwrap().current().unwrap().no, 41);
@@ -2128,7 +2128,7 @@ fn following_edge_cases() {
     app.set_thread(changed);
     draw_at(&mut app, 100, 30);
     let t = app.tab.thread.as_ref().unwrap();
-    assert_eq!((t.current().unwrap().no, t.new_below()), (40, 0));
+    assert_eq!((t.current().unwrap().no, t.new_below().0), (40, 0));
     assert!(t.scroll >= scroll);
     // New posts that are hidden are passed over; all hidden: nothing moves.
     app.store.toggle_hidden("a", "x", 41);
@@ -2841,4 +2841,43 @@ fn replies_to_hidden_posts_hide_with_them() {
     app.tab.catalog = vec![quoting(6, &[], "recurse"), quoting(10, &[6], "x")];
     app.remark_catalog();
     assert!(app.tab.catalog_marks[1].hidden.is_none());
+}
+
+#[test]
+fn the_terminal_title_says_where_and_whats_new() {
+    let mut app = local_app();
+    let key = |no| ThreadKey { site: "a".into(), board: "x".into(), no };
+    let title = |app: &App| app.terminal_title().unwrap_or_default();
+    // Away from a thread: the watched threads' unread posts, and whether some reply to yours.
+    assert_eq!(title(&app), "ck: Sites");
+    app.store.toggle_watch(key(1), "One".into(), 2, 5);
+    app.store.toggle_watch(key(9), "Gone".into(), 2, 5);
+    app.store.watched_mut(&key(1)).unwrap().unread = 3;
+    assert_eq!(title(&app), "ck: (3) Sites");
+    app.store.watched_mut(&key(1)).unwrap().replies = 1;
+    let gone = app.store.watched_mut(&key(9)).unwrap();
+    (gone.unread, gone.dead) = (4, true);
+    assert_eq!(title(&app), "ck: (3) (You) Sites");
+    // In a thread: its new posts below the screen. The subject is the site's text: nothing
+    // in it reaches the terminal as an escape.
+    app.tab.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
+    app.tab.view = View::Thread;
+    let mut posts = posts_saying(&[(1, "op"), (2, "mine"), (3, "new"), (4, "new, to you")]);
+    posts[0].subject = Some("Evil\x1b]2;owned\x07 sub\u{9b}2Jject\n".into());
+    posts[3].quotes = vec![2];
+    app.set_thread(posts);
+    let t = app.tab.thread.as_mut().unwrap();
+    t.new_after = 2;
+    t.mine.insert(2);
+    draw_at(&mut app, 80, 8);
+    assert_eq!(title(&app), "ck: (2) (You) /x/ Evil ]2;owned sub 2Jject");
+    app.on_key(KeyEvent::from(KeyCode::Char('G')));
+    draw_at(&mut app, 80, 8);
+    assert_eq!(title(&app), "ck: /x/ Evil ]2;owned sub 2Jject");
+    // Off (Settings): left alone.
+    app.open_settings();
+    app.settings_list.state.select(settings::position("Terminal title"));
+    app.enter();
+    assert!(!app.set_title && app.terminal_title().is_none());
+    app.show_title();
 }

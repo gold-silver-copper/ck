@@ -612,11 +612,24 @@ impl ThreadView {
         self.viewport > 0 && self.entry() + 1 == self.entries.len() && self.scroll + self.viewport + 1 >= l.len()
     }
 
-    /// New posts whose entries start below the screen.
-    pub fn new_below(&self) -> usize {
-        let Some(l) = &self.layout else { return 0 };
+    /// New posts whose entries start below the screen, and how many of those quote yours.
+    pub fn new_below(&self) -> (usize, usize) {
+        let Some(l) = &self.layout else { return (0, 0) };
         let bottom = self.scroll + self.viewport;
-        self.entries.iter().enumerate().filter(|&(e, x)| l.starts.get(e).is_some_and(|&s| s >= bottom) && self.is_new(x.post)).count()
+        let below = self.entries.iter().enumerate().filter(|&(e, x)| l.starts.get(e).is_some_and(|&s| s >= bottom) && self.is_new(x.post));
+        below.fold((0, 0), |(n, yours), (_, x)| {
+            let to_you = self.posts[x.post].quotes.iter().any(|q| self.mine.contains(q));
+            (n + 1, yours + usize::from(to_you))
+        })
+    }
+
+    /// The first new post's entry, when posts read before come above it: the unread line
+    /// goes before it. (It's drawn in the gap above the entry, so the layout is the same.)
+    pub fn unread_line(&self) -> Option<usize> {
+        if self.new_after == 0 {
+            return None;
+        }
+        self.entries.iter().position(|e| e.path.len() == 1 && self.is_new(e.post)).filter(|&e| e > 0)
     }
 
     pub(super) fn top_anchor(&self) -> Option<(usize, usize)> {
