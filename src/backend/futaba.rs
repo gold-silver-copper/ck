@@ -1,6 +1,8 @@
 //! 4chan's JSON API, and the vichan family that clones it.
 #![deny(clippy::indexing_slicing, clippy::arithmetic_side_effects, clippy::cast_possible_truncation)]
 
+use std::fmt::Write as _;
+
 use anyhow::{Result, bail};
 use serde_json::Value;
 
@@ -122,7 +124,7 @@ impl Futaba {
             name.push_str(&trip);
         }
         if let Some(cap) = as_str(&v["capcode"]) {
-            name.push_str(&format!(" ## {cap}"));
+            let _ = write!(name, " ## {cap}");
         }
         // On an overboard, files live under the thread's own board.
         let own_board = as_str(&v["board"]);

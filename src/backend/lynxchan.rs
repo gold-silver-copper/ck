@@ -1,6 +1,8 @@
 //! LynxChan engine JSON API (endchan, kohlchan, ...).
 #![deny(clippy::indexing_slicing, clippy::arithmetic_side_effects, clippy::cast_possible_truncation)]
 
+use std::fmt::Write as _;
+
 use anyhow::Result;
 use serde_json::Value;
 
@@ -61,7 +63,7 @@ impl Lynxchan {
         };
         let mut name = as_str(&v["name"]).unwrap_or_else(|| "Anonymous".into());
         if let Some(role) = as_str(&v["signedRole"]) {
-            name.push_str(&format!(" ## {role}"));
+            let _ = write!(name, " ## {role}");
         }
         let mut files: Vec<Attachment> = items(&v["files"])
             .filter_map(|f| {

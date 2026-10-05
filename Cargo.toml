@@ -54,6 +54,7 @@ string_slice = "deny"
 redundant_clone = "warn"
 or_fun_call = "warn"
 assigning_clones = "warn"
+format_push_string = "warn"
 
 [profile.release]
 lto = "thin"

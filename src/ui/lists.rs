@@ -1,6 +1,8 @@
 //! The lists: home, watched, history, saved, boards, search results, and the catalog (cards,
 //! compact rows and the grid).
 
+use std::fmt::Write as _;
+
 use super::*;
 
 pub(super) fn draw_sites(f: &mut Frame, app: &mut App, area: Rect) {
@@ -552,7 +554,7 @@ pub(super) fn draw_tile(f: &mut Frame, images: &mut Images, file: &Attachment, c
         Some(file.ext().to_uppercase()).filter(|e| !e.is_empty()).unwrap_or_else(|| "FILE".into())
     };
     if count > 1 {
-        kind.push_str(&format!(" +{}", count - 1));
+        let _ = write!(kind, " +{}", count - 1);
     }
     let Some(url) = file.thumb.as_ref().filter(|_| whole) else {
         label(f, kind, dim());

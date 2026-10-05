@@ -3,6 +3,8 @@
 //! a page are in the `.` menu (they have no key unless given one), and the two big ones ask
 //! first, saying what they'll write and where.
 
+use std::fmt::Write as _;
+
 use super::*;
 
 /// What a confirmation would save.
@@ -109,10 +111,10 @@ impl App {
                 let mut first = format!("{} file{}", jobs.len() - have, if jobs.len() - have == 1 { "" } else { "s" });
                 if known > 0 {
                     let about = if files.iter().all(|f| f.size.is_some()) { "" } else { "at least " };
-                    first.push_str(&format!(" ({about}{} in all)", size(known)));
+                    let _ = write!(first, " ({about}{} in all)", size(known));
                 }
                 if have > 0 {
-                    first.push_str(&format!(", {have} already there"));
+                    let _ = write!(first, ", {have} already there");
                 }
                 if have == jobs.len() {
                     return self.info(format!("All {} of the thread's files are already in {at}", jobs.len()));
@@ -255,10 +257,10 @@ impl App {
                     let dir = d.dir.as_ref().map(|p| p.display().to_string()).unwrap_or_default();
                     let mut msg = format!("Downloaded {} file{} to {dir}", d.done, if d.done == 1 { "" } else { "s" });
                     if d.skipped > 0 {
-                        msg.push_str(&format!(", {} already there", d.skipped));
+                        let _ = write!(msg, ", {} already there", d.skipped);
                     }
                     if d.failed > 0 {
-                        msg.push_str(&format!(", {} failed ({})", d.failed, d.last_error.as_deref().unwrap_or("")));
+                        let _ = write!(msg, ", {} failed ({})", d.failed, d.last_error.as_deref().unwrap_or(""));
                     }
                     self.status = Some(Status { text: msg, error: d.failed > 0 });
                 }
