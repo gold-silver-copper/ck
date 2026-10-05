@@ -1348,3 +1348,51 @@ fn no_color_means_the_mono_theme() {
     let colored = buf.content().iter().any(|c| c.fg != ratatui::style::Color::Reset || c.bg != ratatui::style::Color::Reset);
     assert!(!colored);
 }
+
+/// Render at 50x20, checking nothing is drawn with box-drawing characters.
+fn narrow(app: &mut App) -> String {
+    let text = render_at(app, 50, 20).0;
+    assert!(!text.chars().any(|c| ('\u{2500}'..='\u{257f}').contains(&c)), "{text}");
+    text
+}
+
+#[test]
+fn narrow_catalog_keeps_its_counts() {
+    let mut a = catalog_app(false);
+    let text = narrow(&mut a);
+    assert!(text.contains(" R") && text.contains(" I"), "{text}");
+    insta::assert_snapshot!(text);
+    a.default_layout = crate::config::CatalogLayout::Compact;
+    insta::assert_snapshot!("narrow_catalog_compact", narrow(&mut a));
+}
+
+#[test]
+fn narrow_thread_keeps_where_you_are() {
+    let mut a = thread_app(false);
+    let text = narrow(&mut a);
+    let bar = text.lines().next().unwrap();
+    // The thread's crumb keeps some letters; the counts gave way.
+    assert!(bar.contains("Snaps"), "{bar}");
+    insta::assert_snapshot!(text);
+}
+
+#[test]
+fn narrow_tall_post_markers_leave_the_text() {
+    use ratatui::crossterm::event::{KeyCode, KeyEvent};
+    let mut a = tall_app();
+    narrow(&mut a);
+    a.on_key(KeyEvent::from(KeyCode::Char('j')));
+    let text = narrow(&mut a);
+    // Its last row: the text whole, then the marker.
+    let last = text.lines().rev().nth(1).unwrap();
+    assert!(last.ends_with("↓ more") || last.ends_with('↓'), "{text}");
+    insta::assert_snapshot!(text);
+}
+
+#[test]
+fn narrow_home_and_help() {
+    let mut a = app(false);
+    insta::assert_snapshot!("narrow_home", narrow(&mut a));
+    a.popup = Some(Popup::Help(0));
+    insta::assert_snapshot!("narrow_help", narrow(&mut a));
+}

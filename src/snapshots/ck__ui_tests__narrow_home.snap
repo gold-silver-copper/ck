@@ -1,0 +1,24 @@
+---
+source: src/ui_tests.rs
+expression: narrow(&mut a)
+---
+ ck  Sites                               23 sites
+
+  ▌ ◉  Watched         3 threads   2 new
+    ◷  History         2 recent threads
+    ▤  Saved           0 threads
+       4chan            4chan       https://4ch
+       lainchan         vichan      https://lai
+       wizchan          vichan      https://wiz
+       uboachan         vichan      https://ubo
+       endchan          lynxchan    https://end
+       kohlchan         lynxchan    https://koh
+       desuarchive      foolfuuka   https://des
+       zzzchan          jschan      https://zzz
+       2ch              makaba      https://2ch
+       smuglo.li        vichan      https://smu
+       kissu            vichan      https://kis
+       tvch             vichan      https://tvc
+       sushigirl        vichan      https://sus
+       leftypol         vichan      https://lef
+ enter open   . more   / filter   ? help
