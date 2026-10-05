@@ -403,7 +403,7 @@ impl App {
                 self.keep_copy(&key, &posts, false);
                 self.notified_max.insert(key, max_no);
                 if note.new > 0 {
-                    self.notes_since.get_or_insert_with(Instant::now);
+                    self.notes_since.get_or_insert(self.clock.instant());
                     self.notes.push(note);
                 }
                 self.save();
