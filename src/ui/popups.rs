@@ -91,7 +91,7 @@ pub(super) fn draw_adding(f: &mut Frame, app: &App) {
         }
     };
     let w = lines.iter().map(|l| l.width()).max().unwrap_or(0).max(title.width() + hint.width() + 8).max(60) + 6;
-    let inner = panel(f, w.min(100) as u16, lines.len() as u16 + 3, &title, hint);
+    let inner = panel(f, w.min(100) as u16, cells(lines.len()).saturating_add(3), &title, hint);
     for (i, line) in lines.into_iter().enumerate() {
         put(f, inner.x, inner.y + i as u16, inner.width, line);
     }
@@ -105,7 +105,7 @@ pub(super) fn draw_confirm(f: &mut Frame, app: &App) {
     let w = (c.lines.iter().map(|l| l.width()).max().unwrap_or(0).max(c.title.width() + 24) + 6).min(100) as u16;
     let width = (w.min(f.area().width.saturating_sub(4)).saturating_sub(4) as usize).max(10);
     let lines: Vec<String> = c.lines.iter().flat_map(|l| wrap_path(l, width)).collect();
-    let inner = panel(f, w, lines.len() as u16 + 3, c.title, "enter save · esc cancel");
+    let inner = panel(f, w, cells(lines.len()).saturating_add(3), c.title, "enter save · esc cancel");
     for (i, line) in lines.into_iter().enumerate() {
         put(f, inner.x, inner.y + i as u16, inner.width, Line::styled(line, Style::new().fg(t.text)));
     }
@@ -155,7 +155,7 @@ pub(super) fn draw_menu(f: &mut Frame, app: &mut App) {
     };
     let w = (m.items.iter().map(|i| label(i).width()).max().unwrap_or(10) + key_w + 8).max(m.title.width() + 24) as u16;
     let title = if m.title.is_empty() { "Actions".to_string() } else { m.title.clone() };
-    let inner = panel(f, w.min(90), m.items.len() as u16 + 3, &title, "enter run · esc close");
+    let inner = panel(f, w.min(90), cells(m.items.len()).saturating_add(3), &title, "enter run · esc close");
     let rows = inner.height as usize;
     let sel = m.list.selected().unwrap_or(0);
     let off = scroll_to(m.list.offset(), sel, rows);
@@ -201,7 +201,7 @@ pub(super) fn draw_preview(f: &mut Frame, app: &App) {
     while lines.last().is_some_and(|l| l.width() == 0) {
         lines.pop();
     }
-    let inner = panel(f, w, lines.len() as u16 + 3, "Quoted posts", "j/k scroll · enter jump · esc close");
+    let inner = panel(f, w, cells(lines.len()).saturating_add(3), "Quoted posts", "j/k scroll · enter jump · esc close");
     let scroll = (p.scroll as usize).min(lines.len().saturating_sub(inner.height as usize));
     for (row, line) in lines.into_iter().skip(scroll).take(inner.height as usize).enumerate() {
         put(f, inner.x, inner.y + row as u16, inner.width, line);
@@ -213,7 +213,7 @@ pub(super) fn draw_links(f: &mut Frame, app: &mut App) {
     let t = theme();
     let Some(TabPopup::Links(p)) = &mut app.tab.popup else { return };
     let w = f.area().width.saturating_sub(8).clamp(20, 110);
-    let inner = panel(f, w, p.items.len() as u16 + 3, "Links", "enter open · y copy · esc close");
+    let inner = panel(f, w, cells(p.items.len()).saturating_add(3), "Links", "enter open · y copy · esc close");
     let rows = inner.height as usize;
     let sel = p.list.selected().unwrap_or(0);
     let off = scroll_to(p.list.offset(), sel, rows);
@@ -242,7 +242,7 @@ pub(super) fn draw_image_search(f: &mut Frame, app: &mut App) {
     let t = theme();
     let names: Vec<String> = app.image_search.iter().map(|e| e.name.clone()).collect();
     let Some(Popup::ImageSearch(p)) = &mut app.popup else { return };
-    let inner = panel(f, 64, p.rows.len() as u16 + 3, "Search for this image", "enter open · y copy · esc close");
+    let inner = panel(f, 64, cells(p.rows.len()).saturating_add(3), "Search for this image", "enter open · y copy · esc close");
     let rows = inner.height as usize;
     let sel = p.list.selected().unwrap_or(0);
     let off = scroll_to(p.list.offset(), sel, rows);
@@ -365,7 +365,7 @@ pub(super) fn draw_help(f: &mut Frame, app: &App) {
     let total: usize = sections.iter().map(Vec::len).sum();
     let area = f.area();
     // Two columns when one doesn't fit, split at the section boundary nearest the middle.
-    let two = total as u16 + 4 > area.height && area.width >= 2 * COL + 8;
+    let two = cells(total).saturating_add(4) > area.height && area.width >= 2 * COL + 8;
     let mut cols = vec![Vec::new(), Vec::new()];
     for s in sections {
         let c = usize::from(two && cols[0].len() + s.len() / 2 >= total / 2);
@@ -398,7 +398,7 @@ pub(super) fn draw_add_filter(f: &mut Frame, app: &App) {
     use crate::filter::FilterAction;
     let t = theme();
     let Some(Popup::AddFilter(a)) = &app.popup else { return };
-    let h = a.candidates.len() as u16 + 9;
+    let h = cells(a.candidates.len()).saturating_add(9);
     let inner = panel(f, 72, h, &format!("Filter like No.{}", a.post), "enter add · esc cancel");
     let sel = a.list.selected().unwrap_or(0);
     for (k, c) in a.candidates.iter().enumerate().take(inner.height as usize) {
@@ -408,7 +408,7 @@ pub(super) fn draw_add_filter(f: &mut Frame, app: &App) {
         let left = vec![Span::styled(truncate(&c.what, room), Style::new().fg(t.text))];
         put(f, inner.x, y, inner.width, spread(left, vec![Span::styled(c.field.as_str(), dim())], inner.width as usize));
     }
-    let y = inner.y + a.candidates.len() as u16 + 1;
+    let y = inner.y + cells(a.candidates.len()).saturating_add(1);
     let row = |f: &mut Frame, k: u16, name: &str, value: Vec<Span<'static>>, key: &str| {
         let mut spans = vec![Span::styled(format!("{name:<8}"), dim())];
         spans.extend(value);

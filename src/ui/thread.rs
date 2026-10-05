@@ -102,7 +102,7 @@ pub(super) fn draw_thread(f: &mut Frame, app: &mut App, area: Rect) {
     // In a post taller than the screen: whether it goes on below, or started above.
     if let Some((_, above, below)) = t.tall() {
         let mark = |f: &mut Frame, y: u16, text: &str| {
-            let w = text.width() as u16 + 2;
+            let w = cells(text.width()).saturating_add(2);
             let x = area.right().saturating_sub(w + 1);
             put(f, x, y, w, Line::from(Span::styled(format!(" {text} "), Style::new().fg(th.text_dim).bg(th.surface_high))));
         };
@@ -528,7 +528,7 @@ pub(super) fn draw_peek(f: &mut Frame, app: &App, area: Rect) {
     let th = theme();
     let width = area.width.saturating_sub(6);
     let mut lines = post_lines(&t.posts[i], &post_ctx(t, i, app.clock), width as usize).0;
-    let h = (lines.len() as u16 + 2).min(area.height / 2).max(3);
+    let h = (cells(lines.len()).saturating_add(2)).min(area.height / 2).max(3);
     lines.truncate(h.saturating_sub(2) as usize);
     // Where the quote is on screen decides where the peek goes.
     let quote_y = t.layout.as_ref().and_then(|lay| {

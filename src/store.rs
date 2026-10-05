@@ -283,7 +283,7 @@ impl Store {
         for &no in threads {
             map.entry(no).or_default().last = now;
         }
-        map.retain(|_, t| now - t.last <= SEEN_FOR);
+        map.retain(|_, t| now.saturating_sub(t.last) <= SEEN_FOR);
         new
     }
 
@@ -529,7 +529,7 @@ impl Store {
         if self.saved_max == 0 {
             return;
         }
-        let mut total: u64 = self.saved.iter().map(|m| m.bytes).sum();
+        let mut total = self.saved.iter().fold(0u64, |sum, m| sum.saturating_add(m.bytes));
         while total > self.saved_max {
             let watched = |m: &SavedMeta| self.watched.iter().any(|w| w.key == m.key);
             let Some(i) = self.saved.iter().rposition(|m| m.dead && !watched(m)) else { break };
@@ -689,6 +689,10 @@ mod tests {
         s.catalog_seen("4chan", "g", &[4], 9 * day);
         assert!(!s.seen["4chan/g"].contains_key(&1) && !s.seen["4chan/g"].contains_key(&3));
         assert_eq!(s.catalog_seen("4chan", "g", &[1, 4], 9 * day), [1].into());
+        // A corrupt time in the file is just old.
+        s.seen.get_mut("4chan/g").unwrap().insert(7, SeenThread { last: i64::MIN, replies: None });
+        s.catalog_seen("4chan", "g", &[4], i64::MAX);
+        assert!(!s.seen["4chan/g"].contains_key(&7));
     }
 
     #[test]

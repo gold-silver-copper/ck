@@ -54,7 +54,7 @@ pub(super) fn draw_settings_popup(f: &mut Frame, app: &App) {
     };
     match popup {
         Some(SettingsPopup::Themes { list, names, .. }) => {
-            let inner = panel(f, 52, names.len() as u16 + 3, "Theme", "enter keep · esc cancel");
+            let inner = panel(f, 52, cells(names.len()).saturating_add(3), "Theme", "enter keep · esc cancel");
             list_rows(f, inner, 0, names.len(), list.selected().or(Some(0)), |k| {
                 let name = &names[k];
                 let mut spans = vec![Span::styled(format!("{name:<22}"), Style::new().fg(t.text))];
@@ -69,7 +69,7 @@ pub(super) fn draw_settings_popup(f: &mut Frame, app: &App) {
         Some(SettingsPopup::Colors { list, editing }) => {
             let title = format!("Colors · {}", app.theme_name);
             let hint = if editing.is_some() { "enter save · esc cancel" } else { "enter edit · x reset · esc close" };
-            let h = (ROLES.len() as u16 + 5).min(f.area().height.saturating_sub(4));
+            let h = (cells(ROLES.len()).saturating_add(5)).min(f.area().height.saturating_sub(4));
             let inner = panel(f, 96, h, &title, hint);
             let rows = inner.height.saturating_sub(2) as usize;
             let sel = list.selected().unwrap_or(0);
@@ -99,7 +99,7 @@ pub(super) fn draw_settings_popup(f: &mut Frame, app: &App) {
         Some(SettingsPopup::Keys { list, capture }) => {
             let rows = key_rows();
             let hint = if capture.is_some() { "press a key · esc cancel" } else { "enter rebind · a add · u unbind · x reset · esc close" };
-            let h = (rows.len() as u16 + 5).min(f.area().height.saturating_sub(4));
+            let h = (cells(rows.len()).saturating_add(5)).min(f.area().height.saturating_sub(4));
             let inner = panel(f, 96, h, "Keys", hint);
             let view = inner.height.saturating_sub(2) as usize;
             let sel = list.selected().unwrap_or(0);
@@ -269,7 +269,7 @@ fn draw_filter_edit(f: &mut Frame, app: &App, index: Option<usize>, draft: &crat
         None => "New filter".into(),
     };
     let hint = if typing.is_some() { "enter keep · esc cancel" } else { "enter change · esc back" };
-    let inner = panel(f, 84, EDIT_ROWS.len() as u16 + 6, &title, hint);
+    let inner = panel(f, 84, cells(EDIT_ROWS.len()).saturating_add(6), &title, hint);
     let fields = draft.fields();
     for (k, r) in EDIT_ROWS.iter().enumerate().take(inner.height.saturating_sub(2) as usize) {
         let y = inner.y + k as u16;
