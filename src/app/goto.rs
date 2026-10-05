@@ -103,12 +103,12 @@ impl App {
     }
 
     pub fn on_goto_key(&mut self, key: KeyEvent) {
-        let Some(text) = &mut self.goto else { return };
+        let Some(super::Typing::Goto(text)) = &mut self.typing else { return };
         match key.code {
-            KeyCode::Esc => self.goto = None,
+            KeyCode::Esc => self.typing = None,
             KeyCode::Enter => {
                 let input = std::mem::take(text);
-                self.goto = None;
+                self.typing = None;
                 self.goto_str(&input);
             }
             KeyCode::Tab => self.complete_goto(),
@@ -122,7 +122,7 @@ impl App {
         if self.paste_adding(&text) {
             return;
         }
-        if let Some(g) = &mut self.goto {
+        if let Some(super::Typing::Goto(g)) = &mut self.typing {
             g.push_str(&text);
         } else if let Some(Popup::AddFilter(a)) = &mut self.popup {
             if let Some(label) = &mut a.typing {
@@ -130,24 +130,24 @@ impl App {
             }
         } else if let Some(Popup::Settings(super::SettingsPopup::FilterEdit { typing: Some(field), .. })) = &mut self.popup {
             field.push_str(&text);
-        } else if self.searching {
+        } else if self.typing == Some(super::Typing::ThreadSearch) {
             if let Some(t) = &mut self.tab.thread {
                 let q = format!("{}{text}", t.search);
                 t.set_search(q);
             }
-        } else if self.filtering {
+        } else if self.typing == Some(super::Typing::ListFilter) {
             if let Some((p, len)) = self.picker() {
                 p.filter.push_str(&text);
                 p.clamp(len);
             }
         } else if !matches!(self.popup, Some(Popup::Settings(_) | Popup::Help(_))) && self.tab.viewer().is_none() {
-            self.goto = Some(text);
+            self.typing = Some(super::Typing::Goto(text));
         }
     }
 
     /// Tab in the `:` input: complete a site name, or a board of the site typed so far.
     fn complete_goto(&mut self) {
-        let Some(text) = self.goto.clone() else { return };
+        let Some(text) = self.goto_text().map(String::from) else { return };
         let (prefix, partial, site) = match text.rsplit_once('/') {
             Some((head, tail)) => {
                 let name = head.trim_start_matches('/');
@@ -170,14 +170,14 @@ impl App {
             [] => self.info(format!("Nothing starts with \"{partial}\"")),
             [one] => {
                 let slash = if site.is_none() && self.sites.iter().any(|s| s.cfg.name == **one) { "/" } else { "" };
-                self.goto = Some(format!("{prefix}{one}{slash}"));
+                self.typing = Some(super::Typing::Goto(format!("{prefix}{one}{slash}")));
             }
             many => {
                 let common = many.iter().skip(1).fold(many[0].clone(), |acc, m| {
                     acc.chars().zip(m.chars()).take_while(|(a, b)| a == b).map(|(a, _)| a).collect()
                 });
                 if common.chars().count() > partial.chars().count() {
-                    self.goto = Some(format!("{prefix}{common}"));
+                    self.typing = Some(super::Typing::Goto(format!("{prefix}{common}")));
                 }
                 let shown: Vec<&str> = many.iter().take(10).map(|s| s.as_str()).collect();
                 let more = if many.len() > 10 { format!(" (+{})", many.len() - 10) } else { String::new() };

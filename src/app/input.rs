@@ -38,7 +38,7 @@ impl App {
                         t.scroll_lines(if down { 3 } else { -3 });
                     }
                 }
-                _ if !self.filtering && !self.searching => self.on_key(key(down)),
+                _ if !matches!(self.typing, Some(Typing::ListFilter | Typing::ThreadSearch)) => self.on_key(key(down)),
                 _ => {}
             }
             return;
@@ -162,12 +162,13 @@ impl App {
             (matches!(self.tab.popup, Some(TabPopup::Preview(_))), Modal::Preview),
             (self.tab.gallery.is_some() && self.tab.view == View::Thread, Modal::Gallery),
             (matches!(self.tab.popup, Some(TabPopup::Links(_))), Modal::Links),
-            (self.goto.is_some(), Modal::Goto),
-            (self.search_input.is_some(), Modal::SearchInput),
-            (self.searching, Modal::Searching),
-            (self.filtering, Modal::Filtering),
         ];
-        open.into_iter().find_map(|(on, modal)| on.then_some(modal))
+        open.into_iter().find_map(|(on, modal)| on.then_some(modal)).or(self.typing.as_ref().map(|t| match t {
+            Typing::Goto(_) => Modal::Goto,
+            Typing::ArchiveQuery(_) => Modal::SearchInput,
+            Typing::ThreadSearch => Modal::Searching,
+            Typing::ListFilter => Modal::Filtering,
+        }))
     }
 
     /// Select what's at a screen position: a list row, or a post (and its part) in a thread.
@@ -347,10 +348,10 @@ impl App {
             Action::Search if self.tab.view == View::Thread => {
                 if let Some(t) = &mut self.tab.thread {
                     t.set_search(String::new());
-                    self.searching = true;
+                    self.typing = Some(Typing::ThreadSearch);
                 }
             }
-            Action::Search => self.filtering = true,
+            Action::Search => self.typing = Some(Typing::ListFilter),
             Action::Reload => self.refresh(),
             Action::Filter => self.open_add_filter(),
             Action::Conversation => self.toggle_conversation(),
@@ -368,7 +369,7 @@ impl App {
             Action::PrevPart => self.step_part(false),
             Action::Watch => self.toggle_watch(),
             Action::Remove => self.remove_entry(),
-            Action::Goto => self.goto = Some(String::new()),
+            Action::Goto => self.typing = Some(Typing::Goto(String::new())),
             Action::Links => self.open_links(),
             Action::Hide => self.toggle_hidden(),
             Action::Mine => self.toggle_mine(),
@@ -382,7 +383,7 @@ impl App {
             Action::BoardImages => self.toggle_board_images(),
             Action::UpdateBoards if self.tab.view == View::Boards => self.refresh_board_list(self.tab.site),
             Action::UpdateBoards => {}
-            Action::SearchSaved => self.goto = Some("saved ".into()),
+            Action::SearchSaved => self.typing = Some(Typing::Goto("saved ".into())),
             Action::Follow => self.toggle_follow(),
             Action::NextTab => self.cycle_tab(true),
             Action::PrevTab => self.cycle_tab(false),
@@ -435,7 +436,7 @@ impl App {
 
     fn on_filter_key(&mut self, key: KeyEvent) {
         let Some((p, _)) = self.picker() else {
-            self.filtering = false;
+            self.typing = None;
             return;
         };
         match key.code {
@@ -444,7 +445,7 @@ impl App {
         }
         p.state.select(Some(0));
         if matches!(key.code, KeyCode::Esc | KeyCode::Enter) {
-            self.filtering = false;
+            self.typing = None;
         }
         self.clamp_list();
     }
@@ -572,16 +573,16 @@ impl App {
 
     fn on_search_key(&mut self, key: KeyEvent) {
         let Some(t) = &mut self.tab.thread else {
-            self.searching = false;
+            self.typing = None;
             return;
         };
         match key.code {
             KeyCode::Esc => {
                 t.set_search(String::new());
-                self.searching = false;
+                self.typing = None;
             }
             KeyCode::Enter => {
-                self.searching = false;
+                self.typing = None;
                 let msg = match t.next_match(true) {
                     Some(i) => {
                         t.select(i);

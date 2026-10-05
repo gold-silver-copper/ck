@@ -74,18 +74,18 @@ impl App {
     /// `f` in a catalog: ask what to search for.
     pub fn start_archive_search(&mut self) {
         match self.archive_site() {
-            Some(_) => self.search_input = Some(String::new()),
+            Some(_) => self.typing = Some(super::Typing::ArchiveQuery(String::new())),
             None => self.info("This site has no archive to search (see `archive` in the config)"),
         }
     }
 
     pub fn on_search_input_key(&mut self, key: KeyEvent) {
-        let Some(text) = &mut self.search_input else { return };
+        let Some(super::Typing::ArchiveQuery(text)) = &mut self.typing else { return };
         match key.code {
-            KeyCode::Esc => self.search_input = None,
+            KeyCode::Esc => self.typing = None,
             KeyCode::Enter => {
                 let query = std::mem::take(text).trim().to_string();
-                self.search_input = None;
+                self.typing = None;
                 if !query.is_empty() {
                     self.search_archive(query);
                 }
