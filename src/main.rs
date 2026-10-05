@@ -55,9 +55,13 @@ fn main() -> Result<()> {
     let _ = execute!(stdout(), EnableMouseCapture, EnableBracketedPaste);
     restore_on_main_thread_panics();
     ck::input_log::note(|| "images  asking the terminal".into());
-    let picker = (config.images != ImagesMode::Off).then(|| detect_images(config.images));
+    let detected = (config.images != ImagesMode::Off).then(|| detect_images(config.images));
+    let (picker, images_note) = detected.map_or((None, None), |(p, note)| (Some(p), note));
     ck::input_log::note(|| format!("images  {:?}", picker.as_ref().map(|p| p.protocol_type())));
     let mut app = App::new(config, keys, filters, picker, store);
+    if let Some(note) = images_note {
+        app.info(note);
+    }
     #[cfg(unix)]
     if let Err(e) = app.quit_on_signals() {
         app.error(format!("Closing the terminal won't save first: {e}"));
@@ -139,12 +143,18 @@ Press ? inside ck for the keys. See the README for configuration.
 
 /// Ask the terminal which image protocol it speaks (and its cell size); half-blocks if it
 /// doesn't answer. `images` in the config may name the protocol instead. Must run after
-/// entering the alternate screen and before reading any events.
-fn detect_images(mode: ImagesMode) -> Picker {
+/// entering the alternate screen and before reading any events. Also something to tell the
+/// user, when there's a setting that would make images sharper.
+fn detect_images(mode: ImagesMode) -> (Picker, Option<String>) {
     // Terminals that can't show graphics: don't wait for an answer that won't come (it
     // would also swallow the first keypress).
     if matches!(std::env::var("TERM").as_deref(), Ok("dumb" | "linux")) && mode == ImagesMode::Auto {
-        return Picker::halfblocks();
+        return (Picker::halfblocks(), None);
+    }
+    // tmux without passthrough drops the question: waiting a second for nothing every start.
+    if mode == ImagesMode::Auto && std::env::var_os("TMUX").is_some() && tmux_passthrough() == Some(false) {
+        ck::input_log::note(|| "images  tmux without allow-passthrough: half-blocks, not asking".into());
+        return (Picker::halfblocks(), Some("Images are half-blocks: in tmux, `set -g allow-passthrough on` lets the terminal draw them sharp".into()));
     }
     const TIMEOUT: Duration = Duration::from_secs(1);
     let options = QueryStdioOptions { timeout: TIMEOUT, ..Default::default() };
@@ -157,7 +167,18 @@ fn detect_images(mode: ImagesMode) -> Picker {
     let mut picker = picker.unwrap_or_else(|_| Picker::halfblocks());
     let in_zellij = std::env::var_os("ZELLIJ").is_some();
     picker.set_protocol_type(ck::images::choose_protocol(mode, picker.protocol_type(), in_zellij));
-    picker
+    (picker, None)
+}
+
+/// Whether the tmux ck runs in passes escapes through to the terminal (`None`: couldn't
+/// tell).
+fn tmux_passthrough() -> Option<bool> {
+    let out = std::process::Command::new("tmux").args(["show", "-gv", "allow-passthrough"]).stderr(std::process::Stdio::null()).output().ok()?;
+    match String::from_utf8_lossy(&out.stdout).trim() {
+        "on" | "all" => Some(true),
+        "off" => Some(false),
+        _ => None,
+    }
 }
 
 /// After a terminal query that got no answer in time. ratatui-image reads the answer on a
