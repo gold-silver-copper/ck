@@ -2543,3 +2543,14 @@ fn removing_a_saved_copy_asks_again_once_the_question_is_gone() {
     app.act(Action::Remove);
     assert!(app.store.saved(&key).is_none());
 }
+
+#[test]
+fn where_ck_can_start_is_checked_first() {
+    let cfg: Config = toml::from_str(crate::config::DEFAULT_CONFIG).unwrap();
+    for fine in ["4chan/g", "4chan/g/123#456", "https://boards.4chan.org/g/thread/1", "saved", "saved some words", "history", "somechan.example/b/", "lainchan/λ"] {
+        assert_eq!(start_error(&cfg.sites, fine), None, "{fine}");
+    }
+    let e = start_error(&cfg.sites, "nosuchsite/g").unwrap();
+    assert!(e.contains("No site is called `nosuchsite`"), "{e}");
+    assert!(start_error(&cfg.sites, "123").unwrap().contains("Open a board first"));
+}

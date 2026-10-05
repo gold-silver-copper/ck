@@ -23,10 +23,21 @@ pub fn sanitize(name: &str) -> String {
     if out.is_empty() { "file".into() } else { out }
 }
 
+/// The system's Downloads folder.
+fn downloads() -> PathBuf {
+    dirs::download_dir().unwrap_or_else(|| dirs::home_dir().unwrap_or_default().join("Downloads"))
+}
+
+/// Where files go unless `download_dir` says otherwise (in a folder per site, board and
+/// thread).
+pub fn default_root() -> PathBuf {
+    downloads().join("ck")
+}
+
 /// The directory for a thread's files, from the `download_dir` template.
 pub fn dir(template: Option<&str>, site: &str, board: &str, thread: u64) -> PathBuf {
     let home = dirs::home_dir().unwrap_or_default();
-    let downloads = dirs::download_dir().unwrap_or_else(|| home.join("Downloads"));
+    let downloads = downloads();
     let t = template.unwrap_or(DEFAULT_DIR);
     let t = match t.strip_prefix("~/") {
         Some(rest) => format!("{}/{rest}", home.display()),

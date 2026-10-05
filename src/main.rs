@@ -32,11 +32,19 @@ fn main() -> Result<()> {
             print!("{}", help_text());
             return Ok(());
         }
+        ["-V" | "--version"] => {
+            println!("ck {}", env!("CARGO_PKG_VERSION"));
+            return Ok(());
+        }
         [a] if !a.starts_with('-') => start_at = Some(a.to_string()),
-        _ => anyhow::bail!("usage: ck [URL | site/board/thread]   (ck --help for more)"),
+        [a] => anyhow::bail!("ck doesn't know the option {a}\n{USAGE}"),
+        many => anyhow::bail!("ck takes one place to start at, not {}: {}\n{USAGE}", many.len(), many.join(" ")),
     }
 
     let config = Config::load()?;
+    if let Some(e) = start_at.as_deref().and_then(|at| ck::app::start_error(&config.sites, at)) {
+        anyhow::bail!("can't start at {}: {e}", start_at.unwrap_or_default());
+    }
     // Config errors are reported before the terminal is taken over.
     let keys = KeyMap::new(&config.keys)?;
     let filters = filter::Filters::from_config(&config.filters, &config.hidden_words)?;
@@ -96,6 +104,8 @@ fn restore_on_main_thread_panics() {
     }));
 }
 
+const USAGE: &str = "usage: ck [URL | site/board/thread]   (ck --help for more)";
+
 fn help_text() -> String {
     let path = |p: Option<std::path::PathBuf>| p.map_or("(no home directory)".into(), |p| p.display().to_string());
     let config_state = if Config::path().is_some_and(|p| p.exists()) { "" } else { " (not created; using defaults)" };
@@ -107,11 +117,14 @@ usage: ck                  start
                            4chan/g, 4chan/g/123 or lainchan/λ/42#43
        ck --print-config   print the default config (a starting point for your own)
        ck --print-sites    print the built-in sites (copy one into your config to change it)
+       ck --version        the version
        ck --help           this help
 
 config:  {}{config_state}
 data:    {}   (watched threads, history, hidden posts, tabs, board lists)
 cache:   {}   (thumbnails, at most 200 MB)
+pages:   {}   (the last copy of each catalog and thread, page_cache_mb)
+files:   {}   (downloads, in a folder per thread; download_dir)
 
 Press ? inside ck for the keys. See the README for configuration.
 ",
@@ -119,6 +132,8 @@ Press ? inside ck for the keys. See the README for configuration.
         path(Config::path()),
         path(Store::dir()),
         path(disk_cache::DiskCache::default_dir()),
+        path(ck::pages::Pages::default_dir()),
+        ck::download::default_root().display(),
     )
 }
 

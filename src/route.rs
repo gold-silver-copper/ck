@@ -83,7 +83,8 @@ pub fn resolve(input: &str, sites: &[SiteInfo], here: (usize, Option<&str>)) -> 
         [board] => Target { site, board: Some(board.clone()), thread: None, post: None },
         [board, n] => match number(n) {
             Some(n) => Target { site, board: Some(board.clone()), thread: Some(n), post },
-            None => bail!("`{n}` isn't a thread number; type {FORMS}"),
+            // `nosuchsite/g`: more likely a site name misspelled than a thread number.
+            None => bail!("No site is called `{board}` (and `{n}` isn't a thread number); type {FORMS}"),
         },
         _ => bail!("Couldn't read `{input}`; type {FORMS}"),
     };
