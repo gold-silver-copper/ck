@@ -418,9 +418,11 @@ pub(crate) mod tests {
         // A vichan site without a board in the link: nothing to find; it says so.
         let e = found("vi.invalid", None).unwrap_err().to_string();
         assert!(e.contains("doesn't answer like") && e.contains("try a link to one of its boards"), "{e}");
-        assert!(found("none.invalid", Some("b")).unwrap_err().to_string().contains("doesn't answer like"));
+        let e = found("none.invalid", Some("b")).unwrap_err().to_string();
+        assert!(e.contains("doesn't answer like"), "{e}");
         // Nothing there at all, or a site that keeps programs out.
-        assert!(found("nobody.invalid", None).unwrap_err().to_string().starts_with("Couldn't reach nobody.invalid"));
+        let e = found("nobody.invalid", None).unwrap_err().to_string();
+        assert!(e.starts_with("Couldn't reach nobody.invalid"), "{e}");
         serve_test_host("wall.invalid", Some(Arc::new(|_, _| Raw { status: 403, last_modified: None, body: "<html>".into() })));
         assert!(found("wall.invalid", None).unwrap_err().to_string().contains("refused ck's requests (HTTP 403)"));
         assert!(has_board("https://vi.invalid", "tech") && !has_board("https://vi.invalid", "b"));
