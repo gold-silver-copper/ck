@@ -2457,3 +2457,23 @@ impl App {
         if let Some(Popup::ImageSearch(p)) = &self.popup { Some(p) } else { None }
     }
 }
+
+#[test]
+fn a_quote_preview_survives_a_refresh_that_drops_posts() {
+    let mut app = local_app();
+    app.tab.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
+    app.tab.view = View::Thread;
+    let quoting = |no, q: u64| Post { no, quotes: vec![q], body: vec![Line::from(format!("reply {no}"))], ..Default::default() };
+    let plain = |no| Post { no, body: vec![Line::from(format!("post {no}"))], ..Default::default() };
+    app.set_thread(vec![plain(1), plain(2), plain(3), plain(4), plain(5), quoting(6, 5)]);
+    draw_at(&mut app, 100, 30);
+    app.on_key(KeyEvent::from(KeyCode::Char('G')));
+    app.act(Action::Preview);
+    assert!(matches!(app.tab.popup, Some(TabPopup::Preview(_))));
+    // Posts 2-4 deleted: the quoted post moves from the fifth place to the second.
+    app.set_thread(vec![plain(1), plain(5), quoting(6, 5)]);
+    let screen = draw_at(&mut app, 100, 30);
+    assert!(screen.content.iter().map(|c| c.symbol()).collect::<String>().contains("post 5"));
+    app.on_key(KeyEvent::from(KeyCode::Enter));
+    assert_eq!(app.tab.thread.as_ref().unwrap().current().unwrap().no, 5);
+}

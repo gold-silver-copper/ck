@@ -237,10 +237,11 @@ impl App {
                 tv.cache = old.cache;
                 tv.cache_width = old.cache_width;
                 tv.estimates = old.estimates;
-                tv.jumps = old.jumps;
+                // Jumps back and revealed spoilers by post number, since indices can shift.
+                let moved = |i: &usize| old.posts.get(*i).and_then(|p| tv.index.get(&p.no)).copied();
+                tv.jumps = old.jumps.iter().filter_map(moved).collect();
                 tv.new_after = old.new_after;
-                // Revealed spoilers by post number, since indices can shift.
-                tv.revealed = old.revealed.iter().filter_map(|&i| tv.index.get(&old.posts[i].no).copied()).collect();
+                tv.revealed = old.revealed.iter().filter_map(moved).collect();
                 tv.reveal_all = old.reveal_all;
                 tv.set_search(old.search);
                 // The focused part, if the post still has it.

@@ -608,7 +608,7 @@ impl App {
     fn open_preview(&mut self) {
         let Some(t) = &self.tab.thread else { return };
         let Some(p) = t.current() else { return };
-        let posts: Vec<usize> = p.quotes.iter().filter_map(|q| t.index.get(q).copied()).collect();
+        let posts: Vec<u64> = p.quotes.iter().copied().filter(|q| t.index.contains_key(q)).collect();
         let elsewhere: Vec<u64> = p.links.iter().filter_map(|l| l.post).filter(|n| !t.index.contains_key(n)).collect();
         if posts.is_empty() && elsewhere.is_empty() {
             self.info("Post quotes nothing");
@@ -629,7 +629,9 @@ impl App {
             KeyCode::Enter => {
                 let first = p.posts.first().copied();
                 self.tab.popup = None;
-                if let (Some(i), Some(t)) = (first, &mut self.tab.thread) {
+                if let Some(t) = &mut self.tab.thread
+                    && let Some(i) = first.and_then(|no| t.index.get(&no).copied())
+                {
                     t.jumps.push(t.selected);
                     t.select(i);
                 }

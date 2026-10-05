@@ -203,7 +203,7 @@ fn quote_preview() {
     let mut a = thread_app(false);
     let t = a.tab.thread.as_mut().unwrap();
     t.selected = 3;
-    a.tab.popup = Some(crate::app::TabPopup::Preview(Preview { posts: vec![1], elsewhere: vec![], scroll: 0 }));
+    a.tab.popup = Some(crate::app::TabPopup::Preview(Preview { posts: vec![1001], elsewhere: vec![], scroll: 0 }));
     insta::assert_snapshot!(snapshot(&mut a));
 }
 
