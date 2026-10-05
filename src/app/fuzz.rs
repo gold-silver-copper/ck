@@ -1147,7 +1147,7 @@ fn check_thread(t: &ThreadView) -> Result<(), String> {
         return Err(format!("an entry, match or revealed post past the {n} posts"));
     }
     // A conversation shows just its posts, all of them, its own post among them; without
-    // one, every post is there.
+    // one, every post is there, or (`M`) the OP and every post with files.
     let top: Vec<usize> = t.entries.iter().filter(|e| e.path.len() == 1).map(|e| e.post).collect();
     match &t.conversation {
         Some(c) => {
@@ -1161,8 +1161,13 @@ fn check_thread(t: &ThreadView) -> Result<(), String> {
                 return Err(format!("the conversation of No.{} shows {top:?}, not {:?}", c.anchor, set.keys().collect::<Vec<_>>()));
             }
         }
-        None if top != (0..n).collect::<Vec<_>>() => return Err(format!("the whole thread shows {} of {n} posts", top.len())),
-        None => {}
+        None => {
+            let files = t.media == super::Media::Files;
+            let want: Vec<usize> = (0..n).filter(|&i| !files || i == 0 || !t.posts[i].files.is_empty()).collect();
+            if top != want {
+                return Err(format!("the whole thread ({:?}) shows {} of its {} posts", t.media, top.len(), want.len()));
+            }
+        }
     }
     // A post hidden as a reply to a hidden post quotes it, and it's hidden; the OP never is.
     for (i, m) in t.marks.iter().enumerate() {
@@ -1245,7 +1250,7 @@ fn check_images(app: &App, before: &[String]) {
             .tab
             .thread
             .as_ref()
-            .filter(|t| !app.images_on(app.tab.site, &t.board))
+            .filter(|_| !app.thread_images_on())
             .map(|t| t.posts.iter().flat_map(|p| p.files.iter().filter_map(|f| f.thumb.as_deref())).collect())
             .unwrap_or_default(),
         View::Catalog => app.tab.catalog.iter().filter(|p| !app.catalog_images_on(p)).flat_map(|p| p.files.iter().filter_map(|f| f.thumb.as_deref())).collect(),

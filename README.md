@@ -157,6 +157,7 @@ ones for where you are.
 | `e`  | show / hide the post's replies under it, indented; again on a reply goes a level deeper (up to 4) [`expand`] |
 | `c`  | the post's conversation alone: what it replies to and the replies to it; `esc` (or `c`) shows the whole thread again [`conversation`] |
 | `I`  | on a board with poster IDs: that poster's posts alone; `esc` (or `I`) shows the whole thread again [`poster`] |
+| `M`  | in turn: only the posts with files (and the OP), every post with its images hidden, every post again [`media`] |
 | `v` / `V` | image viewer from the post's files on through the thread's / gallery of every file in the thread [`view`, `gallery`] |
 | `i` / `R` | open the post's file (videos in mpv if it's installed) / reverse image search [`open_file`, `image_search`] |
 | `O`  | the post's links: quotes of other threads, web links, files; `enter` opens, `y` copies [`links`] |
@@ -235,6 +236,18 @@ file of the thread), `d` saves the file, `esc` returns to its post.
 Copying uses the terminal's clipboard escape (OSC 52), which also works over SSH; in tmux it
 needs `set -g set-clipboard on`. On a local machine ck also uses `pbcopy`, `wl-copy`,
 `xclip` or `xsel` when one is installed.
+
+### Posts with files, or no images
+
+`M` shows only the posts with files (and the OP: it's the thread), the way a conversation
+shows its posts: `j`/`k` and search go through those, and the top bar says "with
+files". New posts with files appear as the thread refreshes, and going to a
+quoted post without one shows every post again. `M` again shows every post with its images
+hidden, the way a board with images off has them ("image off" in their place, the layout
+the same, nothing asked for), and the bar says "images hidden"; `M` once more shows
+everything. It's for that thread, while it's open; in a conversation, the conversation
+still shows all its posts. (On a board you always want without images, see Images on or
+off per board.)
 
 ### The home screen
 
@@ -770,12 +783,12 @@ Nothing here leaves the machine: fake sites answer on `*.invalid` hosts or on 12
   again. Threads die for good now and then: a watched thread that was ever loaded must
   keep its saved copy, and a dead thread's copy being read is never fetched. A filter
   added from a post must catch it, and after any filter change the marks and the config
-  agree with the filters in use. A conversation shows exactly its posts. A post shown
-  before a refresh of the same thread is still there after it (or marked deleted), unless
-  the refresh came back too small to trust, and a deleted post is never new. A post hidden
-  as a reply quotes a hidden post. A failure prints
-  the seed that replays it and the fewest steps that still fail (`FUZZ_TRACE=1` prints the
-  state after each step).
+  agree with the filters in use. A conversation shows exactly its posts, and `M` the posts
+  with files. A post shown before a refresh of the same thread is still there after it
+  (or marked deleted), unless the refresh came back too small to trust, and a deleted post
+  is never new. A post hidden as a reply quotes a hidden post. A failure prints the seed
+  that replays it and the fewest steps that still fail (`FUZZ_TRACE=1` prints the state
+  after each step).
 - **The rest** (`src/fuzz.rs`): every engine's parsers on mangled responses, the markup
   parser and wrapping, routes, the rate limiter and the cache against a model, broken data
   directories and saved threads (nothing the user had may be lost), broken configs and

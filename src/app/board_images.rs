@@ -111,7 +111,13 @@ impl App {
             }
             View::Thread => {
                 let Some(t) = &self.tab.thread else { return false };
-                (self.images_on(self.tab.site, &t.board), t.board.clone())
+                let on = self.images_on(self.tab.site, &t.board);
+                if on && !self.thread_images_on() {
+                    let key = self.keys.key(Action::Media);
+                    self.info(format!("Images are hidden in this thread ({key} shows them); i opens the file"));
+                    return true;
+                }
+                (on, t.board.clone())
             }
             _ => return false,
         };

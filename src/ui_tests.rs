@@ -345,6 +345,62 @@ fn conversation() {
 }
 
 #[test]
+fn only_posts_with_files_or_no_images() {
+    use crate::app::Media;
+    use ratatui::crossterm::event::{KeyCode, KeyEvent};
+    let m = |a: &mut App| a.on_key(KeyEvent::from(KeyCode::Char('M')));
+    // A long thread, every third post with a file, read from the middle.
+    let mut a = long_thread_app(300);
+    a.images = Images::offline();
+    for (k, p) in a.tab.thread.as_mut().unwrap().posts.iter_mut().enumerate() {
+        if k % 3 == 1 {
+            p.files = vec![file(&format!("{}.png", p.no))];
+        }
+    }
+    render(&mut a);
+    a.tab.thread.as_mut().unwrap().select(150);
+    render(&mut a);
+    assert_layout_exact(&mut a);
+    // Files only: the OP and the posts with files, the selection on the next one that has
+    // one, laid out exactly and on screen; the bar says so.
+    m(&mut a);
+    let text = render(&mut a).0;
+    let t = a.tab.thread.as_ref().unwrap();
+    assert_eq!((t.media, t.entries.len(), t.posts[t.selected].no), (Media::Files, 101, 2151));
+    assert!(t.entries.iter().skip(1).all(|e| !t.posts[e.post].files.is_empty()));
+    assert!(text.lines().next().unwrap().contains("with files"), "{text}");
+    assert!(text.contains("No.2151"), "{text}");
+    assert_layout_exact(&mut a);
+    // j goes from one to the next.
+    a.on_key(KeyEvent::from(KeyCode::Char('j')));
+    render(&mut a);
+    assert_eq!(a.tab.thread.as_ref().unwrap().current().unwrap().no, 2154);
+    assert_layout_exact(&mut a);
+    // Images hidden: every post again, tiles say so, and nothing's asked for.
+    let asked = a.images.queued();
+    m(&mut a);
+    let text = render(&mut a).0;
+    let t = a.tab.thread.as_ref().unwrap();
+    assert_eq!((t.media, t.entries.len(), t.posts[t.selected].no), (Media::NoImages, 300, 2154));
+    assert!(text.lines().next().unwrap().contains("images hidden") && text.contains("image off"), "{text}");
+    assert_eq!(a.images.queued(), asked);
+    assert_layout_exact(&mut a);
+    // And back.
+    m(&mut a);
+    let text = render(&mut a).0;
+    assert_eq!(a.tab.thread.as_ref().unwrap().media, Media::All);
+    assert!(!text.contains("image off") && !text.contains("images hidden"), "{text}");
+    assert_layout_exact(&mut a);
+
+    // A snapshot of the fixture thread with files only: the OP alone has one.
+    let mut a = thread_app(false);
+    a.tab.thread.as_mut().unwrap().posts[3].files = vec![file("reply.png")];
+    a.tab.thread.as_mut().unwrap().select(2);
+    m(&mut a);
+    insta::assert_snapshot!(snapshot(&mut a));
+}
+
+#[test]
 fn thread_from_its_last_copy() {
     let mut a = thread_app(false);
     a.tab.copy = Some(crate::app::ThreadCopy::Cached(crate::app::Offline { saved: NOW - 3 * 60, dead: false }));
