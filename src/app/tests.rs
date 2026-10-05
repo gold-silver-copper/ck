@@ -2512,3 +2512,17 @@ fn a_termination_signal_quits_like_q() {
     signal_hook::low_level::raise(signal_hook::consts::SIGTERM).unwrap();
     settle_until(&mut app, |a| a.quit);
 }
+
+#[test]
+fn new_posts_wait_for_notifying_by_the_app_clock() {
+    let mut app = local_app();
+    let key = ThreadKey { site: "a".into(), board: "x".into(), no: 1 };
+    let post = |no| Post { no, ..Default::default() };
+    // The app's clock is an hour on from the real one.
+    let later = Instant::now() + Duration::from_secs(3600);
+    app.clock = Clock { instant: Some(later), ..Default::default() };
+    app.store.toggle_watch(key.clone(), "One".into(), 1, 1);
+    app.refreshed(key.clone(), Ok(vec![post(1)]));
+    app.refreshed(key.clone(), Ok(vec![post(1), post(2)]));
+    assert_eq!(app.notes_since, Some(later));
+}
