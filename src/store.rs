@@ -555,8 +555,10 @@ fn load_file<T: DeserializeOwned + Default>(path: &Path, warnings: &mut Vec<Stri
         Err(e) => {
             // Keep the broken file for the user instead of overwriting it on the next save.
             let aside = path.with_extension("json.corrupt");
-            let _ = std::fs::rename(path, &aside);
-            warnings.push(format!("{} was corrupt ({e}); moved it to {}", path.display(), aside.display()));
+            warnings.push(match std::fs::rename(path, &aside) {
+                Ok(()) => format!("{} was corrupt ({e}); moved it to {}", path.display(), aside.display()),
+                Err(r) => format!("{} was corrupt ({e}), and couldn't be moved aside ({r}): it will be overwritten", path.display()),
+            });
             T::default()
         }
     }
@@ -610,6 +612,11 @@ mod tests {
         assert_eq!(warnings.len(), 1);
         assert!(s3.history.is_empty() && s3.watched.len() == 1);
         assert!(dir.path().join("history.json.corrupt").exists());
+        // Where it can't be moved (a directory is in the way), the message says so.
+        std::fs::write(dir.path().join("watched.json"), "{not json").unwrap();
+        std::fs::create_dir_all(dir.path().join("watched.json.corrupt/full")).unwrap();
+        let (_, warnings) = Store::load(Some(dir.path().to_path_buf()));
+        assert!(warnings.iter().any(|w| w.contains("couldn't be moved aside")), "{warnings:?}");
     }
 
     #[test]
