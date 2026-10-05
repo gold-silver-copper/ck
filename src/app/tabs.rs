@@ -81,6 +81,8 @@ pub struct Tab {
     pub catalog_cached: Option<Offline>,
     /// The tab's request in flight (0: none).
     pub req: u64,
+    /// Why the tab's last load failed, shown where what it loads would be (until the next).
+    pub failed: Option<String>,
     /// The thread number of the last thread load, for 404 handling.
     pub pending_thread: u64,
     /// Thread to select in the catalog once it loads (restoring a session).
@@ -132,6 +134,7 @@ impl Tab {
             catalog_cached: None,
             offline: None,
             req: 0,
+            failed: None,
             pending_thread: 0,
             pending_catalog: None,
             restoring: false,

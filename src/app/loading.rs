@@ -18,6 +18,7 @@ impl App {
         let backend = self.current_site().backend.clone();
         let tx = self.tx.clone();
         self.tab.loading = Some(label);
+        self.tab.failed = None;
         self.status = None;
         std::thread::spawn(move || {
             let res = crate::guard::result(|| job(&*backend, id, &tx));

@@ -194,7 +194,7 @@ pub(super) fn draw_boards(f: &mut Frame, app: &mut App, area: Rect) {
     });
     app.tab.board_list.state = state;
     if app.hit.is_none() && app.tab.loading.is_none() {
-        empty(f, area, "No boards");
+        empty(f, area, app.tab.failed.as_deref().unwrap_or("No boards"));
     }
 }
 
@@ -284,7 +284,7 @@ pub(super) fn draw_catalog(f: &mut Frame, app: &mut App, area: Rect) {
     app.tab.catalog_list.state = state;
     if app.hit.is_none() {
         if app.tab.loading.is_none() {
-            empty(f, area, "No threads");
+            empty(f, area, app.tab.failed.as_deref().unwrap_or("No threads"));
         }
         return;
     }
@@ -415,7 +415,7 @@ fn draw_grid(f: &mut Frame, app: &mut App, area: Rect) {
     if visible.is_empty() {
         app.hit = None;
         if app.tab.loading.is_none() {
-            empty(f, area, "No threads");
+            empty(f, area, app.tab.failed.as_deref().unwrap_or("No threads"));
         }
         return;
     }

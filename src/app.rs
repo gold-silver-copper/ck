@@ -888,7 +888,8 @@ impl App {
                 }
                 match res {
                     Ok(b) => self.set_boards(site, b, true),
-                    Err(e) => self.error(e),
+                    Err(e) if other.is_none() => self.load_failed(http::plain(&e)),
+                    Err(e) => self.error(http::plain(&e)),
                 }
             }
             Msg::BoardsPartial(_, site, b) => self.set_boards(site, b, false),
@@ -928,7 +929,11 @@ impl App {
                         let len = self.visible_catalog().len();
                         self.tab.catalog_list.clamp(len);
                     }
-                    Err(e) => self.error(e),
+                    Err(e) if http::is_not_found(&e) => {
+                        let board = self.tab.board.as_ref().map_or_else(String::new, |b| b.uri.clone());
+                        self.load_failed(format!("There's no /{board}/ on {}", self.current_site().cfg.name));
+                    }
+                    Err(e) => self.load_failed(http::plain(&e)),
                 }
             }
             Msg::Thread(_, res) => {
@@ -954,7 +959,7 @@ impl App {
                         self.store.saved_dead(&key);
                         self.thread_gone(&key);
                     }
-                    Err(e) => self.error(e),
+                    Err(e) => self.load_failed(http::plain(&e)),
                 }
             }
         }
@@ -981,6 +986,13 @@ impl App {
     /// Say something in the footer for a moment.
     pub fn info(&mut self, text: impl Into<String>) {
         self.status = Some(Status { text: text.into(), error: false });
+    }
+
+    /// The tab's load failed: say so, and keep saying it where what it loads would be.
+    fn load_failed(&mut self, why: String) {
+        let retry = format!("{why}. {} tries again", self.keys.key(Action::Reload));
+        self.error(&why);
+        self.tab.failed = Some(retry);
     }
 
     /// Say something went wrong (shown a little longer).
@@ -1204,6 +1216,7 @@ impl App {
                 format!("Thread was deleted or archived{}", in_archive.map(|a| format!(": {a}")).unwrap_or_default())
             }
         };
+        self.tab.failed = Some(text.clone());
         self.error(text);
     }
 
@@ -1602,6 +1615,8 @@ impl App {
 
     fn back(&mut self) {
         self.tab.gallery = None;
+        // The failure was the view's being left.
+        self.tab.failed = None;
         self.tab.view = match self.tab.view {
             View::Sites | View::Boards | View::Watched | View::History | View::Saved => View::Sites,
             View::Settings => self.tab.settings_back.take().unwrap_or(View::Sites),

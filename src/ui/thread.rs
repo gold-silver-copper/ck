@@ -11,7 +11,7 @@ pub(super) fn draw_thread(f: &mut Frame, app: &mut App, area: Rect) {
         }
         match app.tab.saved_offer.as_ref().and_then(|k| app.store.saved(k)) {
             Some(m) => empty(f, area, &format!("The thread is gone. enter opens its saved copy from {}.", ago(m.saved, app.clock))),
-            None => empty(f, area, "Thread not loaded"),
+            None => empty(f, area, app.tab.failed.as_deref().unwrap_or("Thread not loaded")),
         }
         return;
     };

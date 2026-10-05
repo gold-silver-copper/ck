@@ -109,10 +109,34 @@ fn count(n: usize, one: &str, many: &str) -> String {
     format!("{n} {}", if n == 1 { one } else { many })
 }
 
-/// A dim message in the middle of an area.
+/// Words of `text` in lines at most `width` wide.
+fn wrap_words(text: &str, width: usize) -> Vec<String> {
+    let mut lines = vec![String::new()];
+    for word in text.split(' ') {
+        let Some(line) = lines.last_mut() else { break };
+        if !line.is_empty() && line.width() + 1 + word.width() > width {
+            lines.push(word.to_string());
+        } else {
+            if !line.is_empty() {
+                line.push(' ');
+            }
+            line.push_str(word);
+        }
+    }
+    lines
+}
+
+/// A dim message in the middle of an area, wrapped to fit.
 fn empty(f: &mut Frame, area: Rect, msg: &str) {
-    if !msg.is_empty() {
-        put(f, area.x, area.y + area.height / 3, area.width, Line::styled(msg.to_string(), dim()).centered());
+    if msg.is_empty() {
+        return;
+    }
+    let width = usize::from(area.width.saturating_sub(4)).max(1);
+    for (i, line) in wrap_words(msg, width).into_iter().enumerate() {
+        let y = area.y.saturating_add(area.height / 3).saturating_add(cells(i));
+        if y < area.bottom() {
+            put(f, area.x, y, area.width, Line::styled(line, dim()).centered());
+        }
     }
 }
 
