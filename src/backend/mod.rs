@@ -244,7 +244,7 @@ mod tests {
 
     /// Hits the network: `cargo test -- --ignored --nocapture`.
     #[test]
-    #[ignore]
+    #[ignore = "network: hits every default site"]
     fn live_default_sites() {
         crate::http::NETWORK.store(true, std::sync::atomic::Ordering::Relaxed);
         let cfg: Config = toml::from_str(crate::config::DEFAULT_CONFIG).unwrap();

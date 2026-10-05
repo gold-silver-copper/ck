@@ -187,7 +187,7 @@ fn fuzz_markup() {
 }
 
 #[test]
-#[ignore]
+#[ignore = "long fuzz run"]
 fn fuzz_markup_long() {
     run("fuzz_markup", true, 0, 200_000, markup_once);
 }
@@ -224,7 +224,7 @@ fn fuzz_routes() {
 }
 
 #[test]
-#[ignore]
+#[ignore = "long fuzz run"]
 fn fuzz_routes_long() {
     let sites = default_sites();
     run("fuzz_routes", true, 0, 1_000_000, |s| route_once(s, &sites));
@@ -267,7 +267,7 @@ fn fuzz_limiter() {
 }
 
 #[test]
-#[ignore]
+#[ignore = "long fuzz run"]
 fn fuzz_limiter_long() {
     run("fuzz_limiter", true, 0, 50_000, limiter_once);
 }
@@ -377,7 +377,7 @@ fn fuzz_cache() {
 }
 
 #[test]
-#[ignore]
+#[ignore = "long fuzz run"]
 fn fuzz_cache_long() {
     run("fuzz_cache", true, 0, 50_000, cache_once);
 }
@@ -587,7 +587,7 @@ fn fuzz_backends() {
 }
 
 #[test]
-#[ignore]
+#[ignore = "long fuzz run"]
 fn fuzz_backends_long() {
     run("fuzz_backends", true, 0, 5_000, backends_once);
 }
@@ -707,7 +707,7 @@ fn fuzz_data_dir() {
 }
 
 #[test]
-#[ignore]
+#[ignore = "long fuzz run"]
 fn fuzz_data_dir_long() {
     run("fuzz_data_dir", true, 0, 5_000, data_dir_once);
 }
@@ -764,7 +764,7 @@ fn fuzz_pages() {
 }
 
 #[test]
-#[ignore]
+#[ignore = "long fuzz run"]
 fn fuzz_pages_long() {
     run("fuzz_pages", true, 0, 5_000, pages_once);
 }
@@ -924,7 +924,7 @@ fn fuzz_config() {
 }
 
 #[test]
-#[ignore]
+#[ignore = "long fuzz run"]
 fn fuzz_config_long() {
     run("fuzz_config", true, 0, 50_000, config_once);
 }
@@ -983,7 +983,7 @@ fn fuzz_images() {
 }
 
 #[test]
-#[ignore]
+#[ignore = "long fuzz run"]
 fn fuzz_images_long() {
     run("fuzz_images", true, 0, 50_000, image_once);
 }
