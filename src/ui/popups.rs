@@ -273,11 +273,13 @@ fn help_sections(keys: &KeyMap) -> Vec<(&'static str, Vec<(String, &'static str)
             vec![
                 ("j k g G ^d ^u".into(), "move, top/bottom, page"),
                 ("enter l / esc h".into(), "open / back"),
+                (format!("{}, right-click", k(Action::Menu)), "menu: what you can do here"),
+                (k(Action::Hints), "label on-screen items to open"),
                 (k(Action::Search), "filter (thread: search)"),
                 (pair(Action::Reload, Action::Browser), "reload / open in browser"),
                 (k(Action::Goto), "go to a URL or site/board"),
                 (k(Action::Settings), "settings: theme, keys, …"),
-                (pair(Action::NextTab, Action::CloseTab), "next tab / close tab"),
+                (format!("{} / {} / {}", k(Action::PrevTab), k(Action::NextTab), k(Action::CloseTab)), "previous / next / close tab"),
                 (format!("{}, ctrl-c", k(Action::Quit)), "quit (mouse works too)"),
             ],
         ),
@@ -292,7 +294,7 @@ fn help_sections(keys: &KeyMap) -> Vec<(&'static str, Vec<(String, &'static str)
         (
             "Watched, History, Saved",
             vec![
-                (k(Action::Remove), "remove the entry (Saved: asks first)"),
+                (k(Action::Remove), "remove (Saved: asks first)"),
                 (pair(Action::NewTab, Action::Follow), "new tab / follow general"),
                 (pair(Action::Copy, Action::CopyLink), "copy subject+link / link"),
             ],
@@ -327,12 +329,13 @@ fn help_sections(keys: &KeyMap) -> Vec<(&'static str, Vec<(String, &'static str)
             "Thread",
             vec![
                 ("J / K, space".into(), "scroll by line / page"),
-                ("enter, l".into(), "follow quote (any thread)"),
+                (pair(Action::NextPart, Action::PrevPart), "focus images, links, replies"),
+                ("enter, l".into(), "open focused / follow quote"),
                 (pair(Action::Preview, Action::Replies), "preview quotes / 1st reply"),
                 (pair(Action::JumpBack, Action::Unread), "jump back / first unread"),
                 (pair(Action::NextMatch, Action::PrevMatch), "next / previous match"),
                 (pair(Action::Spoiler, Action::AllSpoilers), "spoilers: post / all"),
-                (pair(Action::Expand, Action::Conversation), "replies under it / conversation"),
+                (pair(Action::Expand, Action::Conversation), "expand / conversation"),
                 (pair(Action::View, Action::Gallery), "view images / gallery"),
                 (pair(Action::OpenFile, Action::ImageSearch), "open file / image search"),
                 (k(Action::Links), "the post's links and files"),
@@ -348,16 +351,56 @@ fn help_sections(keys: &KeyMap) -> Vec<(&'static str, Vec<(String, &'static str)
     ]
 }
 
+/// The help section for where the user is, shown right after "Everywhere".
+fn help_here(app: &App) -> &'static str {
+    if app.tab.viewer().is_some() {
+        return "Image viewer";
+    }
+    match app.tab.view {
+        View::Catalog => "Catalog",
+        View::Thread => "Thread",
+        View::Watched | View::History | View::Saved => "Watched, History, Saved",
+        _ => "Home screen",
+    }
+}
+
+/// Words of `text` in lines at most `width` wide.
+fn wrap_words(text: &str, width: usize) -> Vec<String> {
+    let mut lines = vec![String::new()];
+    for word in text.split(' ') {
+        let Some(line) = lines.last_mut() else { break };
+        if !line.is_empty() && line.width() + 1 + word.width() > width {
+            lines.push(word.to_string());
+        } else {
+            if !line.is_empty() {
+                line.push(' ');
+            }
+            line.push_str(word);
+        }
+    }
+    lines
+}
+
 pub(super) fn draw_help(f: &mut Frame, app: &App) {
     const COL: u16 = 50;
+    // Keys take this many columns; what they do wraps in the rest.
+    const KEYS: usize = 21;
     let t = theme();
-    let sections: Vec<Vec<Line>> = help_sections(&app.keys)
+    let mut sections = help_sections(&app.keys);
+    if let Some(i) = sections.iter().position(|(title, _)| *title == help_here(app)) {
+        let here = sections.remove(i);
+        sections.insert(1.min(sections.len()), here);
+    }
+    let sections: Vec<Vec<Line>> = sections
         .into_iter()
         .map(|(title, rows)| {
             let mut lines = vec![Line::styled(title, bold(t.primary))];
-            lines.extend(rows.into_iter().map(|(k, v)| {
-                Line::from(vec![Span::styled(format!("  {k:<18} "), bold(t.text)), Span::styled(v, Style::new().fg(t.text_dim))])
-            }));
+            for (k, v) in rows {
+                for (i, part) in wrap_words(v, usize::from(COL).saturating_sub(KEYS)).into_iter().enumerate() {
+                    let keys = if i == 0 { format!("  {k:<18} ") } else { " ".repeat(KEYS) };
+                    lines.push(Line::from(vec![Span::styled(keys, bold(t.text)), Span::styled(part, Style::new().fg(t.text_dim))]));
+                }
+            }
             lines.push(Line::raw(""));
             lines
         })
@@ -376,18 +419,26 @@ pub(super) fn draw_help(f: &mut Frame, app: &App) {
             c.pop();
         }
     }
-    let rows = cols.iter().map(Vec::len).max().unwrap_or(0) as u16;
+    let rows = cells(cols.iter().map(Vec::len).max().unwrap_or(0));
     let w = if two { 2 * COL + 6 } else { COL + 4 };
-    let hint = format!("images: {} · esc close", app.images.protocol_name());
-    let inner = panel(f, w, rows + 3, "Keys", &hint);
+    // How it fits is known once the panel is placed: measure with the scroll hint's room.
+    let height = rows.saturating_add(3).min(f.area().height.saturating_sub(2));
+    let scrolls = rows > height.saturating_sub(3);
+    let hint = format!("{}images: {} · esc close", if scrolls { "j/k scroll · " } else { "" }, app.images.protocol_name());
+    let inner = panel(f, w, rows.saturating_add(3), "Keys", &hint);
     // In small terminals the help scrolls (j/k).
     let scrolled = if let Some(Popup::Help(s)) = app.popup { s } else { 0 };
-    let scroll = scrolled.min(rows.saturating_sub(inner.height)) as usize;
+    let scroll = scrolled.min(rows.saturating_sub(inner.height));
+    let more = rows.saturating_sub(scroll) > inner.height;
     for (c, lines) in cols.into_iter().enumerate() {
         let x = inner.x + c as u16 * (COL + 2);
-        for (row, line) in lines.into_iter().skip(scroll).take(inner.height as usize).enumerate() {
+        for (row, line) in lines.into_iter().skip(usize::from(scroll)).take(inner.height as usize).enumerate() {
             put(f, x, inner.y + row as u16, COL, line);
         }
+    }
+    if more && inner.height > 0 {
+        let more = Line::styled("↓ more (j)", bold(t.primary)).right_aligned();
+        put(f, inner.x, inner.y + inner.height - 1, inner.width, more);
     }
 }
 
