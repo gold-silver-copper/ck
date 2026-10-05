@@ -12,7 +12,7 @@ use crate::store::ThreadKey;
 impl App {
     /// Open a thread's saved copy. It's read offline: nothing in it is fetched.
     pub fn open_saved(&mut self, key: ThreadKey) {
-        let Some(site) = self.sites.iter().position(|s| s.cfg.name == key.site) else {
+        let Some(site) = self.site_index(&key.site) else {
             self.error(format!("No site named {} in the config", key.site));
             return;
         };
@@ -70,7 +70,7 @@ impl App {
     /// The thread a site's configured archive would have, if it has one.
     pub(super) fn archive_of(&self, board: &str, no: u64) -> Option<ThreadKey> {
         let site = self.current_site();
-        let archive = site.cfg.archive.clone().filter(|a| self.sites.iter().any(|s| s.cfg.name == *a))?;
+        let archive = site.cfg.archive.clone().filter(|a| self.site_index(a).is_some())?;
         Some(ThreadKey { site: archive, board: board.to_string(), no })
     }
 

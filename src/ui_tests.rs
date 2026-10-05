@@ -800,7 +800,7 @@ fn gallery() {
 fn archive_search_results() {
     let mut a = app(false);
     let v = crate::backend::fixture("foolfuuka_search.json");
-    a.tab.site = a.sites.iter().position(|s| s.cfg.name == "desuarchive").unwrap();
+    a.tab.site = a.site_index("desuarchive").unwrap();
     a.typing = Some(crate::app::Typing::ArchiveQuery("borrow".into()));
     a.tab.view = View::Catalog;
     insta::assert_snapshot!("archive_search_typing", snapshot(&mut a));
@@ -1137,7 +1137,7 @@ fn updating_a_built_in_sites_boards() {
     use crate::app::BoardsUpdate;
     use crate::config::BoardConfig;
     let mut a = app(false);
-    let lain = a.sites.iter().position(|s| s.cfg.name == "lainchan").unwrap();
+    let lain = a.site_index("lainchan").unwrap();
     let list = a.sites[lain].cfg.boards.clone().unwrap();
     let mut bar = list.clone();
     bar.push(BoardConfig::Full { uri: "mega".into(), title: "Overboard".into() });

@@ -351,7 +351,7 @@ impl App {
     }
 
     fn refresh_in_background(&mut self, key: ThreadKey) {
-        let Some(site) = self.sites.iter().find(|s| s.cfg.name == key.site) else { return };
+        let Some(site) = self.site_named(&key.site) else { return };
         let backend = site.backend.clone();
         let later = self.later();
         self.refreshing.insert(key.clone());

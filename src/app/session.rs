@@ -100,7 +100,7 @@ impl App {
 
     /// Open a saved place: the view shows at once, and loads like it would by hand.
     pub fn go_to_place(&mut self, p: &Place) {
-        let Some(site) = self.sites.iter().position(|s| s.cfg.name == p.site) else { return };
+        let Some(site) = self.site_index(&p.site) else { return };
         self.switch_site(site);
         self.tab.catalog_sort = p.sort.unwrap_or_default();
         self.tab.catalog_list = Picker { filter: p.filter.clone(), ..Picker::top() };
