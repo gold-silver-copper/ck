@@ -10,7 +10,10 @@ use crate::theme::{LEGACY_KEYS, ThemeDef, ThemeSetting};
 
 pub const DEFAULT_CONFIG: &str = include_str!("../config.example.toml");
 
+/// Unknown keys are errors, here and in `[[site]]` and `[[image_search]]`: a misspelled
+/// setting would otherwise do nothing, without a word.
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Config {
     #[serde(default)]
     pub images: ImagesMode,
@@ -133,6 +136,7 @@ cycle!(Sort { Bump => "bump order", Replies => "most replies", Newest => "newest
 
 /// A reverse image search engine: `{url}` in `url` becomes the file's (encoded) URL.
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct ImageSearch {
     pub name: String,
     pub url: String,
@@ -222,6 +226,7 @@ impl ColorMode {
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct SiteConfig {
     pub name: String,
     pub kind: SiteKind,
@@ -661,6 +666,14 @@ mod tests {
         let c: Config = toml::from_str(DEFAULT_CONFIG).unwrap();
         assert!(!c.sites.is_empty());
         assert!(!c.compact_catalog && c.keys.is_empty());
+    }
+
+    #[test]
+    fn misspelled_settings_are_errors() {
+        for (text, key) in [("colour = \"256\"", "colour"), ("[[site]]\nname = \"x\"\nkind = \"vichan\"\nurll = \"https://x\"", "urll"), ("[[image_search]]\nname = \"x\"\nlink = \"y\"", "link")] {
+            let e = toml::from_str::<Config>(text).unwrap_err().to_string();
+            assert!(e.contains(&format!("unknown field `{key}`")), "{e}");
+        }
     }
 
     #[test]
