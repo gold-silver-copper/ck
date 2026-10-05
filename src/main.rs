@@ -39,7 +39,7 @@ fn main() -> Result<()> {
     let config = Config::load()?;
     // Config errors are reported before the terminal is taken over.
     let keys = KeyMap::new(&config.keys)?;
-    filter::Filters::new(&config.filters)?.with_words(&config.hidden_words)?;
+    let filters = filter::Filters::from_config(&config.filters, &config.hidden_words)?;
     // The theme is checked now, so a bad one is reported before the terminal is taken over.
     theme::set(theme::from_config(config.theme.as_ref(), &config.themes)?);
     let (store, warnings) = Store::load(Store::dir());
@@ -49,7 +49,7 @@ fn main() -> Result<()> {
     ck::input_log::note(|| "images  asking the terminal".into());
     let picker = (config.images != ImagesMode::Off).then(|| detect_images(config.images));
     ck::input_log::note(|| format!("images  {:?}", picker.as_ref().map(|p| p.protocol_type())));
-    let mut app = App::new(config, keys, picker, store);
+    let mut app = App::new(config, keys, filters, picker, store);
     #[cfg(unix)]
     if let Err(e) = app.quit_on_signals() {
         app.error(format!("Closing the terminal won't save first: {e}"));
