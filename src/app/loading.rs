@@ -4,9 +4,20 @@
 use super::*;
 
 impl App {
-    /// Run `job` on a thread, as the current request (shown as `label`). The job gets the
-    /// request id and a sender for partial results.
+    /// Run `job` on a thread, as the current request (shown as `label`), then `apply` what
+    /// it came to in the request's tab. The job gets the request id and a sender for partial
+    /// results.
     pub(super) fn spawn<T: Send + 'static>(
+        &mut self,
+        label: String,
+        job: impl FnOnce(&dyn Backend, u64, &Sender<Msg>) -> Result<T> + Send + 'static,
+        apply: impl FnOnce(&mut App, Result<T>) + Send + 'static,
+    ) {
+        self.start(label, job, move |id, res| Msg::request(id, move |app| apply(app, res)));
+    }
+
+    /// `spawn`, with `wrap` making the message its result is sent back in.
+    fn start<T: Send + 'static>(
         &mut self,
         label: String,
         job: impl FnOnce(&dyn Backend, u64, &Sender<Msg>) -> Result<T> + Send + 'static,
@@ -25,7 +36,7 @@ impl App {
             let cached = http::take_cached_age();
             let _ = tx.send(wrap(id, res));
             if let Some(age) = cached {
-                let _ = tx.send(Msg::Cached(id, age));
+                let _ = tx.send(Msg::request(id, move |app| app.up_to_date(age)));
             }
         });
     }
@@ -74,15 +85,115 @@ impl App {
     pub(super) fn load_boards(&mut self) {
         let site = self.tab.site;
         let label = format!("Loading boards for {}", self.current_site().cfg.name);
-        self.spawn(
+        // A finished list is worth keeping even once the tab has moved on.
+        self.start(
             label,
             move |b, id, tx| {
                 b.boards(&|so_far| {
-                    let _ = tx.send(Msg::BoardsPartial(id, site, so_far.to_vec()));
+                    let so_far = so_far.to_vec();
+                    let _ = tx.send(Msg::request(id, move |app| app.set_boards(site, so_far, false)));
                 })
             },
-            move |id, r| Msg::Boards(id, site, r),
+            move |id, res| Msg::kept(id, move |app| app.boards_arrived(id, site, res)),
         );
+    }
+
+    /// The request was answered from the cache without hitting the network.
+    fn up_to_date(&mut self, age: Duration) {
+        if self.status.is_none() {
+            self.info(format!("Up to date (checked {}s ago)", age.as_secs()));
+        }
+    }
+
+    /// A site's board list arrived for request `id`; it's shown even if the tab has moved on.
+    pub(super) fn boards_arrived(&mut self, id: u64, site: usize, res: Result<Vec<Board>>) {
+        let stale = self.tab.req != Some(id);
+        if !stale {
+            self.tab.loading = None;
+        }
+        match res {
+            Ok(b) => self.set_boards(site, b, true),
+            Err(e) if !stale => self.load_failed(http::plain(&e)),
+            Err(e) => self.error(http::plain(&e)),
+        }
+    }
+
+    /// The last copy kept of the catalog being fetched, fetched at `fetched`: shown only
+    /// before anything fetched has arrived.
+    fn cached_catalog_arrived(&mut self, posts: Vec<Post>, fetched: i64) {
+        if self.tab.catalog.is_empty() && self.tab.view == View::Catalog {
+            self.tab.catalog_cached = Some(tabs::Offline { saved: fetched, dead: false });
+            self.show_catalog(posts);
+            if let Some(no) = self.tab.pending_catalog
+                && let Some(i) = self.visible_catalog().iter().position(|&k| self.tab.catalog[k].no == no)
+            {
+                self.tab.catalog_list.state.select(Some(i));
+            }
+        }
+    }
+
+    /// The catalog's pages loaded so far; more are coming.
+    pub(super) fn catalog_partial(&mut self, posts: Vec<Post>) {
+        self.tab.catalog_cached = None;
+        self.show_catalog(posts);
+    }
+
+    pub(super) fn catalog_arrived(&mut self, res: Result<Vec<Post>>) {
+        self.tab.loading = None;
+        match res {
+            Ok(posts) => {
+                self.tab.catalog_cached = None;
+                self.show_catalog(posts);
+                self.catalog_seen();
+                if let Some(no) = self.tab.pending_catalog.take()
+                    && let Some(i) = self.visible_catalog().iter().position(|&k| self.tab.catalog[k].no == no)
+                {
+                    self.tab.catalog_list.state.select(Some(i));
+                }
+                let len = self.visible_catalog().len();
+                self.tab.catalog_list.clamp(len);
+            }
+            Err(e) if http::is_not_found(&e) => {
+                let board = self.tab.board.as_ref().map_or_else(String::new, |b| b.uri.clone());
+                self.load_failed(format!("There's no /{board}/ on {}", self.current_site().cfg.name));
+            }
+            Err(e) => self.load_failed(http::plain(&e)),
+        }
+    }
+
+    /// The last copy kept of the thread being fetched, fetched at `fetched`: shown only
+    /// before anything fetched (or saved) is.
+    fn cached_thread_arrived(&mut self, posts: Vec<Post>, fetched: i64) {
+        if self.tab.thread.is_none() && self.tab.view == View::Thread && self.tab.saved().is_none() {
+            self.set_cached_thread(posts, fetched);
+        }
+    }
+
+    pub(super) fn thread_arrived(&mut self, res: Result<Vec<Post>>) {
+        self.tab.loading = None;
+        self.tab.thread_checked = self.clock.instant();
+        let restoring = std::mem::take(&mut self.tab.restoring);
+        match res {
+            Ok(posts) => self.set_thread(posts),
+            // Last session's thread is gone: its catalog instead.
+            Err(e) if restoring && http::is_not_found(&e) => {
+                self.tab.view = View::Catalog;
+                self.load_catalog();
+                self.info("The thread you had open last time is gone (archived or deleted)");
+            }
+            Err(e) if http::is_not_found(&e) => {
+                let Some(key) = self.tab.board.as_ref().map(|b| self.key(&b.uri, self.tab.pending_thread.unwrap_or_default())) else {
+                    return;
+                };
+                if let Some(w) = self.store.watched_mut(&key) {
+                    w.dead = true;
+                    self.save();
+                }
+                self.store.saved_dead(&key);
+                self.thread_gone(&key);
+            }
+            Err(e) => self.load_failed(http::plain(&e)),
+        }
     }
 
     pub(super) fn load_catalog(&mut self) {
@@ -103,12 +214,14 @@ impl App {
                 if let Ok(posts) = http::from_copies(copies, || b.catalog(&board.uri, &|_| {}))
                     && !posts.is_empty()
                 {
-                    let _ = tx.send(Msg::CachedCatalog(id, posts, *fetched));
+                    let fetched = *fetched;
+                    let _ = tx.send(Msg::request(id, move |app| app.cached_catalog_arrived(posts, fetched)));
                 }
             }
             let (res, copies) = http::recording(|| {
                 b.catalog(&board.uri, &|so_far| {
-                    let _ = tx.send(Msg::CatalogPartial(id, so_far.to_vec()));
+                    let so_far = so_far.to_vec();
+                    let _ = tx.send(Msg::request(id, move |app| app.catalog_partial(so_far)));
                 })
             });
             if let (Ok(posts), Some(p)) = (&res, &pages)
@@ -118,7 +231,7 @@ impl App {
             }
             res
         };
-        self.spawn(label, job, Msg::Catalog);
+        self.spawn(label, job, App::catalog_arrived);
     }
 
     pub(super) fn load_thread(&mut self, no: u64) {
@@ -156,7 +269,8 @@ impl App {
                 if let Ok(posts) = http::from_copies(copies, || b.thread(&board.uri, no))
                     && !posts.is_empty()
                 {
-                    let _ = tx.send(Msg::CachedThread(id, posts, *fetched));
+                    let fetched = *fetched;
+                    let _ = tx.send(Msg::request(id, move |app| app.cached_thread_arrived(posts, fetched)));
                 }
             }
             let (res, copies) = http::recording(|| b.thread(&board.uri, no));
@@ -167,7 +281,7 @@ impl App {
             }
             res
         };
-        self.spawn(format!("Loading thread {no}"), job, Msg::Thread);
+        self.spawn(format!("Loading thread {no}"), job, App::thread_arrived);
     }
 
     /// Show catalog threads, keeping the selected thread selected (by number).
