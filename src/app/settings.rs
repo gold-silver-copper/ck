@@ -519,7 +519,7 @@ impl App {
             KeyCode::Esc => None,
             KeyCode::Enter => {
                 let dir = Some(value.trim().to_string()).filter(|v| !v.is_empty());
-                self.download_dir = dir.clone();
+                self.download_dir.clone_from(&dir);
                 self.save_config("the download folder", |d| match &dir {
                     Some(v) => d["download_dir"] = toml_edit::value(v.as_str()),
                     None => {
@@ -612,7 +612,7 @@ impl App {
         }
         match theme::resolve(&name, &self.themes) {
             Ok(t) => {
-                self.theme_name = name.clone();
+                self.theme_name.clone_from(&name);
                 self.set_theme(t);
                 let what = match &color {
                     Some(c) => format!("{role} = {c} in theme {name}"),

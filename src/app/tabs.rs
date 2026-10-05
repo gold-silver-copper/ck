@@ -291,7 +291,7 @@ impl App {
             },
             View::Catalog => format!("/{board}/"),
             View::Boards => self.sites.get(t.site).map_or(String::new(), |s| s.cfg.name.clone()),
-            View::Search => t.search.as_ref().map_or("Search".into(), |s| format!("Search: {}", s.query)),
+            View::Search => t.search.as_ref().map_or_else(|| "Search".into(), |s| format!("Search: {}", s.query)),
             View::Sites => "Sites".into(),
             View::Watched => "Watched".into(),
             View::History => "History".into(),

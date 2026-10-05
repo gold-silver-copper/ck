@@ -565,7 +565,7 @@ fn backends_once(seed: u64) {
             }
         };
         let boards = b.boards(&|_| {}).unwrap_or_default();
-        let board = boards.first().map_or("g".to_string(), |b| b.uri.clone());
+        let board = boards.first().map_or_else(|| "g".to_string(), |b| b.uri.clone());
         if let Ok(cat) = b.catalog(&board, &|p| look(p)) {
             look(&cat);
             let no = cat.first().map_or(1, |p| p.no);

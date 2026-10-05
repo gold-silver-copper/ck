@@ -40,7 +40,7 @@ impl App {
             View::Catalog | View::Thread => {
                 place.board = self.tab.board.as_ref().map(|b| b.uri.clone());
                 place.sort = (self.tab.catalog_sort != Sort::Bump).then_some(self.tab.catalog_sort);
-                place.filter = self.tab.catalog_list.filter.clone();
+                place.filter.clone_from(&self.tab.catalog_list.filter);
             }
             _ => {}
         }

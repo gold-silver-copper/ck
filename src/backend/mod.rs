@@ -256,7 +256,7 @@ mod tests {
                 let boards = b.boards(&|_| pages.set(pages.get() + 1))?;
                 let board = &boards.first().ok_or_else(|| anyhow::anyhow!("no boards"))?.uri;
                 let cat = b.catalog(board, &|_| pages.set(pages.get() + 1))?;
-                let op = cat.iter().find(|p| !p.sticky).or(cat.first()).ok_or_else(|| anyhow::anyhow!("empty catalog"))?;
+                let op = cat.iter().find(|p| !p.sticky).or_else(|| cat.first()).ok_or_else(|| anyhow::anyhow!("empty catalog"))?;
                 // On an overboard the thread is on its own board; then also try a real board.
                 let thread_board = op.board.as_deref().unwrap_or(board);
                 if thread_board != board

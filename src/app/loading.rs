@@ -342,9 +342,9 @@ impl App {
                 }
                 tv.selected = old.current().and_then(|p| tv.index.get(&p.no)).copied().unwrap_or(0);
                 // Expanded replies, the selected entry and the one at the top stay put.
-                tv.expanded = old.expanded.clone();
+                tv.expanded.clone_from(&old.expanded);
                 // A conversation stays, with any new replies that belong in it.
-                tv.conversation = old.conversation.clone();
+                tv.conversation.clone_from(&old.conversation);
                 let cursor_path = old.entries.get(old.entry()).map(|e| e.path.clone());
                 tv.rebuild_entries();
                 if let Some(e) = cursor_path.and_then(|p| tv.entries.iter().position(|e| e.path == p)) {
@@ -526,7 +526,7 @@ impl App {
                 self.keep_copy(&key, &posts, false);
                 self.notified_max.insert(key, max_no);
                 if note.new > 0 {
-                    self.notes_since.get_or_insert(self.clock.instant());
+                    self.notes_since.get_or_insert_with(|| self.clock.instant());
                     self.notes.push(note);
                 }
                 self.save();

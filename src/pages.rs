@@ -38,7 +38,7 @@ impl Pages {
 
     /// A catalog's file (no thread), or a thread's.
     fn path(&self, site: &str, board: &str, thread: Option<u64>) -> PathBuf {
-        let name = thread.map_or("catalog.json".to_string(), |no| format!("{no}.json"));
+        let name = thread.map_or_else(|| "catalog.json".to_string(), |no| format!("{no}.json"));
         self.dir.join(crate::saved::component(site)).join(crate::saved::component(board)).join(name)
     }
 

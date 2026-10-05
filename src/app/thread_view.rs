@@ -322,9 +322,9 @@ impl ThreadView {
     /// The next (or previous) matching post after the selection, wrapping around.
     pub(super) fn next_match(&self, forward: bool) -> Option<usize> {
         if forward {
-            self.matches.iter().find(|&&i| i > self.selected).or(self.matches.first()).copied()
+            self.matches.iter().find(|&&i| i > self.selected).or_else(|| self.matches.first()).copied()
         } else {
-            self.matches.iter().rev().find(|&&i| i < self.selected).or(self.matches.last()).copied()
+            self.matches.iter().rev().find(|&&i| i < self.selected).or_else(|| self.matches.last()).copied()
         }
     }
 

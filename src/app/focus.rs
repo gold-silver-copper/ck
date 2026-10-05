@@ -638,7 +638,7 @@ impl App {
                     return;
                 }
                 t.set_cursor(e);
-                t.focus = part.clone();
+                t.focus.clone_from(&part);
                 t.layout = None;
                 t.follow_focus = true;
                 if let Some(part) = part {

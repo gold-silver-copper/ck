@@ -333,13 +333,13 @@ mod tests {
         let odd = ThreadKey { site: "4chan".into(), board: "AZf9b\u{af4}\u{594}fy".into(), no: 3 };
         let p = path(dir.path(), &odd);
         assert!(p.to_str().unwrap().is_ascii(), "{p:?}");
-        let t = SavedThread { site: odd.site.clone(), board: odd.board.clone(), no: 3, ..t.clone() };
+        let t = SavedThread { site: odd.site.clone(), board: odd.board.clone(), no: 3, ..t };
         write(dir.path(), &t).unwrap();
         assert_eq!(read(dir.path(), &odd).unwrap().board, odd.board);
         // Unicode boards stay readable; different odd names stay apart.
         assert!(path(dir.path(), &ThreadKey { site: "lainchan".into(), board: "λ".into(), no: 1 }).ends_with("lainchan/λ/1.json"));
         let a = ThreadKey { board: "a?b".into(), ..odd.clone() };
-        let b = ThreadKey { board: "a*b".into(), ..odd.clone() };
+        let b = ThreadKey { board: "a*b".into(), ..odd };
         assert_ne!(path(dir.path(), &a), path(dir.path(), &b));
 
         std::fs::write(path(dir.path(), &key), b"{ not json").unwrap();

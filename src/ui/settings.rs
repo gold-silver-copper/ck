@@ -33,7 +33,7 @@ pub(super) fn draw_settings(f: &mut Frame, app: &mut App, area: Rect) {
             }
         }
     }
-    let y = (area.y as usize + setting_rows().len() + 1).checked_sub(offset).map_or(area.bottom(), |y| y as u16);
+    let y = (area.y as usize + setting_rows().len() + 1).checked_sub(offset).map_or_else(|| area.bottom(), |y| y as u16);
     if y < area.bottom() {
         let note = match &app.config_path {
             Some(p) => format!(

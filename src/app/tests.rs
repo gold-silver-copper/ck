@@ -1174,7 +1174,7 @@ fn a_thread_dying_on_screen_becomes_its_saved_copy() {
     app.goto_str("a/x/1");
     app.handle(answer(app.tab.req.unwrap(), App::thread_arrived, Ok(nos(&[1, 2]))));
     app.act(Action::Watch);
-    app.refreshed(key.clone(), Err(gone()));
+    app.refreshed(key, Err(gone()));
     assert_eq!(app.tab.saved(), Some(tabs::Offline { saved: 1000, dead: true }));
     assert!(app.status.as_ref().unwrap().text.contains("this is its saved copy"));
     assert_eq!(app.tab.thread.as_ref().unwrap().posts.len(), 2);
@@ -2529,7 +2529,7 @@ fn new_posts_wait_for_notifying_by_the_app_clock() {
     app.clock = Clock { instant: Some(later), ..Default::default() };
     app.store.toggle_watch(key.clone(), "One".into(), 1, 1);
     app.refreshed(key.clone(), Ok(vec![post(1)]));
-    app.refreshed(key.clone(), Ok(vec![post(1), post(2)]));
+    app.refreshed(key, Ok(vec![post(1), post(2)]));
     assert_eq!(app.notes_since, Some(later));
 }
 

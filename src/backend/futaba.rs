@@ -165,7 +165,7 @@ pub fn parse_boards(v: &Value) -> Vec<Board> {
         Some(Board {
             uri: as_str(&b["board"]).or_else(|| as_str(&b["uri"]))?,
             title: as_str(&b["title"]).map(|t| markup::decode(t.trim())).unwrap_or_default(),
-            nsfw: b.get("ws_board").or(b.get("sfw")).map(|w| !as_bool(w)),
+            nsfw: b.get("ws_board").or_else(|| b.get("sfw")).map(|w| !as_bool(w)),
         })
     })
     .collect()
