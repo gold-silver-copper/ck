@@ -5,6 +5,7 @@ use std::io::stdout;
 use std::time::Instant;
 
 use ratatui::crossterm::event::{DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture};
+use ratatui::crossterm::terminal::EnterAlternateScreen;
 use ratatui::crossterm::execute;
 use ratatui_image::picker::Picker;
 use ratatui_image::picker::cap_parser::QueryStdioOptions;
@@ -17,19 +18,19 @@ fn main() -> Result<()> {
     match args.iter().map(String::as_str).collect::<Vec<_>>().as_slice() {
         [] => {}
         ["--print-config"] => {
-            print!("{}", ck::fresh_config());
+            say(&ck::fresh_config().to_string());
             return Ok(());
         }
         ["--print-sites"] => {
-            print!("{}", ck::builtin_sites_text());
+            say(&ck::builtin_sites_text());
             return Ok(());
         }
         ["-h" | "--help"] => {
-            print!("{}", help_text());
+            say(&help_text());
             return Ok(());
         }
         ["-V" | "--version"] => {
-            println!("ck {}", env!("CARGO_PKG_VERSION"));
+            say(&format!("ck {}\n", env!("CARGO_PKG_VERSION")));
             return Ok(());
         }
         [a] if !a.starts_with('-') => start_at = Some(a.to_string()),
@@ -47,8 +48,7 @@ fn main() -> Result<()> {
     // The theme is checked now, so a bad one is reported before the terminal is taken over.
     ck::set_theme(ck::theme_from_config(config.theme.as_ref(), &config.themes)?);
     let (store, warnings) = Store::load(Store::dir());
-    let mut terminal = ratatui::init();
-    let _ = execute!(stdout(), EnableMouseCapture, EnableBracketedPaste);
+    let mut terminal = take_terminal().inspect_err(|_| give_terminal_back())?;
     restore_on_main_thread_panics();
     ck::input_log::note(|| "images  asking the terminal".into());
     let detected = (config.images != ImagesMode::Off).then(|| detect_images(config.images));
@@ -81,29 +81,51 @@ fn main() -> Result<()> {
     app.save_now();
     // (A panic or a signal ends up here too.)
     app.restore_title();
-    let _ = execute!(stdout(), DisableMouseCapture, DisableBracketedPaste);
-    ratatui::restore();
+    give_terminal_back();
     match app.quit_because {
         Some(why) => result.and(Err(anyhow::anyhow!("{why}"))),
         None => result,
     }
 }
 
-/// ratatui::init's panic hook restores the terminal, for a panic on any thread; one on a
-/// background thread would leave ck running on a terminal no longer set up for it. Only
-/// the main thread's restores (mouse capture off too); others are left to the thread's
-/// owner to report, and the terminal alone.
+/// The terminal set up for ck: raw mode, the alternate screen, mouse and paste. Not with
+/// ratatui::init: its panic hook restores with ratatui::restore, which panics when it can't
+/// write its error to stderr (the terminal gone: the window closed), and a panic inside a
+/// panic hook aborts.
+fn take_terminal() -> std::io::Result<ratatui::DefaultTerminal> {
+    ratatui::crossterm::terminal::enable_raw_mode()?;
+    execute!(stdout(), EnterAlternateScreen)?;
+    let _ = execute!(stdout(), EnableMouseCapture, EnableBracketedPaste);
+    ratatui::Terminal::new(ratatui::backend::CrosstermBackend::new(stdout()))
+}
+
+/// Put the terminal back as it was. Never fails or panics: by now it may be gone.
+fn give_terminal_back() {
+    let _ = execute!(stdout(), DisableMouseCapture, DisableBracketedPaste);
+    let _ = ratatui::try_restore();
+}
+
+/// A panic on the main thread puts the terminal back, then reports as usual; one on a
+/// background thread is left to the thread's owner to report, and the terminal alone (ck
+/// goes on running on it).
 fn restore_on_main_thread_panics() {
     let main = std::thread::current().id();
-    let restore = std::panic::take_hook();
+    let report = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         if std::thread::current().id() == main {
-            let _ = execute!(stdout(), DisableMouseCapture, DisableBracketedPaste);
-            restore(info);
+            give_terminal_back();
+            report(info);
         } else {
             ck::input_log::note(|| format!("panic   {info}"));
         }
     }));
+}
+
+/// Print to stdout, which may be a closed pipe (`ck --help | head -1`): print! would panic.
+fn say(text: &str) {
+    use std::io::Write;
+    let mut out = stdout();
+    let _ = out.write_all(text.as_bytes()).and_then(|()| out.flush());
 }
 
 const USAGE: &str = "usage: ck [URL | site/board/thread]   (ck --help for more)";
