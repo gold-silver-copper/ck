@@ -1200,7 +1200,7 @@ impl App {
                 if let Some(c) = self.tab.cached.as_mut().filter(|_| shown) {
                     c.dead = true;
                 }
-                format!("Thread was deleted or archived{}", in_archive.map(|a| format!(". Press {a}")).unwrap_or_default())
+                format!("Thread was deleted or archived{}", in_archive.map(|a| format!(": {a}")).unwrap_or_default())
             }
         };
         self.error(text);

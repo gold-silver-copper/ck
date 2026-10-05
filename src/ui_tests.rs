@@ -1278,3 +1278,12 @@ fn every_view_draws_on_tiny_screens() {
         }
     }
 }
+
+#[test]
+fn thread_gone_without_a_copy_offers_the_archive() {
+    let mut a = app(false);
+    a.tab.view = View::Thread;
+    a.thread_gone(&ThreadKey { site: "4chan".into(), board: "g".into(), no: 901 });
+    let text = &a.status.as_ref().unwrap().text;
+    assert_eq!(text, "Thread was deleted or archived: a opens it in desuarchive");
+}
