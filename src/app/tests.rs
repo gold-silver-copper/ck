@@ -2492,3 +2492,13 @@ fn huge_refresh_intervals_in_the_config_dont_overflow_the_clock() {
     assert!(app.next_wake(now) <= Duration::from_secs(1));
     assert_eq!(app.refresh_thread, Duration::from_secs(86400));
 }
+
+#[test]
+fn a_request_that_panics_ends_like_one_that_failed() {
+    let mut app = local_app();
+    app.tab.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
+    app.spawn("Loading the thread".into(), |_, _, _| -> Result<Vec<Post>> { std::panic::panic_any("deliberate: index out of bounds") }, Msg::Thread);
+    settle_until(&mut app, |a| a.tab.loading.is_none());
+    let status = app.status.as_ref().unwrap();
+    assert!(status.error && status.text.contains("ck hit a bug: deliberate: index out of bounds"), "{}", status.text);
+}

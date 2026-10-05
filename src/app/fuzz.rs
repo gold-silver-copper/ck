@@ -825,13 +825,15 @@ thread_local! {
 }
 
 /// Count panics on worker threads (unnamed: the app's and the fake sites'), note where test
-/// threads panic, and keep quiet while shrinking.
+/// threads panic, and keep quiet while shrinking. Tests of what a panic does panic on worker
+/// threads on purpose, with a message starting "deliberate"; those don't count.
 fn watch_panics() {
     static ONCE: std::sync::Once = std::sync::Once::new();
     ONCE.call_once(|| {
         let prev = std::panic::take_hook();
         std::panic::set_hook(Box::new(move |info| {
-            if std::thread::current().name().is_none() {
+            let deliberate = info.payload().downcast_ref::<&str>().is_some_and(|m| m.starts_with("deliberate"));
+            if std::thread::current().name().is_none() && !deliberate {
                 WORKER_PANICS.fetch_add(1, Ordering::SeqCst);
             }
             let at = info.location().map(|l| format!("{}:{}", l.file(), l.line()));

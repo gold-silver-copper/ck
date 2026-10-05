@@ -20,7 +20,7 @@ impl App {
         self.tab.loading = Some(label);
         self.status = None;
         std::thread::spawn(move || {
-            let res = job(&*backend, id, &tx);
+            let res = crate::guard::result(|| job(&*backend, id, &tx));
             let cached = http::take_cached_age();
             let _ = tx.send(wrap(id, res));
             if let Some(age) = cached {
@@ -59,7 +59,7 @@ impl App {
         let backend = self.sites[site].backend.clone();
         let later = self.later();
         std::thread::spawn(move || {
-            let res = http::background_at(now, || backend.boards(&|_| {}));
+            let res = crate::guard::result(|| http::background_at(now, || backend.boards(&|_| {})));
             later.run(move |app| {
                 app.boards_refreshing.remove(&site);
                 // A failed background refresh keeps the saved list; there's nothing to say.
@@ -350,7 +350,7 @@ impl App {
         let pages = self.pages.clone().filter(|_| self.store.watched(&key).is_none());
         let (now, asked) = (self.clock.now(), self.clock.instant());
         std::thread::spawn(move || {
-            let (res, copies) = http::recording(|| http::background_at(asked, || backend.thread(&key.board, key.no)));
+            let (res, copies) = http::recording(|| crate::guard::result(|| http::background_at(asked, || backend.thread(&key.board, key.no))));
             if let (Ok(posts), Some(p)) = (&res, &pages)
                 && !posts.is_empty()
             {

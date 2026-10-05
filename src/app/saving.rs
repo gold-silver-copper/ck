@@ -227,7 +227,7 @@ impl App {
                 let ev = if path.exists() {
                     DlEvent::Skipped
                 } else {
-                    match http::download_to(&url, &path) {
+                    match crate::guard::result(|| http::download_to(&url, &path)) {
                         Ok(()) => DlEvent::Done,
                         Err(e) => DlEvent::Failed(format!("{e:#}")),
                     }

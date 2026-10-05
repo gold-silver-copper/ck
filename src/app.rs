@@ -417,6 +417,8 @@ pub struct App {
     last_click: Option<(Instant, usize)>,
     pub tick: usize,
     pub quit: bool,
+    /// Why ck quit on its own (the terminal stopped giving input), to report after.
+    pub quit_because: Option<String>,
     /// The active tab's place; the other tabs (the active one's slot holds nothing useful),
     /// and which is active.
     pub tab: Tab,
@@ -544,6 +546,7 @@ impl App {
             last_click: None,
             tick: 0,
             quit: false,
+            quit_because: None,
             tab: Tab::new(0, Instant::now()),
             tabs: vec![Tab::new(0, Instant::now())],
             active: 0,
@@ -783,11 +786,25 @@ impl App {
     pub fn listen_for_input(&self) {
         let tx = self.tx.clone();
         std::thread::spawn(move || {
-            while let Ok(ev) = event::read() {
-                crate::input_log::note(|| format!("read    {ev:?}"));
-                if tx.send(Msg::Input(ev)).is_err() {
-                    return;
+            let read = crate::guard::catching(|| {
+                loop {
+                    match event::read() {
+                        Ok(ev) => {
+                            crate::input_log::note(|| format!("read    {ev:?}"));
+                            if tx.send(Msg::Input(ev)).is_err() {
+                                return None;
+                            }
+                        }
+                        Err(e) => return Some(format!("couldn't read the terminal: {e}")),
+                    }
                 }
+            });
+            // Without input ck can't even be quit: quit for the user, saying why.
+            if let Some(why) = read.unwrap_or_else(|what| Some(format!("ck hit a bug reading input: {what}"))) {
+                let _ = tx.send(Msg::Done(Box::new(move |app: &mut App| {
+                    app.quit = true;
+                    app.quit_because = Some(why);
+                })));
             }
         });
     }
