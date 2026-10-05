@@ -1556,6 +1556,17 @@ impl App {
         }
     }
 
+    /// The selected thread in Watched, History or Saved: its key and subject.
+    fn selected_listed(&self) -> Option<(&ThreadKey, &str)> {
+        let i = self.selected_index()?;
+        match self.tab.view {
+            View::Watched => self.store.watched.get(i).map(|w| (&w.key, w.subject.as_str())),
+            View::History => self.store.history.get(i).map(|v| (&v.key, v.subject.as_str())),
+            View::Saved => self.store.saved.get(i).map(|m| (&m.key, m.subject.as_str())),
+            _ => None,
+        }
+    }
+
     fn enter(&mut self) {
         match (self.tab.view, self.selected_index()) {
             (View::Settings, _) => self.activate_setting(),
@@ -1577,9 +1588,10 @@ impl App {
                 }
                 None => {}
             },
-            (View::Watched, Some(i)) => self.open_key(self.store.watched[i].key.clone()),
-            (View::History, Some(i)) => self.open_key(self.store.history[i].key.clone()),
-            (View::Saved, Some(i)) => self.open_saved(self.store.saved[i].key.clone()),
+            (View::Watched | View::History | View::Saved, Some(_)) => {
+                let Some(key) = self.selected_listed().map(|(k, _)| k.clone()) else { return };
+                if self.tab.view == View::Saved { self.open_saved(key) } else { self.open_key(key) }
+            }
             (View::Boards, Some(i)) => self.open_catalog(self.boards()[i].clone()),
             (View::Catalog, Some(i)) => {
                 let no = self.tab.catalog[i].no;
@@ -1701,9 +1713,7 @@ impl App {
             match self.tab.view {
                 View::Thread => self.tab.thread.as_ref().and_then(ThreadView::current).map(|p| ("text", copy_text(p, false))),
                 View::Catalog => self.selected_post().map(|p| ("text", copy_text(p, true))),
-                View::Watched => self.selected_index().map(|i| ("text", saved(&self.store.watched[i].key, &self.store.watched[i].subject))),
-                View::History => self.selected_index().map(|i| ("text", saved(&self.store.history[i].key, &self.store.history[i].subject))),
-                View::Saved => self.selected_index().map(|i| ("text", saved(&self.store.saved[i].key, &self.store.saved[i].subject))),
+                View::Watched | View::History | View::Saved => self.selected_listed().map(|(key, subject)| ("text", saved(key, subject))),
                 _ => None,
             }
         };
@@ -1737,9 +1747,7 @@ impl App {
     fn selected_link(&self) -> Option<String> {
         let backend = &self.current_site().backend;
         match (self.tab.view, &self.tab.board) {
-            (View::Watched, _) => self.selected_index().and_then(|i| self.thread_link(&self.store.watched[i].key, None)),
-            (View::History, _) => self.selected_index().and_then(|i| self.thread_link(&self.store.history[i].key, None)),
-            (View::Saved, _) => self.selected_index().and_then(|i| self.thread_link(&self.store.saved[i].key, None)),
+            (View::Watched | View::History | View::Saved, _) => self.selected_listed().and_then(|(key, _)| self.thread_link(key, None)),
             (View::Boards, _) => self.selected_index().map(|i| backend.board_url(&self.boards()[i].uri)),
             (View::Catalog, Some(b)) => self.selected_index().map(|i| {
                 let p = &self.tab.catalog[i];

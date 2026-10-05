@@ -217,9 +217,8 @@ impl App {
                 let p = &self.tab.catalog[i];
                 Open::Thread(self.find_board(&self.board_of(p)), p.no)
             }),
-            View::Watched => self.selected_index().map(|i| Open::Key(self.store.watched[i].key.clone())),
-            View::History => self.selected_index().map(|i| Open::Key(self.store.history[i].key.clone())),
-            View::Saved => self.selected_index().map(|i| Open::Saved(self.store.saved[i].key.clone())),
+            View::Watched | View::History => self.selected_listed().map(|(key, _)| Open::Key(key.clone())),
+            View::Saved => self.selected_listed().map(|(key, _)| Open::Saved(key.clone())),
             View::Thread => match self.outgoing_link() {
                 Some(link) => Some(Open::Link(link)),
                 None => {
