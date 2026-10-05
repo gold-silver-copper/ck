@@ -352,7 +352,7 @@ impl Images {
     }
 
     pub fn protocol_name(&self) -> String {
-        self.picker.as_ref().map_or("off".into(), |p| format!("{:?}", p.protocol_type()).to_lowercase())
+        self.picker.as_ref().map_or_else(|| "off".into(), |p| format!("{:?}", p.protocol_type()).to_lowercase())
     }
 
     #[cfg(test)]

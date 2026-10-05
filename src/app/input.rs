@@ -163,7 +163,7 @@ impl App {
             (self.tab.gallery.is_some() && self.tab.view == View::Thread, Modal::Gallery),
             (matches!(self.tab.popup, Some(TabPopup::Links(_))), Modal::Links),
         ];
-        open.into_iter().find_map(|(on, modal)| on.then_some(modal)).or(self.typing.as_ref().map(|t| match t {
+        open.into_iter().find_map(|(on, modal)| on.then_some(modal)).or_else(|| self.typing.as_ref().map(|t| match t {
             Typing::Goto(_) => Modal::Goto,
             Typing::ArchiveQuery(_) => Modal::SearchInput,
             Typing::ThreadSearch => Modal::Searching,
@@ -653,10 +653,10 @@ impl App {
             KeyCode::Char('-') => v.crop = v.crop.zoomed(false),
             KeyCode::Char('0') => v.crop = Crop::FIT,
             KeyCode::Esc if zoomed => v.crop = Crop::FIT,
-            KeyCode::Char('h') | KeyCode::Left if zoomed => v.crop = v.crop.moved(-1, 0, v.shown.unwrap_or(v.crop.guess_shown())),
-            KeyCode::Char('l') | KeyCode::Right if zoomed => v.crop = v.crop.moved(1, 0, v.shown.unwrap_or(v.crop.guess_shown())),
-            KeyCode::Char('k') | KeyCode::Up if zoomed => v.crop = v.crop.moved(0, -1, v.shown.unwrap_or(v.crop.guess_shown())),
-            KeyCode::Char('j') | KeyCode::Down if zoomed => v.crop = v.crop.moved(0, 1, v.shown.unwrap_or(v.crop.guess_shown())),
+            KeyCode::Char('h') | KeyCode::Left if zoomed => v.crop = v.crop.moved(-1, 0, v.shown.unwrap_or_else(|| v.crop.guess_shown())),
+            KeyCode::Char('l') | KeyCode::Right if zoomed => v.crop = v.crop.moved(1, 0, v.shown.unwrap_or_else(|| v.crop.guess_shown())),
+            KeyCode::Char('k') | KeyCode::Up if zoomed => v.crop = v.crop.moved(0, -1, v.shown.unwrap_or_else(|| v.crop.guess_shown())),
+            KeyCode::Char('j') | KeyCode::Down if zoomed => v.crop = v.crop.moved(0, 1, v.shown.unwrap_or_else(|| v.crop.guess_shown())),
             KeyCode::PageUp => {
                 v.index = (v.index + n - 1) % n;
                 v.crop = Crop::FIT;

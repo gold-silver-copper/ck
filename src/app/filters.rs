@@ -121,7 +121,7 @@ pub fn candidates(p: &Post, file: Option<usize>, is_op: bool, default_name: Opti
         let short: String = md5.chars().take(8).collect();
         out.push(Candidate { what: "posts with this image".into(), field: Field::Md5, pattern: md5, label: format!("image {short}") });
     }
-    if let Some(f) = focused.or(p.files.first()).filter(|f| !f.filename.is_empty()) {
+    if let Some(f) = focused.or_else(|| p.files.first()).filter(|f| !f.filename.is_empty()) {
         let stem = f.filename.rsplit_once('.').map(|(s, _)| s).filter(|s| !s.is_empty()).unwrap_or(&f.filename);
         out.push(Candidate {
             what: format!("files named like {}", crate::ui::truncate(stem, 40)),
@@ -219,7 +219,7 @@ pub fn problem(f: &FilterConfig) -> Option<String> {
     }
     // A regex error is several lines, pointing at the spot; its last line says what's wrong.
     let e = f.check().err()?.root_cause().to_string();
-    let what = e.lines().rev().find_map(|l| l.trim().strip_prefix("error: ")).unwrap_or(e.lines().next().unwrap_or_default());
+    let what = e.lines().rev().find_map(|l| l.trim().strip_prefix("error: ")).unwrap_or_else(|| e.lines().next().unwrap_or_default());
     Some(format!("Not a valid pattern: {what}"))
 }
 

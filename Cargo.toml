@@ -51,6 +51,9 @@ unreachable = "forbid"
 todo = "forbid"
 unimplemented = "forbid"
 string_slice = "deny"
+redundant_clone = "warn"
+or_fun_call = "warn"
+assigning_clones = "warn"
 
 [profile.release]
 lto = "thin"

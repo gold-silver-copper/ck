@@ -183,7 +183,7 @@ impl Fake {
         let name = if ext.is_empty() { format!("{n}") } else { format!("{n}.{ext}") };
         let url = format!("https://fuzz.invalid/{}/{board}/src/{name}", self.site);
         Attachment {
-            filename: if rng.chance(10) { fuzz::html(rng, 3) } else { name.clone() },
+            filename: if rng.chance(10) { fuzz::html(rng, 3) } else { name },
             thumb: rng.chance(80).then(|| format!("https://fuzz.invalid/{}/{board}/thumb/{n}s.jpg", self.site)),
             spoiler: rng.chance(10),
             width: rng.chance(70).then(|| rng.below(5000) as u32),

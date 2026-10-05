@@ -312,7 +312,7 @@ fn location(app: &App) -> (Vec<String>, Vec<Span<'static>>) {
             let mut return_crumbs = None;
             let th = app.tab.thread.as_ref();
             let subject = th.and_then(|th| th.posts.first()?.subject.clone()).unwrap_or_else(|| {
-                th.map_or("Thread".into(), |th| format!("Thread {}", th.no))
+                th.map_or_else(|| "Thread".into(), |th| format!("Thread {}", th.no))
             });
             if let Some(th) = th {
                 meta.push(plural(th.posts.len(), "post"));
@@ -492,7 +492,7 @@ fn fit_hints(mut hints: Vec<(String, &'static str)>, width: usize) -> Line<'stat
 
 /// Key hints for the footer, with the configured keys, most useful first; help is last.
 fn footer_hints(app: &App) -> Vec<(String, &'static str)> {
-    let k = |a| app.keys.key(a).to_string();
+    let k = |a| app.keys.key(a);
     let mut hints: Vec<(String, &'static str)> = match app.tab.view {
         View::Thread if app.tab.gallery.is_some() => vec![
             ("h/j/k/l".into(), "move"),

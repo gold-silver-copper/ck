@@ -107,7 +107,7 @@ fn restore_on_main_thread_panics() {
 const USAGE: &str = "usage: ck [URL | site/board/thread]   (ck --help for more)";
 
 fn help_text() -> String {
-    let path = |p: Option<std::path::PathBuf>| p.map_or("(no home directory)".into(), |p| p.display().to_string());
+    let path = |p: Option<std::path::PathBuf>| p.map_or_else(|| "(no home directory)".into(), |p| p.display().to_string());
     let config_state = if Config::path().is_some_and(|p| p.exists()) { "" } else { " (not created; using defaults)" };
     format!(
         "ck {} - browse imageboards from the terminal (read-only)

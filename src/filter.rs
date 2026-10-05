@@ -412,7 +412,7 @@ pub mod tests {
         every.sites = vec!["4chan".into()];
         every.boards = vec!["g".into(), "v".into()];
         every.enabled = false;
-        for c in [FilterConfig::new("p".into(), &[Field::Subject, Field::Comment]), FilterConfig::new("q".into(), &[Field::Filename]), every.clone()] {
+        for c in [FilterConfig::new("p".into(), &[Field::Subject, Field::Comment]), FilterConfig::new("q".into(), &[Field::Filename]), every] {
             let mut t = toml_edit::Table::new();
             c.write(&mut t, None);
             let back: FilterConfig = toml::from_str(&toml_edit::DocumentMut::from(t.clone()).to_string()).unwrap();

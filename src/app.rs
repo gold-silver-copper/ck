@@ -1335,7 +1335,7 @@ impl App {
         self.tab.loading = None;
         match res {
             Ok(Some(no)) => {
-                self.leave_trail(self.tab.board.clone().unwrap_or(board.clone()));
+                self.leave_trail(self.tab.board.clone().unwrap_or_else(|| board.clone()));
                 let in_settings = self.tab.view == View::Settings;
                 self.open_thread_at(board, no, Some(post));
                 // Found while the settings were open: the thread is behind them.
@@ -1354,7 +1354,7 @@ impl App {
     /// A board by URI from the site's board list, or a bare one if the list isn't loaded.
     fn find_board(&self, uri: &str) -> Board {
         let known = self.boards().iter().find(|b| b.uri == uri).cloned();
-        known.unwrap_or(Board { uri: uri.to_string(), title: String::new(), nsfw: None })
+        known.unwrap_or_else(|| Board { uri: uri.to_string(), title: String::new(), nsfw: None })
     }
 
     /// Open a thread on the current site, selecting `post` when it arrives.

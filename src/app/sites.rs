@@ -128,7 +128,7 @@ impl App {
             return;
         };
         self.popup = Some(Popup::Adding(Adding::Looking { id: self.next_request(), host: link.host.clone(), open }));
-        let (id, later, base) = (self.next_id, self.later(), link.base.clone());
+        let (id, later, base) = (self.next_id, self.later(), link.base);
         std::thread::spawn(move || {
             let res = crate::guard::result(|| {
                 if detect::has_board(&base, &board) { Ok(Detected::Board(i, board)) } else { Err(anyhow::anyhow!("{base} has no /{board}/ (its catalog isn't there)")) }

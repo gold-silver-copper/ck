@@ -89,7 +89,7 @@ impl App {
             (None, Some(post)) => {
                 // A post without its thread (FoolFuuka's /post/ links): ask the engine.
                 let label = format!("Looking up post {post}");
-                let job_board = uri.clone();
+                let job_board = uri;
                 self.spawn(label, move |b, _, _| b.find_thread(&job_board, post), move |app, r| app.thread_found(board, post, r));
             }
             (None, None) => {
@@ -148,7 +148,7 @@ impl App {
         let (prefix, partial, site) = match text.rsplit_once('/') {
             Some((head, tail)) => {
                 let name = head.trim_start_matches('/');
-                let site = self.sites.iter().position(|s| s.cfg.name.eq_ignore_ascii_case(name)).or(head.is_empty().then_some(self.tab.site));
+                let site = self.sites.iter().position(|s| s.cfg.name.eq_ignore_ascii_case(name)).or_else(|| head.is_empty().then_some(self.tab.site));
                 (format!("{head}/"), tail.to_string(), site)
             }
             None => (String::new(), text.clone(), None),
