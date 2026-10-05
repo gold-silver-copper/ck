@@ -71,9 +71,10 @@ pub fn send(method: &Method, title: &str, body: &str) -> anyhow::Result<()> {
         Method::Osc777 => format!("\x1b]777;notify;{};{}\x07", clean(title), clean(body)),
         Method::Bell => "\x07".to_string(),
         Method::Command(argv) => {
+            let Some((program, args)) = argv.split_first() else { return Ok(()) };
             let fill = |a: &String| a.replace("{title}", title).replace("{body}", body);
-            let mut child = Command::new(fill(&argv[0]))
-                .args(argv[1..].iter().map(fill))
+            let mut child = Command::new(fill(program))
+                .args(args.iter().map(fill))
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
