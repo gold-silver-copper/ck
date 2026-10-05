@@ -2,7 +2,7 @@
 
 use std::time::{Duration, Instant};
 
-use super::{App, Picker, Sort, View};
+use super::{App, FilteredList, Sort, View};
 use crate::store::{Place, Session};
 
 /// How often the session is saved while ck runs (if it changed).
@@ -103,7 +103,7 @@ impl App {
         let Some(site) = self.site_index(&p.site) else { return };
         self.switch_site(site);
         self.tab.catalog_sort = p.sort.unwrap_or_default();
-        self.tab.catalog_list = Picker { filter: p.filter.clone(), ..Picker::top() };
+        self.tab.catalog_list = FilteredList { filter: p.filter.clone(), ..FilteredList::top() };
         let board = p.board.as_ref().map(|b| self.find_board(b));
         match (p.view.as_str(), board, p.thread) {
             ("watched", ..) => self.tab.view = View::Watched,

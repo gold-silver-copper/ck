@@ -133,7 +133,7 @@ impl App {
                 t.set_search(q);
             }
         } else if self.typing == Some(super::Typing::ListFilter) {
-            if let Some((p, len)) = self.picker() {
+            if let Some((p, len)) = self.filtered_list() {
                 p.filter.push_str(&text);
                 p.clamp(len);
             }

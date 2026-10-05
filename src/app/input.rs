@@ -126,7 +126,7 @@ impl App {
             if double {
                 self.on_key(KeyEvent::from(KeyCode::Enter));
             }
-        } else if let Some((p, len)) = self.picker()
+        } else if let Some((p, len)) = self.filtered_list()
             && target < len
         {
             p.state.select(Some(target));
@@ -182,7 +182,7 @@ impl App {
                 t.layout = None;
             }
         } else if let Some(target) = self.click_target(col, row)
-            && let Some((p, len)) = self.picker()
+            && let Some((p, len)) = self.filtered_list()
             && target < len
         {
             p.state.select(Some(target));
@@ -287,7 +287,7 @@ impl App {
                 }
             }
             KeyCode::Esc => {
-                if let Some((p, _)) = self.picker().filter(|(p, _)| !p.filter.is_empty()) {
+                if let Some((p, _)) = self.filtered_list().filter(|(p, _)| !p.filter.is_empty()) {
                     p.filter.clear();
                     p.state.select(Some(0));
                 } else {
@@ -300,7 +300,7 @@ impl App {
             _ if self.tab.view == View::Thread => self.on_thread_key(key.code, ctrl),
             KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right => self.enter(),
             code => {
-                let Some((p, len)) = self.picker() else { return };
+                let Some((p, len)) = self.filtered_list() else { return };
                 match code {
                     KeyCode::Char('j') | KeyCode::Down => p.move_by(1, len),
                     KeyCode::Char('k') | KeyCode::Up => p.move_by(-1, len),
@@ -435,7 +435,7 @@ impl App {
     }
 
     fn on_filter_key(&mut self, key: KeyEvent) {
-        let Some((p, _)) = self.picker() else {
+        let Some((p, _)) = self.filtered_list() else {
             self.typing = None;
             return;
         };

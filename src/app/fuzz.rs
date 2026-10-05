@@ -696,7 +696,7 @@ impl World {
                 self.app.clock = Clock { fixed: Some(START + self.elapsed.as_secs() as i64), instant: Some(now) };
             }
             Act::Pick(k) => {
-                if let Some((p, len)) = app.picker() {
+                if let Some((p, len)) = app.filtered_list() {
                     p.state.select(Some(k % (len + 1)));
                 }
                 app.on_key(KeyEvent::from(KeyCode::Enter));
@@ -782,7 +782,7 @@ impl World {
                     app.on_key(KeyEvent::from(KeyCode::Enter));
                 }
                 let in_saved = app.tab.view == View::Saved;
-                if let Some((p, len)) = app.picker().filter(|(_, len)| *len > 0 && in_saved) {
+                if let Some((p, len)) = app.filtered_list().filter(|(_, len)| *len > 0 && in_saved) {
                     p.state.select(Some(k % len));
                     app.on_key(KeyEvent::from(KeyCode::Enter));
                 }

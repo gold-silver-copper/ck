@@ -597,7 +597,7 @@ impl App {
     }
 
     fn picker_len(&mut self) -> usize {
-        self.picker().map_or(0, |(_, len)| len)
+        self.filtered_list().map_or(0, |(_, len)| len)
     }
 
     pub(super) fn on_hints_key(&mut self, key: KeyEvent) {
@@ -646,7 +646,7 @@ impl App {
                 }
             }
             HintTo::Row(i) => {
-                if let Some((p, len)) = self.picker()
+                if let Some((p, len)) = self.filtered_list()
                     && i < len
                 {
                     p.state.select(Some(i));

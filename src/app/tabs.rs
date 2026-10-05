@@ -4,7 +4,7 @@
 use std::collections::HashSet;
 use std::time::Instant;
 
-use super::{App, Gallery, LinksPanel, Picker, Preview, Search, Sort, ThreadView, View, Viewer, thread_subject};
+use super::{App, FilteredList, Gallery, LinksPanel, Preview, Search, Sort, ThreadView, View, Viewer, thread_subject};
 use crate::filter::Mark;
 use crate::model::{Board, Post};
 use crate::store::ThreadKey;
@@ -43,8 +43,8 @@ pub struct Tab {
     pub view: View,
     /// Where esc goes back to from Settings.
     pub settings_back: Option<View>,
-    pub board_list: Picker,
-    pub catalog_list: Picker,
+    pub board_list: FilteredList,
+    pub catalog_list: FilteredList,
     pub catalog_sort: Sort,
     /// Where `back` goes from a thread opened from Watched or History.
     pub return_to: Option<View>,
@@ -99,7 +99,7 @@ pub struct Tab {
     pub restoring: bool,
     /// Archive search: its results and the list over them.
     pub search: Option<Search>,
-    pub search_list: Picker,
+    pub search_list: FilteredList,
 }
 
 impl Tab {
@@ -125,8 +125,8 @@ impl Tab {
         Self {
             view: View::Sites,
             settings_back: None,
-            board_list: Picker::top(),
-            catalog_list: Picker::default(),
+            board_list: FilteredList::top(),
+            catalog_list: FilteredList::default(),
             catalog_sort: Sort::default(),
             return_to: None,
             thread_checked: now,
@@ -156,7 +156,7 @@ impl Tab {
             pending_catalog: None,
             restoring: false,
             search: None,
-            search_list: Picker::default(),
+            search_list: FilteredList::default(),
         }
     }
 }
