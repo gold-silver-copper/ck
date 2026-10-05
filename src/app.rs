@@ -1162,7 +1162,7 @@ impl App {
     /// The open catalog's board, as `site/board` (for its own sort and layout).
     fn board_key(&self) -> String {
         let board = self.tab.catalog_board.clone().or_else(|| self.tab.board.as_ref().map(|b| b.uri.clone()));
-        format!("{}/{}", self.current_site().cfg.name, board.unwrap_or_default())
+        crate::store::board_key(&self.current_site().cfg.name, &board.unwrap_or_default())
     }
 
     /// The catalog layout here: the board's own, or the default.
