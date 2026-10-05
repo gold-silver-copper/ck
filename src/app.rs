@@ -220,8 +220,8 @@ pub enum Popup {
 
 /// Popup with the posts the selected post quotes.
 pub struct Preview {
-    /// Indices of quoted posts in this thread.
-    pub posts: Vec<usize>,
+    /// Numbers of the quoted posts in this thread (not indices: a refresh can drop posts).
+    pub posts: Vec<u64>,
     /// Quoted post numbers that aren't in this thread.
     pub elsewhere: Vec<u64>,
     pub scroll: u16,

@@ -1010,11 +1010,6 @@ fn check(app: &App) {
         {
             fail(format!("tab {i}: links selection {:?} of {}", l.list.selected(), l.items.len()));
         }
-        if let (Some(crate::app::TabPopup::Preview(p)), Some(t)) = (&tab.popup, &tab.thread)
-            && p.posts.iter().any(|&k| k >= t.posts.len())
-        {
-            fail(format!("tab {i}: preview of posts {:?} in a thread of {}", p.posts, t.posts.len()));
-        }
         // Marks left from an emptied catalog are harmless; a catalog's own must line up.
         if !tab.catalog.is_empty() && tab.catalog_marks.len() != tab.catalog.len() {
             fail(format!("tab {i}: {} catalog marks for {} threads", tab.catalog_marks.len(), tab.catalog.len()));
