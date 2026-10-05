@@ -2557,16 +2557,18 @@ fn where_ck_can_start_is_checked_first() {
 
 #[test]
 fn a_failed_load_stays_on_screen_in_plain_words() {
-    let mut app = local_app();
+    // A host of its own (one that refuses connections), so no other test's requests make
+    // this one wait its turn.
+    let mut app = app_with("[[site]]\nname = \"a\"\nkind = \"vichan\"\nurl = \"http://127.0.0.1:5\"\nboards = [\"x\"]");
     app.goto_str("a/x");
     settle_until(&mut app, |a| a.tab.loading.is_none());
     let failed = app.tab.failed.clone().unwrap();
-    assert_eq!(failed, "Couldn't reach 127.0.0.1:3 (connection refused). r tries again");
+    assert_eq!(failed, "Couldn't reach 127.0.0.1:5 (connection refused). r tries again");
     // Long after the footer's message has gone, it's still where the threads would be.
     app.status = None;
     let screen = draw_at(&mut app, 100, 30);
     let text: String = screen.content.iter().map(|c| c.symbol()).collect();
-    assert!(text.contains("Couldn't reach 127.0.0.1:3 (connection refused)") && !text.contains("No threads"), "{text}");
+    assert!(text.contains("Couldn't reach 127.0.0.1:5 (connection refused)") && !text.contains("No threads"), "{text}");
     // Trying again clears it.
     app.act(Action::Reload);
     assert!(app.tab.failed.is_none());
