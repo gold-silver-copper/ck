@@ -898,9 +898,9 @@ impl App {
     }
 
     /// The tab's load failed: say so, and keep saying it where what it loads would be.
-    fn load_failed(&mut self, why: String) {
+    fn load_failed(&mut self, why: &str) {
         let retry = format!("{why}. {} tries again", self.keys.key(Action::Reload));
-        self.error(&why);
+        self.error(why);
         self.tab.failed = Some(retry);
     }
 
@@ -910,7 +910,7 @@ impl App {
     }
 
     /// A change that holds until ck quits, because writing it to the config failed.
-    fn error_unsaved(&mut self, done: &str, e: anyhow::Error) {
+    fn error_unsaved(&mut self, done: &str, e: &anyhow::Error) {
         self.error(format!("{done} for now; couldn't save it: {e:#}"));
     }
 
@@ -1275,7 +1275,7 @@ impl App {
     /// to posts over links to boards.
     fn follow_link(&mut self) {
         match self.outgoing_link() {
-            Some(link) => self.follow(link),
+            Some(link) => self.follow(&link),
             None => self.info("Post quotes nothing in this thread"),
         }
     }
@@ -1303,7 +1303,7 @@ impl App {
 
     /// Go where a quote link leads: a thread (remembered for `u`), a board, or a post whose
     /// thread the engine is asked for.
-    fn follow(&mut self, link: Link) {
+    fn follow(&mut self, link: &Link) {
         let Some(board) = self.tab.board.clone() else { return };
         let target = match &link.board {
             Some(uri) if *uri != board.uri => self.find_board(uri),
@@ -1507,7 +1507,7 @@ impl App {
             },
             (View::Watched | View::History | View::Saved, Some(_)) => {
                 let Some(key) = self.selected_listed().map(|(k, _)| k.clone()) else { return };
-                if self.tab.view == View::Saved { self.open_saved(key) } else { self.open_key(key) }
+                if self.tab.view == View::Saved { self.open_saved(&key) } else { self.open_key(key) }
             }
             (View::Boards, Some(i)) => self.open_catalog(self.boards()[i].clone()),
             (View::Catalog, Some(i)) => {

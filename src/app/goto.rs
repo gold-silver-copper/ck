@@ -48,7 +48,7 @@ impl App {
         }
         if let Some(query) = saved_query(input) {
             self.tab.gallery = None;
-            return self.search_saved(query.to_string());
+            return self.search_saved(query);
         }
         // A link to a site ck doesn't have (`somechan.org/b/`, not a board called that): ask
         // it what it runs, to add it.

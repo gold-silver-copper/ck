@@ -456,7 +456,7 @@ impl ThreadView {
             // Replies are indented by how far down from the conversation's post they are.
             let depth = d.clamp(0, MAX_DEPTH as i32 - 1) as u8;
             out.push(Entry { post: i, depth, path: path.clone() });
-            self.push_replies(&mut out, i, path, depth + 1);
+            self.push_replies(&mut out, i, &path, depth + 1);
         }
         self.entries = out;
         self.layout = None;
@@ -473,17 +473,17 @@ impl ThreadView {
         }
     }
 
-    fn push_replies(&self, out: &mut Vec<Entry>, post: usize, path: Vec<u64>, depth: u8) {
-        if depth > MAX_DEPTH || !self.expanded.contains(&path) {
+    fn push_replies(&self, out: &mut Vec<Entry>, post: usize, path: &[u64], depth: u8) {
+        if depth > MAX_DEPTH || !self.expanded.contains(path) {
             return;
         }
         for no in &self.backlinks[post] {
             // A post can't contain itself (quote loops).
             let Some(&j) = self.index.get(no).filter(|_| !path.contains(no)) else { continue };
-            let mut p = path.clone();
+            let mut p = path.to_vec();
             p.push(*no);
             out.push(Entry { post: j, depth, path: p.clone() });
-            self.push_replies(out, j, p, depth + 1);
+            self.push_replies(out, j, &p, depth + 1);
         }
     }
 

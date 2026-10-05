@@ -56,6 +56,7 @@ or_fun_call = "warn"
 assigning_clones = "warn"
 format_push_string = "warn"
 ignore_without_reason = "warn"
+needless_pass_by_value = "warn"
 
 [profile.release]
 lto = "thin"

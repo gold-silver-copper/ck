@@ -109,7 +109,7 @@ impl App {
 
     /// Search every saved copy for `query`, newest first, off the UI thread: results come in
     /// as they're found. Another search, or leaving the results, stops it.
-    pub fn search_saved(&mut self, query: String) {
+    pub fn search_saved(&mut self, query: &str) {
         let Some((dir, keys)) = self.store.saved_files() else {
             return self.error("No data folder: nothing is saved");
         };
@@ -123,7 +123,7 @@ impl App {
             self.info("Nothing is saved yet: watched threads are saved as they refresh");
         }
         let saved = SavedSearch { keys: Vec::new(), done: 0, of, skipped: 0, finished: of == 0, id };
-        self.tab.search = Some(Search { saved: Some(saved), board: String::new(), query: query.clone(), hits: Vec::new(), total: None, pages: 0, back });
+        self.tab.search = Some(Search { saved: Some(saved), board: String::new(), query: query.to_string(), hits: Vec::new(), total: None, pages: 0, back });
         self.tab.search_list = FilteredList::top();
         self.tab.view = View::Search;
         // Saving waits for nothing: copies being written are read as they were.
@@ -184,7 +184,7 @@ impl App {
         let Some(s) = &self.tab.search else { return };
         if s.saved.is_some() {
             let query = s.query.clone();
-            return self.search_saved(query);
+            return self.search_saved(&query);
         }
         let (board, query, page) = (s.board.clone(), s.query.clone(), s.pages + 1);
         let label = if page == 1 { format!("Searching /{board}/ for \"{query}\"") } else { format!("Loading page {page} of results") };
@@ -230,7 +230,7 @@ impl App {
             let Some(i) = self.tab.search_list.state.selected() else { return };
             let (Some(key), Some((_, post))) = (saved.keys.get(i).cloned(), s.hits.get(i)) else { return };
             let (no, query) = (post.no, s.query.clone());
-            self.open_saved(key);
+            self.open_saved(&key);
             if let Some(t) = self.tab.thread.as_mut().filter(|_| self.tab.view == View::Thread) {
                 if let Some(&i) = t.index.get(&no) {
                     t.select(i);
