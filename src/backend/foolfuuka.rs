@@ -1,6 +1,8 @@
 //! FoolFuuka 4chan archives (desuarchive, b4k, ...): the `/_/api/chan/` JSON API.
 #![deny(clippy::indexing_slicing, clippy::arithmetic_side_effects, clippy::cast_possible_truncation)]
 
+use std::fmt::Write as _;
+
 use anyhow::Result;
 use serde_json::Value;
 
@@ -110,7 +112,7 @@ fn post(v: &Value) -> Option<Post> {
         _ => None,
     };
     if let Some(cap) = cap {
-        name.push_str(&format!(" ## {cap}"));
+        let _ = write!(name, " ## {cap}");
     }
     Some(Post {
         no: as_u64(&v["num"])?,

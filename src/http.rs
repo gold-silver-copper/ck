@@ -4,6 +4,7 @@
 use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
+use std::fmt::Write as _;
 use std::sync::{LazyLock, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
@@ -529,7 +530,7 @@ pub fn encode_segment(s: &str) -> String {
         if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'~') {
             out.push(b as char);
         } else {
-            out.push_str(&format!("%{b:02X}"));
+            let _ = write!(out, "%{b:02X}");
         }
     }
     out

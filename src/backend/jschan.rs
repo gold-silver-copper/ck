@@ -1,6 +1,8 @@
 //! jschan engine JSON API (zzzchan, ...).
 #![deny(clippy::indexing_slicing, clippy::arithmetic_side_effects, clippy::cast_possible_truncation)]
 
+use std::fmt::Write as _;
+
 use anyhow::Result;
 use serde_json::Value;
 
@@ -64,7 +66,7 @@ pub fn post(base: &str, v: &Value) -> Post {
         name.push_str(&trip);
     }
     if let Some(cap) = as_str(&v["capcode"]) {
-        name.push_str(&format!(" {}", cap.trim()));
+        let _ = write!(name, " {}", cap.trim());
     }
     let time = as_i64(&v["u"])
         .map(|ms| ms / 1000)

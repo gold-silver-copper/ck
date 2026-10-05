@@ -1,5 +1,6 @@
 //! `E`: a thread saved as a page (thread.html, readable offline) and as data (thread.json).
 
+use std::fmt::Write as _;
 use std::path::Path;
 
 use anyhow::Result;
@@ -159,13 +160,13 @@ pre {{ background: {code_bg}; color: {code}; padding: 8px; overflow-x: auto; whi
     }
     for (i, p) in posts.iter().enumerate() {
         let time = chrono::DateTime::from_timestamp(p.time, 0).map(|d| d.format("%Y-%m-%d %H:%M UTC").to_string()).unwrap_or_default();
-        out.push_str(&format!(r#"<article class="post" id="p{}"><div class="head"><span class="name">{}</span> "#, p.no, text(&p.name)));
+        let _ = write!(out, r#"<article class="post" id="p{}"><div class="head"><span class="name">{}</span> "#, p.no, text(&p.name));
         if i == 0 {
             out.push_str(r#"<span class="op">OP</span> "#);
         }
-        out.push_str(&format!(r##"{time} <a href="#p{0}">No.{0}</a></div>"##, p.no));
+        let _ = write!(out, r##"{time} <a href="#p{0}">No.{0}</a></div>"##, p.no);
         if let Some(s) = &p.subject {
-            out.push_str(&format!(r#"<div class="subject">{}</div>"#, text(s)));
+            let _ = write!(out, r#"<div class="subject">{}</div>"#, text(s));
         }
         let files = files(p, dir);
         if !files.is_empty() {
@@ -173,11 +174,11 @@ pre {{ background: {code_bg}; color: {code}; padding: 8px; overflow-x: auto; whi
             for (f, name, saved) in &files {
                 let href = if *saved { name.clone() } else { f.url.clone() };
                 let img = if *saved && f.is_image() { Some(name.clone()) } else { f.thumb.clone() };
-                out.push_str(&format!(r#"<a href="{}">"#, attr(&href)));
+                let _ = write!(out, r#"<a href="{}">"#, attr(&href));
                 if let Some(src) = img {
-                    out.push_str(&format!(r#"<img src="{}" alt="{}" loading="lazy">"#, attr(&src), attr(&f.filename)));
+                    let _ = write!(out, r#"<img src="{}" alt="{}" loading="lazy">"#, attr(&src), attr(&f.filename));
                 }
-                out.push_str(&format!(r#"</a><div class="file">{}</div>"#, text(&f.filename)));
+                let _ = write!(out, r#"</a><div class="file">{}</div>"#, text(&f.filename));
             }
             out.push_str("</div>");
         }
@@ -186,7 +187,7 @@ pre {{ background: {code_bg}; color: {code}; padding: 8px; overflow-x: auto; whi
         out.push_str("</div>");
         if let Some(r) = backlinks.get(&p.no) {
             let links: Vec<String> = r.iter().map(|n| format!(r##"<a href="#p{n}">&gt;&gt;{n}</a>"##)).collect();
-            out.push_str(&format!(r#"<div class="replies">Replies: {}</div>"#, links.join(" ")));
+            let _ = write!(out, r#"<div class="replies">Replies: {}</div>"#, links.join(" "));
         }
         out.push_str("</article>\n");
     }

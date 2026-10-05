@@ -10,6 +10,7 @@
 //! clipboard or notifications). Every site is on 127.0.0.1, and URLs in answers are
 //! rewritten to point there: nothing reaches the network.
 
+use std::fmt::Write as _;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
@@ -270,7 +271,7 @@ fn e2e_soak() {
     for (name, kind, extra) in sites {
         let port = serve(kind, rng.next());
         let kind = format!("{kind:?}").to_lowercase();
-        config.push_str(&format!("\n[[site]]\nname = \"{name}\"\nkind = \"{kind}\"\nurl = \"http://127.0.0.1:{port}\"\n{extra}"));
+        let _ = write!(config, "\n[[site]]\nname = \"{name}\"\nkind = \"{kind}\"\nurl = \"http://127.0.0.1:{port}\"\n{extra}");
     }
     std::fs::create_dir_all(dir.path().join("config/ck")).unwrap();
     std::fs::write(dir.path().join("config/ck/config.toml"), &config).unwrap();
