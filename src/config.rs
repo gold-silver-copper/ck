@@ -344,7 +344,6 @@ pub fn set_theme_color(doc: &mut DocumentMut, name: &str, base: Option<&str>, ro
     }
 }
 
-/// Set an action's keys in `[keys]`, or with `None` (the default) remove its entry.
 /// A change to the config's `[[filter]]` tables. A change or removal names the table by
 /// position and what ck read there, and is refused if the file says otherwise now.
 #[derive(Clone, Copy)]
@@ -595,6 +594,7 @@ pub fn set_hidden_words(doc: &mut DocumentMut, words: &[String]) {
     }
 }
 
+/// Set an action's keys in `[keys]`, or with `None` (the default) remove its entry.
 pub fn set_key(doc: &mut DocumentMut, action: &str, binding: Option<&Binding>) {
     if !doc.contains_key("keys") {
         doc.insert("keys", Item::Table(Table::new()));
