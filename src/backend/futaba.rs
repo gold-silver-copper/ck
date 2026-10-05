@@ -6,7 +6,7 @@ use std::fmt::Write as _;
 use anyhow::{Result, bail};
 use serde_json::Value;
 
-use super::{Backend, Partial, as_u32};
+use super::{Backend, Partial, ThreadPages, as_u32};
 use crate::http::{as_bool, as_i64, as_str, as_u64, encode_segment as enc, get_json, items};
 use crate::markup;
 use crate::model::{Attachment, Board, Flag, Post};
@@ -182,6 +182,20 @@ pub fn parse_boards(v: &Value) -> Vec<Board> {
     .collect()
 }
 
+/// Where each thread is from `threads.json`: an array of pages with their `threads`. Pages
+/// count by their place, as 4chan numbers them from 1 and vichan from 0.
+pub fn parse_pages(v: &Value) -> ThreadPages {
+    let mut out = ThreadPages::default();
+    for (i, p) in items(v).enumerate() {
+        let page = u32::try_from(i).unwrap_or(u32::MAX).saturating_add(1);
+        for no in items(&p["threads"]).filter_map(|t| as_u64(&t["no"])) {
+            out.page.entry(no).or_insert(page);
+        }
+        out.of = page;
+    }
+    out
+}
+
 impl Backend for Futaba {
     fn boards(&self, _partial: Partial<Board>) -> Result<Vec<Board>> {
         if let Some(b) = &self.boards {
@@ -206,6 +220,11 @@ impl Backend for Futaba {
         let path = if self.is_4chan { "thread" } else { "res" };
         let v = get_json(&format!("{}/{}/{path}/{no}.json", self.api, enc(board)))?;
         Ok(self.parse_thread(board, &v))
+    }
+
+    fn thread_pages(&self, board: &str) -> Result<Option<ThreadPages>> {
+        let v = get_json(&format!("{}/{}/threads.json", self.api, enc(board)))?;
+        Ok(Some(parse_pages(&v)))
     }
 
     fn board_url(&self, board: &str) -> String {
@@ -345,6 +364,20 @@ mod tests {
         assert_eq!(p.flag, flag("naxalite", "Naxalite"));
         assert_eq!(p.flag.as_ref().unwrap().short(), "Naxalite");
         assert_eq!(by(487211102).flag.as_ref().unwrap().short(), "GB");
+    }
+
+    #[test]
+    fn thread_pages() {
+        // 4chan counts pages from 1, vichan from 0: they count by their place.
+        let p = super::parse_pages(&fixture("4chan_pages.json"));
+        assert_eq!((p.of, p.page.len()), (11, 151));
+        assert_eq!((p.page.get(&105076684), p.page.get(&109980439)), (Some(&1), Some(&11)));
+        let p = super::parse_pages(&fixture("vichan_pages.json"));
+        assert_eq!((p.of, p.page.get(&42742), p.page.get(&39212)), (13, Some(&1), Some(&13)));
+        // Nothing usable: no pages, and threads without numbers left out.
+        assert_eq!(super::parse_pages(&serde_json::json!({"threads": []})).of, 0);
+        let odd = super::parse_pages(&serde_json::json!([{"threads": [{"no": "x"}, {"no": 5}]}, 3, {"page": 9}]));
+        assert_eq!((odd.of, odd.page.len(), odd.page.get(&5)), (3, 1, Some(&1)));
     }
 
     #[test]

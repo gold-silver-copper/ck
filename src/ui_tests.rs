@@ -228,6 +228,25 @@ fn watched() {
     insta::assert_snapshot!(snapshot(&mut a));
 }
 
+#[test]
+fn watched_threads_pages() {
+    // Where each is in its board's index; the last page stands out, and a dead thread's
+    // page isn't shown.
+    use crate::backend::ThreadPages;
+    let mut a = app(false);
+    a.board_pages.insert(("4chan".into(), "g".into()), ThreadPages { page: [(1000, 3), (900, 10)].into(), of: 10 });
+    a.board_pages.insert(("lainchan".into(), "λ".into()), ThreadPages { page: [(42, 13)].into(), of: 13 });
+    a.tab.view = View::Watched;
+    insta::assert_snapshot!(snapshot(&mut a));
+    // The thread's bar says it too.
+    let mut a = thread_app(false);
+    a.board_pages.insert(("4chan".into(), "g".into()), ThreadPages { page: [(1000, 3)].into(), of: 10 });
+    let bar = |a: &mut App| render(a).0.lines().next().unwrap().to_string();
+    assert!(bar(&mut a).ends_with("p3/10"), "{}", bar(&mut a));
+    a.board_pages.insert(("4chan".into(), "g".into()), ThreadPages { page: [(1000, 10)].into(), of: 10 });
+    assert!(bar(&mut a).contains("last page 10/10") && !bar(&mut a).contains("p10/10"), "{}", bar(&mut a));
+}
+
 /// Saved copies: a watched one, a dead one, an exported one.
 fn with_saved(a: &mut App) {
     use crate::saved::SavedMeta;

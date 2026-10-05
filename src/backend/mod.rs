@@ -8,6 +8,7 @@ mod jschan;
 mod lynxchan;
 mod makaba;
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -25,6 +26,14 @@ pub struct SearchPage {
     pub total: Option<u64>,
 }
 
+/// Where a board's threads are in its index: each thread's page (from 1), and how many
+/// pages there are. A thread on the last page is next to fall off.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ThreadPages {
+    pub page: HashMap<u64, u32>,
+    pub of: u32,
+}
+
 pub trait Backend: Send + Sync {
     /// All boards. Multi-page lists report each page through `partial` as it arrives.
     fn boards(&self, partial: Partial<Board>) -> Result<Vec<Board>>;
@@ -34,6 +43,11 @@ pub trait Backend: Send + Sync {
     fn thread(&self, board: &str, no: u64) -> Result<Vec<Post>>;
     /// The thread a post is in, for engines that can look it up.
     fn find_thread(&self, _board: &str, _post: u64) -> Result<Option<u64>> {
+        Ok(None)
+    }
+    /// Which index page each of a board's threads is on, for engines that can tell in one
+    /// request (`threads.json`).
+    fn thread_pages(&self, _board: &str) -> Result<Option<ThreadPages>> {
         Ok(None)
     }
     fn board_url(&self, board: &str) -> String;
@@ -74,6 +88,7 @@ pub const ENGINES: [Engine; 6] = [
         hosts: &["boards.4chan.org", "boards.4channel.org", "4chan.org", "4channel.org"],
         probe: None,
         parse: |v| {
+            let _ = futaba::parse_pages(v);
             let b = futaba::Futaba::fourchan(None);
             [b.parse_catalog("g", v), b.parse_thread("g", v)].concat()
         },
@@ -124,7 +139,7 @@ pub const ENGINES: [Engine; 6] = [
         hosts: &[],
         probe: Some(detect::vichan),
         parse: |v| {
-            let _ = futaba::parse_boards(v);
+            let _ = (futaba::parse_boards(v), futaba::parse_pages(v));
             let b = futaba::Futaba::vichan(FUZZ_BASE.into(), None, None, None);
             [b.parse_catalog("g", v), b.parse_thread("g", v)].concat()
         },

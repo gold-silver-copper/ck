@@ -16,7 +16,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 
 use super::*;
-use crate::backend::{Partial, SearchPage};
+use crate::backend::{Partial, SearchPage, ThreadPages};
 use crate::fuzz::{self, Rng};
 use crate::markup;
 use crate::http::{HttpError, lock};
@@ -301,6 +301,26 @@ impl Backend for Fake {
         Ok(posts)
     }
 
+    fn thread_pages(&self, board: &str) -> Result<Option<ThreadPages>> {
+        let _pass = self.gate.enter(format!("{} pages /{board}/", self.site));
+        let mut rng = self.rng(&format!("pages {board}"));
+        if let Some(e) = self.fail(&mut rng, board) {
+            return Err(e);
+        }
+        if rng.chance(20) {
+            return Ok(None);
+        }
+        // Numbers like the catalog's, some of them twice.
+        let mut pages = ThreadPages::default();
+        for page in 1..=rng.below(11) as u32 {
+            for _ in 0..rng.below(16) {
+                pages.page.entry(1000 + rng.below(60) as u64 * 7 + rng.below(5) as u64).or_insert(page);
+            }
+            pages.of = page;
+        }
+        Ok(Some(pages))
+    }
+
     fn find_thread(&self, board: &str, post: u64) -> Result<Option<u64>> {
         let _pass = self.gate.enter(format!("{} find /{board}/{post}", self.site));
         let mut rng = self.rng(&format!("find {board} {post}"));
@@ -367,6 +387,11 @@ impl Backend for Gated {
     fn find_thread(&self, board: &str, post: u64) -> Result<Option<u64>> {
         let _pass = self.gate.enter(format!("{} find /{board}/{post}", self.site));
         self.data.find_thread(board, post)
+    }
+
+    fn thread_pages(&self, board: &str) -> Result<Option<ThreadPages>> {
+        let _pass = self.gate.enter(format!("{} pages /{board}/", self.site));
+        self.data.thread_pages(board)
     }
 
     fn search(&self, board: &str, query: &str, page: u32) -> Result<SearchPage> {
@@ -1090,6 +1115,10 @@ fn check(app: &App) {
             fail(format!("{:?} refreshes every {every:?}", w.key));
         }
     }
+    // A thread's page is one of its board's.
+    if let Some((at, p)) = app.board_pages.iter().find(|(_, p)| p.page.values().any(|&n| n == 0 || n > p.of)) {
+        fail(format!("{at:?}: a thread on a page past the {} there are", p.of));
+    }
     // The site's text never reaches the terminal's title as an escape.
     if let Some(t) = app.terminal_title().filter(|t| t.chars().any(char::is_control)) {
         fail(format!("a control character in the terminal's title: {t:?}"));
@@ -1380,6 +1409,7 @@ fn check_idle(app: &App) {
     assert!(app.refreshing.is_empty(), "refreshes stuck: {:?}", app.refreshing);
     assert!(app.generals_searching.is_empty(), "general searches stuck");
     assert!(app.boards_refreshing.is_empty(), "board list refreshes stuck");
+    assert!(app.pages_asking.is_empty(), "thread pages asked for stuck");
 }
 
 /// Background requests for the same thing are never closer together than the refetch floor

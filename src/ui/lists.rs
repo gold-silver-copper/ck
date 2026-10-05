@@ -125,6 +125,12 @@ pub(super) fn draw_watched(f: &mut Frame, app: &mut App, area: Rect) {
         } else if w.unread > 0 {
             right.extend([chip(format!("{} new", w.unread), t.background, t.new), Span::raw("  ")]);
         }
+        // Its page in the board's index; on the last, it's next to fall off.
+        match app.thread_page(&w.key).filter(|_| !w.dead) {
+            Some((p, of)) if p >= of => right.extend([chip(format!("last page {p}/{of}"), t.background, t.warning), Span::raw("  ")]),
+            Some((p, of)) => right.push(Span::styled(format!("p{p}/{of}  ·  "), dim())),
+            None => {}
+        }
         right.push(Span::styled(plural(w.posts, "post"), dim()));
         vec![spread(thread_row(&w.key, &w.subject), right, width)]
     });

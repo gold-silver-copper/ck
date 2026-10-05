@@ -331,6 +331,10 @@ fn location(app: &App) -> (Vec<String>, Vec<Span<'static>>) {
                 if th.reveal_all {
                     meta.push("spoilers shown".into());
                 }
+                // Its page in the board's index (the last one is shown with the chips).
+                if let Some((p, of)) = app.thread_page(&app.key(&th.board, th.no)).filter(|(p, of)| p < of) {
+                    meta.push(format!("p{p}/{of}"));
+                }
                 // Which screenful of a post taller than the screen.
                 if let (Some(((at, n), ..)), Some(p)) = (th.tall(), th.current()) {
                     meta.insert(0, format!("No.{} ({at}/{n})", p.no));
@@ -401,6 +405,11 @@ fn location(app: &App) -> (Vec<String>, Vec<Span<'static>>) {
     };
     if let Some(q) = query {
         spans.extend([chip(q, t.on_primary_container, t.primary_container), Span::raw("  ")]);
+    }
+    // A thread on its board's last page is next to fall off.
+    let last_page = app.tab.thread.as_ref().filter(|_| app.tab.view == View::Thread).and_then(|th| app.thread_page(&app.key(&th.board, th.no)));
+    if let Some((p, of)) = last_page.filter(|(p, of)| p >= of) {
+        spans.extend([chip(format!("last page {p}/{of}"), t.background, t.warning), Span::raw("  ")]);
     }
     // A saved copy, read offline; or the last copy kept, shown while it loads.
     let copy = match app.tab.view {
