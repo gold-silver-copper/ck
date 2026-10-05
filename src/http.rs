@@ -389,14 +389,27 @@ impl Cache {
                 }
                 Ok(body)
             }
-            404 | 410 => {
+            code @ (404 | 410) => {
                 self.entries.remove(url);
-                Err(HttpError::NotFound(url.to_string()).into())
+                Err(status_error(code, url))
             }
-            429 => Err(HttpError::RateLimited.into()),
-            code => Err(HttpError::Status(code, url.to_string()).into()),
+            code => Err(status_error(code, url)),
         }
     }
+}
+
+/// What an answer that isn't a success comes to: gone, rate limited, or some other status.
+fn status_error(code: u16, url: &str) -> anyhow::Error {
+    match code {
+        404 | 410 => HttpError::NotFound(url.to_string()).into(),
+        429 => HttpError::RateLimited.into(),
+        code => HttpError::Status(code, url.to_string()).into(),
+    }
+}
+
+/// Ok for a success (2xx), else the error the status comes to.
+fn check_status(code: u16, url: &str) -> Result<()> {
+    if (200..=299).contains(&code) { Ok(()) } else { Err(status_error(code, url)) }
 }
 
 /// The cache logic around a transport, separated so it can be tested without the network.
@@ -463,12 +476,8 @@ pub fn get_json(url: &str) -> Result<Value> {
 /// GET a page's text (HTML) through the rate limiter, at this thread's priority. Not cached.
 pub fn get_text(url: &str) -> Result<String> {
     let raw = transport(url, None)?;
-    match raw.status {
-        200..=299 => Ok(raw.body),
-        404 | 410 => Err(HttpError::NotFound(url.to_string()).into()),
-        429 => Err(HttpError::RateLimited.into()),
-        code => Err(HttpError::Status(code, url.to_string()).into()),
-    }
+    check_status(raw.status, url)?;
+    Ok(raw.body)
 }
 
 /// Whether something is at `url` (a HEAD request, at low priority, through the rate limiter).
@@ -488,12 +497,7 @@ pub fn exists(url: &str) -> bool {
 pub fn get_bytes(url: &str, limit: u64) -> Result<Vec<u8>> {
     throttle(url, Priority::Low)?;
     let mut resp = AGENT.get(url).call().with_context(|| format!("GET {url}"))?;
-    match resp.status().as_u16() {
-        200..=299 => {}
-        404 | 410 => return Err(HttpError::NotFound(url.to_string()).into()),
-        429 => return Err(HttpError::RateLimited.into()),
-        code => return Err(HttpError::Status(code, url.to_string()).into()),
-    }
+    check_status(resp.status().as_u16(), url)?;
     resp.body_mut().with_config().limit(limit).read_to_vec().with_context(|| format!("reading {url}"))
 }
 
@@ -501,12 +505,7 @@ pub fn get_bytes(url: &str, limit: u64) -> Result<Vec<u8>> {
 pub fn download_to(url: &str, path: &std::path::Path) -> Result<()> {
     throttle(url, Priority::Low)?;
     let mut resp = AGENT.get(url).call().with_context(|| format!("GET {url}"))?;
-    match resp.status().as_u16() {
-        200..=299 => {}
-        404 | 410 => return Err(HttpError::NotFound(url.to_string()).into()),
-        429 => return Err(HttpError::RateLimited.into()),
-        code => return Err(HttpError::Status(code, url.to_string()).into()),
-    }
+    check_status(resp.status().as_u16(), url)?;
     let mut tmp = path.as_os_str().to_owned();
     tmp.push(".part");
     let tmp = std::path::PathBuf::from(tmp);
