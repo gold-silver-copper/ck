@@ -624,7 +624,7 @@ impl App {
                 true
             }
             Err(e) => {
-                self.error(format!("{done} {what} for now; couldn't save it: {e:#}"));
+                self.error_unsaved(&format!("{done} {what}"), e);
                 false
             }
         }

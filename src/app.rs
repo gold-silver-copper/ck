@@ -1023,6 +1023,11 @@ impl App {
         self.status = Some(Status { text: format!("{e:#}"), error: true });
     }
 
+    /// A change that holds until ck quits, because writing it to the config failed.
+    fn error_unsaved(&mut self, done: &str, e: anyhow::Error) {
+        self.error(format!("{done} for now; couldn't save it: {e:#}"));
+    }
+
     fn key(&self, board: &str, no: u64) -> ThreadKey {
         ThreadKey { site: self.current_site().cfg.name.clone(), board: board.to_string(), no }
     }
