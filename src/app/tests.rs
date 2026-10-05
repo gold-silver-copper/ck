@@ -2579,3 +2579,90 @@ fn a_failed_load_stays_on_screen_in_plain_words() {
     app.act(Action::Reload);
     assert!(app.tab.failed.is_none());
 }
+
+/// The local app on /x/, in the thread view.
+fn thread_app() -> App {
+    let mut app = local_app();
+    app.tab.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
+    app.tab.view = View::Thread;
+    app
+}
+
+#[test]
+fn deleted_posts_stay_marked_deleted() {
+    let mut app = thread_app();
+    let quoting = |no, q: u64| Post { no, quotes: vec![q], body: vec![Line::from(format!("reply {no}"))], ..Default::default() };
+    let mut posts = nos(&[1, 2, 3, 4, 5]);
+    posts.push(quoting(6, 3));
+    app.set_thread(posts.clone());
+    // No.3 deleted: kept in its place, with its reply.
+    let without = |gone: &[u64]| posts.iter().filter(|p| !gone.contains(&p.no)).cloned().collect::<Vec<_>>();
+    app.set_thread(without(&[3]));
+    let t = app.tab.thread.as_ref().unwrap();
+    assert_eq!(t.posts.iter().map(|p| p.no).collect::<Vec<_>>(), [1, 2, 3, 4, 5, 6]);
+    assert!(t.is_deleted(2) && !t.is_deleted(1));
+    assert_eq!(t.backlinks[2], [6]);
+    assert_eq!(t.live_posts().len(), 5);
+    let screen: String = draw_at(&mut app, 100, 30).content.iter().map(|c| c.symbol()).collect();
+    assert!(screen.contains(" deleted ") && screen.contains("5 posts") && screen.contains("1 deleted"), "{screen}");
+    // Its quote and its conversation work.
+    app.tab.thread.as_mut().unwrap().select(5);
+    app.on_key(KeyEvent::from(KeyCode::Enter));
+    assert_eq!(app.tab.thread.as_ref().unwrap().current().unwrap().no, 3);
+    app.act(Action::Conversation);
+    assert!(app.tab.thread.as_ref().unwrap().conversation.is_some());
+    app.act(Action::Conversation);
+    // Still deleted on the next refresh, with another one gone, and a new post: in order.
+    let mut next = without(&[3, 5]);
+    next.push(Post { no: 7, ..Default::default() });
+    app.set_thread(next);
+    let t = app.tab.thread.as_ref().unwrap();
+    assert_eq!(t.posts.iter().map(|p| p.no).collect::<Vec<_>>(), [1, 2, 3, 4, 5, 6, 7]);
+    assert_eq!(t.deleted, HashSet::from([3, 5]));
+    // Back again (a moderator undid it): not deleted any more.
+    app.set_thread(without(&[5]));
+    let t = app.tab.thread.as_ref().unwrap();
+    assert_eq!(t.deleted, HashSet::from([5, 7]));
+}
+
+#[test]
+fn a_refresh_much_smaller_than_the_thread_is_shown_as_it_came() {
+    let mut app = thread_app();
+    app.set_thread(posts_upto(10));
+    // Half is still deletion; fewer is more likely a broken answer.
+    app.set_thread(posts_upto(5));
+    let t = app.tab.thread.as_ref().unwrap();
+    assert_eq!((t.posts.len(), t.deleted.len(), t.shrinks), (10, 5, 0));
+    app.set_thread(posts_upto(2));
+    let t = app.tab.thread.as_ref().unwrap();
+    assert_eq!((t.posts.len(), t.deleted.len(), t.shrinks), (2, 0, 1));
+    // Another thread isn't a refresh of this one.
+    app.set_thread(nos(&[20, 21]));
+    app.set_thread(nos(&[30]));
+    assert!(app.tab.thread.as_ref().unwrap().deleted.is_empty());
+}
+
+#[test]
+fn deleted_posts_are_never_new_or_counted() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = saving_app(dir.path(), 1000);
+    app.tab.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
+    app.tab.view = View::Thread;
+    let key = ThreadKey { site: "a".into(), board: "x".into(), no: 1 };
+    app.set_thread(nos(&[1, 2]));
+    app.act(Action::Watch);
+    // Two new posts, then the newest deleted: the other is still new, it isn't.
+    app.set_thread(nos(&[1, 2, 3, 4]));
+    app.set_thread(nos(&[1, 2, 3]));
+    let t = app.tab.thread.as_ref().unwrap();
+    assert!(t.is_new(2) && t.is_deleted(3) && !t.is_new(3));
+    assert_eq!((0..t.posts.len()).filter(|&i| t.is_new(i)).count(), 1);
+    // The saved copy and the counts are the thread as the site has it.
+    app.flush_writes();
+    assert_eq!(app.store.load_saved(&key).unwrap().posts.len(), 3);
+    assert_eq!(app.store.saved(&key).unwrap().posts, 3);
+    // A refresh with nothing new isn't a visit, though the deleted post was the newest.
+    let seen = app.store.history[0].last_seen;
+    app.set_thread(nos(&[1, 2, 3]));
+    assert_eq!(app.store.history[0].last_seen, seen);
+}

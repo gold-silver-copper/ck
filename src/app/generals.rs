@@ -40,7 +40,8 @@ impl App {
         let (key, subject, posts, max_no) = match (self.tab.view, &self.tab.board) {
             (View::Thread, _) => {
                 let Some(t) = &self.tab.thread else { return };
-                (self.key(&t.board, t.no), thread_subject(&t.posts), t.posts.len(), max_no(&t.posts))
+                let posts = t.live_posts();
+                (self.key(&t.board, t.no), thread_subject(&posts), posts.len(), max_no(&posts))
             }
             (View::Catalog, Some(_)) => {
                 let Some(i) = self.selected_index() else { return };

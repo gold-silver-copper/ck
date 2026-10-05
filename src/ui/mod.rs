@@ -315,7 +315,11 @@ fn location(app: &App) -> (Vec<String>, Vec<Span<'static>>) {
                 th.map_or_else(|| "Thread".into(), |th| format!("Thread {}", th.no))
             });
             if let Some(th) = th {
-                meta.push(plural(th.posts.len(), "post"));
+                let deleted = th.deleted.len();
+                meta.push(plural(th.posts.len().saturating_sub(deleted), "post"));
+                if deleted > 0 {
+                    meta.push(format!("{deleted} deleted"));
+                }
                 let new = (0..th.posts.len()).filter(|&i| th.is_new(i)).count();
                 match th.new_below() {
                     0 if new > 0 => meta.push(format!("{new} new")),

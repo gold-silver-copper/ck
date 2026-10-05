@@ -123,7 +123,7 @@ impl App {
             }
             Saving::Page => (
                 "Save the thread as a page?",
-                vec![format!("thread.html and thread.json ({} posts)", t.posts.len()), format!("to {at}"), "and a copy in Saved".into()],
+                vec![format!("thread.html and thread.json ({} posts)", t.live_posts().len()), format!("to {at}"), "and a copy in Saved".into()],
             ),
         };
         self.popup = Some(Popup::Confirm(Confirm { what, title, lines }));
@@ -194,7 +194,8 @@ impl App {
         let url = site.backend.thread_url(&b.uri, t.no);
         let about = crate::export::About { site: &site.cfg.name, board: &t.board, thread: t.no, url: &url, saved: self.clock.now() };
         let key = self.key(&t.board, t.no);
-        let posts = t.posts.clone();
+        // As the site has it, like the saved copy it's also kept as.
+        let posts = t.live_posts().into_owned();
         match crate::export::save(&posts, &about, &theme::theme(), &dir) {
             Ok(()) => {
                 // Also kept as a saved copy, to read in ck (the Saved view).
