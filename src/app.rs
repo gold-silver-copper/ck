@@ -1045,8 +1045,6 @@ impl App {
         self.info(if self.show_hidden { "Showing hidden threads and posts" } else { "Leaving out hidden threads and posts" });
     }
 
-    // ----- watched threads and auto-refresh -----
-
     // ----- downloads and settings -----
 
     /// The open catalog's board, as `site/board` (for its own sort and layout).
@@ -1719,8 +1717,6 @@ pub fn on_path(program: &str) -> bool {
     std::env::var_os("PATH").is_some_and(|paths| std::env::split_paths(&paths).any(|dir| dir.join(program).is_file()))
 }
 
-/// The indices of `n` items whose `text` contains the filter (any case). The text is only
-/// made while there's a filter.
 /// Where j/k (or the arrows) move one row and g/G (or home/end) jump to the ends of a list
 /// of `len` rows, from row `cur`; `None` for other keys.
 fn list_move(code: KeyCode, cur: usize, len: usize) -> Option<usize> {
@@ -1745,6 +1741,8 @@ fn edit_text(text: &mut String, code: KeyCode) {
     }
 }
 
+/// The indices of `n` items whose `text` contains the filter (any case). The text is only
+/// made while there's a filter.
 fn filtered(filter: &str, n: usize, text: impl Fn(usize) -> String) -> Vec<usize> {
     let needle = filter.to_lowercase();
     (0..n).filter(|&i| needle.is_empty() || text(i).to_lowercase().contains(&needle)).collect()

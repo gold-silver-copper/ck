@@ -12,7 +12,6 @@ use crate::store::ThreadKey;
 /// Tabs open at once, at most.
 pub const MAX_TABS: usize = 9;
 
-/// One tab's place: the active one is `App::tab`.
 /// A saved copy being read: when it was saved, and whether the thread is gone.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Offline {
@@ -39,6 +38,7 @@ pub enum TabPopup {
     Links(LinksPanel),
 }
 
+/// One tab's place: the active one is `App::tab`.
 pub struct Tab {
     pub view: View,
     /// Where esc goes back to from Settings.
