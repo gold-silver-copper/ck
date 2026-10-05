@@ -69,11 +69,8 @@ impl App {
     pub(super) fn go(&mut self, target: Target) {
         let from_thread = self.tab.view == View::Thread;
         // `u` comes back to the thread this was opened from.
-        if let (Some(t), Some(b)) = (&self.tab.thread, &self.tab.board)
-            && from_thread
-            && target.thread.is_some()
-        {
-            self.tab.trail.push((self.tab.site, b.clone(), t.no, t.current().map_or(t.no, |p| p.no)));
+        if let Some(b) = self.tab.board.clone().filter(|_| from_thread && target.thread.is_some()) {
+            self.leave_trail(b);
         }
         let back_to = self.tab.view;
         self.switch_site(target.site);
