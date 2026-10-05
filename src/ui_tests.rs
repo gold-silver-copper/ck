@@ -1396,3 +1396,17 @@ fn narrow_home_and_help() {
     a.popup = Some(Popup::Help(0));
     insta::assert_snapshot!("narrow_help", narrow(&mut a));
 }
+
+#[test]
+fn huge_counts_from_the_data_files_dont_overflow() {
+    // Seen by the data directory fuzzer: unread counts and sizes as a corrupt file has them.
+    let mut a = app(false);
+    for no in [1, 2] {
+        let key = ThreadKey { site: "4chan".into(), board: "g".into(), no };
+        a.store.toggle_watch(key.clone(), "t".into(), 1, 1);
+        a.store.watched_mut(&key).unwrap().unread = usize::MAX;
+    }
+    render(&mut a);
+    a.tab.view = View::Watched;
+    render(&mut a);
+}

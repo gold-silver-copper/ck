@@ -14,7 +14,7 @@ pub(super) fn draw_sites(f: &mut Frame, app: &mut App, area: Rect) {
         match rows[k] {
             SiteRow::Watched => {
                 let n = app.store.watched.len();
-                let unread: usize = app.store.watched.iter().map(|w| w.unread).sum();
+                let unread = app.store.watched.iter().fold(0usize, |n, w| n.saturating_add(w.unread));
                 let mut spans = vec![
                     Span::styled("◉  ", Style::new().fg(t.primary)),
                     Span::styled(format!("{:<16}", "Watched"), bold(t.text)),
