@@ -1287,3 +1287,12 @@ fn thread_gone_without_a_copy_offers_the_archive() {
     let text = &a.status.as_ref().unwrap().text;
     assert_eq!(text, "Thread was deleted or archived: a opens it in desuarchive");
 }
+
+#[test]
+fn counts_of_one_are_singular() {
+    let mut a = catalog_app(false);
+    a.tab.catalog[0].replies = Some(1);
+    a.tab.catalog[0].images = Some(1);
+    let text = render(&mut a).0;
+    assert!(text.contains("1 reply · 1 image ·"), "{text}");
+}
