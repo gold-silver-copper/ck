@@ -879,9 +879,7 @@ impl App {
                 self.tab.loading = None;
                 match res {
                     Ok(Some(no)) => {
-                        if let Some(t) = &self.tab.thread {
-                            self.tab.trail.push((self.tab.site, self.tab.board.clone().unwrap_or(board.clone()), t.no, t.current().map_or(t.no, |p| p.no)));
-                        }
+                        self.leave_trail(self.tab.board.clone().unwrap_or(board.clone()));
                         let in_settings = self.tab.view == View::Settings;
                         self.open_thread_at(board, no, Some(post));
                         // Found while the settings were open: the thread is behind them.
@@ -1410,6 +1408,13 @@ impl App {
         links.iter().filter(leaves).find(|l| l.post.is_some()).or_else(|| links.iter().find(leaves)).cloned()
     }
 
+    /// Remember the thread shown, on `board`, and its selected post, for `u` to come back to.
+    fn leave_trail(&mut self, board: Board) {
+        if let Some(t) = &self.tab.thread {
+            self.tab.trail.push((self.tab.site, board, t.no, t.current().map_or(t.no, |p| p.no)));
+        }
+    }
+
     /// Go where a quote link leads: a thread (remembered for `u`), a board, or a post whose
     /// thread the engine is asked for.
     fn follow(&mut self, link: Link) {
@@ -1420,8 +1425,8 @@ impl App {
         };
         match (link.thread, link.post) {
             (Some(no), post) => {
-                if let Some(t) = self.tab.thread.as_ref().filter(|_| self.tab.view == View::Thread) {
-                    self.tab.trail.push((self.tab.site, board, t.no, t.current().map_or(t.no, |p| p.no)));
+                if self.tab.view == View::Thread {
+                    self.leave_trail(board);
                 }
                 self.open_thread_at(target, no, post);
             }
