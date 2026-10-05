@@ -238,8 +238,11 @@ pub fn read(dir: &Path, key: &ThreadKey) -> Result<SavedThread> {
     match serde_json::from_slice::<SavedThread>(&bytes) {
         Ok(t) => Ok(t),
         Err(e) => {
-            let _ = std::fs::rename(&file, file.with_extension("json.corrupt"));
-            Err(e).with_context(|| format!("{} was corrupt; moved it aside", file.display()))
+            let moved = match std::fs::rename(&file, file.with_extension("json.corrupt")) {
+                Ok(()) => "moved it aside".to_string(),
+                Err(r) => format!("couldn't move it aside: {r}"),
+            };
+            Err(e).with_context(|| format!("{} was corrupt; {moved}", file.display()))
         }
     }
 }
