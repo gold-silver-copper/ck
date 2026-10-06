@@ -5,6 +5,10 @@
 //!
 //!   cargo build --release && cargo test -- --ignored e2e_soak --nocapture
 //!
+//! Shorter ones check how ck ends when its world goes: its window closed
+//! (`e2e_terminal_gone`), its output a closed pipe (`e2e_closed_output`), its data
+//! directory read-only (`e2e_read_only_data`).
+//!
 //! `E2E_SECS` (default 60) and `FUZZ_SEED`. Needs tmux; uses its own tmux server, scratch
 //! config, data, cache and download directories, and `CK_NO_EXTERNAL` (no browser,
 //! clipboard or notifications). Every site is on 127.0.0.1, and URLs in answers are
