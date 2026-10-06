@@ -33,12 +33,13 @@ fn local_command() -> Option<Vec<&'static str>> {
     } else {
         &[]
     };
-    candidates.iter().find(|argv| crate::app::on_path(argv[0])).map(|argv| argv.to_vec())
+    candidates.iter().find(|argv| argv.first().is_some_and(|cmd| crate::app::on_path(cmd))).map(|argv| argv.to_vec())
 }
 
 fn pipe(argv: &[&str], text: &str) -> anyhow::Result<()> {
-    let mut child = Command::new(argv[0])
-        .args(&argv[1..])
+    let Some((cmd, args)) = argv.split_first() else { anyhow::bail!("no clipboard command") };
+    let mut child = Command::new(cmd)
+        .args(args)
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::null())

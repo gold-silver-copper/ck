@@ -15,7 +15,8 @@ macro_rules! cycle {
             pub fn next(self) -> Self {
                 const ALL: &[$t] = &[$($t::$v),+];
                 let i = ALL.iter().position(|&v| v == self).unwrap_or(0);
-                ALL[(i + 1) % ALL.len()]
+                // The one after, or round to the first.
+                ALL.get(i + 1).or(ALL.first()).copied().unwrap_or(self)
             }
         }
     };

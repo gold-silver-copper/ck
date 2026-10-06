@@ -498,16 +498,16 @@ pub fn merge_sites(mine: Vec<SiteConfig>, builtin: Vec<SiteConfig>) -> Vec<SiteC
 /// A site as a `[[site]]` table.
 fn site_table(site: &SiteConfig) -> Table {
     let mut t = Table::new();
-    t["name"] = value(site.name.as_str());
-    t["kind"] = value(site.kind.as_str());
+    t.insert("name", value(site.name.as_str()));
+    t.insert("kind", value(site.kind.as_str()));
     let optional = [("url", &site.url), ("thumb_ext", &site.thumb_ext), ("media_url", &site.media_url), ("archive", &site.archive)];
     for (key, v) in optional {
         if let Some(v) = v {
-            t[key] = value(v.as_str());
+            t.insert(key, value(v.as_str()));
         }
     }
     if let Some(boards) = &site.boards {
-        t["boards"] = value(boards_array(boards));
+        t.insert("boards", value(boards_array(boards)));
     }
     t
 }
