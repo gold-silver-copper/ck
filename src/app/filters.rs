@@ -539,8 +539,7 @@ impl App {
                 Some(editor(None, FilterConfig::new(String::new(), &[Field::Subject, Field::Comment]), Some(String::new())))
             }
             KeyCode::Char('x') | KeyCode::Delete => {
-                if let Some(i) = sel.filter(|&i| i < self.filter_cfgs.len()) {
-                    let f = self.filter_cfgs[i].clone();
+                if let Some((i, f)) = sel.and_then(|i| self.filter_cfgs.get(i).cloned().map(|f| (i, f))) {
                     let saved = self.write_filters(FilterEdit::Remove(i, &f));
                     self.filter_cfgs.remove(i);
                     self.apply_filters();
@@ -549,12 +548,13 @@ impl App {
                 Some(self.filter_list(sel.unwrap_or(0)))
             }
             KeyCode::Char(' ') => {
-                if let Some(i) = sel.filter(|&i| i < self.filter_cfgs.len()) {
-                    let old = self.filter_cfgs[i].clone();
+                if let Some((i, old)) = sel.and_then(|i| self.filter_cfgs.get(i).cloned().map(|f| (i, f))) {
                     let new = FilterConfig { enabled: !old.enabled, ..old.clone() };
                     let what = format!("{} the filter {}", if new.enabled { "Turned on" } else { "Turned off" }, new.label());
                     let saved = self.write_filters(FilterEdit::Change(i, &old, &new));
-                    self.filter_cfgs[i] = new;
+                    if let Some(f) = self.filter_cfgs.get_mut(i) {
+                        *f = new;
+                    }
                     self.apply_filters();
                     self.say_saved(&what, saved);
                 }
@@ -664,7 +664,9 @@ impl App {
         let (index, saved) = match index {
             Some(i) if self.filter_cfgs.get(i) == Some(old) => {
                 let saved = self.write_filters(FilterEdit::Change(i, old, new));
-                self.filter_cfgs[i] = new.clone();
+                if let Some(f) = self.filter_cfgs.get_mut(i) {
+                    f.clone_from(new);
+                }
                 (Some(i), saved)
             }
             // Gone meanwhile (it can't be, with the popup open): nothing to change.

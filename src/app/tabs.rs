@@ -167,11 +167,10 @@ impl Tab {
 impl App {
     /// Make tab `i` the active one.
     pub fn switch_tab(&mut self, i: usize) {
-        if i == self.active || i >= self.tabs.len() {
-            return;
-        }
-        std::mem::swap(&mut self.tab, &mut self.tabs[self.active]);
-        std::mem::swap(&mut self.tab, &mut self.tabs[i]);
+        // Not the active tab itself, nor one that isn't there.
+        let Ok([here, there]) = self.tabs.get_disjoint_mut([self.active, i]) else { return };
+        std::mem::swap(&mut self.tab, here);
+        std::mem::swap(&mut self.tab, there);
         self.active = i;
     }
 
@@ -216,10 +215,7 @@ impl App {
             return;
         }
         let open = match self.tab.view {
-            View::Catalog => self.selected_index().map(|i| {
-                let p = &self.tab.catalog[i];
-                Open::Thread(self.find_board(&self.board_of(p)), p.no)
-            }),
+            View::Catalog => self.selected_index().and_then(|i| self.tab.catalog.get(i)).map(|p| Open::Thread(self.find_board(&self.board_of(p)), p.no)),
             View::Watched | View::History => self.selected_listed().map(|(key, _)| Open::Key(key.clone())),
             View::Saved => self.selected_listed().map(|(key, _)| Open::Saved(key.clone())),
             View::Thread => match self.outgoing_link() {

@@ -53,7 +53,7 @@ impl App {
                 place.conversation = t.and_then(|t| Some(t.conversation.as_ref().filter(|c| c.poster.is_none())?.anchor)).or(self.tab.pending_conversation);
             }
             View::Catalog => {
-                place.selected = self.tab.catalog_list.state.selected().and_then(|i| self.visible_catalog().get(i).map(|&k| self.tab.catalog[k].no));
+                place.selected = self.tab.catalog_list.state.selected().and_then(|i| self.visible_catalog().get(i).and_then(|&k| self.tab.catalog.get(k)).map(|p| p.no));
             }
             _ => {}
         }
