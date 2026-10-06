@@ -51,11 +51,10 @@ pub enum HintTo {
 /// Hint labels: one letter while they last, then two.
 fn labels(n: usize) -> Vec<String> {
     const KEYS: &[u8] = b"asdfghjklqwertyuiopzxcvbnm";
-    let one = |i: usize| (KEYS[i % KEYS.len()] as char).to_string();
     if n <= KEYS.len() {
-        (0..n).map(one).collect()
+        KEYS.iter().take(n).map(|&k| (k as char).to_string()).collect()
     } else {
-        (0..n).map(|i| format!("{}{}", one(i / KEYS.len()), one(i))).collect()
+        KEYS.iter().cycle().flat_map(|&a| KEYS.iter().map(move |&b| format!("{}{}", a as char, b as char))).take(n).collect()
     }
 }
 
@@ -314,7 +313,7 @@ impl App {
         }
         if t.conversation.is_some() {
             items.push(act(A::Conversation, "the whole thread again"));
-        } else if t.backlinks[t.selected].len() + p.quotes.iter().filter(|q| t.index.contains_key(q)).count() > 0 {
+        } else if t.backlinks.get(t.selected).map_or(0, Vec::len) + p.quotes.iter().filter(|q| t.index.contains_key(q)).count() > 0 {
             items.push(act(A::Conversation, "its conversation alone"));
         }
         items.push(act(
@@ -471,8 +470,8 @@ impl App {
     fn saved_menu(&self, items: &mut Vec<MenuItem>) -> String {
         use Action as A;
         let mut title = String::new();
-        if let Some(i) = self.selected_index() {
-            title = format!("No.{}", self.store.saved[i].key.no);
+        if let Some(s) = self.selected_index().and_then(|i| self.store.saved.get(i)) {
+            title = format!("No.{}", s.key.no);
             items.push(MenuItem::Enter("read the saved copy".into()));
             items.push(act(A::Remove, "remove the saved copy"));
             items.push(act(A::Copy, "copy its subject and link"));
@@ -574,7 +573,8 @@ impl App {
                 for row in 0..area.height {
                     let i = t.scroll + row as usize;
                     let Some((e, _)) = l.line(i) else { break };
-                    let in_block = i - l.starts[e];
+                    let Some(&start) = l.starts.get(e) else { break };
+                    let in_block = i - start;
                     let x0 = area.x + INDENT * t.entries.get(e).map_or(0, |e| e.depth) as u16 + PAD;
                     let y = area.y + row;
                     // The post itself, at its header; each part just before it (where
@@ -626,14 +626,14 @@ impl App {
         match key.code {
             KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
                 h.typed.push(c.to_ascii_lowercase());
-                let matching: Vec<usize> = (0..h.targets.len()).filter(|&i| h.targets[i].label.starts_with(&h.typed)).collect();
+                let matching: Vec<&HintTarget> = h.targets.iter().filter(|t| t.label.starts_with(&h.typed)).collect();
                 match matching.as_slice() {
                     // Not a label: the key is ignored.
                     [] => {
                         h.typed.pop();
                     }
-                    [i] if h.targets[*i].label == h.typed => {
-                        let to = h.targets[*i].to.clone();
+                    [t] if t.label == h.typed => {
+                        let to = t.to.clone();
                         self.popup = None;
                         self.go_hint(to);
                     }
