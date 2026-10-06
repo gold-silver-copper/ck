@@ -312,7 +312,7 @@ pub fn key_rows() -> Vec<Result<usize, &'static str>> {
     ];
     let mut out = Vec::new();
     for (scope, title) in groups {
-        let actions: Vec<usize> = (0..ACTIONS.len()).filter(|&i| ACTIONS[i].3[0] == scope).collect();
+        let actions: Vec<usize> = ACTIONS.iter().enumerate().filter(|(_, a)| a.3.first() == Some(&scope)).map(|(i, _)| i).collect();
         if actions.is_empty() {
             continue;
         }
@@ -428,11 +428,13 @@ impl App {
     }
 
     fn on_colors_key(&mut self, key: KeyEvent, mut list: ListState, editing: Option<String>) -> Option<SettingsPopup> {
+        let cur = list.selected().unwrap_or(0);
+        // The rows are ROLES, so the selected one is always there.
+        let &(role, _) = ROLES.get(cur)?;
         if let Some(mut text) = editing {
             return match key.code {
                 KeyCode::Esc => Some(SettingsPopup::Colors { list, editing: None }),
                 KeyCode::Enter => {
-                    let role = ROLES[list.selected().unwrap_or(0)].0;
                     match theme::parse_color(&text) {
                         Ok(c) => {
                             self.set_role_color(role, Some(&theme::color_string(c)));
@@ -450,8 +452,6 @@ impl App {
                 }
             };
         }
-        let cur = list.selected().unwrap_or(0);
-        let role = ROLES[cur].0;
         match key.code {
             KeyCode::Esc | KeyCode::Char('q' | 'h') | KeyCode::Left => None,
             // The field starts empty; the current color is on the row above it.
@@ -490,7 +490,7 @@ impl App {
             }
             code => {
                 let rows = key_rows();
-                let actions: Vec<usize> = (0..rows.len()).filter(|&r| rows[r].is_ok()).collect();
+                let actions: Vec<usize> = rows.iter().enumerate().filter(|(_, r)| r.is_ok()).map(|(i, _)| i).collect();
                 let cur = actions.iter().position(|&r| Some(r) == list.selected()).unwrap_or(0);
                 let to = match code {
                     KeyCode::PageDown => (cur + 10).min(actions.len().saturating_sub(1)),
@@ -579,8 +579,7 @@ impl App {
     /// Bind a key to the action selected in the key editor (replacing its keys, or added to
     /// them), or with `None` reset it to the default; refused if it would clash.
     fn bind_key(&mut self, list: &ListState, key: Option<(Key, bool)>) {
-        let Some(Ok(i)) = list.selected().and_then(|r| key_rows().get(r).copied()) else { return };
-        let (action, name, ..) = ACTIONS[i];
+        let Some(&(action, name, ..)) = list.selected().and_then(|r| key_rows().get(r).copied()).and_then(Result::ok).and_then(|i| ACTIONS.get(i)) else { return };
         let keys = key.map(|(k, add)| {
             let mut keys = if add { self.keys.keys(action).to_vec() } else { Vec::new() };
             if !keys.contains(&k) {
@@ -601,8 +600,7 @@ impl App {
 
     /// Take every key away from the action selected in the key editor.
     fn unbind_key(&mut self, list: &ListState) {
-        let Some(Ok(i)) = list.selected().and_then(|r| key_rows().get(r).copied()) else { return };
-        let (action, name, ..) = ACTIONS[i];
+        let Some(&(action, name, ..)) = list.selected().and_then(|r| key_rows().get(r).copied()).and_then(Result::ok).and_then(|i| ACTIONS.get(i)) else { return };
         if self.keys.keys(action).is_empty() {
             return self.info(format!("{name} has no key (it's in the menu)"));
         }
@@ -702,7 +700,7 @@ impl App {
 
 /// The next value in a cycle of choices.
 fn next(choices: &[u64], current: u64) -> u64 {
-    choices.iter().copied().find(|&c| c > current).unwrap_or(choices[0])
+    choices.iter().copied().find(|&c| c > current).or_else(|| choices.first().copied()).unwrap_or(current)
 }
 
 /// A path with the home directory shown as `~`.
