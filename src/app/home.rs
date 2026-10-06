@@ -37,10 +37,9 @@ impl App {
     /// At the start: titles for the sites the favorites and recent boards are on.
     pub fn load_home_titles(&mut self) {
         let named: Vec<String> = self.favorites.iter().map(|f| f.site.clone()).chain(self.store.recent_boards.iter().filter_map(|r| BoardRef::parse(r).map(|b| b.site))).collect();
-        for i in 0..self.sites.len() {
-            if named.contains(&self.sites[i].cfg.name) {
-                self.note_titles(i);
-            }
+        let on: Vec<usize> = self.sites.iter().enumerate().filter(|(_, s)| named.contains(&s.cfg.name)).map(|(i, _)| i).collect();
+        for i in on {
+            self.note_titles(i);
         }
     }
 
@@ -60,7 +59,7 @@ impl App {
     fn current_board_ref(&self) -> Option<BoardRef> {
         let site = self.current_site().cfg.name.clone();
         let board = match self.tab.view {
-            View::Boards => self.selected_index().map(|i| self.boards()[i].uri.clone())?,
+            View::Boards => self.selected_index().and_then(|i| self.boards().get(i))?.uri.clone(),
             View::Catalog | View::Thread => self.tab.board.as_ref()?.uri.clone(),
             View::Sites => match self.selected_site_row()? {
                 SiteRow::Favorite(i) => return self.favorites.get(i).cloned(),
@@ -131,13 +130,13 @@ impl App {
     }
 
     pub fn is_site_hidden(&self, i: usize) -> bool {
-        self.hidden_sites.contains(&self.sites[i].cfg.name)
+        self.sites.get(i).is_some_and(|s| self.hidden_sites.contains(&s.cfg.name))
     }
 
     /// `x` on a site: leave it off the home screen (or, when hidden ones are shown, bring
     /// it back). Kept in the config as `hidden_sites`.
     pub fn toggle_site_hidden(&mut self, i: usize) {
-        let name = self.sites[i].cfg.name.clone();
+        let Some(name) = self.sites.get(i).map(|s| s.cfg.name.clone()) else { return };
         let hidden = !self.hidden_sites.remove(&name);
         if hidden {
             self.hidden_sites.insert(name.clone());
