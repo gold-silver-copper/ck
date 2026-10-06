@@ -682,14 +682,15 @@ impl App {
             }
             KeyCode::Char('h' | 'k') | KeyCode::Left | KeyCode::Up => v.index = (v.index + n - 1) % n,
             // Space pauses an animated GIF; otherwise it's the next file.
-            KeyCode::Char(' ') if self.images.toggle_pause(&v.files[v.index].url) => {
-                let paused = self.images.is_paused(&v.files[v.index].url);
+            KeyCode::Char(' ') if v.files.get(v.index).is_some_and(|f| self.images.toggle_pause(&f.url)) => {
+                let paused = v.files.get(v.index).is_some_and(|f| self.images.is_paused(&f.url));
                 self.info(if paused { "Paused (space plays)" } else { "Playing" });
             }
             KeyCode::Char('l' | 'j' | ' ') | KeyCode::Right | KeyCode::Down => v.index = (v.index + 1) % n,
             KeyCode::Char('i') | KeyCode::Enter => {
-                let f = v.files[v.index].clone();
-                self.open_file(&f);
+                if let Some(f) = v.files.get(v.index).cloned() {
+                    self.open_file(&f);
+                }
             }
             _ => {}
         }

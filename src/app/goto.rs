@@ -169,8 +169,8 @@ impl App {
                 let slash = if site.is_none() && self.site_index(one).is_some() { "/" } else { "" };
                 self.typing = Some(super::Typing::Goto(format!("{prefix}{one}{slash}")));
             }
-            many => {
-                let common = many.iter().skip(1).fold(many[0].clone(), |acc, m| {
+            many @ [first, rest @ ..] => {
+                let common = rest.iter().fold((*first).clone(), |acc, m| {
                     acc.chars().zip(m.chars()).take_while(|(a, b)| a == b).map(|(a, _)| a).collect()
                 });
                 if common.chars().count() > partial.chars().count() {

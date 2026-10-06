@@ -133,7 +133,7 @@ pub struct ImageSearchPanel {
 impl App {
     pub fn open_image_search(&mut self) {
         let files: Vec<Attachment> = match self.tab.viewer() {
-            Some(v) => vec![v.files[v.index].clone()],
+            Some(v) => v.files.get(v.index).cloned().into_iter().collect(),
             None => self.selected_post().map(|p| p.files.clone()).unwrap_or_default(),
         };
         // Videos and others: their thumbnail is what can be searched.
@@ -156,14 +156,14 @@ impl App {
 
     pub fn on_image_search_key(&mut self, code: KeyCode) {
         let Some(Popup::ImageSearch(p)) = &mut self.popup else { return };
-        let ok: Vec<usize> = (0..p.rows.len()).filter(|&r| p.rows[r].is_ok()).collect();
+        let ok: Vec<usize> = p.rows.iter().enumerate().filter(|(_, r)| r.is_ok()).map(|(i, _)| i).collect();
         let cur = ok.iter().position(|&r| Some(r) == p.list.selected()).unwrap_or(0);
         if let Some(&to) = super::list_move(code, cur, ok.len()).and_then(|to| ok.get(to)) {
             p.list.select(Some(to));
             return;
         }
         let row = p.list.selected().and_then(|r| p.rows.get(r)).and_then(|r| r.as_ref().ok()).cloned();
-        let link = row.map(|(url, e)| self.image_search[e].link(&url));
+        let link = row.and_then(|(url, e)| self.image_search.get(e).map(|s| s.link(&url)));
         match code {
             KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right => {
                 self.popup = None;
