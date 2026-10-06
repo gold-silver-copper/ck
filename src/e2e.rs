@@ -52,9 +52,9 @@ fn respond(mut stream: TcpStream, port: u16, answer: &(dyn Fn(&str, Option<&str>
     let text = String::from_utf8_lossy(&request).to_string();
     let path = text.split_whitespace().nth(1).unwrap_or("/").to_string();
     let since = text.lines().any(|l| l.to_ascii_lowercase().starts_with("if-modified-since:") && l.contains(MODIFIED));
-    let (delay, drop, image_index, corrupt, unchanged) = {
+    let (delay, drop, image_index, corrupt, unchanged, cut) = {
         let mut r = crate::http::lock(rng);
-        (Duration::from_millis(*r.pick(&[0, 0, 0, 50, 300, 1500]) as u64), r.chance(2), r.below(10), r.chance(15), r.chance(50))
+        (Duration::from_millis(*r.pick(&[0, 0, 0, 50, 300, 1500]) as u64), r.chance(2), r.below(10), r.chance(15), r.chance(50), r.chance(2))
     };
     let long_post = crate::http::lock(rng).chance(30);
     std::thread::sleep(delay);
@@ -82,7 +82,9 @@ fn respond(mut stream: TcpStream, port: u16, answer: &(dyn Fn(&str, Option<&str>
     let modified = if kind == "application/json" && status == 200 { format!("Last-Modified: {MODIFIED}\r\n") } else { String::new() };
     let head = format!("HTTP/1.1 {status} X\r\nContent-Type: {kind}\r\n{modified}Content-Length: {}\r\nConnection: close\r\n\r\n", body.len());
     let _ = stream.write_all(head.as_bytes());
-    let _ = stream.write_all(&body);
+    // Now and then the connection drops halfway through the body.
+    let sent = if cut { body.len() / 2 } else { body.len() };
+    let _ = stream.write_all(body.get(..sent).unwrap_or_default());
 }
 
 /// The first comment in an answer (whichever engine's field it's in) made a few hundred
