@@ -144,10 +144,17 @@ impl Tmux {
         self.launch(&format!("{}; echo CK_EXIT=$?; sleep 600", command(ck, env, &[])), size);
     }
 
-    /// `cmd` in a new window of a new server.
+    /// `cmd` in a new window of a new server. (A new server sometimes exits as it starts:
+    /// "server exited unexpectedly". Then again.)
     fn launch(&self, cmd: &str, (w, h): (u16, u16)) {
-        let _ = self.run(&["kill-server"]);
-        self.run(&["new-session", "-d", "-s", "ck", "-x", &w.to_string(), "-y", &h.to_string(), cmd]);
+        for _ in 0..5 {
+            let _ = self.run(&["kill-server"]);
+            self.run(&["new-session", "-d", "-s", "ck", "-x", &w.to_string(), "-y", &h.to_string(), cmd]);
+            if Command::new("tmux").arg("-L").arg(&self.socket).args(["has-session", "-t", "ck"]).output().is_ok_and(|o| o.status.success()) {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(200));
+        }
     }
 
     fn screen(&self) -> String {
