@@ -289,14 +289,14 @@ impl KeyMap {
     /// commands on one key in the same view. No keys (`[]`) leaves an action to the menu.
     pub fn new(overrides: &HashMap<String, Binding>) -> Result<Self> {
         let mut map = Self::default();
-        let mut names: Vec<_> = overrides.keys().collect();
-        names.sort();
-        for name in names {
+        let mut named: Vec<_> = overrides.iter().collect();
+        named.sort_by_key(|&(name, _)| name);
+        for (name, binding) in named {
             let Some(&(action, ..)) = ACTIONS.iter().find(|e| e.1 == name) else {
                 let known: Vec<_> = ACTIONS.iter().map(|e| e.1).collect();
                 bail!("[keys]: unknown action `{name}` (known: {})", known.join(", "));
             };
-            let specs = overrides[name].specs();
+            let specs = binding.specs();
             let keys = specs.iter().map(|s| Key::parse(s)).collect::<Result<Vec<_>>>();
             map.keys.insert(action, keys.map_err(|e| anyhow::anyhow!("[keys]: `{name}`: {e}"))?);
         }
@@ -313,7 +313,7 @@ impl KeyMap {
                 if !applies(scopes, view) {
                     continue;
                 }
-                for &key in &self.keys[&action] {
+                for &key in self.keys.get(&action).into_iter().flatten() {
                     if let Some(other) = seen.insert(key, name)
                         && other != name
                     {
@@ -328,31 +328,32 @@ impl KeyMap {
 
     /// The first key of an action, as shown in hints; empty when it has none.
     pub fn key(&self, action: Action) -> String {
-        self.keys[&action].first().map(Key::to_string).unwrap_or_default()
+        self.keys(action).first().map(Key::to_string).unwrap_or_default()
     }
 
     /// All of an action's keys, for help; empty when it has none.
     pub fn label(&self, action: Action) -> String {
-        self.keys[&action].iter().map(Key::to_string).collect::<Vec<_>>().join(", ")
+        self.keys(action).iter().map(Key::to_string).collect::<Vec<_>>().join(", ")
     }
 
     /// How to get to an action, for messages: its key, or the menu.
     pub fn how(&self, action: Action) -> String {
-        match self.keys[&action].first() {
+        match self.keys(action).first() {
             Some(k) => k.to_string(),
-            None => match self.keys[&Action::Menu].first() {
+            None => match self.keys(Action::Menu).first() {
                 Some(m) => format!("the {m} menu"),
                 None => "the menu (right-click)".into(),
             },
         }
     }
 
+    /// An action's keys; empty when it has none.
     pub fn keys(&self, action: Action) -> &[Key] {
-        &self.keys[&action]
+        self.keys.get(&action).map_or(&[], Vec::as_slice)
     }
 
     pub fn is_default(&self, action: Action) -> bool {
-        self.keys[&action] == default_keys(action)
+        self.keys(action) == default_keys(action)
     }
 
     /// The action bound to a key in `scope` (or a global one).
@@ -374,8 +375,10 @@ impl KeyMap {
         if self.is_default(action) {
             return None;
         }
-        let keys: Vec<String> = self.keys[&action].iter().map(Key::to_string).collect();
-        Some(if keys.len() == 1 { Binding::One(keys[0].clone()) } else { Binding::Many(keys) })
+        Some(match self.keys(action) {
+            [one] => Binding::One(one.to_string()),
+            keys => Binding::Many(keys.iter().map(Key::to_string).collect()),
+        })
     }
 }
 
