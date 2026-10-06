@@ -82,6 +82,10 @@ fn main() -> Result<()> {
     // (A panic or a signal ends up here too.)
     app.restore_title();
     give_terminal_back();
+    // Not dropped: when it can't show the cursor (the terminal gone), its drop eprintln!s
+    // and panics.
+    let _ = terminal.show_cursor();
+    std::mem::forget(terminal);
     match app.quit_because {
         Some(why) => result.and(Err(anyhow::anyhow!("{why}"))),
         None => result,
