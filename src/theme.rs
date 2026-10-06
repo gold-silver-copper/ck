@@ -475,9 +475,10 @@ pub fn paint(style: Style) -> Style {
 pub fn to_256(c: Color) -> Color {
     let Color::Rgb(r, g, b) = c else { return c };
     const LEVELS: [u8; 6] = [0, 95, 135, 175, 215, 255];
-    let level = |v: u8| LEVELS.iter().enumerate().min_by_key(|(_, l)| (**l as i32 - v as i32).abs()).map_or(0, |(i, _)| i);
-    let (ri, gi, bi) = (level(r), level(g), level(b));
-    let cube = (LEVELS[ri], LEVELS[gi], LEVELS[bi]);
+    // Its index among the levels, and the level.
+    let level = |v: u8| LEVELS.iter().copied().enumerate().min_by_key(|&(_, l)| (l as i32 - v as i32).abs()).unwrap_or((0, 0));
+    let ((ri, rl), (gi, gl), (bi, bl)) = (level(r), level(g), level(b));
+    let cube = (rl, gl, bl);
     // The 24 grays, 8..238.
     let avg = (r as u32 + g as u32 + b as u32) / 3;
     let gray_i = ((avg.saturating_sub(3)) / 10).min(23) as u8;

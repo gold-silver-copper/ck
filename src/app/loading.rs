@@ -43,13 +43,16 @@ impl App {
 
     /// Show a site's boards; a complete list is also saved for next time.
     pub(super) fn set_boards(&mut self, site: usize, boards: Vec<Board>, complete: bool) {
-        if complete && self.sites[site].cfg.boards.is_none() {
-            let name = self.sites[site].cfg.name.clone();
+        let Some(s) = self.sites.get(site) else { return };
+        if complete && s.cfg.boards.is_none() {
+            let name = s.cfg.name.clone();
             if let Err(e) = self.store.save_boards(&name, &boards, self.clock.now()) {
                 self.error(format!("Couldn't save the board list: {e:#}"));
             }
         }
-        self.sites[site].boards = Some(boards);
+        if let Some(s) = self.sites.get_mut(site) {
+            s.boards = Some(boards);
+        }
         if site == self.tab.site {
             let len = self.visible_boards().len();
             self.tab.board_list.clamp(len);
@@ -61,6 +64,7 @@ impl App {
 
     /// Refresh a saved board list at background priority, without a spinner.
     pub(super) fn refresh_boards_in_background(&mut self, site: usize) {
+        let Some(backend) = self.sites.get(site).map(|s| s.backend.clone()) else { return };
         let now = self.clock.instant();
         if self.boards_tried.get(&site).is_some_and(|t| now.saturating_duration_since(*t) < http::MIN_REFETCH)
             || !self.boards_refreshing.insert(site)
@@ -68,7 +72,6 @@ impl App {
             return;
         }
         self.boards_tried.insert(site, now);
-        let backend = self.sites[site].backend.clone();
         let later = self.later();
         std::thread::spawn(move || {
             let res = crate::guard::result(|| http::background_at(now, || backend.boards(&|_| {})));
@@ -125,7 +128,7 @@ impl App {
             self.tab.catalog_cached = Some(tabs::Offline { saved: fetched, dead: false });
             self.show_catalog(posts);
             if let Some(no) = self.tab.pending_catalog
-                && let Some(i) = self.visible_catalog().iter().position(|&k| self.tab.catalog[k].no == no)
+                && let Some(i) = self.catalog_row(no)
             {
                 self.tab.catalog_list.state.select(Some(i));
             }
@@ -146,7 +149,7 @@ impl App {
                 self.show_catalog(posts);
                 self.catalog_seen();
                 if let Some(no) = self.tab.pending_catalog.take()
-                    && let Some(i) = self.visible_catalog().iter().position(|&k| self.tab.catalog[k].no == no)
+                    && let Some(i) = self.catalog_row(no)
                 {
                     self.tab.catalog_list.state.select(Some(i));
                 }
@@ -286,12 +289,17 @@ impl App {
         self.spawn(format!("Loading thread {no}"), job, App::thread_arrived);
     }
 
+    /// Where thread `no` is among the catalog's rows shown.
+    fn catalog_row(&self, no: u64) -> Option<usize> {
+        self.visible_catalog().iter().position(|&k| self.tab.catalog.get(k).is_some_and(|p| p.no == no))
+    }
+
     /// Show catalog threads, keeping the selected thread selected (by number).
     pub(super) fn show_catalog(&mut self, posts: Vec<Post>) {
         let selected = self.selected_index().filter(|_| self.tab.view == View::Catalog).and_then(|i| self.tab.catalog.get(i)).map(|p| p.no);
         self.tab.catalog = posts;
         self.remark_catalog();
-        if let Some(i) = selected.and_then(|no| self.visible_catalog().iter().position(|&k| self.tab.catalog[k].no == no)) {
+        if let Some(i) = selected.and_then(|no| self.catalog_row(no)) {
             self.tab.catalog_list.state.select(Some(i));
         }
         let len = self.visible_catalog().len();
@@ -410,7 +418,7 @@ impl App {
         if let Some(last) = follow
             && let Some(t) = &mut self.tab.thread
             && let Some(at) = t.entries.iter().position(|e| e.path == last)
-            && let Some(next) = (at + 1..t.entries.len()).find(|&e| !t.is_collapsed(t.entries[e].post))
+            && let Some(next) = t.entries.iter().enumerate().skip(at + 1).find(|(_, e)| !t.is_collapsed(e.post)).map(|(i, _)| i)
         {
             t.set_cursor(next);
             t.reveal = Some(Reveal::Step);

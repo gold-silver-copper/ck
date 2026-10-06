@@ -487,11 +487,8 @@ impl Filters {
 /// hidden this way, and never spreads it: everyone quotes it. Gone through once each, so
 /// quote loops end, and without recursion, so a long chain doesn't overflow the stack.
 pub fn spread_hiding(marks: &mut [Mark], posts: &[Post], index: &HashMap<u64, usize>, backlinks: &[Vec<u64>], spreads: impl Fn(&Mark) -> bool) {
-    let mut seen = vec![false; marks.len()];
-    let mut queue: VecDeque<usize> = marks.iter().enumerate().skip(1).filter(|(_, m)| m.hidden.is_some() && spreads(m)).map(|(i, _)| i).collect();
-    for &i in &queue {
-        seen[i] = true;
-    }
+    let mut seen: Vec<bool> = marks.iter().enumerate().map(|(i, m)| i > 0 && m.hidden.is_some() && spreads(m)).collect();
+    let mut queue: VecDeque<usize> = seen.iter().enumerate().filter(|&(_, &s)| s).map(|(i, _)| i).collect();
     while let Some(i) = queue.pop_front() {
         let (Some(parent), Some(replies)) = (posts.get(i), backlinks.get(i)) else { continue };
         for no in replies {

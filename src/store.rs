@@ -538,9 +538,9 @@ impl Store {
         let mut total = self.saved.iter().fold(0u64, |sum, m| sum.saturating_add(m.bytes));
         while total > self.saved_max {
             let watched = |m: &SavedMeta| self.watched.iter().any(|w| w.key == m.key);
-            let Some(i) = self.saved.iter().rposition(|m| m.dead && !watched(m)) else { break };
-            total = total.saturating_sub(self.saved[i].bytes);
-            let key = self.saved[i].key.clone();
+            let Some(m) = self.saved.iter().rev().find(|m| m.dead && !watched(m)) else { break };
+            total = total.saturating_sub(m.bytes);
+            let key = m.key.clone();
             self.forget_saved(&key);
         }
     }

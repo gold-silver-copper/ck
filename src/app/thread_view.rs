@@ -50,10 +50,10 @@ pub fn conversation_of(posts: &[Post], index: &HashMap<u64, usize>, backlinks: &
             if !through(i) {
                 continue;
             }
-            let next: Vec<u64> = if up { posts[i].quotes.clone() } else { backlinks[i].clone() };
+            let next = if up { posts.get(i).map(|p| &p.quotes) } else { backlinks.get(i) };
             let d = if up { d - 1 } else { d + 1 };
-            for no in next {
-                let Some(&j) = index.get(&no) else { continue };
+            for no in next.into_iter().flatten() {
+                let Some(&j) = index.get(no) else { continue };
                 if depth.contains_key(&j) {
                     continue;
                 }
@@ -307,7 +307,8 @@ impl ThreadLayout {
             len += b.len();
         }
         self.starts.push(len);
-        self.thumbs = (0..self.blocks.len()).filter(|&e| self.has_thumb[e]).map(|e| (self.starts[e] + 1, e)).collect();
+        let thumbs = self.has_thumb.iter().zip(&self.starts).take(self.blocks.len()).enumerate();
+        self.thumbs = thumbs.filter(|(_, (has, _))| **has).map(|(e, (_, start))| (start + 1, e)).collect();
     }
 
     /// The entry line `i` is in.
@@ -339,13 +340,14 @@ impl ThreadView {
         for p in &posts {
             for q in &p.quotes {
                 if let Some(&i) = index.get(q)
-                    && !backlinks[i].contains(&p.no)
+                    && let Some(b) = backlinks.get_mut(i)
+                    && !b.contains(&p.no)
                 {
-                    backlinks[i].push(p.no);
+                    b.push(p.no);
                 }
             }
         }
-        let entries = (0..posts.len()).map(|i| Entry { post: i, depth: 0, path: vec![posts[i].no] }).collect();
+        let entries = posts.iter().enumerate().map(|(i, p)| Entry { post: i, depth: 0, path: vec![p.no] }).collect();
         let mut ids: HashMap<String, usize> = HashMap::new();
         for id in posts.iter().filter_map(|p| p.id.as_ref()) {
             *ids.entry(id.clone()).or_default() += 1;
@@ -375,13 +377,13 @@ impl ThreadView {
         } else {
             let mut texts = std::mem::take(&mut self.search_texts);
             texts.resize(self.posts.len(), None);
-            let mut found = |i: usize| {
+            let found = |i: usize, text: &mut Option<String>| {
                 if self.is_revealed(i) {
                     return self.post_text(i).contains(&needle);
                 }
-                texts[i].get_or_insert_with(|| self.post_text(i)).contains(&needle)
+                text.get_or_insert_with(|| self.post_text(i)).contains(&needle)
             };
-            let m = (0..self.posts.len()).filter(|&i| self.in_view(i) && found(i)).collect();
+            let m = texts.iter_mut().enumerate().filter_map(|(i, text)| (self.in_view(i) && found(i, text)).then_some(i)).collect();
             self.search_texts = texts;
             m
         };
@@ -391,7 +393,7 @@ impl ThreadView {
 
     /// Lowercase searchable text of a post: name, subject, files and body (hidden spoilers excluded).
     fn post_text(&self, i: usize) -> String {
-        let p = &self.posts[i];
+        let Some(p) = self.posts.get(i) else { return String::new() };
         let files = p.files.iter().map(|f| f.filename.as_str());
         if self.is_revealed(i) {
             let mut text = String::new();
@@ -439,7 +441,7 @@ impl ThreadView {
         let Some(p) = self.current() else { return Err("No posts".into()) };
         let no = p.no;
         let quotes = p.quotes.iter().any(|q| self.index.contains_key(q));
-        if !quotes && self.backlinks[self.selected].is_empty() {
+        if !quotes && self.backlinks.get(self.selected).is_none_or(Vec::is_empty) {
             return Err(format!("No.{no} isn't part of a conversation here: it quotes no post in the thread, and none quote it"));
         }
         Ok(self.show_only(no, None))
@@ -490,7 +492,7 @@ impl ThreadView {
     /// Whether post `i` arrived since the last visit. A deleted one never counts: it was
     /// shown before.
     pub fn is_new(&self, i: usize) -> bool {
-        self.new_after > 0 && self.posts[i].no > self.new_after && !self.is_deleted(i)
+        self.new_after > 0 && self.posts.get(i).is_some_and(|p| p.no > self.new_after) && !self.is_deleted(i)
     }
 
     /// Whether post `i` is kept after the site deleted it.
@@ -596,7 +598,8 @@ impl ThreadView {
         };
         let mut out = Vec::with_capacity(shown.len());
         for (i, d) in shown {
-            let path = vec![self.posts[i].no];
+            let Some(p) = self.posts.get(i) else { continue };
+            let path = vec![p.no];
             // Replies are indented by how far down from the conversation's post they are.
             let depth = d.clamp(0, MAX_DEPTH as i32 - 1) as u8;
             out.push(Entry { post: i, depth, path: path.clone() });
@@ -622,7 +625,7 @@ impl ThreadView {
         if depth > MAX_DEPTH || !self.expanded.contains(path) {
             return;
         }
-        for no in &self.backlinks[post] {
+        for no in self.backlinks.get(post).into_iter().flatten() {
             // A post can't contain itself (quote loops).
             let Some(&j) = self.index.get(no).filter(|_| !path.contains(no)) else { continue };
             let mut p = path.to_vec();
@@ -665,7 +668,7 @@ impl ThreadView {
         let bottom = self.scroll + self.viewport;
         let below = self.entries.iter().enumerate().filter(|&(e, x)| l.starts.get(e).is_some_and(|&s| s >= bottom) && self.is_new(x.post));
         below.fold((0, 0), |(n, yours), (_, x)| {
-            let to_you = self.posts[x.post].quotes.iter().any(|q| self.mine.contains(q));
+            let to_you = self.posts.get(x.post).is_some_and(|p| p.quotes.iter().any(|q| self.mine.contains(q)));
             (n + 1, yours + usize::from(to_you))
         })
     }
@@ -682,7 +685,7 @@ impl ThreadView {
     pub(super) fn top_anchor(&self) -> Option<(usize, usize)> {
         let l = self.layout.as_ref()?;
         let top = l.starts.partition_point(|&s| s <= self.scroll).saturating_sub(1);
-        Some((top, self.scroll - l.starts[top]))
+        Some((top, self.scroll - l.starts.get(top)?))
     }
 
     /// Select a post's top-level entry. A post outside the conversation shown leaves it.
@@ -708,8 +711,9 @@ impl ThreadView {
     pub fn step(&mut self, down: bool) {
         let e = self.entry();
         let view = self.viewport.max(1);
-        if let Some(l) = self.layout.as_ref().filter(|l| l.exact.get(e) == Some(&true)) {
-            let (start, end) = (l.starts[e], l.starts[e + 1]);
+        if let Some(l) = self.layout.as_ref().filter(|l| l.exact.get(e) == Some(&true))
+            && let (Some(&start), Some(&end)) = (l.starts.get(e), l.starts.get(e + 1))
+        {
             // The last line is the gap before the next post: it's past the end that matters.
             let last = end.saturating_sub(1);
             let page = view.saturating_sub(2).max(1);
@@ -797,7 +801,7 @@ impl ThreadView {
         self.scroll = (self.scroll as isize + delta).clamp(0, max as isize) as usize;
         let top = l.starts.partition_point(|&s| s <= self.scroll).saturating_sub(1);
         // Prefer an entry whose header is on screen.
-        let e = if l.starts[top] < self.scroll && top + 1 < self.entries.len() && l.starts[top + 1] < self.scroll + self.viewport {
+        let e = if l.starts.get(top).is_some_and(|&s| s < self.scroll) && top + 1 < self.entries.len() && l.starts.get(top + 1).is_some_and(|&s| s < self.scroll + self.viewport) {
             top + 1
         } else {
             top

@@ -66,9 +66,10 @@ pub(super) fn draw_thread(f: &mut Frame, app: &mut App, area: Rect) {
     // A part just focused is scrolled into view (the post itself: its top).
     if std::mem::take(&mut t.follow_focus)
         && let Some(l) = t.layout.as_ref()
+        && let Some(&start) = l.starts.get(cursor)
     {
         let at = l.spots.get(cursor).and_then(|s| s.iter().find(|s| Some(&s.part) == t.focus.as_ref()));
-        let line = l.starts[cursor] + at.map_or(0, |s| s.line);
+        let line = start + at.map_or(0, |s| s.line);
         if line < t.scroll {
             t.scroll = line;
         } else if line >= t.scroll + t.viewport {
@@ -85,13 +86,13 @@ pub(super) fn draw_thread(f: &mut Frame, app: &mut App, area: Rect) {
         let Some((e, line)) = l.line(i) else { break };
         // Each entry's last line is the gap before the next card: the unread line is
         // drawn there, between what was read and what's new.
-        if i + 1 == l.starts[e + 1] {
+        if l.starts.get(e + 1) == Some(&(i + 1)) {
             if unread == Some(e + 1) {
                 put(f, area.x + PAD, area.y + row, area.width.saturating_sub(PAD), Line::from(chip("new posts", th.background, th.new)));
             }
             continue;
         }
-        let entry = &t.entries[e];
+        let Some(entry) = t.entries.get(e) else { continue };
         // Replies shown inline sit further in, on another tone.
         let x = area.x + INDENT * entry.depth as u16;
         let width = area.right().saturating_sub(x);
@@ -135,17 +136,23 @@ pub(super) fn draw_thread(f: &mut Frame, app: &mut App, area: Rect) {
     // Visible ones are asked for first, top to bottom; those within a screen are prefetched
     // from media hosts.
     let (top, h, view) = (t.scroll, THUMB.height as usize, area.height as usize);
+    // An entry's depth, its post's first file and how many it has: what its tile shows.
+    let tile_of = |e: usize| {
+        let entry = t.entries.get(e)?;
+        let files = &t.posts.get(entry.post)?.files;
+        Some((entry.depth, files.first()?, files.len()))
+    };
     for &(line, e) in &l.thumbs {
         if line + h > top && line < top + view {
+            let Some((depth, file, count)) = tile_of(e) else { continue };
             // A tile cut off at the top starts above the area; draw_tile clips it.
             let y = area.y as i32 + line as i32 - top as i32;
             let tile_top = y.max(area.y as i32) as u16;
-            let x = area.x + INDENT * t.entries[e].depth as u16 + PAD;
+            let x = area.x + INDENT * depth as u16 + PAD;
             let tile = Rect::new(x, tile_top, THUMB.width, (y + THUMB.height as i32 - tile_top as i32) as u16);
             let full = line >= top && line + h <= top + view;
-            let p = &t.posts[t.entries[e].post];
             if full {
-                draw_tile(f, &mut app.images, &p.files[0], p.files.len(), off, tile, area);
+                draw_tile(f, &mut app.images, file, count, off, tile, area);
             } else {
                 fill(f, tile.intersection(area), th.surface_high);
             }
@@ -153,7 +160,7 @@ pub(super) fn draw_thread(f: &mut Frame, app: &mut App, area: Rect) {
     }
     for &(line, e) in &l.thumbs {
         let near = !(line >= top && line + h <= top + view) && line + h + view > top && line < top + 2 * view;
-        if let Some(url) = t.posts[t.entries[e].post].files[0].thumb.as_ref().filter(|u| near && !off && http::is_media_host(u)) {
+        if let Some(url) = tile_of(e).and_then(|(_, file, _)| file.thumb.as_ref()).filter(|u| near && !off && http::is_media_host(u)) {
             app.images.want(url, Kind::Thumb);
         }
     }
@@ -211,7 +218,7 @@ pub(super) fn blank(height: usize) -> Rc<[Line<'static>]> {
 /// cache has it), else from the length of its text (remembered in `estimates`).
 fn estimate(t: &ThreadView, estimates: &mut HashMap<(u64, u16, bool), usize>, e: usize, width: u16, thumbs: bool) -> usize {
     let Some(entry) = t.entries.get(e) else { return 0 };
-    let p = &t.posts[entry.post];
+    let Some(p) = t.posts.get(entry.post) else { return 0 };
     if t.is_collapsed(entry.post) {
         return 2;
     }
@@ -233,7 +240,7 @@ fn estimate(t: &ThreadView, estimates: &mut HashMap<(u64, u16, bool), usize>, e:
     if !p.body.is_empty() {
         n += 1 + p.body.iter().map(|l| rows(l.spans.iter().map(|s| s.content.width()).sum())).sum::<usize>();
     }
-    if !t.backlinks[entry.post].is_empty() {
+    if t.backlinks.get(entry.post).is_some_and(|b| !b.is_empty()) {
         n += 2;
     }
     n += 2;
@@ -245,10 +252,12 @@ fn estimate(t: &ThreadView, estimates: &mut HashMap<(u64, u16, bool), usize>, e:
 /// Lay out entry `e` (a post, or a reply shown inline) as a card of wrapped lines: a padding
 /// line above and below the content, then a gap line. Posts with files get a thumbnail tile
 /// on the left. Unchanged posts come from the line cache. Returns its lines, where its parts
-/// are, and whether it has a thumbnail.
+/// are, and whether it has a thumbnail. An entry that isn't there has no lines.
 fn lay_out(t: &ThreadView, cache: &mut LineCache, e: usize, width: u16, thumbs: bool, clock: Clock) -> (Rc<[Line<'static>]>, Rc<[Spot]>, bool) {
-    let entry = &t.entries[e];
-    let (i, p) = (entry.post, &t.posts[entry.post]);
+    let Some((entry, p)) = t.entries.get(e).and_then(|entry| Some((entry, t.posts.get(entry.post)?))) else {
+        return (Rc::from([]), Rc::from([]), false);
+    };
+    let i = entry.post;
     if t.is_collapsed(i) {
         // A hidden post is one line, so replies to it still make sense.
         let why = match t.marks.get(i).and_then(|m| m.hidden.as_ref()) {
@@ -294,11 +303,12 @@ fn lay_out_entries(t: &mut ThreadView, entries: impl IntoIterator<Item = usize>,
     let mut cache = std::mem::take(&mut t.cache);
     let mut any = false;
     for e in entries {
-        if e >= l.blocks.len() || l.exact[e] {
+        // Not an entry, or laid out already.
+        if l.exact.get(e) != Some(&false) {
             continue;
         }
-        let (block, at, thumb) = lay_out(t, &mut cache, e, l.width, l.thumbs_on, clock);
-        (l.blocks[e], l.spots[e], l.has_thumb[e], l.exact[e]) = (block, at, thumb, true);
+        let laid = lay_out(t, &mut cache, e, l.width, l.thumbs_on, clock);
+        place(&mut l, e, laid);
         any = true;
     }
     if any {
@@ -307,6 +317,13 @@ fn lay_out_entries(t: &mut ThreadView, entries: impl IntoIterator<Item = usize>,
     t.cache = cache;
     t.layout = Some(l);
     any
+}
+
+/// Put entry `e`'s lines in the layout, as laid out.
+fn place(l: &mut ThreadLayout, e: usize, (block, at, thumb): (Rc<[Line<'static>]>, Rc<[Spot]>, bool)) {
+    if let (Some(b), Some(s), Some(h), Some(x)) = (l.blocks.get_mut(e), l.spots.get_mut(e), l.has_thumb.get_mut(e), l.exact.get_mut(e)) {
+        (*b, *s, *h, *x) = (block, at, thumb, true);
+    }
 }
 
 /// Lay out what's on screen, and a screen above and below (and the selected entry), keeping
@@ -320,14 +337,16 @@ fn settle(t: &mut ThreadView, clock: Clock) {
         let view = t.viewport.max(1);
         t.scroll = t.scroll.min(l.len().saturating_sub(view));
         let top = l.entry_at(t.scroll);
-        let off = t.scroll - l.starts[top];
+        let Some(&start) = l.starts.get(top) else { return };
+        let off = t.scroll - start;
         let (lo, hi) = (l.entry_at(t.scroll.saturating_sub(view)), l.entry_at(t.scroll + 2 * view));
         let cursor = t.entry();
         if !lay_out_entries(t, (lo..=hi).chain([cursor]), clock) {
             return;
         }
         let Some(l) = &t.layout else { return };
-        t.scroll = (l.starts[top] + off).min(l.len().saturating_sub(view));
+        let Some(&start) = l.starts.get(top) else { return };
+        t.scroll = (start + off).min(l.len().saturating_sub(view));
     }
 }
 
@@ -337,8 +356,7 @@ pub fn layout_all(t: &mut ThreadView, width: u16, thumbs: bool, clock: Clock) ->
     let mut cache = LineCache::new();
     let mut l = layout_thread(t, width, thumbs);
     for e in 0..t.entries.len() {
-        let (block, at, thumb) = lay_out(t, &mut cache, e, width, thumbs, clock);
-        (l.blocks[e], l.spots[e], l.has_thumb[e], l.exact[e]) = (block, at, thumb, true);
+        place(&mut l, e, lay_out(t, &mut cache, e, width, thumbs, clock));
     }
     l.restart();
     l
@@ -404,20 +422,21 @@ pub(super) struct PostCtx<'a> {
 }
 
 pub(super) fn post_ctx(t: &ThreadView, i: usize, clock: Clock) -> PostCtx<'_> {
+    let p = t.posts.get(i);
     PostCtx {
         clock,
         is_op: i == 0,
         is_new: t.is_new(i),
         deleted: t.is_deleted(i),
-        backlinks: &t.backlinks[i],
+        backlinks: t.backlinks.get(i).map_or(&[], Vec::as_slice),
         op_no: t.no,
         reveal: t.is_revealed(i),
         search: t.search.to_lowercase(),
         mark: t.marks.get(i),
         mine: &t.mine,
         focus: None,
-        anchor: t.conversation.as_ref().is_some_and(|c| c.poster.is_none() && c.anchor == t.posts[i].no),
-        id_count: t.posts[i].id.as_deref().map_or(0, |id| t.id_count(id)),
+        anchor: t.conversation.as_ref().is_some_and(|c| c.poster.is_none() && p.is_some_and(|p| c.anchor == p.no)),
+        id_count: p.and_then(|p| p.id.as_deref()).map_or(0, |id| t.id_count(id)),
     }
 }
 
@@ -431,7 +450,7 @@ fn id_colors(id: &str) -> (Color, Color) {
     }
     // FNV-1a: the same color for an ID every time.
     let h = id.bytes().fold(0x811c_9dc5u32, |h, b| (h ^ u32::from(b)).wrapping_mul(0x0100_0193));
-    let rgb = TONES[h as usize % TONES.len()];
+    let rgb = TONES.get(h as usize % TONES.len()).copied().unwrap_or_default();
     (Color::Rgb(0x1a, 0x1a, 0x1a), Color::Rgb((rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8))
 }
 
@@ -509,7 +528,7 @@ pub(super) fn post_lines(p: &Post, ctx: &PostCtx, width: usize) -> (Vec<Line<'st
             line.clone()
         } else {
             let ranges: Vec<(usize, usize)> = links.iter().map(|&(a, b, _)| (a, b)).collect();
-            markup::restyle(line, &ranges, |style, r| tag(style, links[r].2))
+            markup::restyle(line, &ranges, |style, r| tag(style, links.get(r).map_or(usize::MAX, |l| l.2)))
         };
         let mut line = if ctx.reveal { markup::reveal(&line) } else { line };
         // A hidden spoiler's text isn't drawn at all (hidden by color alone, it would show in
@@ -585,9 +604,10 @@ pub(super) fn draw_peek(f: &mut Frame, app: &App, area: Rect) {
     let Some(Part::Link(Target::Quote(l))) = app.focused() else { return };
     let Some(t) = &app.tab.thread else { return };
     let Some(&i) = l.post.filter(|_| l.board.is_none() && l.thread.is_none_or(|n| n == t.no)).and_then(|n| t.index.get(&n)) else { return };
+    let Some(p) = t.posts.get(i) else { return };
     let th = theme();
     let width = area.width.saturating_sub(6);
-    let mut lines = post_lines(&t.posts[i], &post_ctx(t, i, app.clock), width as usize).0;
+    let mut lines = post_lines(p, &post_ctx(t, i, app.clock), width as usize).0;
     let h = (cells(lines.len()).saturating_add(2)).min(area.height / 2).max(3);
     lines.truncate(h.saturating_sub(2) as usize);
     // Where the quote is on screen decides where the peek goes.

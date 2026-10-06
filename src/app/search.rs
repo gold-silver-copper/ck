@@ -68,7 +68,7 @@ impl App {
             return Some(self.tab.site);
         }
         let name = site.cfg.archive.as_ref()?;
-        self.site_index(name).filter(|&i| self.sites[i].cfg.kind == SiteKind::Foolfuuka)
+        self.site_index(name).filter(|&i| self.sites.get(i).is_some_and(|s| s.cfg.kind == SiteKind::Foolfuuka))
     }
 
     /// `f` in a catalog: ask what to search for.

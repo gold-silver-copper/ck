@@ -11,7 +11,8 @@ pub(super) fn draw_sites(f: &mut Frame, app: &mut App, area: Rect) {
     let rows = app.visible_sites();
     let mut state = app.site_list.state;
     app.hit = draw_rows(f, area, rows.len(), &mut state, (1, 0), None, &|_| false, &mut |k| {
-        match rows[k] {
+        let Some(&row) = rows.get(k) else { return Vec::new() };
+        match row {
             SiteRow::Watched => {
                 let n = app.store.watched.len();
                 let unread = app.store.watched.iter().fold(0usize, |n, w| n.saturating_add(w.unread));
@@ -43,7 +44,7 @@ pub(super) fn draw_sites(f: &mut Frame, app: &mut App, area: Rect) {
                 vec![Line::from(spans)]
             }
             SiteRow::Favorite(i) => {
-                let b = &app.favorites[i];
+                let Some(b) = app.favorites.get(i) else { return Vec::new() };
                 let left = vec![
                     Span::styled("★  ", Style::new().fg(t.primary)),
                     Span::styled(format!("{:<16}", truncate(&format!("{} /{}/", b.site, b.board), 15)), bold(t.text)),
@@ -63,7 +64,7 @@ pub(super) fn draw_sites(f: &mut Frame, app: &mut App, area: Rect) {
                 ])]
             }
             SiteRow::Site(i) => {
-                let s = &app.sites[i];
+                let Some(s) = app.sites.get(i) else { return Vec::new() };
                 let url = s.cfg.url.clone().unwrap_or_else(|| "https://4chan.org".into());
                 let kind = s.cfg.kind.engine().name;
                 let hidden = app.is_site_hidden(i);
@@ -105,7 +106,7 @@ pub(super) fn draw_watched(f: &mut Frame, app: &mut App, area: Rect) {
     let rows = app.visible_watched();
     let mut state = app.watched_list.state;
     app.hit = draw_rows(f, area, rows.len(), &mut state, (1, 0), None, &|_| false, &mut |k| {
-        let w = &app.store.watched[rows[k]];
+        let Some(w) = rows.get(k).and_then(|&i| app.store.watched.get(i)) else { return Vec::new() };
         let mut right = Vec::new();
         if app.refreshing.contains(&w.key) {
             right.push(Span::styled("↻  ", Style::new().fg(t.primary)));
@@ -146,7 +147,7 @@ pub(super) fn draw_history(f: &mut Frame, app: &mut App, area: Rect) {
     let rows = app.visible_history();
     let mut state = app.history_list.state;
     app.hit = draw_rows(f, area, rows.len(), &mut state, (1, 0), None, &|_| false, &mut |k| {
-        let v = &app.store.history[rows[k]];
+        let Some(v) = rows.get(k).and_then(|&i| app.store.history.get(i)) else { return Vec::new() };
         vec![spread(thread_row(&v.key, &v.subject), vec![Span::styled(ago(v.opened, app.clock), dim())], width)]
     });
     app.history_list.state = state;
@@ -161,7 +162,7 @@ pub(super) fn draw_saved(f: &mut Frame, app: &mut App, area: Rect) {
     let rows = app.visible_saved();
     let mut state = app.saved_list.state;
     app.hit = draw_rows(f, area, rows.len(), &mut state, (1, 0), None, &|_| false, &mut |k| {
-        let m = &app.store.saved[rows[k]];
+        let Some(m) = rows.get(k).and_then(|&i| app.store.saved.get(i)) else { return Vec::new() };
         let mut right = Vec::new();
         if m.dead {
             right.extend([chip("dead", t.background, t.error), Span::raw(" ")]);
@@ -190,7 +191,7 @@ pub(super) fn draw_boards(f: &mut Frame, app: &mut App, area: Rect) {
     let rows = app.visible_boards();
     let mut state = app.tab.board_list.state;
     app.hit = draw_rows(f, area, rows.len(), &mut state, (1, 0), None, &|_| false, &mut |k| {
-        let b = &app.boards()[rows[k]];
+        let Some(b) = rows.get(k).and_then(|&i| app.boards().get(i)) else { return Vec::new() };
         let mut spans = vec![
             Span::styled(format!("{:<width$}", format!("/{}/", b.uri)), bold(t.primary)),
             Span::styled(b.title.clone(), Style::new().fg(t.text)),
@@ -221,8 +222,8 @@ pub(super) fn draw_catalog(f: &mut Frame, app: &mut App, area: Rect) {
     let width = area.width.saturating_sub(PAD + 2) as usize;
     let visible = app.visible_catalog();
     let mut build = |k: usize| -> Vec<Line<'static>> {
-        let i = visible[k];
-        let p = &app.tab.catalog[i];
+        let Some(&i) = visible.get(k) else { return Vec::new() };
+        let Some(p) = app.tab.catalog.get(i) else { return Vec::new() };
         let mark = app.tab.catalog_marks.get(i).cloned().unwrap_or_default();
         let mut head = Vec::new();
         if app.catalog_watching(p) {
@@ -311,7 +312,7 @@ pub(super) fn draw_catalog(f: &mut Frame, app: &mut App, area: Rect) {
     } else {
         (2, 1, Some(t.surface))
     };
-    let highlighted = |k: usize| app.tab.catalog_marks.get(visible[k]).is_some_and(|m| m.highlight.is_some());
+    let highlighted = |k: usize| visible.get(k).and_then(|&i| app.tab.catalog_marks.get(i)).is_some_and(|m| m.highlight.is_some());
     let mut state = app.tab.catalog_list.state;
     app.hit = draw_rows(f, area, visible.len(), &mut state, (height, gap), card, &highlighted, &mut build);
     app.tab.catalog_list.state = state;
@@ -330,12 +331,13 @@ pub(super) fn draw_catalog(f: &mut Frame, app: &mut App, area: Rect) {
     let on_screen = (area.height / per) as usize + 1;
     let offset = app.tab.catalog_list.state.offset();
     for (k, &i) in visible.iter().enumerate().skip(offset).take(on_screen * 2) {
-        let off = app.tab.catalog.get(i).is_some_and(|p| !app.catalog_images_on(p));
-        let Some(file) = app.tab.catalog[i].files.first() else { continue };
+        let Some(p) = app.tab.catalog.get(i) else { continue };
+        let off = !app.catalog_images_on(p);
+        let Some(file) = p.files.first() else { continue };
         let row = (k - offset) as u16 * per;
         if row < area.height {
             let tile = Rect::new(area.x + PAD, area.y + row, CAT_THUMB.width, CAT_THUMB.height);
-            draw_tile(f, &mut app.images, file, app.tab.catalog[i].files.len(), off, tile, area);
+            draw_tile(f, &mut app.images, file, p.files.len(), off, tile, area);
         } else if let Some(url) = file.thumb.as_ref().filter(|u| !off && http::is_media_host(u)) {
             app.images.want(url, Kind::Thumb);
         }
@@ -378,7 +380,7 @@ pub(super) fn draw_search(f: &mut Frame, app: &mut App, area: Rect) {
     let more = app.more_results();
     let needle = s.query.to_lowercase();
     let mut build = |k: usize| -> Vec<Line<'static>> {
-        let (thread, p) = &s.hits[k];
+        let Some((thread, p)) = s.hits.get(k) else { return Vec::new() };
         let mut head = vec![Span::styled(p.name.clone(), bold(t.name)), Span::raw("  ")];
         let key = s.saved.as_ref().and_then(|x| x.keys.get(k));
         if let Some(key) = key {
@@ -471,12 +473,12 @@ fn draw_grid(f: &mut Frame, app: &mut App, area: Rect) {
         let off = app.tab.catalog.get(i).is_some_and(|p| !app.catalog_images_on(p));
         if card.is_empty() {
             // Below the screen: prefetch from media hosts.
-            if let Some(url) = app.tab.catalog[i].files.first().and_then(|f| f.thumb.as_ref()).filter(|u| !off && http::is_media_host(u)) {
+            if let Some(url) = app.tab.catalog.get(i).and_then(|p| p.files.first()).and_then(|f| f.thumb.as_ref()).filter(|u| !off && http::is_media_host(u)) {
                 app.images.want(url, Kind::Thumb);
             }
             continue;
         }
-        let p = &app.tab.catalog[i];
+        let Some(p) = app.tab.catalog.get(i) else { continue };
         let mark = app.tab.catalog_marks.get(i).cloned().unwrap_or_default();
         paint_row(f, card, Some(t.surface), k == sel, mark.highlight.is_some());
         let tile = Rect::new(x + PAD, y, THUMB.width, THUMB.height);

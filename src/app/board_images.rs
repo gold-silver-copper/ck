@@ -46,10 +46,10 @@ impl App {
     /// With `nsfw_images = "off"`, know which of a site's boards are NSFW: from its saved
     /// board list, or (once) by loading it in the background.
     pub(super) fn know_nsfw(&mut self, site: usize) {
-        if self.nsfw_images == NsfwImages::Show || self.sites.get(site).is_none_or(|s| s.boards.is_some()) || self.nsfw_saved.contains_key(&site) {
+        if self.nsfw_images == NsfwImages::Show || self.nsfw_saved.contains_key(&site) {
             return;
         }
-        let name = self.sites[site].cfg.name.clone();
+        let Some(name) = self.sites.get(site).filter(|s| s.boards.is_none()).map(|s| s.cfg.name.clone()) else { return };
         match self.store.load_boards(&name) {
             Some((boards, _)) => {
                 self.nsfw_saved.insert(site, boards.into_iter().filter(|b| b.nsfw == Some(true)).map(|b| b.uri).collect());

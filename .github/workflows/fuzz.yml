@@ -79,6 +79,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: sudo apt-get install -y tmux
       - run: cargo build --release
+      - name: A closed window, a closed pipe, a read-only data directory
+        run: cargo test -- --ignored e2e_terminal_gone e2e_closed_output e2e_read_only_data --nocapture
       - name: Soak for ten minutes
         run: cargo test -- --ignored e2e_soak --nocapture
         env:

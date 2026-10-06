@@ -600,81 +600,75 @@ impl App {
             .chain((0..self.favorites.len()).map(SiteRow::Favorite))
             .chain(self.recent_rows().into_iter().map(SiteRow::Recent))
             .chain(
-                (0..self.sites.len())
-                    .filter(|&i| !self.removed_sites.contains(&self.sites[i].cfg.name))
-                    .filter(|&i| self.show_hidden_sites || !self.is_site_hidden(i))
-                    .map(SiteRow::Site),
+                self.sites
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, s)| !self.removed_sites.contains(&s.cfg.name))
+                    .filter(|&(i, _)| self.show_hidden_sites || !self.is_site_hidden(i))
+                    .map(|(i, _)| SiteRow::Site(i)),
             )
             .chain((!self.hidden_sites.is_empty()).then_some(SiteRow::HiddenSites))
             .collect();
-        let name = |k: usize| match &rows[k] {
+        let name = |row: &SiteRow| match row {
             SiteRow::Watched => "Watched".to_string(),
             SiteRow::History => "History".to_string(),
             SiteRow::Saved => "Saved".to_string(),
-            SiteRow::Favorite(i) => {
-                let f = &self.favorites[*i];
-                format!("{} /{}/ {}", f.site, f.board, self.board_title(f))
-            }
+            SiteRow::Favorite(i) => self.favorites.get(*i).map_or(String::new(), |f| format!("{} /{}/ {}", f.site, f.board, self.board_title(f))),
             SiteRow::Recent(i) => {
                 let r = self.recent_board(*i);
                 r.map_or(String::new(), |r| format!("{} /{}/ {}", r.site, r.board, self.board_title(&r)))
             }
-            SiteRow::Site(i) => self.sites[*i].cfg.name.clone(),
+            SiteRow::Site(i) => self.sites.get(*i).map_or(String::new(), |s| s.cfg.name.clone()),
             SiteRow::HiddenSites => "hidden sites".to_string(),
         };
-        filtered(&self.site_list.filter, rows.len(), name).into_iter().map(|i| rows[i]).collect()
+        filtered(&self.site_list.filter, &rows, name).into_iter().filter_map(|i| rows.get(i).copied()).collect()
     }
 
     pub fn visible_watched(&self) -> Vec<usize> {
-        let w = &self.store.watched;
-        filtered(&self.watched_list.filter, w.len(), |i| format!("{} {} {} {}", w[i].key.site, w[i].key.board, w[i].key.no, w[i].subject))
+        filtered(&self.watched_list.filter, &self.store.watched, |w| format!("{} {} {} {}", w.key.site, w.key.board, w.key.no, w.subject))
     }
 
     pub fn visible_saved(&self) -> Vec<usize> {
-        let s = &self.store.saved;
-        filtered(&self.saved_list.filter, s.len(), |i| format!("{} {} {} {}", s[i].key.site, s[i].key.board, s[i].key.no, s[i].subject))
+        filtered(&self.saved_list.filter, &self.store.saved, |s| format!("{} {} {} {}", s.key.site, s.key.board, s.key.no, s.subject))
     }
 
     pub fn visible_history(&self) -> Vec<usize> {
-        let h = &self.store.history;
-        filtered(&self.history_list.filter, h.len(), |i| format!("{} {} {} {}", h[i].key.site, h[i].key.board, h[i].key.no, h[i].subject))
+        filtered(&self.history_list.filter, &self.store.history, |h| format!("{} {} {} {}", h.key.site, h.key.board, h.key.no, h.subject))
     }
 
     pub fn boards(&self) -> &[Board] {
-        self.sites[self.tab.site].boards.as_deref().unwrap_or(&[])
+        self.sites.get(self.tab.site).and_then(|s| s.boards.as_deref()).unwrap_or(&[])
     }
 
     pub fn visible_boards(&self) -> Vec<usize> {
-        let b = self.boards();
-        filtered(&self.tab.board_list.filter, b.len(), |i| format!("{} {}", b[i].uri, b[i].title))
+        filtered(&self.tab.board_list.filter, self.boards(), |b| format!("{} {}", b.uri, b.title))
     }
 
     pub fn visible_catalog(&self) -> Vec<usize> {
         let needle = self.tab.catalog_list.filter.to_lowercase();
         let shown = |i: usize| self.show_hidden || self.tab.catalog_marks.get(i).is_none_or(|m| m.hidden.is_none());
-        let mut v: Vec<usize> =
-            (0..self.tab.catalog.len()).filter(|&i| shown(i) && self.tab.catalog[i].search_text().contains(&needle)).collect();
-        let c = &self.tab.catalog;
+        let mut v: Vec<(usize, &Post)> =
+            self.tab.catalog.iter().enumerate().filter(|&(i, p)| shown(i) && p.search_text().contains(&needle)).collect();
         match self.tab.catalog_sort {
             Sort::Bump => {}
-            Sort::Replies => v.sort_by_key(|&i| std::cmp::Reverse(c[i].replies.unwrap_or(0))),
-            Sort::Newest => v.sort_by_key(|&i| std::cmp::Reverse((c[i].time, c[i].no))),
-            Sort::Oldest => v.sort_by_key(|&i| (c[i].time, c[i].no)),
+            Sort::Replies => v.sort_by_key(|&(_, p)| std::cmp::Reverse(p.replies.unwrap_or(0))),
+            Sort::Newest => v.sort_by_key(|&(_, p)| std::cmp::Reverse((p.time, p.no))),
+            Sort::Oldest => v.sort_by_key(|&(_, p)| (p.time, p.no)),
         }
         // What a `top` filter highlights first, then (`watched_first`) the threads you watch,
         // each in the sort's order. The filters are rules written to come first whatever the
         // sort; watching is a sort of its own.
-        let top = |i: &usize| self.tab.catalog_marks.get(*i).is_some_and(|m| m.top);
+        let top = |&(i, _): &(usize, &Post)| self.tab.catalog_marks.get(i).is_some_and(|m| m.top);
         let site = self.sites.get(self.tab.catalog_site).map_or("", |s| s.cfg.name.as_str());
         let watched: HashSet<(&str, u64)> = match self.watched_first {
             true => self.store.watched.iter().filter(|w| w.key.site == site).map(|w| (w.key.board.as_str(), w.key.no)).collect(),
             false => HashSet::new(),
         };
-        let watching = |i: &usize| !watched.is_empty() && watched.contains(&(self.board_of(&c[*i]).as_str(), c[*i].no));
-        if v.iter().any(|i| top(i) || watching(i)) {
-            v.sort_by_cached_key(|i| (!top(i), !watching(i)));
+        let watching = |&(_, p): &(usize, &Post)| !watched.is_empty() && watched.contains(&(self.board_of(p).as_str(), p.no));
+        if v.iter().any(|t| top(t) || watching(t)) {
+            v.sort_by_cached_key(|t| (!top(t), !watching(t)));
         }
-        v
+        v.into_iter().map(|(i, _)| i).collect()
     }
 
     /// Whether a thread in the tab's catalog is watched.
@@ -716,6 +710,7 @@ impl App {
         Later(self.tx.clone())
     }
 
+    #[allow(clippy::indexing_slicing)] // the config always has a site, and tab.site is always one of them
     pub fn current_site(&self) -> &Site {
         &self.sites[self.tab.site]
     }
@@ -728,7 +723,7 @@ impl App {
 
     /// The site of this name, if it's still in the config.
     pub fn site_named(&self, name: &str) -> Option<&Site> {
-        self.site_index(name).map(|i| &self.sites[i])
+        self.sites.iter().find(|s| s.cfg.name == name)
     }
 
     /// What's typed after `:`, while it's being typed.
@@ -1084,7 +1079,7 @@ impl App {
         let (board, no, what, mark) = match self.tab.view {
             View::Catalog => {
                 let Some(i) = self.selected_index() else { return };
-                let p = &self.tab.catalog[i];
+                let Some(p) = self.tab.catalog.get(i) else { return };
                 (self.board_of(p), p.no, "thread", self.tab.catalog_marks.get(i).cloned())
             }
             View::Thread => {
@@ -1216,8 +1211,7 @@ impl App {
                 (t.board.clone(), t.no, thread_subject(&posts), posts.len(), max_no(&posts))
             }
             (View::Catalog, Some(b)) => {
-                let Some(i) = self.selected_index() else { return };
-                let op = &self.tab.catalog[i];
+                let Some(op) = self.selected_post() else { return };
                 let posts = op.replies.map_or(1, |r| r as usize + 1);
                 let board = op.board.clone().unwrap_or_else(|| b.uri.clone());
                 // Unknown until the first refresh, which then counts nothing as unread.
@@ -1370,9 +1364,13 @@ impl App {
             self.tab.site = site;
         }
         // Also for the site it's on already (the first, at startup: `ck 4chan` showed none).
-        if self.sites[site].boards.is_none() {
+        if self.sites.get(site).is_some_and(|s| s.boards.is_none()) {
             match self.known_boards(site) {
-                Some(boards) => self.sites[site].boards = Some(boards),
+                Some(boards) => {
+                    if let Some(s) = self.sites.get_mut(site) {
+                        s.boards = Some(boards);
+                    }
+                }
                 None => self.refresh_boards_in_background(site),
             }
         }
@@ -1488,7 +1486,7 @@ impl App {
     /// The post whose files `v`, `i`, `d` act on: the selected catalog entry or thread post.
     fn selected_post(&self) -> Option<&Post> {
         match self.tab.view {
-            View::Catalog => self.selected_index().map(|i| &self.tab.catalog[i]),
+            View::Catalog => self.selected_index().and_then(|i| self.tab.catalog.get(i)),
             View::Thread => self.tab.thread.as_ref().and_then(ThreadView::current),
             _ => None,
         }
@@ -1559,7 +1557,7 @@ impl App {
                 self.store.history.remove(i);
             }
             View::Saved => {
-                let key = self.store.saved[i].key.clone();
+                let Some(key) = self.store.saved.get(i).map(|m| m.key.clone()) else { return };
                 // Asked first: a copy can't be fetched again once the thread is gone. The
                 // second press counts only while the question is still showing.
                 let ask = format!("Press {} again to remove the saved copy of thread {}", self.keys.key(Action::Remove), key.no);
@@ -1626,11 +1624,16 @@ impl App {
                 let Some(key) = self.selected_listed().map(|(k, _)| k.clone()) else { return };
                 if self.tab.view == View::Saved { self.open_saved(&key) } else { self.open_key(key) }
             }
-            (View::Boards, Some(i)) => self.open_catalog(self.boards()[i].clone()),
+            (View::Boards, Some(i)) => {
+                if let Some(b) = self.boards().get(i).cloned() {
+                    self.open_catalog(b);
+                }
+            }
             (View::Catalog, Some(i)) => {
-                let no = self.tab.catalog[i].no;
+                let Some(p) = self.tab.catalog.get(i) else { return };
+                let no = p.no;
                 // On an overboard the thread lives on its own board.
-                if let Some(uri) = self.tab.catalog[i].board.clone().filter(|b| Some(b) != self.tab.catalog_board.as_ref()) {
+                if let Some(uri) = p.board.clone().filter(|b| Some(b) != self.tab.catalog_board.as_ref()) {
                     self.tab.board = Some(self.find_board(&uri));
                 }
                 self.tab.thread = None;
@@ -1671,7 +1674,9 @@ impl App {
         let saved = if cfg.boards.is_none() { self.store.load_boards(&cfg.name) } else { None };
         match saved {
             Some((boards, fetched)) => {
-                self.sites[i].boards = Some(boards);
+                if let Some(s) = self.sites.get_mut(i) {
+                    s.boards = Some(boards);
+                }
                 if self.clock.now().saturating_sub(fetched) > BOARDS_MAX_AGE {
                     self.refresh_boards_in_background(i);
                 }
@@ -1736,7 +1741,7 @@ impl App {
     fn copy(&mut self, link: bool) {
         let what = if let Some(v) = self.tab.viewer() {
             let post_link = v.link.clone().or_else(|| self.viewer_post_link()).or_else(|| self.gallery_link(v.index));
-            if link { post_link.map(|l| ("link", l)) } else { Some(("file URL", v.files[v.index].url.clone())) }
+            if link { post_link.map(|l| ("link", l)) } else { v.files.get(v.index).map(|f| ("file URL", f.url.clone())) }
         } else if link {
             self.selected_link().map(|l| ("link", l))
         } else {
@@ -1782,11 +1787,8 @@ impl App {
         let backend = &self.current_site().backend;
         match (self.tab.view, &self.tab.board) {
             (View::Watched | View::History | View::Saved, _) => self.selected_listed().and_then(|(key, _)| self.thread_link(key, None)),
-            (View::Boards, _) => self.selected_index().map(|i| backend.board_url(&self.boards()[i].uri)),
-            (View::Catalog, Some(b)) => self.selected_index().map(|i| {
-                let p = &self.tab.catalog[i];
-                backend.thread_url(p.board.as_deref().unwrap_or(&b.uri), p.no)
-            }),
+            (View::Boards, _) => self.selected_index().and_then(|i| self.boards().get(i)).map(|board| backend.board_url(&board.uri)),
+            (View::Catalog, Some(b)) => self.selected_post().map(|p| backend.thread_url(p.board.as_deref().unwrap_or(&b.uri), p.no)),
             (View::Thread, Some(b)) => self.tab.thread.as_ref().and_then(|t| self.thread_link(&self.key(&b.uri, t.no), Some(t.current()?.no))),
             _ => None,
         }
@@ -1859,11 +1861,11 @@ fn edit_text(text: &mut String, code: KeyCode) {
     }
 }
 
-/// The indices of `n` items whose `text` contains the filter (any case). The text is only
+/// The indices of the items whose `text` contains the filter (any case). The text is only
 /// made while there's a filter.
-fn filtered(filter: &str, n: usize, text: impl Fn(usize) -> String) -> Vec<usize> {
+fn filtered<T>(filter: &str, items: &[T], text: impl Fn(&T) -> String) -> Vec<usize> {
     let needle = filter.to_lowercase();
-    (0..n).filter(|&i| needle.is_empty() || text(i).to_lowercase().contains(&needle)).collect()
+    items.iter().enumerate().filter(|(_, x)| needle.is_empty() || text(x).to_lowercase().contains(&needle)).map(|(i, _)| i).collect()
 }
 
 #[cfg(test)]

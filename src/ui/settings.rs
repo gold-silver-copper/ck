@@ -20,9 +20,10 @@ pub(super) fn draw_settings(f: &mut Frame, app: &mut App, area: Rect) {
         match r {
             Err(title) => put(f, area.x, y, area.width, Line::styled(title.to_string(), bold(t.primary))),
             Ok(i) => {
-                let (label, hint) = (items[i].label, items[i].hint);
+                let Some(item) = items.get(i) else { continue };
+                let (label, hint) = (item.label, item.hint);
                 paint_row(f, Rect::new(area.x, y, area.width, 1), None, i == selected, false);
-                let value = (items[i].value)(app);
+                let value = (item.value)(app);
                 let hint_w = (area.width as usize).saturating_sub(PAD as usize + 1 + 18 + 34);
                 let line = Line::from(vec![
                     Span::styled(format!("{label:<18}"), Style::new().fg(t.text)),
@@ -65,7 +66,7 @@ fn draw_themes(f: &mut Frame, app: &App, list: &ListState, names: &[String]) {
     let t = theme();
     let inner = panel(f, 52, cells(names.len()).saturating_add(3), "Theme", "enter keep · esc cancel");
     list_rows(f, inner, 0, names.len(), list.selected().or(Some(0)), |k| {
-        let name = &names[k];
+        let Some(name) = names.get(k) else { return Line::default() };
         let mut spans = vec![Span::styled(format!("{name:<22}"), Style::new().fg(t.text))];
         // A row of colored cells: the theme at a glance.
         if let Ok(th) = theme::resolve(name, &app.themes) {
@@ -86,7 +87,7 @@ fn draw_colors(f: &mut Frame, app: &App, list: &ListState, editing: Option<&str>
     let sel = list.selected().unwrap_or(0);
     let first = sel.saturating_sub(rows.saturating_sub(1));
     list_rows(f, Rect { height: rows as u16, ..inner }, first, ROLES.len(), Some(sel), |k| {
-        let (role, desc) = ROLES[k];
+        let Some(&(role, desc)) = ROLES.get(k) else { return Line::default() };
         let c = t.get(role).unwrap_or(Color::Reset);
         Line::from(vec![
             Span::styled("    ", Style::new().bg(c)),
@@ -119,11 +120,12 @@ fn draw_keys(f: &mut Frame, app: &App, list: &ListState, capture: Option<bool>) 
     let first = (sel + 2).saturating_sub(view).min(rows.len().saturating_sub(view));
     // Group titles are never selected, so never painted.
     list_rows(f, Rect { height: view as u16, ..inner }, first, rows.len(), Some(sel), |k| {
-        let i = match rows[k] {
-            Err(title) => return Line::styled(title.to_string(), bold(t.primary)),
-            Ok(i) => i,
+        let i = match rows.get(k) {
+            Some(Err(title)) => return Line::styled(title.to_string(), bold(t.primary)),
+            Some(&Ok(i)) => i,
+            None => return Line::default(),
         };
-        let (action, name, _, scopes, desc) = keys::ACTIONS[i];
+        let Some(&(action, name, _, scopes, desc)) = keys::ACTIONS.get(i) else { return Line::default() };
         let changed = !app.keys.is_default(action);
         let key_style = if changed { bold(t.primary) } else { bold(t.text) };
         let scopes = scopes.iter().map(|s| s.label()).collect::<Vec<_>>().join(", ");
@@ -143,12 +145,12 @@ fn draw_keys(f: &mut Frame, app: &App, list: &ListState, capture: Option<bool>) 
         Line::from(spans)
     });
     let y = inner.bottom().saturating_sub(1);
-    let line = match (capture, rows.get(sel)) {
-        (Some(add), Some(Ok(i))) => {
+    let line = match (capture, rows.get(sel).and_then(|r| r.ok()).and_then(|i| keys::ACTIONS.get(i))) {
+        (Some(add), Some(entry)) => {
             let verb = if add { "Press a key to add to" } else { "Press the new key for" };
             Line::from(vec![
                 Span::styled(format!("{verb} "), Style::new().fg(t.text)),
-                Span::styled(keys::ACTIONS[*i].1, bold(t.primary)),
+                Span::styled(entry.1, bold(t.primary)),
                 Span::styled("   esc cancels", dim()),
             ])
         }
@@ -198,7 +200,7 @@ fn draw_hidden_words(f: &mut Frame, app: &App, list: &ListState, typing: Option<
     let empty = if typing.is_some() { "" } else { "None yet. a adds one; so does w in a post's X." };
     let sel = list.selected().unwrap_or(0);
     let inner = list_panel(f, (70, "Hidden words", hint), words.len(), (sel, typing.is_none()), (empty, "Whole words, any case. Kept in the config as hidden_words."), (1, 1), |k, _| {
-        Line::styled(words[k].clone(), Style::new().fg(t.text))
+        Line::styled(words.get(k).cloned().unwrap_or_default(), Style::new().fg(t.text))
     });
     if let Some(text) = typing {
         let line = Line::from(vec![Span::styled("New  ", dim()), Span::styled(text.to_string(), bold(t.text)), Span::styled("▏", Style::new().fg(t.primary))]);
@@ -213,7 +215,7 @@ fn draw_board_images(f: &mut Frame, app: &App, list: &ListState) {
     let empty = "None: every board follows the default. A board's . menu changes it.";
     let note = "Boards the site marks NSFW follow the NSFW boards setting; the rest show images.";
     list_panel(f, (70, "Board images", "x back to the default · esc close"), boards.len(), (list.selected().unwrap_or(0), true), (empty, note), (0, 0), |k, width| {
-        let (key, on) = &boards[k];
+        let Some((key, on)) = boards.get(k) else { return Line::default() };
         spread(vec![Span::styled(key.clone(), Style::new().fg(t.text))], vec![Span::styled(if *on { "images on" } else { "images off" }, dim())], width as usize)
     });
 }
@@ -225,7 +227,7 @@ fn draw_my_sites(f: &mut Frame, m: &crate::app::MySites) {
     let note = "Kept in the config as [[site]] tables; the built-in sites are always there too.";
     let hint = "a add · r update a vichan site's boards · x remove · esc close";
     list_panel(f, (100, "Your sites", hint), m.sites.len(), (m.list.selected().unwrap_or(0), true), (empty, note), (1, 0), |k, width| {
-        let s = &m.sites[k];
+        let Some(s) = m.sites.get(k) else { return Line::default() };
         let left = vec![
             Span::styled(format!("{:<18}", truncate(&s.name, 17)), bold(t.text)),
             Span::styled(format!("{:<11}", s.kind.as_str()), Style::new().fg(t.text)),
@@ -243,7 +245,7 @@ fn draw_filter_list(f: &mut Frame, app: &App, list: &ratatui::widgets::ListState
     let note = "Counts are for the open catalog and thread. Kept in the config as [[filter]] tables.";
     let hint = "enter edit · space on/off · a add · x remove · esc close";
     list_panel(f, (110, "Filters", hint), cfgs.len(), (list.selected().unwrap_or(0), true), (&empty, note), (1, 0), |k, width| {
-        let c = &cfgs[k];
+        let Some(c) = cfgs.get(k) else { return Line::default() };
         let wide = width >= 90;
         let style = if c.enabled { Style::new().fg(t.text) } else { dim() };
         let fields = c.fields().iter().map(|f| f.as_str()).collect::<Vec<_>>().join("+");

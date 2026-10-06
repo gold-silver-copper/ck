@@ -103,8 +103,8 @@ impl App {
             return self.error("That isn't a link to a site: paste the address of any page of it");
         };
         let open = open.then(|| input.trim().to_string());
-        let known = self.sites.iter().position(|s| self.site_hosts(s).iter().any(|h| *h == link.host.trim_start_matches("www.")));
-        let Some(i) = known else {
+        let known = self.sites.iter().enumerate().find(|(_, s)| self.site_hosts(s).iter().any(|h| *h == link.host.trim_start_matches("www.")));
+        let Some((i, site)) = known else {
             self.popup = Some(Popup::Adding(Adding::Looking { id: self.next_request(), host: link.host.clone(), open }));
             let (id, later) = (self.next_id, self.later());
             std::thread::spawn(move || {
@@ -113,7 +113,7 @@ impl App {
             });
             return;
         };
-        let site = &self.sites[i].cfg;
+        let site = &site.cfg;
         let missing = match (&link.board, &site.boards) {
             (Some(b), Some(list)) if site.kind == SiteKind::Vichan && !list.iter().any(|l| l.uri() == b) => Some(b.clone()),
             _ => None,
@@ -264,7 +264,9 @@ impl App {
         let what = format!("{}'s board /{board}/", before.name);
         let saved = self.save_config_or("Added", &what, |d| config::set_site_boards(d, &before, &boards));
         let cfg = SiteConfig { boards: Some(boards), ..before };
-        self.sites[i] = Site { backend: backend::build(&cfg), cfg, boards: None };
+        if let Some(s) = self.sites.get_mut(i) {
+            *s = Site { backend: backend::build(&cfg), cfg, boards: None };
+        }
         match open {
             Some(o) => self.goto_str(&o),
             None if saved => self.info(format!("Added {what}")),
@@ -309,7 +311,9 @@ impl App {
         let what = format!("{}'s board list", before.name);
         let saved = self.save_config_or("Added", &what, |d| config::set_site_boards(d, &before, &boards));
         let cfg = SiteConfig { boards: Some(boards), ..before };
-        self.sites[i] = Site { backend: backend::build(&cfg), cfg, boards: None };
+        if let Some(s) = self.sites.get_mut(i) {
+            *s = Site { backend: backend::build(&cfg), cfg, boards: None };
+        }
         if saved {
             self.info(format!("Updated {what}"));
         }
@@ -369,10 +373,9 @@ impl App {
                 }
                 self.my_sites()
             }
-            KeyCode::Char('x') | KeyCode::Delete if cur < m.sites.len() => {
+            KeyCode::Char('x') | KeyCode::Delete if let Some(s) = m.sites.get(cur) => {
                 m.armed = Some(cur);
-                let name = &m.sites[cur].name;
-                self.info(format!("x again removes {name} from your config"));
+                self.info(format!("x again removes {} from your config", s.name));
                 Some(m)
             }
             _ => Some(m),

@@ -44,13 +44,11 @@ impl App {
                 (self.key(&t.board, t.no), thread_subject(&posts), posts.len(), max_no(&posts))
             }
             (View::Catalog, Some(_)) => {
-                let Some(i) = self.selected_index() else { return };
-                let op = &self.tab.catalog[i];
+                let Some(op) = self.selected_index().and_then(|i| self.tab.catalog.get(i)) else { return };
                 (self.key(&self.board_of(op), op.no), thread_subject(std::slice::from_ref(op)), 1, 0)
             }
             (View::Watched, _) => {
-                let Some(i) = self.selected_index() else { return };
-                let w = &self.store.watched[i];
+                let Some(w) = self.selected_index().and_then(|i| self.store.watched.get(i)) else { return };
                 (w.key.clone(), w.subject.clone(), w.posts, w.last_seen)
             }
             _ => return,

@@ -115,25 +115,26 @@ pub(super) fn draw_confirm(f: &mut Frame, app: &App) {
 pub(crate) fn wrap_path(text: &str, width: usize) -> Vec<String> {
     let chars: Vec<char> = text.chars().collect();
     let mut out = Vec::new();
-    let mut start = 0;
-    while start < chars.len() {
+    let mut rest = chars.as_slice();
+    while !rest.is_empty() {
         // As many characters as fit (at least one), then back to just after the last slash.
-        let (mut end, mut w) = (start, 0);
-        while end < chars.len() {
-            let cw = unicode_width::UnicodeWidthChar::width(chars[end]).unwrap_or(0);
-            if w + cw > width && end > start {
+        let (mut end, mut w) = (0, 0);
+        for &c in rest {
+            let cw = unicode_width::UnicodeWidthChar::width(c).unwrap_or(0);
+            if w + cw > width && end > 0 {
                 break;
             }
             w += cw;
             end += 1;
         }
-        if end < chars.len()
-            && let Some(slash) = (start..end).rev().find(|&i| chars[i] == '/').filter(|&i| i + 1 - start > (end - start) / 2)
+        let (mut line, mut after) = rest.split_at_checked(end).unwrap_or((rest, &[]));
+        if !after.is_empty()
+            && let Some(slash) = line.iter().rposition(|&c| c == '/').filter(|&i| i + 1 > line.len() / 2)
         {
-            end = slash + 1;
+            (line, after) = rest.split_at_checked(slash + 1).unwrap_or((line, after));
         }
-        out.push(chars[start..end].iter().collect());
-        start = end;
+        out.push(line.iter().collect());
+        rest = after;
     }
     if out.is_empty() {
         out.push(String::new());
@@ -163,7 +164,7 @@ pub(super) fn draw_menu(f: &mut Frame, app: &mut App) {
     m.area = inner;
     list_rows(f, Rect { height: rows as u16, ..inner }, off, m.items.len(), Some(sel), |k| {
         let key = keys.get(k).cloned().unwrap_or_default();
-        Line::from(vec![Span::styled(format!("{key:<key_w$}  "), bold(t.primary)), Span::styled(label(&m.items[k]), Style::new().fg(t.text))])
+        Line::from(vec![Span::styled(format!("{key:<key_w$}  "), bold(t.primary)), Span::styled(m.items.get(k).map(label).unwrap_or_default(), Style::new().fg(t.text))])
     });
 }
 
@@ -220,7 +221,8 @@ pub(super) fn draw_links(f: &mut Frame, app: &mut App) {
     *p.list.offset_mut() = off;
     p.area = inner;
     list_rows(f, Rect { height: rows as u16, ..inner }, off, p.items.len(), Some(sel), |k| {
-        let (kind, text, extra) = match &p.items[k] {
+        let Some(item) = p.items.get(k) else { return Line::default() };
+        let (kind, text, extra) = match item {
             LinkItem::Quote(_, label) => ("quote", label.clone(), String::new()),
             LinkItem::Url(u) => ("web", u.clone(), String::new()),
             LinkItem::File(file) => ("file", file.filename.clone(), format!("  {}", file.url)),
@@ -249,9 +251,10 @@ pub(super) fn draw_image_search(f: &mut Frame, app: &mut App) {
     *p.list.offset_mut() = off;
     p.area = inner;
     // File headers are never selected, so never painted.
-    list_rows(f, Rect { height: rows as u16, ..inner }, off, p.rows.len(), Some(sel), |k| match &p.rows[k] {
-        Err(file) => Line::styled(truncate(file, inner.width as usize), bold(t.primary)),
-        Ok((_, e)) => Line::styled(format!("  {}", names[*e]), Style::new().fg(t.text)),
+    list_rows(f, Rect { height: rows as u16, ..inner }, off, p.rows.len(), Some(sel), |k| match p.rows.get(k) {
+        Some(Err(file)) => Line::styled(truncate(file, inner.width as usize), bold(t.primary)),
+        Some(Ok((_, e))) => Line::styled(format!("  {}", names.get(*e).map_or("", String::as_str)), Style::new().fg(t.text)),
+        None => Line::default(),
     });
 }
 
@@ -394,11 +397,11 @@ pub(super) fn draw_help(f: &mut Frame, app: &App) {
     let area = f.area();
     // Two columns when one doesn't fit, split at the section boundary nearest the middle.
     let two = cells(total).saturating_add(4) > area.height && area.width >= 2 * COL + 8;
-    let mut cols = vec![Vec::new(), Vec::new()];
+    let (mut left, mut right) = (Vec::new(), Vec::new());
     for s in sections {
-        let c = usize::from(two && cols[0].len() + s.len() / 2 >= total / 2);
-        cols[c].extend(s);
+        if two && left.len() + s.len() / 2 >= total / 2 { right.extend(s) } else { left.extend(s) }
     }
+    let mut cols = [left, right];
     for c in &mut cols {
         while c.last().is_some_and(|l| l.width() == 0) {
             c.pop();
