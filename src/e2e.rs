@@ -246,10 +246,16 @@ fn ready(t: &Tmux) {
     panic!("the first key wasn't acted on:\n{}", t.screen());
 }
 
-/// The release binary, if it's built and tmux is there to run it in (`None`: skipped).
-fn ck_and_tmux(test: &str) -> Option<PathBuf> {
+/// The release binary (`CK_BIN`, or target/release/ck).
+fn release_ck() -> PathBuf {
     let ck = PathBuf::from(std::env::var("CK_BIN").unwrap_or_else(|_| format!("{}/target/release/ck", env!("CARGO_MANIFEST_DIR"))));
     assert!(ck.exists(), "no {} (cargo build --release first)", ck.display());
+    ck
+}
+
+/// The release binary, if tmux is there to run it in (`None`: skipped).
+fn ck_and_tmux(test: &str) -> Option<PathBuf> {
+    let ck = release_ck();
     if Command::new("tmux").arg("-V").output().is_err() {
         eprintln!("{test}: no tmux, skipped");
         return None;
@@ -417,4 +423,21 @@ fn e2e_terminal_gone() {
     // (128 and up; 134 is an abort).
     assert!(["0", "1"].contains(&code.trim()), "ck didn't exit cleanly when its terminal went: {code}");
     assert!(session.exists(), "ck didn't save its session when its terminal went");
+}
+
+/// Output to a closed pipe (`ck --help | head -0`): ck must exit as usual, not panic on the
+/// failed write.
+#[test]
+#[ignore = "runs the release binary"]
+fn e2e_closed_output() {
+    let ck = release_ck();
+    let dir = tempfile::tempdir().unwrap();
+    let env = scratch(dir.path(), "");
+    for (args, code) in [(&["--help"][..], 0), (&["--version"], 0), (&["--print-config"], 0), (&["--print-sites"], 0), (&["--nosuch"], 1), (&["a", "b"], 1)] {
+        let (closed, out) = std::io::pipe().unwrap();
+        drop(closed);
+        let err = out.try_clone().unwrap();
+        let status = Command::new(&ck).args(args).envs(env.iter().cloned()).stdout(out).stderr(err).status().unwrap();
+        assert_eq!(status.code(), Some(code), "ck {args:?} into a closed pipe: {status}");
+    }
 }
