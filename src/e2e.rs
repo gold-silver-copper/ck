@@ -441,3 +441,39 @@ fn e2e_closed_output() {
         assert_eq!(status.code(), Some(code), "ck {args:?} into a closed pipe: {status}");
     }
 }
+
+/// A data directory ck can't write to: it must still start, run and quit (reporting what
+/// it couldn't save, if it likes), not panic.
+#[test]
+#[ignore = "slow: runs the release binary in tmux"]
+fn e2e_read_only_data() {
+    use std::os::unix::fs::PermissionsExt;
+    let Some(ck) = ck_and_tmux("e2e_read_only_data") else { return };
+    let dir = tempfile::tempdir().unwrap();
+    let env = scratch(dir.path(), &one_site(12));
+    let data = dir.path().join("data/ck");
+    std::fs::create_dir_all(&data).unwrap();
+    std::fs::set_permissions(&data, std::fs::Permissions::from_mode(0o555)).unwrap();
+    if std::fs::write(data.join("probe"), "").is_ok() {
+        eprintln!("e2e_read_only_data: the data directory is writable anyway (root?), skipped");
+        return;
+    }
+    let tmux = Tmux { socket: format!("ck-e2e-ro-{}", std::process::id()) };
+    tmux.start(&ck, &env, (110, 32));
+    ready(&tmux);
+    // To a thread, and watch and save it (each a write that fails).
+    tmux.keys(&[":"]);
+    tmux.text("vichan/g");
+    for keys in [&["Enter"][..], &["j", "Enter"], &["w", "s"], &["Escape", "w", "s"]] {
+        tmux.keys(keys);
+        std::thread::sleep(Duration::from_millis(700));
+    }
+    if std::env::var_os("E2E_SHOW").is_some() {
+        eprintln!("{}", tmux.screen());
+    }
+    tmux.keys(&["Escape", "Escape", "C-c"]);
+    let s = exited(&tmux);
+    std::fs::set_permissions(&data, std::fs::Permissions::from_mode(0o755)).unwrap();
+    assert!(!s.contains("panicked"), "ck panicked:\n{s}");
+    assert!(s.contains("CK_EXIT=0"), "ck didn't quit cleanly:\n{s}");
+}
