@@ -133,12 +133,15 @@ impl Tmux {
         String::from_utf8_lossy(&out.stdout).into_owned()
     }
 
-    fn start(&self, ck: &Path, env: &[(String, String)], (w, h): (u16, u16)) {
-        let vars: String = env.iter().map(|(k, v)| format!("{k}='{v}' ")).collect();
+    fn start(&self, ck: &Path, env: &[(String, String)], size: (u16, u16)) {
         // The window stays after ck exits, showing how it went.
-        let cmd = format!("env {vars} '{}'; echo CK_EXIT=$?; sleep 600", ck.display());
+        self.launch(&format!("{}; echo CK_EXIT=$?; sleep 600", command(ck, env, &[])), size);
+    }
+
+    /// `cmd` in a new window of a new server.
+    fn launch(&self, cmd: &str, (w, h): (u16, u16)) {
         let _ = self.run(&["kill-server"]);
-        self.run(&["new-session", "-d", "-s", "ck", "-x", &w.to_string(), "-y", &h.to_string(), &cmd]);
+        self.run(&["new-session", "-d", "-s", "ck", "-x", &w.to_string(), "-y", &h.to_string(), cmd]);
     }
 
     fn screen(&self) -> String {
@@ -161,6 +164,13 @@ impl Tmux {
         let out = Command::new("pgrep").args(["-P", shell.trim()]).output().ok()?;
         String::from_utf8_lossy(&out.stdout).lines().next()?.trim().parse().ok()
     }
+}
+
+/// The shell command that runs ck with `env` and `args`.
+fn command(ck: &Path, env: &[(String, String)], args: &[&str]) -> String {
+    let vars: String = env.iter().map(|(k, v)| format!("{k}='{v}' ")).collect();
+    let args: String = args.iter().map(|a| format!(" '{a}'")).collect();
+    format!("env {vars} '{}'{args}", ck.display())
 }
 
 impl Drop for Tmux {
@@ -234,6 +244,30 @@ fn ready(t: &Tmux) {
     panic!("the first key wasn't acted on:\n{}", t.screen());
 }
 
+/// The release binary, if it's built and tmux is there to run it in (`None`: skipped).
+fn ck_and_tmux(test: &str) -> Option<PathBuf> {
+    let ck = PathBuf::from(std::env::var("CK_BIN").unwrap_or_else(|_| format!("{}/target/release/ck", env!("CARGO_MANIFEST_DIR"))));
+    assert!(ck.exists(), "no {} (cargo build --release first)", ck.display());
+    if Command::new("tmux").arg("-V").output().is_err() {
+        eprintln!("{test}: no tmux, skipped");
+        return None;
+    }
+    Some(ck)
+}
+
+/// `config` written to a scratch config directory in `dir`, and the environment that has
+/// ck use it and keep its data, cache and last frame (frame.txt) in `dir` too.
+fn scratch(dir: &Path, config: &str) -> Vec<(String, String)> {
+    std::fs::create_dir_all(dir.join("config/ck")).unwrap();
+    std::fs::write(dir.join("config/ck/config.toml"), config).unwrap();
+    [("XDG_CONFIG_HOME", "config"), ("XDG_DATA_HOME", "data"), ("XDG_CACHE_HOME", "cache")]
+        .iter()
+        .map(|(k, d)| (k.to_string(), dir.join(d).display().to_string()))
+        .chain([("CK_NO_EXTERNAL".into(), "1".into()), ("COLORTERM".into(), "truecolor".into())])
+        .chain([("CK_FRAME_DUMP".into(), dir.join("frame.txt").display().to_string())])
+        .collect()
+}
+
 const KEYS: &[&str] = &[
     "j", "j", "j", "k", "Enter", "Enter", "Escape", "h", "l", "g", "G", "Down", "Up", "PageDown", "PageUp", "Home", "End",
     "Tab", "BTab", "Space", "BSpace", "w", "s", "c", "v", "i", "b", "u", "U", "p", "n", "N", "S", "d", "D", "a", "x", "y",
@@ -244,12 +278,7 @@ const KEYS: &[&str] = &[
 #[test]
 #[ignore = "slow: runs the release binary in tmux for a minute"]
 fn e2e_soak() {
-    let ck = PathBuf::from(std::env::var("CK_BIN").unwrap_or_else(|_| format!("{}/target/release/ck", env!("CARGO_MANIFEST_DIR"))));
-    assert!(ck.exists(), "no {} (cargo build --release first)", ck.display());
-    if Command::new("tmux").arg("-V").output().is_err() {
-        eprintln!("e2e_soak: no tmux, skipped");
-        return;
-    }
+    let Some(ck) = ck_and_tmux("e2e_soak") else { return };
     let secs: u64 = std::env::var("E2E_SECS").ok().and_then(|v| v.parse().ok()).unwrap_or(60);
     let seed: u64 = std::env::var("FUZZ_SEED").ok().and_then(|v| v.parse().ok()).unwrap_or_else(|| {
         std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(1, |d| d.as_nanos() as u64)
@@ -273,14 +302,7 @@ fn e2e_soak() {
         let kind = format!("{kind:?}").to_lowercase();
         let _ = write!(config, "\n[[site]]\nname = \"{name}\"\nkind = \"{kind}\"\nurl = \"http://127.0.0.1:{port}\"\n{extra}");
     }
-    std::fs::create_dir_all(dir.path().join("config/ck")).unwrap();
-    std::fs::write(dir.path().join("config/ck/config.toml"), &config).unwrap();
-    let env: Vec<(String, String)> = [("XDG_CONFIG_HOME", "config"), ("XDG_DATA_HOME", "data"), ("XDG_CACHE_HOME", "cache")]
-        .iter()
-        .map(|(k, d)| (k.to_string(), dir.path().join(d).display().to_string()))
-        .chain([("CK_NO_EXTERNAL".into(), "1".into()), ("COLORTERM".into(), "truecolor".into())])
-        .chain([("CK_FRAME_DUMP".into(), dir.path().join("frame.txt").display().to_string())])
-        .collect();
+    let env = scratch(dir.path(), &config);
     let tmux = Tmux { socket: format!("ck-e2e-{}", std::process::id()) };
     tmux.start(&ck, &env, (110, 32));
     ready(&tmux);
@@ -357,4 +379,40 @@ fn e2e_soak() {
     let (_, warnings) = crate::store::Store::load(Some(dir.path().join("data/ck")));
     assert!(warnings.is_empty(), "the data doesn't load cleanly: {warnings:?}");
     eprintln!("e2e_soak: {sent} steps, {restarts} restarts, {quits} quits from the menu, peak {peak} KB, no failures");
+}
+
+/// A config with one small vichan site on a local server.
+fn one_site(seed: u64) -> String {
+    let port = serve(SiteKind::Vichan, seed);
+    format!("notify = \"off\"\nrestore_session = true\n\n[[site]]\nname = \"vichan\"\nkind = \"vichan\"\nurl = \"http://127.0.0.1:{port}\"\nboards = [\"g\"]\n")
+}
+
+/// Closing the window (here, killing the pane) hangs ck up and takes its terminal away: it
+/// must still save and exit, not abort when it can't put the terminal back. (It used to:
+/// ratatui::restore panicked writing its error to the gone stderr, inside the panic hook.)
+#[test]
+#[ignore = "slow: runs the release binary in tmux"]
+fn e2e_terminal_gone() {
+    let Some(ck) = ck_and_tmux("e2e_terminal_gone") else { return };
+    let dir = tempfile::tempdir().unwrap();
+    let env = scratch(dir.path(), &one_site(7));
+    let status = dir.path().join("status");
+    let session = dir.path().join("data/ck/session.json");
+    let tmux = Tmux { socket: format!("ck-e2e-gone-{}", std::process::id()) };
+    // The shell outlives the hangup (a trap, which ck doesn't inherit) to note how ck ended.
+    let cmd = format!("trap : HUP; {}; echo $? > '{}'", command(&ck, &env, &["vichan/g"]), status.display());
+    tmux.launch(&cmd, (110, 32));
+    ready(&tmux);
+    assert!(!session.exists(), "the session was saved before ck quit");
+    tmux.run(&["kill-pane", "-t", "ck"]);
+    let ended = Instant::now();
+    while !status.exists() && ended.elapsed() < Duration::from_secs(10) {
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    std::thread::sleep(Duration::from_millis(100));
+    let code = std::fs::read_to_string(&status).unwrap_or_else(|_| "(still running)".into());
+    // 0, or 1 when drawing failed before the hangup was seen: not a panic (101) or a signal
+    // (128 and up; 134 is an abort).
+    assert!(["0", "1"].contains(&code.trim()), "ck didn't exit cleanly when its terminal went: {code}");
+    assert!(session.exists(), "ck didn't save its session when its terminal went");
 }
