@@ -104,7 +104,7 @@ pub(super) fn draw_viewer(f: &mut Frame, app: &mut App) {
     };
     // Terminal graphics would cover a panel on top.
     let Some((url, kind)) = source.filter(|_| !matches!(app.popup, Some(Popup::ImageSearch(_)))) else { return };
-    let spinner = SPINNER[app.tick % SPINNER.len()];
+    let spinner = spinner(app.tick);
     // How much of the image this zoom shows here, for moving around (and so what's shown stays
     // inside the image).
     let mut crop = crop;

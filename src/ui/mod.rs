@@ -47,6 +47,10 @@ pub use thread::layout_all;
 pub(crate) use popups::wrap_path;
 
 const SPINNER: [&str; 8] = ["⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"];
+/// The spinner's frame at this tick.
+fn spinner(tick: usize) -> &'static str {
+    SPINNER.get(tick % SPINNER.len()).copied().unwrap_or_default()
+}
 /// Thumbnail sizes in cells (roughly square at a 1:2 cell aspect).
 const THUMB: Size = Size::new(16, 8);
 const CAT_THUMB: Size = Size::new(10, 4);
@@ -472,7 +476,7 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
         ])
     } else if let Some(label) = &app.tab.loading {
         Line::from(vec![
-            Span::styled(format!(" {} ", SPINNER[app.tick % SPINNER.len()]), bold(t.primary)),
+            Span::styled(format!(" {} ", spinner(app.tick)), bold(t.primary)),
             Span::styled(format!("{label}…"), Style::new().fg(t.on_bar)),
         ])
     } else if let Some(s) = &app.status {

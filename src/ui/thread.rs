@@ -450,8 +450,7 @@ fn id_colors(id: &str) -> (Color, Color) {
     }
     // FNV-1a: the same color for an ID every time.
     let h = id.bytes().fold(0x811c_9dc5u32, |h, b| (h ^ u32::from(b)).wrapping_mul(0x0100_0193));
-    #[allow(clippy::indexing_slicing)] // a remainder of the length is always in range
-    let rgb = TONES[h as usize % TONES.len()];
+    let rgb = TONES.get(h as usize % TONES.len()).copied().unwrap_or_default();
     (Color::Rgb(0x1a, 0x1a, 0x1a), Color::Rgb((rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8))
 }
 
