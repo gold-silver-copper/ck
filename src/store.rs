@@ -401,14 +401,14 @@ impl Store {
         self.watched.iter_mut().find(|w| &w.key == key)
     }
 
-    /// Start or stop watching (forgetting which posts are yours); whether it's watched now.
-    pub fn toggle_watch(&mut self, key: ThreadKey, subject: String, posts: usize, last_seen: u64) -> Changed<bool> {
-        if let Some(i) = self.watched.iter().position(|w| w.key == key) {
-            self.watched.remove(i);
-            return Changed::new(false);
+    /// Watch a thread, unless it's watched already; whether it wasn't. Nothing hiding reads
+    /// changes (none of its posts are yours yet), so it's no `Changed`.
+    pub fn watch(&mut self, key: ThreadKey, subject: String, posts: usize, last_seen: u64) -> bool {
+        if self.watched(&key).is_some() {
+            return false;
         }
         self.watched.push(Watched { key, subject, posts, last_seen, ..Default::default() });
-        Changed::new(true)
+        true
     }
 
     pub fn unwatch(&mut self, key: &ThreadKey) -> Changed<()> {
@@ -694,7 +694,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let (mut s, warnings) = Store::load(Some(dir.path().to_path_buf()));
         assert!(warnings.is_empty() && s.watched.is_empty());
-        assert!(s.toggle_watch(key(1), "one".into(), 5, 105).unchecked());
+        assert!(s.watch(key(1), "one".into(), 5, 105));
         s.visit(&key(2), "two", 3, 203, 1000);
         s.save().unwrap();
         assert!(!dir.path().join("watched.json.tmp").exists());
@@ -741,7 +741,7 @@ mod tests {
         // Nothing changed: nothing written (not even empty files).
         s.save().unwrap();
         assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
-        s.toggle_watch(key(1), "x".into(), 1, 1).unchecked();
+        s.watch(key(1), "x".into(), 1, 1);
         s.save().unwrap();
         assert!(dir.path().join("watched.json").exists() && !dir.path().join("history.json").exists());
         // Written once; an unchanged store doesn't write it again.
@@ -855,11 +855,12 @@ mod tests {
     #[test]
     fn toggle_and_visit_clear_unread() {
         let mut s = Store::default();
-        s.toggle_watch(key(1), "x".into(), 10, 110).unchecked();
+        s.watch(key(1), "x".into(), 10, 110);
         s.watched_mut(&key(1)).unwrap().unread = 4;
         s.visit(&key(1), "x", 14, 114, 0);
         assert_eq!((s.watched[0].unread, s.watched[0].last_seen, s.watched[0].posts), (0, 114, 14));
-        assert!(!s.toggle_watch(key(1), String::new(), 0, 0).unchecked());
+        assert!(!s.watch(key(1), String::new(), 0, 0));
+        s.unwatch(&key(1)).unchecked();
         assert!(s.watched.is_empty());
     }
 
@@ -930,7 +931,7 @@ mod tests {
         s.saved_dead(&key(1));
         s.saved_dead(&key(2));
         for no in [1, 4, 5] {
-            s.toggle_watch(key(no), String::new(), 0, 0).unchecked();
+            s.watch(key(no), String::new(), 0, 0);
         }
         s.saved_max = one * 2;
         s.keep_thread(&key(5), "", "u", &posts(&many), 5);
@@ -948,7 +949,7 @@ mod tests {
         std::fs::remove_dir_all(dir.path().join("threads")).unwrap();
         std::fs::write(dir.path().join("threads"), "not a folder").unwrap();
         // (Watched, so it stays over the limit.)
-        s.toggle_watch(key(6), String::new(), 0, 0).unchecked();
+        s.watch(key(6), String::new(), 0, 0);
         s.keep_thread(&key(6), "", "u", &posts(&many), 6);
         let errors = s.flush(std::time::Duration::from_secs(10));
         assert!(errors.len() == 1 && errors[0].contains("Couldn't save a copy of thread 6"), "{errors:?}");

@@ -627,10 +627,11 @@ impl App {
                 // aren't new or replies to you: the thread passes them over when it's open.
                 // What decides it is kept, to count them again when what's hidden changes.
                 let fresh = with_ancestry(&posts, |p| p.no > last_seen);
-                let (unread, replies) = self.watched_unread(&key, last_seen, &fresh);
+                let count = self.unread_counter(&key, &fresh);
+                let (unread, replies) = count(last_seen);
                 // Tell about posts newer than this session's last refresh (not on the first
                 // one, which may find posts from long ago).
-                let (new, new_replies) = prev.map_or((0, 0), |m| self.watched_unread(&key, last_seen.max(m), &fresh));
+                let (new, new_replies) = prev.map_or((0, 0), |m| count(last_seen.max(m)));
                 // Those a `notify` filter catches, hidden or not: asked for by name.
                 let past = |p: &&Post| p.no > last_seen && prev.is_some_and(|m| p.no > m);
                 let caught: Vec<String> = posts.iter().filter(past).filter_map(|p| self.hiding.filters().check(&key.site, &key.board, p, p.no == key.no).notify).collect();

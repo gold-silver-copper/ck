@@ -104,7 +104,7 @@ fn sleeps_until_the_next_thing_to_do() {
     app.status_since = None;
     // A watched thread that was never refreshed is due now.
     let key = ThreadKey { site: "4chan".into(), board: "g".into(), no: 1 };
-    app.store.toggle_watch(key, String::new(), 1, 1).unchecked();
+    app.store.watch(key, String::new(), 1, 1);
     assert_eq!(app.next_wake(now), Duration::ZERO);
     // But while the maximum number of refreshes is running, due ones don't spin the loop.
     for no in [2, 3] {
@@ -456,7 +456,7 @@ fn hidden_posts_are_not_new_in_watched_threads() {
     let post = |no, quotes: Vec<u64>, text: &str| Post { no, quotes, body: vec![Line::raw(text.to_string())], ..Default::default() };
     app.rehide(|a| a.hiding.set_filters(crate::filter::tests::filters("[[filter]]\npattern = \"spam\"\n\n[[filter]]\npattern = \"rust\"\naction = \"highlight\"\nnotify = true\n").unwrap()));
     app.rehide(|a| a.hiding.set_recursive(true));
-    app.rehide(|a| a.store.toggle_watch(key.clone(), "One".into(), 2, 5));
+    app.store.watch(key.clone(), "One".into(), 2, 5);
     app.store.toggle_mine(&key, 5).unchecked();
     let start = vec![post(1, vec![], ""), post(5, vec![], "")];
     app.refreshed(key.clone(), Ok(start.clone()));
@@ -482,8 +482,8 @@ fn notifies_about_new_posts_and_replies_to_yours() {
     let mut app = local_app();
     let key = |no| ThreadKey { site: "a".into(), board: "x".into(), no };
     let post = |no, quotes: Vec<u64>| Post { no, quotes, ..Default::default() };
-    app.rehide(|a| a.store.toggle_watch(key(1), "One".into(), 2, 5));
-    app.rehide(|a| a.store.toggle_watch(key(2), "Two".into(), 1, 20));
+    app.store.watch(key(1), "One".into(), 2, 5);
+    app.store.watch(key(2), "Two".into(), 1, 20);
     app.store.toggle_mine(&key(1), 5).unchecked();
     // The first refresh of the session tells nothing.
     app.refreshed(key(1), Ok(vec![post(1, vec![]), post(5, vec![]), post(6, vec![5])]));
@@ -517,7 +517,7 @@ fn notify_filters_tell_about_what_they_catch_once() {
     app.rehide(|a| a.hiding.set_filters(crate::filter::tests::filters(cfg).unwrap()));
     let key = |no| ThreadKey { site: "a".into(), board: "x".into(), no };
     let post = |no, id: &str| Post { no, id: Some(id.into()), ..Default::default() };
-    app.rehide(|a| a.store.toggle_watch(key(1), "One".into(), 1, 1));
+    app.store.watch(key(1), "One".into(), 1, 1);
     // The first refresh of the session tells nothing, though it catches one.
     app.refreshed(key(1), Ok(vec![post(1, "x"), post(2, "Ab3d")]));
     app.flush_notes(Instant::now());
@@ -573,7 +573,7 @@ fn watched_threads_first_after_top_ones() {
     let key = |site: &str, board: &str, no| ThreadKey { site: site.into(), board: board.into(), no };
     // Watched: 3 and 4 here; 1 on another board, 5 on another site.
     for k in [key("a", "x", 3), key("a", "x", 4), key("a", "xy", 1), key("b", "x", 5)] {
-        app.rehide(|a| a.store.toggle_watch(k, String::new(), 0, 0));
+        app.store.watch(k, String::new(), 0, 0);
     }
     // Off: the sort, with the top ones first.
     assert!(!app.watched_first);
@@ -1442,7 +1442,7 @@ fn watched_threads_are_saved_as_posts_arrive() {
     app.set_thread(nos(&[1, 2, 3]));
     assert_eq!(app.store.saved(&key(1)).unwrap().posts, 3);
     // A watched thread refreshed in the background, too.
-    app.rehide(|a| a.store.toggle_watch(key(7), "seven".into(), 1, 7));
+    app.store.watch(key(7), "seven".into(), 1, 7);
     app.refreshed(key(7), Ok(nos(&[7, 8])));
     app.flush_writes();
     assert!(file(7).exists());
@@ -1481,7 +1481,7 @@ fn a_dead_thread_offers_its_saved_copy() {
     let mut app = saving_app(dir.path(), 10_000);
     let key = ThreadKey { site: "a".into(), board: "x".into(), no: 1 };
     // A watched thread opens from its saved copy at once, and when it's gone, that's it.
-    app.rehide(|a| a.store.toggle_watch(key.clone(), "one".into(), 2, 2));
+    app.store.watch(key.clone(), "one".into(), 2, 2);
     app.store.keep_thread(&key, "one", "u", &nos(&[1, 2]), 10_000 - 7200);
     app.goto_str("a/x/1");
     assert_eq!(app.tab.cached(), Some(tabs::Offline { saved: 10_000 - 7200, dead: false }));
@@ -1490,7 +1490,7 @@ fn a_dead_thread_offers_its_saved_copy() {
     assert!(app.store.watched(&key).unwrap().dead && app.store.saved(&key).unwrap().dead);
     assert_eq!((app.tab.cached(), app.tab.saved().map(|o| o.dead)), (None, Some(true)));
     // An exported copy of a thread that isn't watched: offered when the thread is gone.
-    app.rehide(|a| a.store.toggle_watch(key.clone(), String::new(), 0, 0));
+    app.rehide(|a| a.store.unwatch(&key));
     app.goto_str("a/x");
     app.goto_str("a/x/1");
     assert!(app.tab.thread.is_none());
@@ -1583,8 +1583,8 @@ fn the_saved_view_lists_and_removes_after_asking() {
     app.flush_writes();
     assert!(app.store.saved(&key(3)).is_none() && !dir.path().join("threads/a/x/3.json").exists());
     // Unwatching keeps a copy.
-    app.rehide(|a| a.store.toggle_watch(key(1), String::new(), 1, 1));
-    app.rehide(|a| a.store.toggle_watch(key(1), String::new(), 1, 1));
+    app.store.watch(key(1), String::new(), 1, 1);
+    app.rehide(|a| a.store.unwatch(&key(1)));
     assert!(app.store.saved(&key(1)).is_some());
     // From : too.
     app.tab.view = View::Sites;
@@ -2990,7 +2990,7 @@ fn new_posts_wait_for_notifying_by_the_app_clock() {
     // The app's clock is an hour on from the real one.
     let later = Instant::now() + Duration::from_secs(3600);
     app.clock = Clock { instant: Some(later), ..Default::default() };
-    app.rehide(|a| a.store.toggle_watch(key.clone(), "One".into(), 1, 1));
+    app.store.watch(key.clone(), "One".into(), 1, 1);
     app.refreshed(key.clone(), Ok(vec![post(1)]));
     app.refreshed(key, Ok(vec![post(1), post(2)]));
     assert_eq!(app.notes_since, Some(later));
@@ -3196,8 +3196,8 @@ fn the_terminal_title_says_where_and_whats_new() {
     let title = |app: &App| app.terminal_title().unwrap_or_default();
     // Away from a thread: the watched threads' unread posts, and whether some reply to yours.
     assert_eq!(title(&app), "ck: Sites");
-    app.rehide(|a| a.store.toggle_watch(key(1), "One".into(), 2, 5));
-    app.rehide(|a| a.store.toggle_watch(key(9), "Gone".into(), 2, 5));
+    app.store.watch(key(1), "One".into(), 2, 5);
+    app.store.watch(key(9), "Gone".into(), 2, 5);
     app.store.watched_mut(&key(1)).unwrap().unread = 3;
     assert_eq!(title(&app), "ck: (3) Sites");
     app.store.watched_mut(&key(1)).unwrap().replies = 1;
@@ -3237,7 +3237,7 @@ fn quiet_threads_are_refreshed_less_often() {
     at(&mut app, 0);
     // A watched thread: each refresh that brings nothing waits half as long again, up to
     // ten times the setting (60s) and 10 minutes; a new post starts over.
-    app.rehide(|a| a.store.toggle_watch(key(1), "One".into(), 2, 2));
+    app.store.watch(key(1), "One".into(), 2, 2);
     let mut every = Vec::new();
     for _ in 0..9 {
         app.refreshed(key(1), Ok(nos(&[1, 2])));
@@ -3262,7 +3262,7 @@ fn quiet_threads_are_refreshed_less_often() {
     app.refresh_backoff = false;
     assert_eq!(app.watched_every(&key(1)), Duration::from_secs(60));
     app.refresh_backoff = true;
-    app.rehide(|a| a.store.toggle_watch(key(1), String::new(), 0, 0));
+    app.rehide(|a| a.store.unwatch(&key(1)));
 
     // The open thread the same, from 10s up to 100s; opening it (or r) starts over.
     at(&mut app, 1000);
@@ -3313,8 +3313,8 @@ fn watched_threads_know_their_page_once_a_round_per_board() {
     let t0 = Instant::now();
     app.clock = Clock { instant: Some(t0), ..Default::default() };
     let key = |no| ThreadKey { site: "p".into(), board: "tech".into(), no };
-    app.rehide(|a| a.store.toggle_watch(key(30364), "First".into(), 2, 2));
-    app.rehide(|a| a.store.toggle_watch(key(39212), "Last".into(), 2, 2));
+    app.store.watch(key(30364), "First".into(), 2, 2);
+    app.store.watch(key(39212), "Last".into(), 2, 2);
     let pages = |asked: &Arc<std::sync::Mutex<Vec<String>>>| http::lock(asked).iter().filter(|u| u.ends_with("/threads.json")).count();
     // Both threads refresh (one at a time), and the board's pages are asked for once.
     for _ in 0..2 {
@@ -3332,8 +3332,8 @@ fn watched_threads_know_their_page_once_a_round_per_board() {
     settle_until(&mut app, |a| a.refreshing.is_empty() && a.pages_asking.is_empty());
     assert_eq!(pages(&asked), 2);
     // A thread that isn't watched (open, say) doesn't ask.
-    app.rehide(|a| a.store.toggle_watch(key(30364), String::new(), 0, 0));
-    app.rehide(|a| a.store.toggle_watch(key(39212), String::new(), 0, 0));
+    app.rehide(|a| a.store.unwatch(&key(30364)));
+    app.rehide(|a| a.store.unwatch(&key(39212)));
     app.clock = Clock { instant: Some(t0 + Duration::from_secs(200)), ..Default::default() };
     app.refresh_in_background(key(30364));
     settle_until(&mut app, |a| a.refreshing.is_empty() && a.pages_asking.is_empty());
@@ -3485,7 +3485,7 @@ fn the_menu_offers_no_gallery_when_only_hidden_posts_have_files() {
 fn hiding_recounts_new_posts_in_watched_threads() {
     let mut app = local_app();
     let key = ThreadKey { site: "a".into(), board: "x".into(), no: 1 };
-    app.rehide(|a| a.store.toggle_watch(key.clone(), "One".into(), 1, 1));
+    app.store.watch(key.clone(), "One".into(), 1, 1);
     let start = posts_saying(&[(1, "a thread")]);
     app.refreshed(key.clone(), Ok(start));
     app.refreshed(key.clone(), Ok(posts_saying(&[(1, "a thread"), (2, "buy crypto"), (3, "hello")])));

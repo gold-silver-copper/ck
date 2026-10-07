@@ -14,9 +14,9 @@ const HOUR: i64 = 3600;
 fn app(images: bool) -> App {
     let mut app = test_app();
     let key = |board: &str, no| ThreadKey { site: "4chan".into(), board: board.into(), no };
-    app.store.toggle_watch(key("g", 1000), "Snapshot thread".into(), 5, 1002).unchecked();
-    app.store.toggle_watch(key("g", 900), "Old thread".into(), 300, 1199).unchecked();
-    app.store.toggle_watch(ThreadKey { site: "lainchan".into(), board: "λ".into(), no: 42 }, "Programming Employment".into(), 92, 77).unchecked();
+    app.store.watch(key("g", 1000), "Snapshot thread".into(), 5, 1002);
+    app.store.watch(key("g", 900), "Old thread".into(), 300, 1199);
+    app.store.watch(ThreadKey { site: "lainchan".into(), board: "λ".into(), no: 42 }, "Programming Employment".into(), 92, 77);
     app.store.watched_vec()[0].unread = 2;
     app.store.watched_vec()[1].dead = true;
     app.store.history = vec![
@@ -1686,7 +1686,7 @@ fn huge_counts_from_the_data_files_dont_overflow() {
     let mut a = app(false);
     for no in [1, 2] {
         let key = ThreadKey { site: "4chan".into(), board: "g".into(), no };
-        a.rehide(|a| a.store.toggle_watch(key.clone(), "t".into(), 1, 1));
+        a.store.watch(key.clone(), "t".into(), 1, 1);
         let w = a.store.watched_mut(&key).unwrap();
         (w.unread, w.replies) = (usize::MAX, usize::MAX);
     }

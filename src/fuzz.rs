@@ -639,7 +639,7 @@ fn data_dir_once(seed: u64) {
     let (mut store, _) = Store::load(Some(data.clone()));
     for i in 0..rng.below(6) as u64 {
         let key = ThreadKey { site: rng.pick(&["4chan", "lainchan", "nosuch"]).to_string(), board: "g".into(), no: 100 + i };
-        store.toggle_watch(key.clone(), format!("thread {i}"), 10, 105 + i).unchecked();
+        store.watch(key.clone(), format!("thread {i}"), 10, 105 + i);
         store.visit(&key, "subject", 10, 109, START + i as i64);
         store.toggle_hidden(&key.site, "g", 200 + i).unchecked();
         store.opened(&key.site, "g", key.no, 9, START);

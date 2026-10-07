@@ -1164,7 +1164,11 @@ impl App {
             _ => return,
         };
         let key = self.key(&board, no);
-        let watching = self.rehide(|a| a.store.toggle_watch(key.clone(), subject, posts, last_seen));
+        // Unwatching forgets which posts are yours; watching changes nothing hidden.
+        let watching = self.store.watch(key.clone(), subject, posts, last_seen);
+        if !watching {
+            self.rehide(|a| a.store.unwatch(&key));
+        }
         if watching {
             self.keep_open_thread(&key);
         }
@@ -1268,7 +1272,7 @@ impl App {
         if self.store.watched(&key).is_none() {
             let posts = t.live_posts();
             let (subject, len, max_no) = (thread_subject(&posts), posts.len(), max_no(&posts));
-            self.rehide(|a| a.store.toggle_watch(key.clone(), subject, len, max_no));
+            self.store.watch(key.clone(), subject, len, max_no);
             self.keep_open_thread(&key);
         }
         let mine = self.rehide(|a| a.store.toggle_mine(&key, no));

@@ -232,15 +232,17 @@ impl App {
         self.tab.search = Some(s);
     }
 
-    /// A watched thread's new posts (numbered past `last_seen`) and those replying to yours,
-    /// leaving out hidden ones whether `Z` shows them or not. `posts`: those new posts with
-    /// all that decides their hiding (`with_ancestry`).
-    pub(super) fn watched_unread(&self, key: &ThreadKey, last_seen: u64, posts: &[Post]) -> (usize, usize) {
+    /// A watched thread's new posts (numbered past the number given) and those replying to
+    /// yours, leaving out hidden ones whether `Z` shows them or not. `posts`: those new posts
+    /// with all that decides their hiding (`with_ancestry`).
+    pub(super) fn unread_counter(&self, key: &ThreadKey, posts: &[Post]) -> impl Fn(u64) -> (usize, usize) + use<> {
         let t = ThreadView::new(key.board.clone(), key.no, posts.to_vec());
         let marks = self.thread_marks(&key.site, &t);
-        let new: Vec<&Post> = t.posts.iter().enumerate().filter(|(i, p)| p.no > last_seen && marks.why_hidden(*i).is_none()).map(|(_, p)| p).collect();
-        let replies = new.iter().filter(|p| p.quotes.iter().any(|&q| marks.is_mine(q))).count();
-        (new.len(), replies)
+        move |after| {
+            let new: Vec<&Post> = t.posts.iter().enumerate().filter(|(i, p)| p.no > after && marks.why_hidden(*i).is_none()).map(|(_, p)| p).collect();
+            let replies = new.iter().filter(|p| p.quotes.iter().any(|&q| marks.is_mine(q))).count();
+            (new.len(), replies)
+        }
     }
 
     /// The catalog's threads shown, by index.
@@ -257,7 +259,7 @@ impl App {
             self.switch_tab(i);
             self.rehide_tab();
         }
-        let counts: Vec<_> = self.store.all_watched().iter().filter(|w| !w.fresh.is_empty()).map(|w| (w.key.clone(), self.watched_unread(&w.key, w.last_seen, &w.fresh))).collect();
+        let counts: Vec<_> = self.store.all_watched().iter().filter(|w| !w.fresh.is_empty()).map(|w| (w.key.clone(), self.unread_counter(&w.key, &w.fresh)(w.last_seen))).collect();
         for (key, (unread, replies)) in counts {
             if let Some(w) = self.store.watched_mut(&key) {
                 (w.unread, w.replies) = (unread, replies);

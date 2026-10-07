@@ -64,8 +64,7 @@ impl App {
             self.error("Can't tell which general this is: its subject has no /tag/ or name");
             return;
         };
-        if self.store.watched(&key).is_none() {
-            self.rehide(|a| a.store.toggle_watch(key.clone(), subject, posts, max_no));
+        if self.store.watch(key.clone(), subject, posts, max_no) {
             self.keep_open_thread(&key);
         }
         if let Some(w) = self.store.watched_mut(&key) {
@@ -134,9 +133,7 @@ impl App {
         let Some((_, op)) = next else { return };
         let new_key = ThreadKey { site: key.site.clone(), board: key.board.clone(), no: op.no };
         let subject = thread_subject(std::slice::from_ref(op));
-        if self.store.watched(&new_key).is_none() {
-            self.rehide(|a| a.store.toggle_watch(new_key.clone(), subject.clone(), op.replies.map_or(1, |r| r as usize + 1), 0));
-        }
+        self.store.watch(new_key.clone(), subject.clone(), op.replies.map_or(1, |r| r as usize + 1), 0);
         if let Some(n) = self.store.watched_mut(&new_key) {
             n.general = Some(pattern.clone());
         }
