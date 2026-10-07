@@ -70,6 +70,9 @@ pub struct SeenThread {
     pub last: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub replies: Option<u32>,
+    /// Opened, but not (yet) seen in its board's catalog: `last` is when it was last opened.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub opened_only: bool,
 }
 
 /// A board's own catalog sort and layout (set with `s` and `c` there).
@@ -280,14 +283,15 @@ impl Store {
     }
 
     /// A board's catalog was loaded: remember its threads, and return the ones that weren't
-    /// there on the previous load (none on the first).
+    /// there on the previous load (none on the first: threads only opened don't make one).
     pub fn catalog_seen(&mut self, site: &str, board: &str, threads: &[u64], now: i64) -> std::collections::HashSet<u64> {
-        let key = board_key(site, board);
-        let first = !self.seen.contains_key(&key);
-        let map = self.seen.entry(key).or_default();
+        let map = self.seen.entry(board_key(site, board)).or_default();
+        let first = map.values().all(|t| t.opened_only);
         let new = if first { Default::default() } else { threads.iter().copied().filter(|no| !map.contains_key(no)).collect() };
         for &no in threads {
-            map.entry(no).or_default().last = now;
+            let t = map.entry(no).or_default();
+            t.last = now;
+            t.opened_only = false;
         }
         map.retain(|_, t| now.saturating_sub(t.last) <= SEEN_FOR);
         new
@@ -303,10 +307,16 @@ impl Store {
 
     /// A thread was opened with `replies` replies.
     pub fn opened(&mut self, site: &str, board: &str, no: u64, replies: u32, now: i64) {
-        let t = self.seen.entry(board_key(site, board)).or_default().entry(no).or_default();
+        // Threads only opened are forgotten a week after their last opening, on every board
+        // (a catalog's own threads go when it's loaded).
+        for map in self.seen.values_mut() {
+            map.retain(|_, t| !t.opened_only || now.saturating_sub(t.last) <= SEEN_FOR);
+        }
+        self.seen.retain(|_, map| !map.is_empty());
+        let t = self.seen.entry(board_key(site, board)).or_default().entry(no).or_insert_with(|| SeenThread { opened_only: true, ..Default::default() });
         t.replies = Some(replies);
         // A thread opened from elsewhere (not seen in a catalog) is kept a while too.
-        if t.last == 0 {
+        if t.opened_only || t.last == 0 {
             t.last = now;
         }
     }
@@ -736,9 +746,34 @@ mod tests {
         assert!(!s.seen["4chan/g"].contains_key(&1) && !s.seen["4chan/g"].contains_key(&3));
         assert_eq!(s.catalog_seen("4chan", "g", &[1, 4], 9 * day), [1].into());
         // A corrupt time in the file is just old.
-        s.seen.get_mut("4chan/g").unwrap().insert(7, SeenThread { last: i64::MIN, replies: None });
+        s.seen.get_mut("4chan/g").unwrap().insert(7, SeenThread { last: i64::MIN, ..Default::default() });
         s.catalog_seen("4chan", "g", &[4], i64::MAX);
         assert!(!s.seen["4chan/g"].contains_key(&7));
+    }
+
+    #[test]
+    fn opening_a_thread_first_leaves_the_catalog_its_first_load() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut s, _) = Store::load(Some(dir.path().to_path_buf()));
+        let day = 24 * 3600;
+        // A thread opened from a link before the board's catalog was ever loaded.
+        s.opened("4chan", "g", 2, 5, 0);
+        s.save().unwrap();
+        let (mut s, _) = Store::load(Some(dir.path().to_path_buf()));
+        assert!(s.catalog_seen("4chan", "g", &[1, 2, 3], day).is_empty());
+        assert_eq!(s.replies_seen("4chan", "g", 2), Some(5));
+        assert_eq!(s.catalog_seen("4chan", "g", &[1, 2, 3, 4], day), [4].into());
+        // On a board whose catalog is never loaded, opened threads are forgotten a week
+        // after they were last opened.
+        s.opened("4chan", "v", 7, 1, 0);
+        s.opened("4chan", "v", 8, 1, 0);
+        s.opened("4chan", "v", 8, 2, 3 * day);
+        s.opened("4chan", "g", 9, 1, 9 * day);
+        assert_eq!((s.replies_seen("4chan", "v", 7), s.replies_seen("4chan", "v", 8)), (None, Some(2)));
+        s.opened("4chan", "g", 9, 1, 11 * day);
+        assert!(!s.seen.contains_key("4chan/v"));
+        // A catalog's threads go only with its own loads.
+        assert_eq!(s.replies_seen("4chan", "g", 2), Some(5));
     }
 
     #[test]

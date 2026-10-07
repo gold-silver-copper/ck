@@ -471,8 +471,10 @@ Watched shows "follows /lmg/" on followed threads; `F` again stops following.
 
 Catalogs mark threads that weren't there on your previous visit with "new" (the header
 counts them), and threads you've opened before show how many replies they've gained since,
-like `+12`. This is kept per board in the data directory (threads are forgotten a week
-after they leave the catalog) and needs no extra requests.
+like `+12`. A board's first catalog marks nothing new, even when you've opened some of
+its threads before from elsewhere. This is kept per board in the data directory (threads
+are forgotten a week after they leave the catalog, or, if you never saw them in it, a
+week after you last opened them) and needs no extra requests.
 
 Threads you watch are marked ◉. `watched_first = true` (or Settings › Watched first) puts
 them first in every catalog, then the rest, each in the order the sort gives them. Threads
