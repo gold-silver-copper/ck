@@ -3472,9 +3472,12 @@ fn the_menu_offers_no_gallery_when_only_hidden_posts_have_files() {
     app.tab.thread = Some(ThreadView::new("x".into(), 1, vec![Post { no: 1, ..Default::default() }, Post { no: 2, files: vec![file], ..Default::default() }]));
     app.tab.view = View::Thread;
     app.rehide(|a| a.store.toggle_hidden("a", "x", 2));
-    // The gallery has nothing to show, so the menu doesn't offer it.
+    // The gallery has nothing to show, and says why; so the menu doesn't offer it.
     app.act(Action::Gallery);
-    assert_eq!(app.status.as_ref().map(|s| s.text.as_str()), Some("Thread has no files"));
+    assert_eq!(app.status.as_ref().map(|s| s.text.as_str()), Some("Only hidden posts have files (Z shows them)"));
+    app.status = None;
+    app.act(Action::DownloadThread);
+    assert_eq!(app.status.as_ref().map(|s| s.text.as_str()), Some("Only hidden posts have files (Z shows them)"));
     app.on_key(KeyEvent::from(KeyCode::Char('.')));
     let m = app.menu().unwrap();
     let has = |a: Action| m.items.iter().any(|i| matches!(i, MenuItem::Act(x, _) if *x == a));

@@ -104,7 +104,7 @@ impl App {
                 let posts: Vec<&Post> = t.unhidden_posts().map(|(_, p)| p).collect();
                 let jobs = download::jobs(&posts, &dir);
                 if jobs.is_empty() {
-                    return self.info("Thread has no files");
+                    return self.info(self.no_files("Thread has no files", false));
                 }
                 let have = jobs.iter().filter(|(_, path)| path.exists()).count();
                 let files: Vec<&Attachment> = posts.iter().flat_map(|p| &p.files).collect();
@@ -184,7 +184,8 @@ impl App {
         let posts: Vec<&Post> = if whole_thread { t.unhidden_posts().map(|(_, p)| p).collect() } else { t.current().into_iter().collect() };
         let dir = download::dir(self.download_dir.as_deref(), &self.current_site().cfg.name, &t.board, t.no);
         let jobs = download::jobs(&posts, &dir);
-        self.start_download(jobs, dir, if whole_thread { "Thread has no files" } else { "Post has no file" });
+        let none = if whole_thread { self.no_files("Thread has no files", false) } else { "Post has no file".into() };
+        self.start_download(jobs, dir, &none);
     }
 
     /// Save the thread as thread.html and thread.json in its download folder.

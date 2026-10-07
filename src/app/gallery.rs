@@ -22,12 +22,18 @@ impl App {
         // In a conversation, its files; not hidden posts' (unless shown).
         let files: Vec<(usize, Attachment)> = t.gallery_files().map(|(i, f)| (i, f.clone())).collect();
         if files.is_empty() {
-            self.info(if t.conversation.is_some() { "The conversation has no files" } else { "Thread has no files" });
-            return;
+            let msg = self.no_files(if t.conversation.is_some() { "The conversation has no files" } else { "Thread has no files" }, true);
+            return self.info(msg);
         }
         // Start at the selected post's first file, or the next one after it.
         let state = ListState::default().with_selected(Some(files.iter().position(|(i, _)| *i >= t.selected).unwrap_or(0)));
         self.tab.gallery = Some(Gallery { files, state, cols: 1 });
+    }
+
+    /// `none`, or that only hidden posts (of those in view, `in_view`) have files.
+    pub(super) fn no_files(&self, none: &str, in_view: bool) -> String {
+        let hidden = self.tab.thread.as_ref().is_some_and(|t| t.posts.iter().enumerate().any(|(i, p)| !p.files.is_empty() && (!in_view || t.in_view(i))));
+        if hidden { format!("Only hidden posts have files ({} shows them)", self.keys.key(Action::ShowHidden)) } else { none.to_string() }
     }
 
     pub fn on_gallery_key(&mut self, key: KeyEvent) {

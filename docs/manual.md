@@ -294,7 +294,8 @@ the viewer's own commands apply.
 one line, so replies to them still make sense. They're marked just "hidden", not why
 (that would show what a filter or hidden word hides); `H` on one says why. Until `Z`
 shows them, they're left out of the thread's search and gallery too (`V` and the footer
-and `.` menu offer the gallery only when it has files to show), a quote of one previews
+and `.` menu offer the gallery only when it has files to show; when only hidden posts have
+files, `V` says so), a quote of one previews
 only "hidden" (with `p` or focused), saving all the thread's files leaves theirs out, and
 hidden threads aren't counted as new in the catalog's header. Hiding, `Z` and filter
 changes apply to every tab at once, and Watched's counts of new posts and replies to you
