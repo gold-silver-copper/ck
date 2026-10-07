@@ -153,7 +153,8 @@ screen), posts a refresh brings come into view: the first new one is selected, p
 `j` would place it, and `j` reads on through the rest. Hidden posts are passed over, and in
 a conversation only new posts that belong to it count. Reading anywhere else, nothing
 moves; the top bar says how many new posts are below ("3 new, 2 below ↓"), and `U` goes to
-the first. `follow_new_posts = false` (or Settings › Background refresh › Reading the end)
+the first. Hidden posts aren't new there either (nor in the terminal title) until `Z` shows
+them. `follow_new_posts = false` (or Settings › Background refresh › Reading the end)
 turns it off. A thread in another tab follows when you come back to it and it refreshes.
 
 ### Long posts

@@ -491,9 +491,9 @@ impl ThreadView {
     }
 
     /// Whether post `i` arrived since the last visit. A deleted one never counts: it was
-    /// shown before.
+    /// shown before; nor does a collapsed one: it isn't shown.
     pub fn is_new(&self, i: usize) -> bool {
-        self.new_after > 0 && self.posts.get(i).is_some_and(|p| p.no > self.new_after) && !self.is_deleted(i)
+        self.new_after > 0 && self.posts.get(i).is_some_and(|p| p.no > self.new_after) && !self.is_deleted(i) && !self.is_collapsed(i)
     }
 
     /// Whether post `i` is kept after the site deleted it.

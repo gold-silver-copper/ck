@@ -2266,6 +2266,33 @@ fn reading_higher_up_nothing_moves() {
 }
 
 #[test]
+fn hidden_posts_are_not_new_in_the_open_thread() {
+    let mut app = thread_app_of(40);
+    app.set_title = true;
+    for _ in 0..12 {
+        app.on_key(KeyEvent::from(KeyCode::Char('j')));
+    }
+    draw_at(&mut app, 100, 30);
+    // 41-45 arrive, 41 and 43 hidden: three are new, and U skips the hidden line.
+    app.store.toggle_hidden("a", "x", 41);
+    app.store.toggle_hidden("a", "x", 43);
+    app.set_thread(posts_upto(45));
+    draw_at(&mut app, 100, 30);
+    let t = app.tab.thread.as_ref().unwrap();
+    assert_eq!(((0..t.posts.len()).filter(|&i| t.is_new(i)).count(), t.new_below().0), (3, 3));
+    let unread = t.unread_line().and_then(|e| t.entries.get(e)).and_then(|e| t.posts.get(e.post)).map(|p| p.no);
+    assert_eq!(unread, Some(42));
+    assert!(app.terminal_title().unwrap().starts_with("ck: (3) "));
+    app.act(Action::Unread);
+    assert_eq!(app.tab.thread.as_ref().unwrap().current().unwrap().no, 42);
+    // Shown with Z, they're new again.
+    app.act(Action::ShowHidden);
+    draw_at(&mut app, 100, 30);
+    let t = app.tab.thread.as_ref().unwrap();
+    assert_eq!((0..t.posts.len()).filter(|&i| t.is_new(i)).count(), 5);
+}
+
+#[test]
 fn following_edge_cases() {
     // Nothing new, or only changed posts: nothing moves.
     let mut app = thread_app_of(40);
