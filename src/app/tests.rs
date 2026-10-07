@@ -48,6 +48,27 @@ fn mouse_wheel_click_and_double_click() {
 }
 
 #[test]
+fn clicks_on_a_settings_popup_never_reach_the_rows_behind() {
+    let mut app = local_app();
+    app.open_settings();
+    app.settings_list.state.select(settings::position("Hidden words"));
+    app.enter();
+    assert!(matches!(app.popup, Some(Popup::Settings(SettingsPopup::HiddenWords { .. }))));
+    draw_at(&mut app, 100, 40);
+    // A double click on the Hidden replies row, beside the popup: nothing changes.
+    let Some(Hit::Settings { area, offset }) = app.hit else { panic!("no settings rows") };
+    let pos = settings::position("Hidden replies").unwrap();
+    let row = setting_rows().iter().position(|r| *r == Ok(pos)).unwrap() - offset;
+    let left = MouseEventKind::Down(MouseButton::Left);
+    let t0 = Instant::now();
+    app.on_mouse(mouse(left, area.x, area.y + row as u16), t0);
+    app.on_mouse(mouse(left, area.x, area.y + row as u16), t0 + Duration::from_millis(100));
+    assert!(!app.recursive_hiding);
+    assert_eq!(app.settings_list.state.selected(), settings::position("Hidden words"));
+    assert!(matches!(app.popup, Some(Popup::Settings(SettingsPopup::HiddenWords { .. }))));
+}
+
+#[test]
 fn mouse_click_selects_thread_post() {
     let mut app = test_app();
     let post = |no| Post { no, body: vec![Line::raw("a"), Line::raw("b")], ..Default::default() };

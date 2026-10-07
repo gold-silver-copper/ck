@@ -98,8 +98,10 @@ impl App {
                 }
                 return;
             }
-            Some(Modal::Viewer | Modal::Searching | Modal::Filtering) => return,
-            Some(Modal::Gallery | Modal::Settings | Modal::Goto | Modal::SearchInput) | None => {}
+            // A settings popup takes keys only: a click mustn't reach the row behind it (a
+            // double click would change that setting).
+            Some(Modal::Viewer | Modal::Searching | Modal::Filtering | Modal::Settings) => return,
+            Some(Modal::Gallery | Modal::Goto | Modal::SearchInput) | None => {}
         }
         let Some(target) = self.click_target(ev.column, ev.row) else { return };
         let double = self.last_click.is_some_and(|(t, i)| i == target && now.duration_since(t) < Duration::from_millis(400));
