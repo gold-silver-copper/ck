@@ -69,7 +69,7 @@ struct Open {
     name: String,
     style: Style,
     href: Option<String>,
-    /// `<pre>` or a highlighted code `<div>`.
+    /// `<pre>`, a highlighted code `<div>` or jschan's `span.code`.
     code: bool,
 }
 
@@ -133,7 +133,10 @@ pub fn parse_html(html: &str, flavor: Flavor) -> Parsed {
             }
             _ => {
                 let class = attr(tag_body, "class").unwrap_or_default().to_ascii_lowercase();
-                let block = name == "pre" || (name == "div" && class.contains("hljs"));
+                // jschan's code blocks are `<span class='code hljs'>` (or just 'code' when not highlighted).
+                let block = name == "pre"
+                    || (name == "div" && class.contains("hljs"))
+                    || (name == "span" && class.split_whitespace().any(|c| c == "code"));
                 let base = stack.last().map(|o| o.style).unwrap_or_default();
                 let href = if name == "a" { attr(tag_body, "href").map(|h| decode(&h)) } else { None };
                 // Links to other sites, as opposed to quote links (which have a class saying so).
@@ -174,6 +177,7 @@ pub fn parse_html(html: &str, flavor: Flavor) -> Parsed {
                 }
                 if block {
                     b.end_line();
+                    b.code_start = true;
                 }
                 stack.push(Open { name, style, href, code: block });
             }
@@ -228,6 +232,8 @@ struct Builder {
     cur_len: usize,
     /// The current line is part of a code block.
     cur_code: bool,
+    /// A code block has just opened: a newline right at its start is no line (as in `<pre>`).
+    code_start: bool,
     /// Don't merge the next text into the last span (it's a quote link).
     sealed: bool,
     quotes: Vec<u64>,
@@ -319,7 +325,12 @@ impl Builder {
 
     /// Text inside a code block: whitespace kept, newlines are line breaks, no quote links.
     fn code_text(&mut self, text: &str, style: Style) {
-        for (i, part) in text.replace('\r', "").split('\n').enumerate() {
+        let text = text.replace('\r', "");
+        let text = match std::mem::take(&mut self.code_start) {
+            true => text.strip_prefix('\n').unwrap_or(&text),
+            false => &text,
+        };
+        for (i, part) in text.split('\n').enumerate() {
             if i > 0 {
                 self.newline();
             }
@@ -920,6 +931,20 @@ mod tests {
         let p = parse_html(&sample("lynx_end_pre"), Flavor::Lynxchan);
         let code = code_lines(&p);
         assert!(code.contains(&"about:debugging#/runtime/this-firefox".to_string()), "{code:?}");
+    }
+
+    #[test]
+    fn jschan_samples() {
+        // Code blocks are span.code: kept as written, no quote links or URLs, and the
+        // highlighter's note on the language isn't shown.
+        let p = parse_html(&sample("jschan_code"), Flavor::Jschan);
+        let code = code_lines(&p);
+        assert_eq!(code, ["def main():", "    print(\">>2 see https://example.com/x\")", ">>3   kept   apart"]);
+        assert_eq!((p.quotes.as_slice(), p.urls.len()), (&[1, 4][..], 0));
+        let lines: Vec<_> = p.lines.iter().map(text).collect();
+        assert_eq!(lines.first().map(String::as_str), Some(">>1  "));
+        assert_eq!(lines.last().map(String::as_str), Some(">>4 after"));
+        assert_ne!(p.lines.last().map(|l| l.style), Some(CODE_LINE));
     }
 
     #[test]
