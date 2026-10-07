@@ -371,6 +371,34 @@ fn filters_and_hiding() {
 }
 
 #[test]
+fn hidden_posts_are_not_new_in_watched_threads() {
+    let mut app = local_app();
+    let key = ThreadKey { site: "a".into(), board: "x".into(), no: 1 };
+    let post = |no, quotes: Vec<u64>, text: &str| Post { no, quotes, body: vec![Line::raw(text.to_string())], ..Default::default() };
+    app.filters = crate::filter::tests::filters("[[filter]]\npattern = \"spam\"\n\n[[filter]]\npattern = \"rust\"\naction = \"highlight\"\nnotify = true\n").unwrap();
+    app.recursive_hiding = true;
+    app.store.toggle_watch(key.clone(), "One".into(), 2, 5);
+    app.store.watched_mut(&key).unwrap().mine.push(5);
+    let start = vec![post(1, vec![], ""), post(5, vec![], "")];
+    app.refreshed(key.clone(), Ok(start.clone()));
+    // A hidden reply to yours, a reply to that (hidden with it), and one you can see.
+    let mut posts = start;
+    posts.extend([post(6, vec![5], "buy spam"), post(7, vec![6, 5], "agreed"), post(8, vec![5], "hello")]);
+    app.refreshed(key.clone(), Ok(posts.clone()));
+    app.flush_notes(Instant::now());
+    assert_eq!(app.notified, ["New reply to your post in /x/ One"]);
+    let w = app.store.watched(&key).unwrap();
+    assert_eq!((w.unread, w.replies), (1, 1));
+    // A `notify` filter still tells about what it catches, hidden or not.
+    app.notified.clear();
+    posts.push(post(9, vec![], "rust spam"));
+    app.refreshed(key.clone(), Ok(posts));
+    app.flush_notes(Instant::now());
+    assert_eq!(app.notified, ["A new post caught by \"rust\" in /x/ One"]);
+    assert_eq!(app.store.watched(&key).unwrap().unread, 1);
+}
+
+#[test]
 fn notifies_about_new_posts_and_replies_to_yours() {
     let mut app = local_app();
     let key = |no| ThreadKey { site: "a".into(), board: "x".into(), no };

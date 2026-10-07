@@ -1366,7 +1366,7 @@ fn check_marks(app: &App, before: &Before) {
     let tab = &app.tab;
     // (A catalog left loaded from another site is marked for that one.)
     if !tab.catalog.is_empty() && tab.catalog_site == tab.site {
-        let want = app.marks(&tab.catalog, false, |p| app.board_of(p));
+        let want = app.marks(&app.current_site().cfg.name, &tab.catalog, false, |p| app.board_of(p));
         if let Some(i) = (0..want.len()).find(|&i| tab.catalog_marks.get(i) != Some(&want[i])) {
             let p = &tab.catalog[i];
             panic!(
@@ -1380,7 +1380,7 @@ fn check_marks(app: &App, before: &Before) {
         }
     }
     if let Some(t) = tab.thread.as_ref().filter(|_| tab.view == View::Thread) {
-        assert!(app.thread_marks(t) == t.marks, "thread marks don't match the filters");
+        assert!(app.thread_marks(&app.current_site().cfg.name, t) == t.marks, "thread marks don't match the filters");
     }
     // And they're what's in the config file.
     if let Some(path) = &app.config_path {

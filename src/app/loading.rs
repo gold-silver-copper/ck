@@ -604,6 +604,11 @@ impl App {
                 // Quiet: nothing past what the last refresh found (the first one of the
                 // session starts over).
                 let quiet = prev.is_some_and(|m| max_no(&posts) <= m);
+                // Hidden posts (by a filter, a hidden word, by hand, or as replies to those)
+                // aren't new or replies to you: the thread passes them over when it's open.
+                let view = ThreadView::new(key.board.clone(), key.no, posts.clone());
+                let marks = self.thread_marks(&key.site, &view);
+                let shown = |p: &Post| view.index.get(&p.no).and_then(|&i| marks.get(i)).is_none_or(|m| m.hidden.is_none());
                 let Some(w) = self.store.watched_mut(&key) else { return };
                 let max_no = max_no(&posts);
                 if w.last_seen == 0 {
@@ -611,14 +616,15 @@ impl App {
                 }
                 let mine = w.mine.clone();
                 let to_you = |p: &Post| p.quotes.iter().any(|q| mine.contains(q));
-                let unread: Vec<&Post> = posts.iter().filter(|p| p.no > w.last_seen).collect();
+                let unread: Vec<&Post> = posts.iter().filter(|p| p.no > w.last_seen && shown(p)).collect();
                 w.unread = unread.len();
                 w.replies = unread.iter().filter(|p| to_you(p)).count();
                 // Tell about posts newer than this session's last refresh (not on the first
                 // one, which may find posts from long ago).
                 let fresh: Vec<&&Post> = unread.iter().filter(|p| prev.is_some_and(|m| p.no > m)).collect();
-                // Those a `notify` filter catches.
-                let caught: Vec<String> = fresh.iter().filter_map(|p| self.filters.check(&key.site, &key.board, p, p.no == key.no).notify).collect();
+                // Those a `notify` filter catches, hidden or not: asked for by name.
+                let past = |p: &&Post| p.no > w.last_seen && prev.is_some_and(|m| p.no > m);
+                let caught: Vec<String> = posts.iter().filter(past).filter_map(|p| self.filters.check(&key.site, &key.board, p, p.no == key.no).notify).collect();
                 let note = Note {
                     key: key.clone(),
                     subject: if w.subject.is_empty() { subject.clone() } else { w.subject.clone() },
@@ -637,7 +643,7 @@ impl App {
                 self.watched_quiet.insert(key.clone(), n);
                 self.keep_copy(&key, &posts, false);
                 self.notified_max.insert(key, max_no);
-                if note.new > 0 {
+                if note.new > 0 || note.caught > 0 {
                     self.notes_since.get_or_insert_with(|| self.clock.instant());
                     self.notes.push(note);
                 }
