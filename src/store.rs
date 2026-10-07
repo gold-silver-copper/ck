@@ -160,8 +160,8 @@ pub struct Store {
 
 /// What a background write of a saved copy came to.
 pub enum Wrote {
-    /// Written: its size.
-    Saved(ThreadKey, u64),
+    /// Written: its size, and the `signature` of the posts written (none when only marked dead).
+    Saved(ThreadKey, u64, Option<u64>),
     Failed(String),
     /// Nothing to tell (a removal, or marking a copy that isn't there dead).
     Nothing,
@@ -430,12 +430,15 @@ impl Store {
                 posts: posts.iter().map(SavedPost::from).collect(),
             };
             match saved::write(&dir, &thread) {
-                Ok(bytes) => Wrote::Saved(key2, bytes),
+                Ok(bytes) => Wrote::Saved(key2, bytes, Some(sig)),
                 Err(e) => Wrote::Failed(format!("Couldn't save a copy of thread {}: {e:#}", key2.no)),
             }
         });
+        // The posts count as saved once they're written (see `settle`): a write that fails,
+        // or hasn't finished at exit, is tried again with the same posts.
+        let hash = before.map_or(0, |m| m.hash);
         self.saved.retain(|m| &m.key != key);
-        let meta = SavedMeta { key: key.clone(), subject: subject.to_string(), saved: now, dead: false, bytes, posts: count, newest, hash: sig };
+        let meta = SavedMeta { key: key.clone(), subject: subject.to_string(), saved: now, dead: false, bytes, posts: count, newest, hash };
         // Newest first.
         let at = self.saved.iter().position(|m| m.saved <= now).unwrap_or(self.saved.len());
         self.saved.insert(at, meta);
@@ -450,9 +453,10 @@ impl Store {
         let mut wrote = false;
         for r in writer.results() {
             match r {
-                Wrote::Saved(key, bytes) => {
+                Wrote::Saved(key, bytes, sig) => {
                     if let Some(m) = self.saved.iter_mut().find(|m| m.key == key) {
                         m.bytes = bytes;
+                        m.hash = sig.unwrap_or(m.hash);
                         wrote = true;
                     }
                 }
@@ -495,7 +499,7 @@ impl Store {
         writer.run(move || match saved::read(&dir, &key) {
             Ok(mut t) => {
                 t.dead = true;
-                saved::write(&dir, &t).map_or(Wrote::Nothing, |bytes| Wrote::Saved(key, bytes))
+                saved::write(&dir, &t).map_or(Wrote::Nothing, |bytes| Wrote::Saved(key, bytes, None))
             }
             Err(_) => Wrote::Nothing,
         });
@@ -860,5 +864,27 @@ mod tests {
         s.keep_thread(&key(6), "", "u", &posts(&many), 6);
         let errors = s.flush(std::time::Duration::from_secs(10));
         assert!(errors.len() == 1 && errors[0].contains("Couldn't save a copy of thread 6"), "{errors:?}");
+        // And the same posts are written again next time.
+        std::fs::remove_file(dir.path().join("threads")).unwrap();
+        assert!(s.keep_thread(&key(6), "", "u", &posts(&many), 7));
+        assert!(s.flush(std::time::Duration::from_secs(10)).is_empty());
+        assert!(dir.path().join("threads/4chan/g/6.json").exists());
+    }
+
+    #[test]
+    fn a_copy_counts_as_saved_once_written() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut s, _) = Store::load(Some(dir.path().to_path_buf()));
+        assert!(s.keep_thread(&key(1), "", "u", &posts(&[1, 2]), 1));
+        // Saved before the write is known to be done (as at exit, when it takes too long):
+        // the next start doesn't take the posts for written.
+        s.save().unwrap();
+        let next = tempfile::tempdir().unwrap();
+        std::fs::copy(dir.path().join("saved.json"), next.path().join("saved.json")).unwrap();
+        let (mut s2, _) = Store::load(Some(next.path().to_path_buf()));
+        assert!(s2.keep_thread(&key(1), "", "u", &posts(&[1, 2]), 2));
+        // Once it's done, it does.
+        s.flush(std::time::Duration::from_secs(10));
+        assert!(!s.keep_thread(&key(1), "", "u", &posts(&[1, 2]), 3));
     }
 }
