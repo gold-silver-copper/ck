@@ -56,6 +56,7 @@ mod saving;
 mod board_images;
 mod search;
 mod session;
+mod tab;
 mod tabs;
 mod settings;
 mod sites;
@@ -77,7 +78,8 @@ pub use thread_view::{CONVERSATION_MAX, conversation_of};
 pub use sites::{Adding, MySites, origin as site_origin};
 #[cfg(test)]
 pub use sites::BoardsUpdate;
-pub use tabs::{MAX_TABS, Offline, Tab, TabPopup, ThreadCopy, Trail};
+pub use tab::Tab;
+pub use tabs::{MAX_TABS, Offline, TabPopup, ThreadCopy, Trail};
 pub use settings::{SettingsPopup, key_rows, rows as setting_rows, settings, tilde};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
