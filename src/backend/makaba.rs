@@ -8,7 +8,7 @@ use serde_json::Value;
 use super::{Backend, Partial, as_u32, saturate};
 use crate::http::{as_bool, as_i64, as_str, as_u64, encode_segment as enc, get_json, items, register_media_host};
 use crate::markup::{self, Flavor};
-use crate::model::{Attachment, Board, Post};
+use crate::model::{Attachment, Board, FileKind, Post};
 
 /// The board category for adult boards.
 const ADULT_CATEGORY: &str = "Взрослым";
@@ -73,9 +73,12 @@ impl Makaba {
     /// Files give paths relative to the site; sizes are in KB.
     fn attachment(&self, f: &Value) -> Option<Attachment> {
         let path = as_str(&f["path"])?;
+        let filename = as_str(&f["fullname"]).or_else(|| as_str(&f["name"])).map(|n| markup::decode(&n)).unwrap_or_default();
+        let url = format!("{}{path}", self.media);
         Some(Attachment {
-            filename: as_str(&f["fullname"]).or_else(|| as_str(&f["name"])).map(|n| markup::decode(&n)).unwrap_or_default(),
-            url: format!("{}{path}", self.media),
+            kind: FileKind::of(None, Some(&url), &filename),
+            filename,
+            url: Some(url),
             thumb: as_str(&f["thumbnail"]).map(|t| format!("{}{t}", self.media)),
             spoiler: false,
             width: as_u32(&f["width"]),
@@ -190,7 +193,7 @@ mod tests {
         // Images in replies, as elsewhere: not the OP's.
         assert_eq!((cat[0].images, cat[2].replies, cat[2].images), (Some(0), Some(103), Some(15)));
         let f = &cat[0].files[0];
-        assert_eq!(f.url, "https://2ch.su/b/src/328868282/17686951847150.jpg");
+        assert_eq!(f.url.as_deref(), Some("https://2ch.su/b/src/328868282/17686951847150.jpg"));
         assert_eq!(f.thumb.as_deref(), Some("https://2ch.su/b/thumb/328868282/17686951847150s.jpg"));
         assert_eq!(f.size, Some(31 * 1024));
     }

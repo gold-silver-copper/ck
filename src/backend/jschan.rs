@@ -9,7 +9,7 @@ use serde_json::Value;
 use super::{Backend, Partial, as_u32};
 use crate::http::{as_bool, as_i64, as_str, as_u64, encode_segment as enc, get_json, items};
 use crate::markup::{self, Flavor};
-use crate::model::{Attachment, Board, Flag, Post};
+use crate::model::{Attachment, Board, FileKind, Flag, Post};
 
 /// The board list is paginated, local boards first, then webring boards from other sites.
 const MAX_BOARD_PAGES: u64 = 5;
@@ -106,9 +106,12 @@ fn attachment(base: &str, f: &Value) -> Option<Attachment> {
         (Some(hash), Some(ext)) if has_thumb && !spoiler => Some(format!("{base}/file/thumb/{hash}{ext}")),
         _ => None,
     };
+    let url = format!("{base}/file/{filename}");
+    let filename = as_str(&f["originalFilename"]).unwrap_or(filename);
     Some(Attachment {
-        filename: as_str(&f["originalFilename"]).unwrap_or_else(|| filename.clone()),
-        url: format!("{base}/file/{filename}"),
+        kind: FileKind::of(Some(&mime), Some(&url), &filename),
+        filename,
+        url: Some(url),
         thumb,
         spoiler,
         width: f.get("geometry").and_then(|g| as_u32(&g["width"])),
@@ -180,7 +183,7 @@ mod tests {
         assert!(sticky.sticky && sticky.replies == Some(215));
         let f = &sticky.files[0];
         let hash = "7330ef9178e4de4b06d0f9daec58c109b4d7e61ad7300ddf9417336d40e7a742";
-        assert_eq!(f.url, format!("{BASE}/file/{hash}.png"));
+        assert_eq!(f.url, Some(format!("{BASE}/file/{hash}.png")));
         assert_eq!(f.thumb, Some(format!("{BASE}/file/thumb/{hash}.png")));
         let spoiler = posts.iter().flat_map(|p| &p.files).find(|f| f.spoiler).unwrap();
         assert!(spoiler.thumb.is_none());

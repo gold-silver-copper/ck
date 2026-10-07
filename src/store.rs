@@ -261,7 +261,7 @@ pub fn signature(posts: &[Post]) -> u64 {
         let text: usize = p.body.iter().map(|l| l.spans.iter().map(|s| s.content.len()).sum::<usize>() + 1).sum();
         (p.no, p.name.len(), p.subject.as_ref().map(String::len), p.files.len(), p.body.len(), text).hash(&mut h);
         for f in &p.files {
-            f.url.hash(&mut h);
+            (&f.url, f.kind).hash(&mut h);
         }
     }
     h.finish()
@@ -948,7 +948,7 @@ mod tests {
         let mut edited = posts(&[1, 2]);
         edited[1].body.push("more".into());
         assert!(s.keep_thread(&key(1), "one", "u", &edited, 25));
-        edited[0].files.push(crate::model::Attachment { url: "f".into(), ..Default::default() });
+        edited[0].files.push(crate::model::Attachment::at("f"));
         assert!(s.keep_thread(&key(1), "one", "u", &edited, 26));
         assert!(s.keep_thread(&key(1), "one", "u", &posts(&[1, 2, 3]), 30));
         assert_eq!((s.saved[0].posts, s.saved[0].newest, s.saved[0].saved), (3, 3, 30));

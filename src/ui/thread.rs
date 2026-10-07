@@ -382,7 +382,7 @@ fn shown_with(t: &ThreadView, i: usize, ctx: &PostCtx) -> u64 {
     // The post itself, which a refresh may bring changed (a file deleted, say).
     (&p.name, &p.subject, p.plain_text(), p.body.len(), &p.id, &p.flag, ctx.id_count).hash(&mut h);
     for f in &p.files {
-        (&f.url, &f.filename, f.width, f.height, f.size).hash(&mut h);
+        (&f.url, f.kind, &f.filename, f.width, f.height, f.size).hash(&mut h);
     }
     (ctx.focus, ctx.anchor).hash(&mut h);
     if highlighted {

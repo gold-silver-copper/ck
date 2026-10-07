@@ -220,7 +220,7 @@ pub(super) fn draw_links(f: &mut Frame, app: &mut App) {
         let (kind, text, extra) = match item {
             LinkItem::Quote(_, label) => ("quote", label.clone(), String::new()),
             LinkItem::Url(u) => ("web", u.clone(), String::new()),
-            LinkItem::File(file) => ("file", file.filename.clone(), format!("  {}", file.url)),
+            LinkItem::File(f) => (if f.url.is_some() { "file" } else { "thumb" }, f.filename.clone(), f.link().map(|(_, u)| format!("  {u}")).unwrap_or_default()),
         };
         let room = (inner.width as usize).saturating_sub(9);
         let text = truncate(&text, room);
@@ -228,7 +228,7 @@ pub(super) fn draw_links(f: &mut Frame, app: &mut App) {
         Line::from(vec![
             chip(pad(kind, 5), t.text_dim, t.surface_high),
             Span::raw("  "),
-            Span::styled(text, Style::new().fg(if kind == "file" { t.text } else { t.quotelink })),
+            Span::styled(text, Style::new().fg(if matches!(kind, "file" | "thumb") { t.text } else { t.quotelink })),
             Span::styled(extra, dim()),
         ])
     });

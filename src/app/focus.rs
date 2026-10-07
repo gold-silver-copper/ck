@@ -9,7 +9,7 @@ use ratatui::widgets::ListState;
 use super::{App, Hit, Media, Part, Popup, RowKey, SiteRow, TabPopup, View, Viewer, list_move};
 use crate::download;
 use crate::keys::{Action, Scope};
-use crate::model::{Link, Target};
+use crate::model::{Attachment, Link, Target};
 use crate::ui::{INDENT, PAD};
 
 /// One row of the menu: `enter` (what it does here), or an action.
@@ -116,11 +116,17 @@ impl App {
         let part = self.focused()?;
         let p = self.selected_post()?;
         Some(match part {
-            Part::File(k) => ("file URL", p.files.get(*k)?.url.clone()),
+            Part::File(k) => p.files.get(*k)?.link().map(|(what, u)| (what, u.to_string()))?,
             Part::Link(Target::Url(u)) => ("link", u.clone()),
             Part::Link(Target::Quote(l)) => ("link", self.quote_url(l)?),
             Part::Replies | Part::Poster => return None,
         })
+    }
+
+    /// The file that has focus.
+    pub(super) fn focused_file(&self) -> Option<&Attachment> {
+        let &Part::File(k) = self.focused()? else { return None };
+        self.selected_post()?.files.get(k)
     }
 
     /// Where a quote link leads, as a web address.
@@ -142,10 +148,10 @@ impl App {
         let Some(&Part::File(k)) = self.focused() else { return false };
         let Some(t) = &self.tab.thread else { return false };
         let Some(p) = t.current() else { return false };
-        let Some(url) = p.files.get(k).map(|f| f.url.clone()) else { return false };
+        let Some(file) = p.files.get(k) else { return false };
         let dir = download::dir(self.download_dir.as_deref(), &self.current_site().cfg.name, &t.board, t.no);
-        let jobs = download::jobs(&[p], &dir).into_iter().filter(|(u, _)| *u == url).collect();
-        self.start_download(jobs, dir, "No file to save");
+        let (jobs, none) = (download::job(p, file, &dir), super::saving::nothing_to_save(file));
+        self.start_download(jobs, dir, none);
         true
     }
 
@@ -266,10 +272,16 @@ impl App {
         }
         match focus {
             Some(Part::File(k)) => {
-                items.push(act(A::Download, "save this file"));
-                items.push(act(A::Copy, "copy the file's URL"));
-                items.push(act(A::Browser, "open the file in the browser"));
-                if p.files.get(*k).is_some_and(|f| f.is_image()) {
+                let f = p.files.get(*k);
+                if f.is_some_and(|f| f.url.is_some()) {
+                    items.push(act(A::Download, "save this file"));
+                }
+                if let Some((what, _)) = f.and_then(Attachment::link) {
+                    let what = if what == crate::model::THUMBNAIL_URL { "thumbnail" } else { "file" };
+                    items.push(act(A::Copy, &format!("copy the {what}'s URL")));
+                    items.push(act(A::Browser, &format!("open the {what} in the browser")));
+                }
+                if f.is_some_and(|f| f.is_image()) {
                     items.push(act(A::ImageSearch, "search for this image"));
                 }
             }
@@ -282,7 +294,7 @@ impl App {
         }
         if !p.files.is_empty() {
             items.push(act(A::View, "view the post's images"));
-            if !matches!(focus, Some(Part::File(_))) {
+            if !matches!(focus, Some(Part::File(_))) && p.files.iter().any(|f| f.url.is_some()) {
                 items.push(act(A::DownloadPost, if p.files.len() == 1 { "save the post's file" } else { "save the post's files" }));
             }
         }
@@ -333,7 +345,7 @@ impl App {
         if t.gallery_files().next().is_some() {
             items.push(act(A::Gallery, "all the thread's files"));
         }
-        if t.unhidden_posts().any(|(_, p)| !p.files.is_empty()) {
+        if t.unhidden_posts().any(|(_, p)| p.files.iter().any(|f| f.url.is_some())) {
             items.push(act(A::DownloadThread, "save all the thread's files…"));
         }
         if self.can_jump_back() {

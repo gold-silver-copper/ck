@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::model::Post;
+use crate::model::{Attachment, Post};
 
 /// Default for `download_dir`. `{downloads}` is the system's Downloads folder.
 const DEFAULT_DIR: &str = "{downloads}/ck/{site}/{board}/{thread}";
@@ -52,26 +52,35 @@ pub fn dir(template: Option<&str>, site: &str, board: &str, thread: u64) -> Path
     PathBuf::from(path)
 }
 
-/// `(url, destination)` for every file of `posts`. Names are the post number and the
-/// original file name, plus the file's position when a post has two files with one name,
-/// so they're unique within a thread and the same on every run (existing files get skipped).
-pub fn jobs(posts: &[&Post], dir: &Path) -> Vec<(String, PathBuf)> {
+/// Every file of a post with where it's saved. Names are the post number and the original
+/// file name, plus the file's position when a post has two files with one name, so they're
+/// unique within a thread and the same on every run (existing files get skipped).
+pub fn paths<'a>(p: &'a Post, dir: &Path) -> Vec<(&'a Attachment, PathBuf)> {
+    let names: Vec<String> = p.files.iter().map(|f| sanitize(&f.filename)).collect();
     let mut out = Vec::new();
-    for p in posts {
-        let names: Vec<String> = p.files.iter().map(|f| sanitize(&f.filename)).collect();
-        for (i, (f, name)) in p.files.iter().zip(&names).enumerate() {
-            let dup = names.iter().filter(|n| *n == name).count() > 1;
-            let file = if dup { format!("{}_{}_{name}", p.no, i + 1) } else { format!("{}_{name}", p.no) };
-            out.push((f.url.clone(), dir.join(file)));
-        }
+    for (i, (f, name)) in p.files.iter().zip(&names).enumerate() {
+        let dup = names.iter().filter(|n| *n == name).count() > 1;
+        let file = if dup { format!("{}_{}_{name}", p.no, i + 1) } else { format!("{}_{name}", p.no) };
+        out.push((f, dir.join(file)));
     }
     out
+}
+
+/// `(url, destination)` for every file of `posts` the site has. A file the archive kept
+/// only the thumbnail of isn't saved.
+pub fn jobs(posts: &[&Post], dir: &Path) -> Vec<(String, PathBuf)> {
+    posts.iter().flat_map(|p| paths(p, dir)).filter_map(|(f, path)| Some((f.url.clone()?, path))).collect()
+}
+
+/// What saving one of a post's files fetches, and where to: nothing for a file the site
+/// has only the thumbnail of.
+pub fn job(p: &Post, file: &Attachment, dir: &Path) -> Vec<(String, PathBuf)> {
+    paths(p, dir).into_iter().filter_map(|(f, path)| Some((f.url.clone().filter(|_| f.url == file.url)?, path))).collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::Attachment;
 
     #[test]
     fn sanitizing() {
@@ -89,7 +98,7 @@ mod tests {
 
     #[test]
     fn unique_names() {
-        let file = |name: &str| Attachment { filename: name.into(), url: format!("https://x/{name}"), ..Default::default() };
+        let file = |name: &str| Attachment { filename: name.into(), ..Attachment::at(format!("https://x/{name}")) };
         let a = Post { no: 1, files: vec![file("a.png"), file("a.png"), file("b.png")], ..Default::default() };
         let b = Post { no: 2, files: vec![file("a.png")], ..Default::default() };
         let names: Vec<_> = jobs(&[&a, &b], Path::new("/d"))
@@ -97,6 +106,12 @@ mod tests {
             .map(|(_, p)| p.file_name().unwrap().to_string_lossy().into_owned())
             .collect();
         assert_eq!(names, ["1_1_a.png", "1_2_a.png", "1_b.png", "2_a.png"]);
+        // One file's job is found by its address: a refresh that changed its size still
+        // finds it, and a post with the same file twice saves both.
+        let refreshed = Attachment { size: Some(1), ..file("a.png") };
+        let names: Vec<_> = job(&a, &refreshed, Path::new("/d")).into_iter().map(|(_, p)| p).collect();
+        assert_eq!(names, [Path::new("/d/1_1_a.png"), Path::new("/d/1_2_a.png")]);
+        assert!(job(&a, &Attachment { url: None, ..file("a.png") }, Path::new("/d")).is_empty());
     }
 
     #[test]
