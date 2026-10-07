@@ -498,6 +498,7 @@ impl App {
         }
         self.remark_catalog();
         self.remark_thread();
+        self.remark_search();
         let len = self.visible_catalog().len();
         self.tab.catalog_list.clamp(len);
     }

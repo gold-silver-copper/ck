@@ -558,6 +558,9 @@ it's one (desuarchive, palanq, b4k), or the archive configured for it with `arch
 thread; `enter` opens the thread on the archive with the post selected, `esc` goes back.
 Each page of 25 results is one request; going down past the last one (or `n`) loads the
 next. Archives limit how often you can search; when they say no, ck shows their message.
+Posts your filters or hidden words hide, or that you've hidden, are left out of the
+results (the title says how many) until `Z` shows them, marked "hidden"; this goes for
+`:saved` searches too.
 
 ## Images
 

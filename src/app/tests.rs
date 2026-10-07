@@ -763,6 +763,47 @@ fn archive_search_and_back() {
 }
 
 #[test]
+fn search_results_leave_out_hidden_posts() {
+    let mut app = app_with(
+        "[[site]]\nname = \"chan\"\nkind = \"vichan\"\nurl = \"http://127.0.0.1:3\"\nboards = [\"g\"]\narchive = \"arch\"\n\
+         [[site]]\nname = \"arch\"\nkind = \"foolfuuka\"\nurl = \"http://localhost:3\"\nboards = [\"g\"]",
+    );
+    app.tab.board = Some(Board { uri: "g".into(), title: String::new(), nsfw: None });
+    app.tab.view = View::Catalog;
+    app.act(Action::ArchiveSearch);
+    app.on_key(KeyEvent::from(KeyCode::Char('x')));
+    app.on_key(KeyEvent::from(KeyCode::Enter));
+    let page = crate::backend::foolfuuka::parse_search(&crate::backend::fixture("foolfuuka_search.json")).unwrap();
+    let nos: Vec<u64> = page.hits.iter().map(|(_, p)| p.no).collect();
+    // One hidden by hand, one by a hidden word (the longest word in it, and in no other).
+    app.store.toggle_hidden("arch", "g", nos[0]);
+    let text = |k: usize| page.hits[k].1.plain_text().to_lowercase();
+    let word = text(2)
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| (0..4).all(|k| k == 2 || !text(k).contains(w)))
+        .max_by_key(|w| w.len())
+        .unwrap()
+        .to_string();
+    app.hidden_words = vec![word];
+    app.filters = crate::filter::Filters::new(&[]).unwrap().with_words(&app.hidden_words).unwrap();
+    app.handle(answer(app.tab.req.unwrap(), |a, (page, r)| a.search_results(page, r), (1, Ok(page))));
+    let shown = |app: &App| app.visible_hits().iter().map(|&k| app.tab.search.as_ref().unwrap().hits[k].1.no).collect::<Vec<_>>();
+    assert_eq!(shown(&app), [nos[1], nos[3]]);
+    // Enter opens the one selected among those shown.
+    app.tab.search_list.state.select(Some(1));
+    app.enter();
+    assert_eq!(app.tab.pending_post, Some(nos[3]));
+    app.back();
+    // Z shows them all; unhiding by hand marks the results again.
+    app.act(Action::ShowHidden);
+    assert_eq!(shown(&app), nos);
+    app.act(Action::ShowHidden);
+    app.store.toggle_hidden("arch", "g", nos[0]);
+    app.remark_search();
+    assert_eq!(shown(&app), [nos[0], nos[1], nos[3]]);
+}
+
+#[test]
 fn reverse_image_search() {
     let mut app = local_app();
     app.images = crate::images::Images::offline();
@@ -2485,6 +2526,29 @@ fn searching_inside_saved_threads() {
     settle_until(&mut app, |a| a.tab.search.as_ref().unwrap().saved.as_ref().unwrap().finished);
     let s = app.tab.search.as_ref().unwrap();
     assert_eq!((s.query.as_str(), s.hits.len()), ("crab", 1));
+}
+
+#[test]
+fn searching_saved_threads_leaves_out_hidden_posts() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = saving_app(dir.path(), 1000);
+    let key = |board: &str, no| ThreadKey { site: "a".into(), board: board.into(), no };
+    app.store.keep_thread(&key("x", 1), "one", "u", &posts_saying(&[(1, "about rust"), (2, "nothing here"), (3, "Rust again")]), 900);
+    app.store.keep_thread(&key("xy", 7), "seven", "u", &posts_saying(&[(7, "no match"), (8, "a crab: RUST")]), 950);
+    app.flush_writes();
+    // A hidden word, and a post hidden by hand on its own board.
+    app.hidden_words = vec!["crab".into()];
+    app.filters = crate::filter::Filters::new(&[]).unwrap().with_words(&app.hidden_words).unwrap();
+    app.store.toggle_hidden("a", "x", 3);
+    app.goto_str("saved rust");
+    settle_until(&mut app, |a| a.tab.search.as_ref().unwrap().saved.as_ref().unwrap().finished);
+    let shown = |app: &App| app.visible_hits().iter().map(|&k| app.tab.search.as_ref().unwrap().hits[k].1.no).collect::<Vec<_>>();
+    assert_eq!(shown(&app), [1]);
+    // Everything found hidden: said, with how to see it.
+    app.goto_str("saved crab");
+    settle_until(&mut app, |a| a.tab.search.as_ref().unwrap().saved.as_ref().unwrap().finished);
+    assert!(shown(&app).is_empty());
+    assert_eq!(app.status.as_ref().unwrap().text, "1 result, all hidden (Z shows them)");
 }
 
 #[test]

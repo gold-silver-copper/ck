@@ -1039,6 +1039,30 @@ fn archive_search_results() {
 }
 
 #[test]
+fn hidden_search_results() {
+    let mut a = app(false);
+    a.tab.site = a.site_index("desuarchive").unwrap();
+    a.tab.view = View::Search;
+    let page = crate::backend::foolfuuka::parse_search(&crate::backend::fixture("foolfuuka_search.json")).unwrap();
+    let first = page.hits[0].1.no;
+    let mut s = crate::app::Search::for_tests("g", "rust borrow checker", page);
+    s.hidden = vec![true, false, false, false];
+    a.tab.search = Some(s);
+    a.tab.search_list.state.select(Some(0));
+    let text = render(&mut a).0;
+    assert!(!text.contains(&format!("No.{first}")) && text.contains("1 hidden"), "{text}");
+    // Z: shown, marked.
+    a.show_hidden = true;
+    let text = render(&mut a).0;
+    assert!(text.lines().any(|l| l.contains(&format!("No.{first}")) && l.contains(" hidden ")), "{text}");
+    // All hidden: says so, and how to see them.
+    a.show_hidden = false;
+    a.tab.search.as_mut().unwrap().hidden = vec![true; 4];
+    let text = render(&mut a).0;
+    assert!(text.contains("All hidden (Z shows them)"), "{text}");
+}
+
+#[test]
 fn image_search_panel() {
     let mut a = thread_app(false);
     let t = a.tab.thread.as_mut().unwrap();

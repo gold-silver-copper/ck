@@ -699,7 +699,7 @@ impl App {
             View::History => (self.visible_history().len(), &mut self.history_list),
             View::Saved => (self.visible_saved().len(), &mut self.saved_list),
             View::Settings => (settings::settings().count(), &mut self.settings_list),
-            View::Search => (self.tab.search.as_ref().map_or(0, |s| s.hits.len()), &mut self.tab.search_list),
+            View::Search => (self.visible_hits().len(), &mut self.tab.search_list),
             View::Thread => return None,
         })
         .map(|(len, p)| (p, len))
@@ -1104,6 +1104,7 @@ impl App {
         self.info(if hidden { format!("Hid {what} {no} ({show} shows hidden ones)") } else { format!("Unhid {what} {no}") });
         self.remark_catalog();
         self.remark_thread();
+        self.remark_search();
         self.clamp_list();
     }
 
@@ -1725,6 +1726,7 @@ impl App {
             View::Search => {
                 if let Some(s) = &mut self.tab.search {
                     s.hits.clear();
+                    s.hidden.clear();
                     s.pages = 0;
                 }
                 self.load_search_page();

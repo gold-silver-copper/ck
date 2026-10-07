@@ -369,9 +369,16 @@ pub(super) fn draw_search(f: &mut Frame, app: &mut App, area: Rect) {
     let width = area.width.saturating_sub(PAD + 2) as usize;
     let more = app.more_results();
     let needle = s.query.to_lowercase();
-    let mut build = |k: usize| -> Vec<Line<'static>> {
+    let visible = app.visible_hits();
+    let mut build = |row: usize| -> Vec<Line<'static>> {
+        let Some(&k) = visible.get(row) else { return Vec::new() };
         let Some((thread, p)) = s.hits.get(k) else { return Vec::new() };
-        let mut head = vec![Span::styled(p.name.clone(), bold(t.name)), Span::raw("  ")];
+        let hidden = s.hidden.get(k).copied().unwrap_or(false);
+        let mut head = Vec::new();
+        if hidden {
+            head.extend([chip("hidden", t.text_dim, t.surface_high), Span::raw(" ")]);
+        }
+        head.extend([Span::styled(p.name.clone(), if hidden { dim() } else { bold(t.name) }), Span::raw("  ")]);
         let key = s.saved.as_ref().and_then(|x| x.keys.get(k));
         if let Some(key) = key {
             head.push(Span::styled(format!("{}/{}/{}  ", key.site, key.board, key.no), dim()));
@@ -382,7 +389,7 @@ pub(super) fn draw_search(f: &mut Frame, app: &mut App, area: Rect) {
             head.push(Span::styled(format!("in thread {thread}  "), dim()));
         }
         if let Some(subject) = &p.subject {
-            head.push(Span::styled(subject.clone(), bold(t.text)));
+            head.push(Span::styled(subject.clone(), if hidden { dim() } else { bold(t.text) }));
         }
         let right = vec![Span::styled(format!("No.{}  ·  {}", p.no, ago(p.time, app.clock)), dim())];
         let mut lines = vec![spread(head, right, width)];
@@ -394,14 +401,14 @@ pub(super) fn draw_search(f: &mut Frame, app: &mut App, area: Rect) {
         lines
     };
     let mut state = app.tab.search_list.state;
-    let hit = draw_rows(f, area, s.hits.len(), &mut state, (3, 1), Some(t.surface), &|_| false, &mut build);
+    let hit = draw_rows(f, area, visible.len(), &mut state, (3, 1), Some(t.surface), &|_| false, &mut build);
     app.tab.search_list.state = state;
     if hit.is_none() && app.tab.loading.is_none() {
-        empty(f, area, "No results");
+        empty(f, area, if s.hits.is_empty() { "No results".to_string() } else { format!("All hidden ({} shows them)", app.keys.key(Action::ShowHidden)) }.as_str());
     }
     // Below the last card: more to load.
     if more && let Some(Hit::List { offset, item_height, .. }) = hit {
-        let shown = cells(s.hits.len().saturating_sub(offset)).saturating_mul(item_height);
+        let shown = cells(visible.len().saturating_sub(offset)).saturating_mul(item_height);
         if shown < area.height {
             let hint = format!("{} more: {} or go down to load them", (s.total.unwrap_or(0) as usize).saturating_sub(s.hits.len()), app.keys.key(Action::NextMatch));
             put(f, area.x, area.y + shown, area.width, Line::styled(hint, dim()).centered());
