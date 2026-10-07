@@ -34,7 +34,7 @@ pub(super) fn draw_gallery(f: &mut Frame, app: &mut App, area: Rect) {
             put(f, x + PAD, y + THUMB.height, card_w - PAD - 1, label);
         }
     }
-    app.hit = Some(Hit::Grid { area, offset: top * cols, cols, cell: (cell_w, cell_h) });
+    app.drawn.body = Some(Hit::Grid { area, offset: top * cols, cols, cell: (cell_w, cell_h) });
 }
 
 pub(super) fn draw_viewer(f: &mut Frame, app: &mut App) {

@@ -24,14 +24,16 @@ fn finds_programs_on_path() {
 #[test]
 fn mouse_wheel_click_and_double_click() {
     let mut app = test_app();
-    app.hit = Some(Hit::List { area: Rect::new(1, 2, 60, 10), offset: 0, item_height: 1 });
+    let list = Some(Hit::List { area: Rect::new(1, 2, 60, 10), offset: 0, item_height: 1 });
+    app.begin_frame().body = list;
     let t0 = Instant::now();
     app.on_mouse(mouse(MouseEventKind::ScrollDown, 5, 5), t0);
     assert_eq!(app.site_list.state.selected(), Some(1));
     app.on_mouse(mouse(MouseEventKind::ScrollUp, 5, 5), t0);
     assert_eq!(app.site_list.state.selected(), Some(0));
 
-    // Row 3 is the second item (History).
+    // Row 3 is the second item (History), in the frame after the wheel.
+    app.begin_frame().body = list;
     let left = MouseEventKind::Down(MouseButton::Left);
     app.on_mouse(mouse(left, 5, 3), t0);
     assert_eq!(app.site_list.state.selected(), Some(1));
@@ -44,6 +46,7 @@ fn mouse_wheel_click_and_double_click() {
 
     // Clicks outside the list do nothing.
     app.tab.view = View::Sites;
+    app.begin_frame().body = list;
     app.on_mouse(mouse(left, 5, 30), t0);
     assert_eq!(app.site_list.state.selected(), Some(1));
 }
@@ -57,7 +60,7 @@ fn clicks_on_a_settings_popup_never_reach_the_rows_behind() {
     assert!(matches!(app.popup, Some(Popup::Settings(SettingsPopup::HiddenWords { .. }))));
     draw_at(&mut app, 100, 40);
     // A double click on the Hidden replies row, beside the popup: nothing changes.
-    let Some(Hit::Settings { area, offset }) = app.hit else { panic!("no settings rows") };
+    let Some(Hit::Settings { area, offset }) = app.drawn.body else { panic!("no settings rows") };
     let pos = settings::position("Hidden replies").unwrap();
     let row = setting_rows().iter().position(|r| *r == Ok(pos)).unwrap() - offset;
     let left = MouseEventKind::Down(MouseButton::Left);
@@ -80,7 +83,7 @@ fn mouse_click_selects_thread_post() {
     t.viewport = 10;
     app.tab.thread = Some(t);
     app.tab.view = View::Thread;
-    app.hit = Some(Hit::Thread { area: Rect::new(0, 1, 40, 10) });
+    app.begin_frame().body = Some(Hit::Thread { area: Rect::new(0, 1, 40, 10), scroll: 0 });
     app.on_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 3, 1 + 9), Instant::now());
     assert_eq!(app.tab.thread.as_ref().unwrap().selected, 2);
     app.on_mouse(mouse(MouseEventKind::ScrollDown, 3, 3), Instant::now());
@@ -95,6 +98,278 @@ fn drawn(app: &mut App) {
 /// The footer's message has gone.
 fn expired(app: &mut App) {
     app.footer = Footer::default();
+}
+
+// ----- the mouse reaches only what's on top, as it was drawn -----
+
+/// A wheel notch while the key editor waits for a key is not a key: nothing is bound or
+/// refused, and the editor still waits for one.
+#[test]
+fn the_wheel_never_answers_the_key_editor() {
+    let mut app = test_app();
+    app.open_settings();
+    app.settings_list.state.select(Some(settings::position("Key bindings").unwrap()));
+    app.activate_setting();
+    // enter: waiting for the key to bind.
+    app.on_key(KeyEvent::from(KeyCode::Enter));
+    assert!(matches!(app.settings_popup(), Some(SettingsPopup::Keys { capture: Some(false), .. })));
+    app.on_mouse(mouse(MouseEventKind::ScrollDown, 5, 5), Instant::now());
+    assert!(app.status.is_none(), "the wheel was taken for a key: {:?}", app.status);
+    assert!(matches!(app.settings_popup(), Some(SettingsPopup::Keys { capture: Some(false), .. })), "the editor stopped waiting");
+}
+
+/// The wheel over a save question doesn't scroll the thread behind it.
+#[test]
+fn the_wheel_over_a_save_question_leaves_the_thread_alone() {
+    let mut app = thread_app();
+    app.set_thread(nos(&(1..=60).collect::<Vec<_>>()));
+    draw_at(&mut app, 80, 20);
+    app.popup = Some(Popup::Confirm(saving::Confirm { what: saving::Saving::Page, title: "Save the thread as a page?", lines: vec![] }));
+    let before = app.tab.thread.as_ref().unwrap().scroll;
+    app.on_mouse(mouse(MouseEventKind::ScrollDown, 5, 5), Instant::now());
+    assert_eq!(app.tab.thread.as_ref().unwrap().scroll, before, "the thread behind scrolled");
+    assert!(app.confirm().is_some());
+}
+
+/// Over a list, the notch that leaves a save question open over a thread mustn't answer it
+/// "no".
+#[test]
+fn the_wheel_never_answers_a_save_question() {
+    let mut app = test_app();
+    app.popup = Some(Popup::Confirm(saving::Confirm { what: saving::Saving::Page, title: "Save the thread as a page?", lines: vec![] }));
+    app.on_mouse(mouse(MouseEventKind::ScrollDown, 5, 5), Instant::now());
+    assert!(app.confirm().is_some(), "the wheel answered: {:?}", app.status);
+    assert_eq!(app.site_list.state.selected(), Some(0));
+}
+
+/// Over the filter maker the wheel moves its choices, not the thread behind it.
+#[test]
+fn the_wheel_moves_the_filter_choices_over_a_thread() {
+    let mut app = thread_app();
+    let mut posts = nos(&(1..=60).collect::<Vec<_>>());
+    posts[0].name = "Satoshi".into();
+    posts[0].subject = Some("Bitcoin".into());
+    app.set_thread(posts);
+    draw_at(&mut app, 80, 20);
+    app.open_add_filter();
+    assert!(app.filter_add().is_some_and(|a| a.candidates.len() > 1));
+    app.on_mouse(mouse(MouseEventKind::ScrollDown, 5, 5), Instant::now());
+    assert_eq!(app.tab.thread.as_ref().unwrap().scroll, 0, "the thread behind scrolled");
+    assert_eq!(app.filter_add().unwrap().list.selected(), Some(1));
+}
+
+/// The wheel over a right-click menu isn't a key: `u` still takes back the filter just added.
+#[test]
+fn the_wheel_over_a_menu_keeps_the_filter_undo() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = filter_app(dir.path());
+    app.tab.thread.as_mut().unwrap().selected = 1;
+    app.act(Action::Filter);
+    app.on_key(KeyEvent::from(KeyCode::Enter));
+    assert_ne!(config_text(&app), FILTER_CONFIG);
+    draw_at(&mut app, 80, 20);
+    let right = MouseEventKind::Down(MouseButton::Right);
+    app.on_mouse(mouse(right, 5, 3), Instant::now());
+    assert!(matches!(app.popup, Some(Popup::Menu(_))));
+    app.on_mouse(mouse(MouseEventKind::ScrollDown, 5, 3), Instant::now());
+    draw_at(&mut app, 80, 20);
+    app.on_mouse(mouse(right, 5, 3), Instant::now());
+    assert!(app.popup.is_none());
+    app.on_key(KeyEvent::from(KeyCode::Char('u')));
+    assert_eq!(config_text(&app), FILTER_CONFIG, "the wheel dropped the undo");
+}
+
+/// A double click on a post while a go-to is being typed doesn't submit the go-to.
+#[test]
+fn a_double_click_never_submits_a_goto() {
+    let mut app = thread_app();
+    app.set_thread(nos(&(1..=60).collect::<Vec<_>>()));
+    draw_at(&mut app, 80, 20);
+    app.act(Action::Goto);
+    for c in "zz/".chars() {
+        app.on_key(KeyEvent::from(KeyCode::Char(c)));
+    }
+    let left = MouseEventKind::Down(MouseButton::Left);
+    let t0 = Instant::now();
+    app.on_mouse(mouse(left, 5, 4), t0);
+    app.on_mouse(mouse(left, 5, 4), t0 + Duration::from_millis(100));
+    assert_eq!((app.tab.view, app.goto_text()), (View::Thread, Some("zz/")), "the go-to was submitted: {:?}", app.status);
+}
+
+/// A thread that's still loading draws no rows: the list drawn before it can't be clicked.
+#[test]
+fn a_loading_thread_keeps_no_clickable_rows_from_the_last_view() {
+    let mut app = test_app();
+    draw_at(&mut app, 80, 20);
+    assert!(matches!(app.drawn.body, Some(Hit::List { .. })));
+    app.tab.view = View::Thread;
+    app.tab.loading = Some("Loading".into());
+    draw_at(&mut app, 80, 20);
+    assert!(app.drawn.body.is_none(), "stale {:?}", app.drawn.body);
+}
+
+/// Input handled before the next frame can change what's shown: a click then lands on
+/// nothing, not on the rows the last frame drew for another view.
+#[test]
+fn a_click_after_leaving_a_view_waits_for_the_next_frame() {
+    let mut app = local_app();
+    app.switch_site(0);
+    app.tab.view = View::Boards;
+    draw_at(&mut app, 80, 20);
+    let Some(Hit::List { area, .. }) = app.drawn.body else { panic!("no boards drawn") };
+    app.on_key(KeyEvent::from(KeyCode::Char('h')));
+    assert_eq!(app.tab.view, View::Sites);
+    let before = app.site_list.state.selected();
+    // The second board's row; on the sites list it would be the second site.
+    app.on_mouse(mouse(MouseEventKind::Down(MouseButton::Left), area.x + 1, area.y + 1), Instant::now());
+    assert_eq!(app.site_list.state.selected(), before, "the click landed on the boards drawn before");
+}
+
+/// A wheel notch handled before the next frame moves what's under the pointer: a click then
+/// lands on nothing, and after the frame on the post drawn there.
+#[test]
+fn a_click_after_a_scroll_waits_for_the_next_frame() {
+    let mut app = thread_app();
+    app.set_thread(nos(&(1..=60).collect::<Vec<_>>()));
+    draw_at(&mut app, 80, 20);
+    let (col, row) = (5, 10);
+    let selected = |app: &App| app.tab.thread.as_ref().unwrap().selected;
+    for _ in 0..4 {
+        app.on_mouse(mouse(MouseEventKind::ScrollDown, col, row), Instant::now());
+    }
+    assert!(app.tab.thread.as_ref().unwrap().scroll >= 12);
+    let before = selected(&app);
+    app.on_mouse(mouse(MouseEventKind::Down(MouseButton::Left), col, row), Instant::now());
+    assert_eq!(selected(&app), before, "the click landed on the posts as they were drawn before");
+    draw_at(&mut app, 80, 20);
+    let shown = app.thread_part_at(col, row).unwrap().0;
+    assert_ne!(shown, before);
+    app.on_mouse(mouse(MouseEventKind::Down(MouseButton::Left), col, row), Instant::now());
+    assert_eq!(selected(&app), shown);
+}
+
+/// `f` right after a wheel notch would label the posts as they were drawn, over a frame
+/// showing others: it waits for the frame too.
+#[test]
+fn hints_after_a_scroll_wait_for_the_next_frame() {
+    let mut app = thread_app();
+    app.set_thread(nos(&(1..=60).collect::<Vec<_>>()));
+    draw_at(&mut app, 80, 20);
+    app.on_mouse(mouse(MouseEventKind::ScrollDown, 5, 5), Instant::now());
+    app.on_key(KeyEvent::from(KeyCode::Char('f')));
+    assert!(!matches!(app.popup, Some(Popup::Hints(_))), "labels on posts no longer drawn there");
+    draw_at(&mut app, 80, 20);
+    app.on_key(KeyEvent::from(KeyCode::Char('f')));
+    assert!(matches!(app.popup, Some(Popup::Hints(_))));
+}
+
+/// The quote peek covers the posts under it: a click on it reaches none of them.
+#[test]
+fn clicks_never_reach_the_posts_under_the_quote_peek() {
+    use crate::model::Target;
+    let mut app = local_app();
+    app.goto_str("a/x/1");
+    let html = r##"<a href="#p1" class="quotelink">&gt;&gt;1</a>"##;
+    let mut posts = nos(&(1..=60).collect::<Vec<_>>());
+    posts[1] = Post { no: 2, ..crate::markup::parse_html(html, crate::markup::Flavor::Vichan).into() };
+    app.handle(answer(app.tab.req.unwrap(), App::thread_arrived, Ok(posts)));
+    app.on_key(KeyEvent::from(KeyCode::Char('j')));
+    draw_at(&mut app, 80, 20);
+    let Some(Hit::Thread { area, .. }) = app.drawn.body else { panic!("no thread drawn") };
+    // The post drawn on a row near the top and one near the bottom.
+    let col = area.x + 5;
+    let drawn = |row| (row, app.thread_part_at(col, row).map(|(e, _)| e));
+    let (top, bottom) = (drawn(area.y + 1), drawn(area.bottom() - 2));
+    app.on_key(KeyEvent::from(KeyCode::Tab));
+    let focus = |app: &App| app.tab.thread.as_ref().unwrap().focus.clone();
+    assert!(matches!(focus(&app), Some(Part::Link(Target::Quote(_)))));
+    draw_at(&mut app, 80, 20);
+    // The peek covers the top or the bottom rows of the thread, as drawn the frame before.
+    let Some(Hit::Thread { area: after, .. }) = app.drawn.body else { panic!("no thread drawn") };
+    let (row, under) = if after.y > area.y { top } else { bottom };
+    assert!(under.is_some_and(|e| e != 1), "no post behind the peek");
+    app.on_mouse(mouse(MouseEventKind::Down(MouseButton::Left), col, row), Instant::now());
+    assert_eq!(app.tab.thread.as_ref().unwrap().selected, 1, "the click reached a post under the peek");
+    assert!(matches!(focus(&app), Some(Part::Link(Target::Quote(_)))));
+}
+
+/// A menu clicked before a frame has drawn it isn't closed by the click: the click waits for
+/// the frame, then picks the row there.
+#[test]
+fn a_menu_clicked_before_it_is_drawn_still_picks_a_row() {
+    let mut app = thread_app();
+    app.set_thread(nos(&(1..=60).collect::<Vec<_>>()));
+    draw_at(&mut app, 80, 20);
+    let right = MouseEventKind::Down(MouseButton::Right);
+    app.on_mouse(mouse(right, 5, 5), Instant::now());
+    draw_at(&mut app, 80, 20);
+    let Some(Hit::List { area, .. }) = app.drawn.popup else { panic!("no menu drawn") };
+    assert_ne!(area, Rect::default());
+    app.on_key(KeyEvent::from(KeyCode::Esc));
+    assert!(app.popup.is_none());
+    draw_at(&mut app, 80, 20);
+    // Right click then left click in one input batch, as a fast double tap does.
+    app.on_mouse(mouse(right, 5, 5), Instant::now());
+    let items = app.menu().unwrap().items.len();
+    app.on_mouse(mouse(MouseEventKind::Down(MouseButton::Left), area.x + 1, area.y + 1), Instant::now());
+    assert!(items > 1 && (app.popup.is_some() || app.status.is_some() || app.opened.is_some()), "the click closed the menu without picking a row");
+    draw_at(&mut app, 80, 20);
+    app.on_mouse(mouse(MouseEventKind::Down(MouseButton::Left), area.x + 1, area.y + 1), Instant::now());
+    assert!(app.menu().is_none() && (app.popup.is_some() || app.status.is_some() || app.opened.is_some() || app.tab.popup.is_some()), "the click picked no row");
+}
+
+/// Clicks on the same row in two tabs, with a tab chip clicked between, aren't a double click.
+#[test]
+fn a_click_in_another_tab_is_not_a_double_click() {
+    let mut app = test_app();
+    app.tabs.push(Tab::new(0, Instant::now()));
+    let list = Some(Hit::List { area: Rect::new(1, 2, 60, 10), offset: 0, item_height: 1 });
+    let frame = app.begin_frame();
+    frame.tabs = vec![(Rect::new(0, 0, 5, 1), 1)];
+    frame.body = list;
+    let left = MouseEventKind::Down(MouseButton::Left);
+    let t0 = Instant::now();
+    app.on_mouse(mouse(left, 5, 3), t0);
+    app.on_mouse(mouse(left, 1, 0), t0 + Duration::from_millis(100));
+    assert_eq!(app.active, 1);
+    app.begin_frame().body = list;
+    app.on_mouse(mouse(left, 5, 3), t0 + Duration::from_millis(200));
+    assert_eq!(app.tab.view, View::Sites, "one click opened it");
+}
+
+/// A list that comes back from a refresh between a frame and a click, in one batch, may
+/// be in another order: the click waits for the frame that shows it.
+#[test]
+fn a_click_after_a_list_answer_waits_for_the_next_frame() {
+    let mut app = local_app();
+    app.tab.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
+    let ops = |nos: &[u64]| nos.iter().map(|&no| Post { no, ..Default::default() }).collect::<Vec<_>>();
+    app.load_catalog();
+    app.handle(answer(app.tab.req.unwrap(), App::catalog_arrived, Ok(ops(&[1, 2, 3, 4]))));
+    app.tab.view = View::Catalog;
+    draw_at(&mut app, 80, 30);
+    let Some(hit) = app.drawn.body else { panic!("no catalog drawn") };
+    let at = (0..30).find(|&row| hit.row_at(5, row) == Some(2)).unwrap();
+    let click = |app: &mut App| {
+        let ev = MouseEvent { kind: MouseEventKind::Down(MouseButton::Left), column: 5, row: at, modifiers: KeyModifiers::NONE };
+        app.handle(Msg::Input(Event::Mouse(ev)));
+    };
+    let selected = |app: &App| app.tab.catalog_list.state.selected();
+    app.load_catalog();
+    app.handle(answer(app.tab.req.unwrap(), App::catalog_arrived, Ok(ops(&[4, 3, 2, 1]))));
+    let before = selected(&app);
+    click(&mut app);
+    assert_eq!(selected(&app), before, "the click landed on the list as it was drawn before");
+    draw_at(&mut app, 80, 30);
+    click(&mut app);
+    assert_eq!(selected(&app), Some(2));
+    // So does what background work found (a watched refresh re-sorts Saved): the list
+    // comes back reversed between this frame and the click.
+    draw_at(&mut app, 80, 30);
+    app.handle(Msg::Done(Box::new(move |app: &mut App| app.catalog_arrived(Ok(ops(&[1, 2, 3, 4]))))));
+    app.tab.catalog_list.state.select(Some(0));
+    click(&mut app);
+    assert_eq!(selected(&app), Some(0), "the click landed on the list as it was drawn before");
 }
 
 #[test]
@@ -734,7 +1009,7 @@ fn grid_moves_in_two_dimensions() {
     assert_eq!(app.tab.view, View::Boards);
     // Clicks hit the right card.
     app.tab.view = View::Catalog;
-    app.hit = Some(Hit::Grid { area: Rect::new(2, 2, 66, 24), offset: 0, cols: 3, cell: (22, 12) });
+    app.begin_frame().body = Some(Hit::Grid { area: Rect::new(2, 2, 66, 24), offset: 0, cols: 3, cell: (22, 12) });
     app.on_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 2 + 22 + 5, 2 + 12 + 3), Instant::now());
     assert_eq!(at(&app), 4);
     // c cycles this board's layout.
@@ -1102,8 +1377,8 @@ fn tabs_keep_their_own_place_and_responses() {
     assert_eq!((app.tab.view, app.tab.settings_back, app.tab.pending_thread.unwrap()), (View::Settings, Some(View::Thread), 3));
     // Tab chips don't switch tabs under a settings popup (it isn't the tab's).
     app.tabs.push(Tab::new(0, Instant::now()));
-    app.tab_chips = vec![(Rect::new(0, 0, 5, 1), 1)];
     app.popup = Some(Popup::Settings(SettingsPopup::Folder { value: String::new() }));
+    app.begin_frame().tabs = vec![(Rect::new(0, 0, 5, 1), 1)];
     app.on_mouse(MouseEvent { kind: MouseEventKind::Down(MouseButton::Left), column: 1, row: 0, modifiers: KeyModifiers::NONE }, Instant::now());
     assert_eq!((app.active, app.tab.view), (0, View::Settings));
     app.popup = None;
@@ -2267,6 +2542,7 @@ fn saving_needs_a_target_or_asks_first() {
     assert_eq!(app.footer.get().unwrap().text, "Not saved");
     // So does a click.
     run_menu_row(&mut app, "save all the thread's files…");
+    app.begin_frame();
     app.on_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 0, 0), Instant::now());
     assert!(app.confirm().is_none() && total(&app) == 1);
     run_menu_row(&mut app, "save all the thread's files…");

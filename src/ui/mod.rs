@@ -145,13 +145,12 @@ fn empty(f: &mut Frame, area: Rect, msg: &str) {
 // ----- the frame -----
 
 pub fn draw(f: &mut Frame, app: &mut App) {
+    app.begin_frame();
     let t = theme();
     let all = f.area();
     // A saved copy is read offline: its images only come from disk.
     app.images.offline = app.tab.view == View::Thread && app.tab.saved().is_some();
     f.buffer_mut().set_style(all, Style::new().fg(t.text).bg(t.background));
-    // Only chips drawn this frame can be clicked: none under the viewer.
-    app.tab_chips.clear();
     if app.tab.viewer().is_some() {
         draw_viewer(f, app);
     } else {
@@ -235,7 +234,7 @@ fn draw_tab_row(f: &mut Frame, app: &mut App, area: Rect) {
         };
         let r = Rect::new(x, area.y, w, 1);
         put(f, x, area.y, w, Line::styled(text, style));
-        app.tab_chips.push((r, i));
+        app.drawn.tabs.push((r, i));
         x += w + 1;
     }
 }

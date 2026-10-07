@@ -40,7 +40,28 @@ Navigation (fixed):
 | `J`/`K`                 | scroll a thread by line                       |
 | `enter`, `l`            | open (in a thread: follow a `>>quote`, also into other threads and boards) |
 | `esc`, `h`, backspace   | back                                          |
-| mouse                   | wheel scrolls, click selects, double-click opens |
+| mouse                   | wheel scrolls, click selects, double-click opens, right-click opens the menu (over popups: below) |
+
+The mouse works on what's on top. Over a list popup (the menu, links, image search, the
+filter maker's choices, a settings picker) the wheel moves its rows; over the help, the
+quoted posts, the gallery and the viewer it does what the arrow keys do there; over hint
+labels it closes them; over a question (save this? the add-site box) it does nothing, even
+with a thread behind; and while the key editor waits for a key it does nothing at all. A
+click on the menu, the links or image search picks the row under it (on a link, a double
+click opens it), and anywhere else closes them; in the gallery a click selects a file and a
+double click views it; a right click closes the menu; a click anywhere closes the filter
+maker, the help, hint labels, the quoted posts or a question, and only the one on top: a
+question over the quoted posts leaves them open. Over the other Settings popups and the
+viewer a click does nothing. While a go-to or archive search is typed, the wheel scrolls a
+thread behind it (over a list it does nothing) and a double click on a post opens it,
+leaving the box open; while a thread search or list filter is typed, a click does nothing.
+
+A click (left or right) lands on what the screen showed. Once that may have changed (a
+key, paste, resize or wheel notch, or anything arriving from a site or background work,
+except an image) it does nothing until the next frame is drawn, a moment later: click
+again. `f` typed in that moment finds nothing to label either. The quote peek can't be
+clicked (nor does `f` label what's under it), a loading thread has no posts to click, and a
+double click is two clicks on the same thing in the same tab, view and popup.
 
 Commands are remappable in Settings or the config (see [Remapping keys](#remapping-keys));
 the action name is in brackets. The `?` help lists them with your keys, starting with the
@@ -320,7 +341,8 @@ its flag, its image's MD5, its file's name, and an OP's subject; never the site'
 anonymous name), whether to hide or highlight
 (`a`), where (`s`: this board, this site, or everywhere) and a label (`e`). `enter` adds
 it: it's written to the config as a `[[filter]]`, applies at once, and the footer says
-what it caught; `u` as the next key takes it back (also when it couldn't be written).
+what it caught; `u` as the next key takes it back (also when it couldn't be written; a left
+click gives that up, the wheel or a right click doesn't).
 
 Settings › Filters lists every filter with what it catches in the open catalog and thread.
 `enter` edits one (pattern, label, action, the fields it looks at, sites and boards, OPs

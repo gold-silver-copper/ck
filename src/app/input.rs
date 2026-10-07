@@ -1,10 +1,12 @@
 //! Keys and the mouse: what captures input, and what each key does where.
 
 use super::*;
+use ratatui::crossterm::event::MouseEventKind::{Down, ScrollDown, ScrollUp};
+use ratatui::layout::Position;
 
 /// A popup or input box that takes the keys (see `App::modal`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Modal {
+pub(super) enum Modal {
     Confirm,
     Adding,
     Settings,
@@ -23,120 +25,140 @@ enum Modal {
     Filtering,
 }
 
+/// What a frame showed: the screen (its view and tab), how many tabs, and what's on top.
+pub(super) type Shown = ((View, usize, bool, bool), usize, Option<Modal>);
+
+/// What the mouse does with one gesture.
+type Handler = fn(&mut App, MouseEvent, Instant);
+
 impl App {
-    /// Wheel scrolls, a click selects, a double click opens.
+    /// What the wheel, a left click and a right click do with `top` on top, and whether the
+    /// tab chips can be clicked under it. Every popup and input has its row: a new one
+    /// can't be added without saying what the mouse does over it.
+    #[deny(clippy::wildcard_enum_match_arm)]
+    fn mouse(&self, top: Option<Modal>) -> (Handler, Handler, Handler, bool) {
+        let Some(top) = top else { return (App::scroll, App::click_view, App::menu_at, true) };
+        match top {
+            // A click doesn't make a save that asks, nor add a site; the wheel answers nothing.
+            Modal::Confirm | Modal::Adding => (App::ignore, App::close_top, App::ignore, false),
+            // The key editor waiting for a key: the mouse is none.
+            Modal::Settings if matches!(&self.popup, Some(Popup::Settings(SettingsPopup::Keys { capture: Some(_), .. }))) => (App::ignore, App::ignore, App::ignore, false),
+            // Settings popups take keys only: a click mustn't reach the row behind (a double
+            // click would change that setting).
+            Modal::Settings => (App::rows, App::ignore, App::ignore, false),
+            Modal::AddFilter | Modal::Help => (App::rows, App::close_top, App::ignore, false),
+            // Labels are on what's drawn, which the wheel would move.
+            Modal::Hints => (App::close_top, App::close_top, App::ignore, false),
+            Modal::Menu => (App::rows, App::on_menu_click, App::close_top, false),
+            Modal::ImageSearch => (App::rows, App::on_image_search_click, App::ignore, false),
+            Modal::Preview => (App::rows, App::close_top, App::ignore, true),
+            Modal::Links => (App::rows, App::on_links_click, App::ignore, true),
+            // The gallery's wheel moves through its grid, a row a notch.
+            Modal::Gallery => (App::rows, App::on_gallery_click, App::ignore, true),
+            Modal::Viewer => (App::rows, App::ignore, App::ignore, true),
+            // Typing stays open while the thread is read, and its posts clicked.
+            Modal::Goto | Modal::SearchInput => (App::scroll_thread, App::click_view, App::ignore, false),
+            Modal::Searching | Modal::Filtering => (App::scroll_thread, App::ignore, App::ignore, false),
+        }
+    }
+
+    /// The mouse, to what's on top. A click lands only on the frame it was aimed at: once
+    /// something may have moved (a wheel notch among them), it does nothing until the next.
     pub fn on_mouse(&mut self, ev: MouseEvent, now: Instant) {
         http::user_input();
-        let down = matches!(ev.kind, MouseEventKind::ScrollDown);
-        if matches!(ev.kind, MouseEventKind::ScrollDown | MouseEventKind::ScrollUp) {
-            let key = |c| KeyEvent::from(if c { KeyCode::Down } else { KeyCode::Up });
-            match self.modal() {
-                // The gallery's wheel moves through its grid, a row a notch.
-                Some(Modal::Help | Modal::Menu | Modal::Viewer | Modal::Preview | Modal::Gallery | Modal::Links | Modal::ImageSearch) => self.on_key(key(down)),
-                Some(Modal::Hints) => self.popup = None,
-                _ if self.tab.view == View::Thread => {
-                    if let Some(t) = &mut self.tab.thread {
-                        t.scroll_lines(if down { 3 } else { -3 });
-                    }
+        let (before, top) = (self.shown(), self.modal());
+        let (wheel, left, right, tabs) = self.mouse(top);
+        let pos = Position::new(ev.column, ev.row);
+        let fresh = self.drawn.shown == Some(before);
+        let clicked = match ev.kind {
+            ScrollDown | ScrollUp => {
+                wheel(self, ev, now);
+                false
+            }
+            Down(MouseButton::Right) if fresh => {
+                right(self, ev, now);
+                true
+            }
+            Down(MouseButton::Left) if fresh => {
+                // `u` takes back a filter only right after it's added.
+                self.filter_undo = None;
+                match self.drawn().and_then(|d| d.tabs.iter().find(|(r, _)| r.contains(pos)).map(|&(_, i)| i)).filter(|_| tabs) {
+                    Some(i) => self.switch_tab(i),
+                    None => left(self, ev, now),
                 }
-                _ if !matches!(self.typing, Some(Typing::ListFilter | Typing::ThreadSearch)) => self.on_key(key(down)),
-                _ => {}
+                true
             }
-            return;
+            _ => return,
+        };
+        if !clicked || self.shown() != before {
+            self.drawn.shown = None;
         }
-        let right = ev.kind == MouseEventKind::Down(MouseButton::Right);
-        if ev.kind != MouseEventKind::Down(MouseButton::Left) && !right {
-            return;
+    }
+
+    fn ignore(&mut self, _: MouseEvent, _: Instant) {}
+
+    /// Close what's on top (a question over the preview, not the preview too).
+    fn close_top(&mut self, _: MouseEvent, _: Instant) {
+        if self.popup.take().is_none() {
+            self.tab.popup = None;
         }
-        // A right-click selects what's under it and opens its menu (or closes one that's open).
-        if right {
-            match self.modal() {
-                Some(Modal::Menu) => self.popup = None,
-                None => {
-                    self.select_at(ev.column, ev.row);
-                    self.open_menu();
-                }
-                _ => {}
-            }
-            return;
+    }
+
+    /// The wheel moves a popup's rows as the arrow keys do.
+    fn rows(&mut self, ev: MouseEvent, _: Instant) {
+        if let Some(m) = self.modal() {
+            self.on_modal_key(m, arrow(ev));
         }
-        let pos = ratatui::layout::Position::new(ev.column, ev.row);
-        // Popups and inputs that aren't the tab's own stay with it: no switching under them.
-        let app_wide = matches!(
-            self.modal(),
-            Some(
-                Modal::Confirm
-                    | Modal::Adding
-                    | Modal::Settings
-                    | Modal::AddFilter
-                    | Modal::Help
-                    | Modal::Menu
-                    | Modal::Hints
-                    | Modal::ImageSearch
-                    | Modal::Goto
-                    | Modal::SearchInput
-                    | Modal::Searching
-                    | Modal::Filtering
-            )
-        );
-        if let Some(&(_, i)) = self.tab_chips.iter().find(|(r, _)| r.contains(pos)).filter(|_| !app_wide) {
-            self.switch_tab(i);
-            return;
+    }
+
+    /// The wheel scrolls a thread three lines a notch.
+    fn scroll_thread(&mut self, ev: MouseEvent, _: Instant) {
+        if let Some(t) = self.tab.thread.as_mut().filter(|_| self.tab.view == View::Thread) {
+            t.scroll_lines(if ev.kind == ScrollDown { 3 } else { -3 });
         }
-        match self.modal() {
-            Some(Modal::Menu) => return self.on_menu_click(ev.column, ev.row),
-            Some(Modal::Hints) => {
-                self.popup = None;
-                return;
-            }
-            Some(Modal::Links) => return self.on_links_click(ev.column, ev.row, now),
-            Some(Modal::ImageSearch) => return self.on_image_search_click(ev.column, ev.row),
-            Some(Modal::Help | Modal::Preview | Modal::AddFilter | Modal::Confirm | Modal::Adding) => {
-                // Clicking anywhere closes a popup (a save that asks isn't made, nor a site added).
-                self.popup = None;
-                if matches!(self.tab.popup, Some(TabPopup::Preview(_))) {
-                    self.tab.popup = None;
-                }
-                return;
-            }
-            // A settings popup takes keys only: a click mustn't reach the row behind it (a
-            // double click would change that setting).
-            Some(Modal::Viewer | Modal::Searching | Modal::Filtering | Modal::Settings) => return,
-            Some(Modal::Gallery | Modal::Goto | Modal::SearchInput) | None => {}
+    }
+
+    /// The wheel scrolls a thread, and moves through a list.
+    fn scroll(&mut self, ev: MouseEvent, now: Instant) {
+        if self.tab.view == View::Thread { self.scroll_thread(ev, now) } else { self.on_view_key(arrow(ev)) }
+    }
+
+    /// A right-click selects what's under it and opens its menu.
+    fn menu_at(&mut self, ev: MouseEvent, _: Instant) {
+        self.select_at(ev.column, ev.row);
+        self.open_menu();
+    }
+
+    /// A click selects (a part of a post focuses it); a double click opens it.
+    fn click_view(&mut self, ev: MouseEvent, now: Instant) {
+        let Some(at) = self.select_at(ev.column, ev.row) else { return };
+        if self.double_click(now, at) {
+            self.on_view_key(KeyEvent::from(KeyCode::Enter));
         }
-        let Some(target) = self.click_target(ev.column, ev.row) else { return };
-        let double = self.last_click.is_some_and(|(t, i)| i == target && now.duration_since(t) < Duration::from_millis(400));
-        self.last_click = if double { None } else { Some((now, target)) };
-        if self.modal() == Some(Modal::Gallery) {
-            if let Some(g) = &mut self.tab.gallery
-                && target < g.files.len()
-            {
-                g.state.select(Some(target));
-                if double {
-                    self.view_from_gallery(target);
-                }
-            }
-        } else if self.tab.view == View::Thread {
-            // A click on a part focuses it (a double click opens it).
-            let part = self.thread_part_at(ev.column, ev.row).and_then(|(_, part)| part);
-            if let Some(t) = &mut self.tab.thread {
-                t.set_cursor(target);
-                if t.focus != part {
-                    t.focus = part;
-                    t.layout = None;
-                }
-            }
-            if double {
-                self.on_key(KeyEvent::from(KeyCode::Enter));
-            }
-        } else if let Some((p, len)) = self.filtered_list()
-            && target < len
-        {
-            p.state.select(Some(target));
-            if double {
-                self.enter();
-            }
+    }
+
+    /// A click on a gallery file selects it; a double click views it.
+    fn on_gallery_click(&mut self, ev: MouseEvent, now: Instant) {
+        let Some(k) = self.select_at(ev.column, ev.row) else { return };
+        if self.double_click(now, k) {
+            self.view_from_gallery(k);
         }
+    }
+
+    /// Whether a click on `at` is the second of a double click: on the same row, tab, view
+    /// and popup as the one before, and soon after it.
+    pub(super) fn double_click(&mut self, now: Instant, at: usize) -> bool {
+        let here = (self.shown(), at);
+        if self.last_click.take().is_some_and(|(t, was)| was == here && now.duration_since(t) < Duration::from_millis(400)) {
+            return true;
+        }
+        self.last_click = Some((now, here));
+        false
+    }
+
+    /// What's on screen now, as a frame stamps it.
+    pub(super) fn shown(&self) -> Shown {
+        (self.screen(), self.tabs.len(), self.modal())
     }
 
     /// Whether a popup or input is taking the keys (the fuzzer asks).
@@ -146,8 +168,8 @@ impl App {
     }
 
     /// What's capturing input, topmost first (the viewer can be open over the gallery, and
-    /// image search over the viewer). It gets every key; clicks go to it or close it.
-    fn modal(&self) -> Option<Modal> {
+    /// image search over the viewer). It gets every key; the mouse goes as `mouse` says.
+    pub(super) fn modal(&self) -> Option<Modal> {
         if let Some(p) = &self.popup {
             return Some(match p {
                 Popup::Settings(_) => Modal::Settings,
@@ -174,44 +196,39 @@ impl App {
         }))
     }
 
-    /// Select what's at a screen position: a list row, or a post (and its part) in a thread.
-    fn select_at(&mut self, col: u16, row: u16) {
+    /// Select what was drawn at a screen position: a list row, a gallery file, or a post (and
+    /// its part) in a thread. Which, if anything.
+    fn select_at(&mut self, col: u16, row: u16) -> Option<usize> {
+        let at = self.click_target(col, row);
+        if let Some(g) = self.tab.gallery.as_mut().filter(|_| self.tab.view == View::Thread) {
+            let k = at.filter(|&k| k < g.files.len())?;
+            g.state.select(Some(k));
+            return Some(k);
+        }
         if self.tab.view == View::Thread {
-            if let Some((e, part)) = self.thread_part_at(col, row)
-                && let Some(t) = &mut self.tab.thread
-            {
-                t.set_cursor(e);
+            let (e, part) = self.thread_part_at(col, row)?;
+            let t = self.tab.thread.as_mut()?;
+            t.set_cursor(e);
+            if t.focus != part {
                 t.focus = part;
                 t.layout = None;
             }
-        } else if let Some(target) = self.click_target(col, row)
-            && let Some((p, len)) = self.filtered_list()
-            && target < len
-        {
-            p.state.select(Some(target));
+            return Some(e);
         }
+        let target = at?;
+        let (p, _) = self.filtered_list().filter(|&(_, len)| target < len)?;
+        p.state.select(Some(target));
+        Some(target)
     }
 
-    /// The list row or thread post at a screen position.
+    /// The list row or grid cell drawn at a screen position.
     fn click_target(&self, col: u16, row: u16) -> Option<usize> {
-        let pos = ratatui::layout::Position::new(col, row);
-        match self.hit? {
-            Hit::List { area, offset, item_height } if area.contains(pos) => {
-                Some(offset + ((row - area.y) / item_height.max(1)) as usize)
-            }
-            Hit::Settings { area, offset } if area.contains(pos) => settings::rows().get(offset + (row - area.y) as usize)?.ok(),
-            Hit::Grid { area, offset, cols, cell } if area.contains(pos) => {
-                let c = ((col - area.x) / cell.0) as usize;
-                (c < cols).then(|| offset + ((row - area.y) / cell.1) as usize * cols + c)
-            }
-            Hit::Thread { area } if area.contains(pos) => {
-                let t = self.tab.thread.as_ref()?;
-                let l = t.layout.as_ref()?;
-                let line = t.scroll + (row - area.y) as usize;
-                l.line(line).map(|(e, _)| e)
-            }
-            _ => None,
-        }
+        self.drawn()?.body?.row_at(col, row)
+    }
+
+    /// The row of the popup's list drawn at a screen position.
+    pub(super) fn popup_row(&self, col: u16, row: u16) -> Option<usize> {
+        self.drawn()?.popup?.row_at(col, row)
     }
 
     pub fn on_key(&mut self, key: KeyEvent) {
@@ -230,34 +247,43 @@ impl App {
             self.undo_filter();
             return;
         }
-        if let Some(modal) = self.modal() {
-            match modal {
-                Modal::Confirm => self.on_confirm_key(key),
-                Modal::Adding => self.on_adding_key(key),
-                Modal::Settings => self.on_settings_popup_key(key),
-                Modal::AddFilter => self.on_add_filter_key(key),
-                Modal::Menu => self.on_menu_key(key),
-                Modal::Hints => self.on_hints_key(key),
-                Modal::Help => match (&mut self.popup, key.code) {
-                    (Some(Popup::Help(scroll)), KeyCode::Char('j') | KeyCode::Down) => *scroll = scroll.saturating_add(1),
-                    (Some(Popup::Help(scroll)), KeyCode::Char('k') | KeyCode::Up) => *scroll = scroll.saturating_sub(1),
-                    _ => self.popup = None,
-                },
-                Modal::ImageSearch => self.on_image_search_key(key.code),
-                Modal::Viewer => match self.keys.action(Scope::Viewer, &key) {
-                    Some(action) => self.act(action),
-                    None => self.on_viewer_key(key.code),
-                },
-                Modal::Preview => self.on_preview_key(key.code),
-                Modal::Gallery => self.on_gallery_key(key),
-                Modal::Links => self.on_links_key(key.code),
-                Modal::Goto => self.on_goto_key(key),
-                Modal::SearchInput => self.on_search_input_key(key),
-                Modal::Searching => self.on_search_key(key),
-                Modal::Filtering => self.on_filter_key(key),
-            }
-            return;
+        match self.modal() {
+            Some(modal) => self.on_modal_key(modal, key),
+            None => self.on_view_key(key),
         }
+    }
+
+    /// A key for what's on top.
+    fn on_modal_key(&mut self, modal: Modal, key: KeyEvent) {
+        match modal {
+            Modal::Confirm => self.on_confirm_key(key),
+            Modal::Adding => self.on_adding_key(key),
+            Modal::Settings => self.on_settings_popup_key(key),
+            Modal::AddFilter => self.on_add_filter_key(key),
+            Modal::Menu => self.on_menu_key(key),
+            Modal::Hints => self.on_hints_key(key),
+            Modal::Help => match (&mut self.popup, key.code) {
+                (Some(Popup::Help(scroll)), KeyCode::Char('j') | KeyCode::Down) => *scroll = scroll.saturating_add(1),
+                (Some(Popup::Help(scroll)), KeyCode::Char('k') | KeyCode::Up) => *scroll = scroll.saturating_sub(1),
+                _ => self.popup = None,
+            },
+            Modal::ImageSearch => self.on_image_search_key(key.code),
+            Modal::Viewer => match self.keys.action(Scope::Viewer, &key) {
+                Some(action) => self.act(action),
+                None => self.on_viewer_key(key.code),
+            },
+            Modal::Preview => self.on_preview_key(key.code),
+            Modal::Gallery => self.on_gallery_key(key),
+            Modal::Links => self.on_links_key(key.code),
+            Modal::Goto => self.on_goto_key(key),
+            Modal::SearchInput => self.on_search_input_key(key),
+            Modal::Searching => self.on_search_key(key),
+            Modal::Filtering => self.on_filter_key(key),
+        }
+    }
+
+    /// A key for the view, with nothing on top.
+    fn on_view_key(&mut self, key: KeyEvent) {
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         if self.tab.view == View::Search && self.keys.keys(Action::NextMatch).contains(&crate::keys::Key::from_event(&key)) {
             if self.more_results() {
@@ -686,4 +712,9 @@ impl App {
             _ => {}
         }
     }
+}
+
+/// The arrow key a wheel notch moves rows by.
+fn arrow(ev: MouseEvent) -> KeyEvent {
+    KeyEvent::from(if ev.kind == ScrollDown { KeyCode::Down } else { KeyCode::Up })
 }

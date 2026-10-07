@@ -1084,7 +1084,7 @@ fn tab_chips_hidden_under_the_viewer_cant_be_clicked() {
     a.tab.catalog_list.state.select(Some(1));
     a.new_tab();
     snapshot(&mut a);
-    let (chip, other) = a.tab_chips.iter().find(|&&(_, i)| i != a.active).copied().unwrap();
+    let (chip, other) = a.drawn.tabs.iter().find(|&&(_, i)| i != a.active).copied().unwrap();
     // The viewer is drawn over the whole screen: the row the chips were on is its own.
     a.tab.popup = Some(crate::app::TabPopup::Viewer(Viewer::new(vec![file("op.png")], 0, None)));
     snapshot(&mut a);
