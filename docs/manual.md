@@ -628,7 +628,9 @@ is created from the default if you don't have one yet:
 
 - **Theme**: pick from the built-in themes (material, material-light, nord, gruvbox,
   catppuccin, tokyo-night, solarized-light, terminal, which uses your terminal's own
-  colors, and mono, which uses none: the default when `NO_COLOR` is set) and your own.
+  colors on its own background, light or dark (cards, panels and bars aren't filled, and
+  the selection shows by its bar), and mono, which uses none: the default when `NO_COLOR`
+  is set) and your own.
   Nothing depends on color alone: the selection has a bar, a focused part is bold and
   underlined, and spoilers are shaded out until revealed. The screen changes as you move through the list; `enter` keeps
   the theme, `esc` goes back.

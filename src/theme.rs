@@ -154,14 +154,19 @@ const SOLARIZED_LIGHT: Theme = Theme {
 };
 
 /// The terminal's own colors: its background stays (transparency works), with the 16 ANSI
-/// colors for accents. For terminals without 256 colors, or for a native look.
+/// colors for accents. For terminals without 256 colors, or for a native look. It reads on
+/// a light terminal as on a dark one: text in the terminal's own color is only ever on its
+/// own background (cards, panels and bars aren't filled; the selection shows by its
+/// stripe), a filled color has text of a fixed color on it, and text colors are the
+/// mid-tone ones (not yellow, black, white or the bright ones) a palette makes readable on
+/// its background.
 #[rustfmt::skip]
 const TERMINAL: Theme = Theme {
-    background: Color::Reset, surface: Color::Reset, surface_high: Color::Black, surface_highest: Color::Black,
-    bar: Color::Black, on_bar: Color::Reset, text: Color::Reset, text_dim: Color::DarkGray,
-    primary: Color::Yellow, on_primary: Color::Black, primary_container: Color::Blue, on_primary_container: Color::White,
-    selection: Color::Blue, greentext: Color::Green, pinktext: Color::LightRed, quotelink: Color::Magenta,
-    heading: Color::Red, code: Color::Cyan, code_bg: Color::Reset, name: Color::Green, new: Color::LightGreen,
+    background: Color::Reset, surface: Color::Reset, surface_high: Color::Reset, surface_highest: Color::Reset,
+    bar: Color::Reset, on_bar: Color::Reset, text: Color::Reset, text_dim: Color::DarkGray,
+    primary: Color::Magenta, on_primary: Color::White, primary_container: Color::Blue, on_primary_container: Color::White,
+    selection: Color::Reset, greentext: Color::Green, pinktext: Color::LightRed, quotelink: Color::Magenta,
+    heading: Color::Red, code: Color::Cyan, code_bg: Color::Reset, name: Color::Green, new: Color::Green,
     error: Color::Red, success: Color::Green, warning: Color::Yellow, search: Color::Yellow, on_search: Color::Black,
     spoiler: Color::DarkGray,
 };
@@ -463,6 +468,22 @@ fn paint_color(c: Option<Color>, t: &Theme) -> Option<Color> {
     })
 }
 
+/// The color for text in `fg` on `bg`. Text in the terminal's own color (`fg` is the
+/// default: a chip's in the terminal theme, or a revealed spoiler's) on a filled color
+/// can't be read on both light and dark terminals, so there it's white on the dark colors
+/// and black on the others.
+pub fn ink(fg: Color, bg: Color) -> Color {
+    if fg != Color::Reset {
+        return fg;
+    }
+    match bg {
+        Color::Reset => fg,
+        Color::Black | Color::DarkGray | Color::Red | Color::Blue | Color::Magenta => Color::White,
+        Color::Rgb(r, g, b) if 0.2126 * f32::from(r) + 0.7152 * f32::from(g) + 0.0722 * f32::from(b) < 128.0 => Color::White,
+        _ => Color::Black,
+    }
+}
+
 /// A style with post markup colors replaced by the current theme's.
 pub fn paint(style: Style) -> Style {
     let t = theme();
@@ -568,6 +589,31 @@ mod tests {
         set(GRUVBOX);
         assert_eq!(paint(Style::new().fg(mark::GREENTEXT).bg(mark::SPOILER)).bg, Some(GRUVBOX.spoiler));
         assert_eq!(paint(Style::new().fg(Color::Red)).fg, Some(Color::Red));
+    }
+
+    #[test]
+    fn the_terminal_theme_reads_on_light_and_dark_terminals() {
+        let t = TERMINAL;
+        // Whatever has text in the terminal's own color on it is the terminal's background.
+        for bg in [t.background, t.surface, t.surface_high, t.surface_highest, t.bar, t.selection, t.code_bg] {
+            assert_eq!(bg, Color::Reset);
+        }
+        // A filled color has text of a color of its own on it.
+        for (bg, fg) in [(t.primary, t.on_primary), (t.primary_container, t.on_primary_container), (t.search, t.on_search)] {
+            assert!(bg != Color::Reset && fg != Color::Reset && fg != bg, "{fg:?} on {bg:?}");
+        }
+        // Text colors are ones a palette makes readable on its own background, light or dark.
+        let unreadable = [Color::Black, Color::White, Color::Gray, Color::Yellow, Color::LightYellow, Color::LightGreen, Color::LightCyan, Color::LightBlue];
+        for fg in [t.on_bar, t.text, t.text_dim, t.primary, t.greentext, t.pinktext, t.quotelink, t.heading, t.code, t.name, t.new, t.error, t.success] {
+            assert!(!unreadable.contains(&fg), "{fg:?}");
+        }
+        // Text in the terminal's own color on a filled color gets one that reads on it
+        // (chips, a revealed spoiler); anything else stays.
+        assert_eq!(ink(t.background, t.new), Color::Black);
+        assert_eq!(ink(t.background, t.error), Color::White);
+        assert_eq!(ink(t.text, t.spoiler), Color::White);
+        assert_eq!(ink(t.text, t.surface_high), Color::Reset);
+        assert_eq!(ink(NORD.background, NORD.new), NORD.background);
     }
 
     #[test]
