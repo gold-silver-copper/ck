@@ -60,8 +60,9 @@ A click (left or right) lands on what the screen showed. Once that may have chan
 key, paste, resize or wheel notch, or anything arriving from a site or background work,
 except an image) it does nothing until the next frame is drawn, a moment later: click
 again. `f` typed in that moment finds nothing to label either. The quote peek can't be
-clicked (nor does `f` label what's under it), a loading thread has no posts to click, and a
-double click is two clicks on the same thing in the same tab, view and popup.
+clicked (nor does `f` label what's under it), a loading thread has no posts to click, the
+quoted posts or links drawn over the tab chips cover them, and a double click is two clicks
+on the same thing in the same tab, view and popup.
 
 Commands are remappable in Settings or the config (see [Remapping keys](#remapping-keys));
 the action name is in brackets. The `?` help lists them with your keys, starting with the

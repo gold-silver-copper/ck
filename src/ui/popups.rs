@@ -181,7 +181,7 @@ pub(super) fn draw_hints(f: &mut Frame, app: &App) {
     }
 }
 
-pub(super) fn draw_preview(f: &mut Frame, app: &App) {
+pub(super) fn draw_preview(f: &mut Frame, app: &mut App) {
     let (Some(TabPopup::Preview(p)), Some(t)) = (&app.tab.popup, &app.tab.thread) else { return };
     let w = f.area().width.saturating_sub(8).clamp(20, 110);
     let width = w.saturating_sub(4) as usize;
@@ -202,6 +202,7 @@ pub(super) fn draw_preview(f: &mut Frame, app: &App) {
     for (row, line) in lines.into_iter().skip(scroll).take(inner.height as usize).enumerate() {
         put(f, inner.x, inner.y + row as u16, inner.width, line);
     }
+    cover_tabs(&mut app.drawn.tabs, inner);
 }
 
 /// The selected post's links: quotes leading elsewhere, web links, files.
@@ -215,6 +216,7 @@ pub(super) fn draw_links(f: &mut Frame, app: &mut App) {
     let off = scroll_to(p.list.offset(), sel, rows);
     *p.list.offset_mut() = off;
     app.drawn.popup = Some(Hit::List { area: inner, offset: off, item_height: 1 });
+    cover_tabs(&mut app.drawn.tabs, inner);
     list_rows(f, Rect { height: rows as u16, ..inner }, off, p.items.len(), Some(sel), |k| {
         let Some(item) = p.items.get(k) else { return Line::default() };
         let (kind, text, extra) = match item {

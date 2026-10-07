@@ -337,6 +337,27 @@ fn a_click_in_another_tab_is_not_a_double_click() {
     assert_eq!(app.tab.view, View::Sites, "one click opened it");
 }
 
+/// A preview tall enough to reach the tab row covers the chips there: a click on its title
+/// closes it, and doesn't switch tabs under it.
+#[test]
+fn a_tall_preview_covers_the_tab_chips() {
+    let mut app = local_app();
+    app.tabs.push(Tab::new(0, Instant::now()));
+    app.tab.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
+    app.tab.view = View::Thread;
+    let mut posts: Vec<Post> = (1..=20).map(|no| Post { no, body: vec![Line::from(format!("post {no}"))], ..Default::default() }).collect();
+    posts.push(Post { no: 21, quotes: (1..=20).collect(), ..Default::default() });
+    app.set_thread(posts);
+    draw_at(&mut app, 80, 20);
+    let Some(&(chip, 1)) = app.drawn.tabs.last() else { panic!("no second chip") };
+    app.on_key(KeyEvent::from(KeyCode::Char('G')));
+    app.act(Action::Preview);
+    draw_at(&mut app, 80, 20);
+    app.on_mouse(mouse(MouseEventKind::Down(MouseButton::Left), chip.x, chip.y), Instant::now());
+    assert_eq!(app.active, 0, "the click went through the preview to a chip");
+    assert!(app.tab.popup.is_none());
+}
+
 /// A list that comes back from a refresh between a frame and a click, in one batch, may
 /// be in another order: the click waits for the frame that shows it.
 #[test]

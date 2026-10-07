@@ -799,6 +799,13 @@ fn spread(mut left: Vec<Span<'static>>, right: Vec<Span<'static>>, width: usize)
     Line::from(left)
 }
 
+/// The tab chips under a panel that stays open over them (a tall preview reaches the tab
+/// row) can't be clicked.
+fn cover_tabs(tabs: &mut Vec<(Rect, usize)>, inner: Rect) {
+    let over = inner.outer(Margin::new(2, 2));
+    tabs.retain(|(r, _)| !r.intersects(over));
+}
+
 /// A raised panel centered in the frame, with a title bar; returns the area inside.
 fn panel(f: &mut Frame, width: u16, height: u16, title: &str, hint: &str) -> Rect {
     let t = theme();
