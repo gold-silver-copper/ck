@@ -3490,3 +3490,44 @@ fn a_watched_thread_that_404s_keeps_no_counts() {
     app.handle(answer(app.tab.req.unwrap(), App::thread_arrived, Err(gone())));
     assert_eq!((app.store.watched(&key(3)).unwrap().status, app.tab.view), (Status::Dead, View::Catalog), "restore 404");
 }
+
+#[test]
+fn gallery_files_keep_their_posts_when_the_live_thread_replaces_a_cached_copy() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = thread_app();
+    app.download_dir = Some(dir.path().display().to_string());
+    app.images = crate::images::Images::offline();
+    let file = |name: &str| Attachment { filename: name.into(), url: format!("http://127.0.0.1:3/x/src/{name}"), ..Default::default() };
+    let post = |no, files: Vec<Attachment>| Post { no, files, ..Default::default() };
+    // The cached copy has No.2; the live thread, arriving with the gallery open, doesn't.
+    app.set_cached_thread(vec![post(1, vec![]), post(2, vec![]), post(3, vec![file("3.png")]), post(4, vec![file("4.png")])], 0);
+    app.act(Action::Gallery);
+    app.set_thread(vec![post(1, vec![]), post(3, vec![file("3.png")]), post(4, vec![file("4.png")]), post(5, vec![])]);
+    // The first file is still 3.png, from No.3: its link, its save and esc go there.
+    assert_eq!(app.gallery_link(0).as_deref(), Some("http://127.0.0.1:3/x/res/1.html#3"));
+    app.on_key(KeyEvent::from(KeyCode::Char('d')));
+    assert_eq!(app.downloads.total, 1);
+    app.close_gallery();
+    assert_eq!(app.tab.thread.as_ref().unwrap().current().unwrap().no, 3);
+}
+
+#[test]
+fn u_skips_a_post_a_refresh_took_away() {
+    let mut app = thread_app();
+    app.set_cached_thread(nos(&[1, 2, 3, 4, 5]), 0);
+    let t = app.tab.thread.as_mut().unwrap();
+    t.select(1);
+    assert!(t.jump_to(3) && t.jump_to(5));
+    // The live thread, without No.3, arrives: u goes back past it, to No.2.
+    app.set_thread(nos(&[1, 2, 4, 5]));
+    app.act(Action::JumpBack);
+    assert_eq!(app.tab.thread.as_ref().unwrap().current().unwrap().no, 2);
+    // With only a dropped post to go back to, there's nowhere: the menu doesn't offer u.
+    let mut app = thread_app();
+    app.set_cached_thread(nos(&[1, 2, 3]), 0);
+    let t = app.tab.thread.as_mut().unwrap();
+    t.select(1);
+    assert!(t.jump_to(3) && app.can_jump_back());
+    app.set_thread(nos(&[1, 3]));
+    assert!(!app.can_jump_back());
+}

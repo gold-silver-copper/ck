@@ -301,9 +301,7 @@ impl App {
             let (no, query) = (post.no, s.query.clone());
             self.open_saved(&key);
             if let Some(t) = self.tab.thread.as_mut().filter(|_| self.tab.view == View::Thread) {
-                if let Some(&i) = t.index.get(&no) {
-                    t.select(i);
-                }
+                t.select_post(no);
                 t.set_search(query);
                 self.tab.return_to = Some(View::Search);
             }

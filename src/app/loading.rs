@@ -376,21 +376,18 @@ impl App {
                 tv.media = old.media;
                 let cursor_path = old.entries.get(old.entry()).map(|e| e.path.clone());
                 tv.rebuild_entries();
-                if let Some(e) = cursor_path.and_then(|p| tv.entries.iter().position(|e| e.path == p)) {
+                if let Some(e) = cursor_path.and_then(|p| tv.entry_of(&p)) {
                     tv.set_cursor(e);
                 }
-                let at = |p: &Vec<u64>| tv.entries.iter().position(|e| e.path == *p);
-                tv.anchor = old.top_anchor().and_then(|(i, off)| Some((at(&old.entries.get(i)?.path)?, off)));
+                tv.anchor = old.top_anchor().and_then(|(i, off)| Some((tv.entry_of(&old.entries.get(i)?.path)?, off)));
                 tv.scroll = old.scroll;
                 tv.viewport = old.viewport;
                 tv.cache = old.cache;
                 tv.cache_width = old.cache_width;
                 tv.estimates = old.estimates;
-                // Jumps back and revealed spoilers by post number, since indices can shift.
-                let moved = |i: &usize| old.posts.get(*i).and_then(|p| tv.index.get(&p.no)).copied();
-                tv.jumps = old.jumps.iter().filter_map(moved).collect();
+                tv.jumps = old.jumps;
                 tv.new_after = old.new_after;
-                tv.revealed = old.revealed.iter().filter_map(moved).collect();
+                tv.revealed = old.revealed;
                 tv.reveal_all = old.reveal_all;
                 tv.set_search(old.search);
                 // The focused part, if the post still has it.
@@ -426,7 +423,7 @@ impl App {
         // Following: the first new entry that isn't hidden, revealed as `j` would.
         if let Some(last) = follow
             && let Some(t) = &mut self.tab.thread
-            && let Some(at) = t.entries.iter().position(|e| e.path == last)
+            && let Some(at) = t.entry_of(&last)
             && let Some(next) = t.entries.iter().enumerate().skip(at + 1).find(|(_, e)| !t.is_collapsed(e.post)).map(|(i, _)| i)
         {
             t.set_cursor(next);

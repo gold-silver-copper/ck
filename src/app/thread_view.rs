@@ -145,7 +145,8 @@ pub struct ThreadView {
     pub backlinks: Vec<Vec<u64>>,
     pub selected: usize,
     pub scroll: usize,
-    pub(super) jumps: Vec<usize>,
+    /// Where `u` goes back to, by post number.
+    pub(super) jumps: Vec<u64>,
     /// Rendered layout, rebuilt by the UI when the width changes, from cached post lines.
     pub layout: Option<ThreadLayout>,
     pub cache: LineCache,
@@ -157,8 +158,8 @@ pub struct ThreadView {
     /// Search query (as typed) and the posts matching it.
     pub search: String,
     pub matches: Vec<usize>,
-    /// Posts whose spoilers are shown, or all of them.
-    pub revealed: HashSet<usize>,
+    /// Posts (by number) whose spoilers are shown, or all of them.
+    pub revealed: HashSet<u64>,
     pub reveal_all: bool,
     /// The posts as shown, with replies expanded inline (`e`) where asked.
     pub entries: Vec<Entry>,
@@ -366,7 +367,16 @@ impl ThreadView {
     }
 
     pub fn is_revealed(&self, i: usize) -> bool {
-        self.reveal_all || self.revealed.contains(&i)
+        self.reveal_all || self.posts.get(i).is_some_and(|p| self.revealed.contains(&p.no))
+    }
+
+    /// `s`: show the selected post's spoilers, or hide them again.
+    pub fn toggle_spoiler(&mut self) {
+        let Some(no) = self.current().map(|p| p.no) else { return };
+        if !self.revealed.remove(&no) {
+            self.revealed.insert(no);
+        }
+        self.layout = None;
     }
 
     /// Recompute matches for the current query and re-render.
@@ -608,7 +618,7 @@ impl ThreadView {
         }
         self.entries = out;
         self.layout = None;
-        match path.and_then(|p| self.entries.iter().position(|e| e.path == p)) {
+        match path.and_then(|p| self.entry_of(&p)) {
             Some(e) => self.set_cursor(e),
             // The selected post, if it's still shown; else the next one that is (or the last).
             None => match self.entries.iter().position(|e| e.path.len() == 1 && e.post >= self.selected) {
@@ -811,9 +821,32 @@ impl ThreadView {
     }
 
     pub(crate) fn jump_to(&mut self, no: u64) -> bool {
-        let Some(&i) = self.index.get(&no) else { return false };
-        self.jumps.push(self.selected);
+        self.index.get(&no).copied().map(|i| self.jump(i)).is_some()
+    }
+
+    /// Select post `i`, with the selected one to come back to (`u`).
+    pub(super) fn jump(&mut self, i: usize) {
+        self.jumps.extend(self.current().map(|p| p.no));
         self.select(i);
-        true
+    }
+
+    /// `u`: back to the last post jumped from that's still here. False if there's none.
+    pub(super) fn jump_back(&mut self) -> bool {
+        while let Some(no) = self.jumps.pop() {
+            if self.select_post(no) {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Select post `no`. False if the thread doesn't have it.
+    pub fn select_post(&mut self, no: u64) -> bool {
+        self.index.get(&no).copied().map(|i| self.select(i)).is_some()
+    }
+
+    /// Where the entry at `path` (post numbers, from the top-level post down) is shown.
+    pub fn entry_of(&self, path: &[u64]) -> Option<usize> {
+        self.entries.iter().position(|e| e.path == path)
     }
 }

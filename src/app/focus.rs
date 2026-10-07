@@ -241,9 +241,10 @@ impl App {
         self.tab.board.as_ref().is_some_and(|b| self.store.watched(&self.key(&b.uri, no)).is_some())
     }
 
-    /// Whether `u` has somewhere to go back to: an earlier post, or the thread before.
+    /// Whether `u` has somewhere to go back to: an earlier post still here, or the thread
+    /// before.
     pub(crate) fn can_jump_back(&self) -> bool {
-        self.tab.thread.as_ref().is_some_and(|t| !t.jumps.is_empty()) || !self.tab.trail.is_empty()
+        self.tab.thread.as_ref().is_some_and(|t| t.jumps.iter().any(|no| t.index.contains_key(no))) || !self.tab.trail.is_empty()
     }
 
     /// The selected post in a thread, and what's focused in it. Returns the menu's title.

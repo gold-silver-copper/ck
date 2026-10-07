@@ -16,8 +16,7 @@ pub(super) fn draw_gallery(f: &mut Frame, app: &mut App, area: Rect) {
     let sel = g.state.selected().unwrap_or(0).min(n - 1);
     let top = scroll_to(g.state.offset() / cols, sel / cols, rows);
     *g.state.offset_mut() = top * cols;
-    let posts = app.tab.thread.as_ref().map(|t| &t.posts);
-    for (k, (post, file)) in g.files.iter().enumerate().skip(top * cols).take((rows + 1) * cols) {
+    for (k, (no, file)) in g.files.iter().enumerate().skip(top * cols).take((rows + 1) * cols) {
         let (r, c) = (k / cols - top, k % cols);
         let (x, y) = (area.x + c as u16 * cell_w, area.y + r as u16 * cell_h);
         let card = Rect::new(x, y, card_w, card_h).intersection(area);
@@ -29,7 +28,6 @@ pub(super) fn draw_gallery(f: &mut Frame, app: &mut App, area: Rect) {
         }
         paint_row(f, card, Some(t.surface), k == sel, false);
         draw_tile(f, &mut app.images, file, 1, off, Rect::new(x + PAD, y, THUMB.width, THUMB.height), area);
-        let no = posts.and_then(|p| p.get(*post)).map_or(0, |p| p.no);
         let kind = file.ext().to_uppercase();
         let label = Line::from(vec![Span::styled(format!("No.{no}"), Style::new().fg(t.text)), Span::styled(format!("  {kind}"), dim())]);
         if y + THUMB.height < area.bottom() {
