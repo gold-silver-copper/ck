@@ -114,7 +114,7 @@ fn the_wheel_never_answers_the_key_editor() {
     app.on_key(KeyEvent::from(KeyCode::Enter));
     assert!(matches!(app.settings_popup(), Some(SettingsPopup::Keys { capture: Some(false), .. })));
     app.on_mouse(mouse(MouseEventKind::ScrollDown, 5, 5), Instant::now());
-    assert!(app.status.is_none(), "the wheel was taken for a key: {:?}", app.status);
+    assert!(app.status().is_none(), "the wheel was taken for a key: {:?}", app.status());
     assert!(matches!(app.settings_popup(), Some(SettingsPopup::Keys { capture: Some(false), .. })), "the editor stopped waiting");
 }
 
@@ -138,7 +138,7 @@ fn the_wheel_never_answers_a_save_question() {
     let mut app = test_app();
     app.popup = Some(Popup::Confirm(saving::Confirm { what: saving::Saving::Page, title: "Save the thread as a page?", lines: vec![] }));
     app.on_mouse(mouse(MouseEventKind::ScrollDown, 5, 5), Instant::now());
-    assert!(app.confirm().is_some(), "the wheel answered: {:?}", app.status);
+    assert!(app.confirm().is_some(), "the wheel answered: {:?}", app.status());
     assert_eq!(app.site_list.state.selected(), Some(0));
 }
 
@@ -193,7 +193,7 @@ fn a_double_click_never_submits_a_goto() {
     let t0 = Instant::now();
     app.on_mouse(mouse(left, 5, 4), t0);
     app.on_mouse(mouse(left, 5, 4), t0 + Duration::from_millis(100));
-    assert_eq!((app.tab.view, app.goto_text()), (View::Thread, Some("zz/")), "the go-to was submitted: {:?}", app.status);
+    assert_eq!((app.tab.view, app.goto_text()), (View::Thread, Some("zz/")), "the go-to was submitted: {:?}", app.status());
 }
 
 /// A thread that's still loading draws no rows: the list drawn before it can't be clicked.
@@ -272,7 +272,7 @@ fn clicks_never_reach_the_posts_under_the_quote_peek() {
     let html = r##"<a href="#p1" class="quotelink">&gt;&gt;1</a>"##;
     let mut posts = nos(&(1..=60).collect::<Vec<_>>());
     posts[1] = Post { no: 2, ..crate::markup::parse_html(html, crate::markup::Flavor::Vichan).into() };
-    app.handle(answer(app.tab.req.unwrap(), App::thread_arrived, Ok(posts)));
+    app.handle(answer(app.tab.req.unwrap(), App::thread_arrived, arrived(posts)));
     app.on_key(KeyEvent::from(KeyCode::Char('j')));
     draw_at(&mut app, 80, 20);
     let Some(Hit::Thread { area, .. }) = app.drawn.body else { panic!("no thread drawn") };
@@ -312,10 +312,10 @@ fn a_menu_clicked_before_it_is_drawn_still_picks_a_row() {
     app.on_mouse(mouse(right, 5, 5), Instant::now());
     let items = app.menu().unwrap().items.len();
     app.on_mouse(mouse(MouseEventKind::Down(MouseButton::Left), area.x + 1, area.y + 1), Instant::now());
-    assert!(items > 1 && (app.popup.is_some() || app.status.is_some() || app.opened.is_some()), "the click closed the menu without picking a row");
+    assert!(items > 1 && (app.popup.is_some() || app.status().is_some() || app.opened.is_some()), "the click closed the menu without picking a row");
     draw_at(&mut app, 80, 20);
     app.on_mouse(mouse(MouseEventKind::Down(MouseButton::Left), area.x + 1, area.y + 1), Instant::now());
-    assert!(app.menu().is_none() && (app.popup.is_some() || app.status.is_some() || app.opened.is_some() || app.tab.popup.is_some()), "the click picked no row");
+    assert!(app.menu().is_none() && (app.popup.is_some() || app.status().is_some() || app.opened.is_some() || app.tab.popup.is_some()), "the click picked no row");
 }
 
 /// Clicks on the same row in two tabs, with a tab chip clicked between, aren't a double click.
@@ -335,6 +335,27 @@ fn a_click_in_another_tab_is_not_a_double_click() {
     app.begin_frame().body = list;
     app.on_mouse(mouse(left, 5, 3), t0 + Duration::from_millis(200));
     assert_eq!(app.tab.view, View::Sites, "one click opened it");
+}
+
+/// Two clicks on one row with the list re-sorted between them are on two threads: not a
+/// double click.
+#[test]
+fn a_list_re_sorted_between_two_clicks_is_not_a_double_click() {
+    let mut app = local_app();
+    app.tab.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
+    let ops = |nos: &[u64]| nos.iter().map(|&no| Post { no, ..Default::default() }).collect::<Vec<_>>();
+    app.load_catalog();
+    app.handle(answer(app.tab.req.unwrap(), App::catalog_arrived, Ok(ops(&[1, 2, 3, 4]))));
+    app.tab.view = View::Catalog;
+    draw_at(&mut app, 80, 30);
+    let Some(hit) = app.drawn.body else { panic!("no catalog drawn") };
+    let at = (0..30).find(|&row| hit.row_at(5, row) == Some(2)).unwrap();
+    let t0 = Instant::now();
+    app.on_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 5, at), t0);
+    app.handle(Msg::Done(Box::new(move |app: &mut App| app.catalog_arrived(Ok(ops(&[4, 3, 2, 1]))))));
+    draw_at(&mut app, 80, 30);
+    app.on_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 5, at), t0 + Duration::from_millis(100));
+    assert_eq!(app.tab.view, View::Catalog, "one click on each thread opened one");
 }
 
 /// A preview tall enough to reach the tab row covers the chips there: a click on its title

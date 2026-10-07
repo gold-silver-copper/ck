@@ -62,7 +62,7 @@ except an image) it does nothing until the next frame is drawn, a moment later: 
 again. `f` typed in that moment finds nothing to label either. The quote peek can't be
 clicked (nor does `f` label what's under it), a loading thread has no posts to click, the
 quoted posts or links drawn over the tab chips cover them, and a double click is two clicks
-on the same thing in the same tab, view and popup.
+on the same thing with none of those changes between them.
 
 Commands are remappable in Settings or the config (see [Remapping keys](#remapping-keys));
 the action name is in brackets. The `?` help lists them with your keys, starting with the

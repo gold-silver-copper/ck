@@ -480,8 +480,8 @@ pub struct App {
     pub(crate) download_dir: Option<String>,
     /// Where the last frame drew what can be clicked.
     pub drawn: Drawn,
-    /// Last left click: when, on what was shown, and the row, post or file it hit.
-    last_click: Option<(Instant, (input::Shown, usize))>,
+    /// Last left click: when, and the list index or thread post it hit.
+    last_click: Option<(Instant, usize)>,
     pub tick: usize,
     pub quit: bool,
     /// Why ck quit on its own (the terminal stopped giving input), to report after.
@@ -1002,7 +1002,7 @@ impl App {
         }
         // Anything else may have moved what the last frame drew (a key, a list re-sorted in
         // the background): a click does nothing until the next frame.
-        self.drawn.shown = None;
+        self.forget_frame();
     }
 
     /// The footer's message, if it has one.

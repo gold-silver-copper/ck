@@ -91,7 +91,7 @@ impl App {
             _ => return,
         };
         if !clicked || self.shown() != before {
-            self.drawn.shown = None;
+            self.forget_frame();
         }
     }
 
@@ -145,15 +145,21 @@ impl App {
         }
     }
 
-    /// Whether a click on `at` is the second of a double click: on the same row, tab, view
-    /// and popup as the one before, and soon after it.
+    /// Whether a click on `at` is the second of a double click: on the same row of the same
+    /// frame as the one before (see `forget_frame`), and soon after it.
     pub(super) fn double_click(&mut self, now: Instant, at: usize) -> bool {
-        let here = (self.shown(), at);
-        if self.last_click.take().is_some_and(|(t, was)| was == here && now.duration_since(t) < Duration::from_millis(400)) {
+        if self.last_click.take().is_some_and(|(t, was)| was == at && now.duration_since(t) < Duration::from_millis(400)) {
             return true;
         }
-        self.last_click = Some((now, here));
+        self.last_click = Some((now, at));
         false
+    }
+
+    /// What the last frame drew may have moved: no click lands until the next frame, and
+    /// none before pairs with one after into a double click.
+    pub(super) fn forget_frame(&mut self) {
+        self.drawn.shown = None;
+        self.last_click = None;
     }
 
     /// What's on screen now, as a frame stamps it.
