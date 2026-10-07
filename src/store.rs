@@ -312,7 +312,7 @@ impl Store {
         for (name, bytes) in self.files()? {
             let h = hash(&bytes);
             if self.written.borrow().get(name) != Some(&h) {
-                write_atomic(&dir.join(name), &bytes)?;
+                crate::atomic::write(&dir.join(name), &bytes)?;
                 self.written.borrow_mut().insert(name, h);
             }
         }
@@ -333,7 +333,7 @@ impl Store {
     pub fn save_boards(&self, site: &str, boards: &[Board], now: i64) -> Result<()> {
         let Some(path) = self.boards_path(site) else { return Ok(()) };
         let saved = SavedBoards { fetched: now, boards: boards.to_vec() };
-        write_atomic(&path, &serde_json::to_vec(&saved)?)
+        crate::atomic::write(&path, &serde_json::to_vec(&saved)?)
     }
 
     /// A board's catalog was loaded: remember its threads, and return the ones that weren't
@@ -387,7 +387,7 @@ impl Store {
 
     pub fn save_session(&self, session: &Session) -> Result<()> {
         let Some(dir) = &self.dir else { return Ok(()) };
-        write_atomic(&dir.join("session.json"), &serde_json::to_vec_pretty(session)?)
+        crate::atomic::write(&dir.join("session.json"), &serde_json::to_vec_pretty(session)?)
     }
 
     /// What's hidden by hand on a board.
@@ -646,9 +646,8 @@ fn load_file<T: DeserializeOwned + Default>(path: &Path, warnings: &mut Vec<Stri
         Ok(v) => v,
         Err(e) => {
             // Keep the broken file for the user instead of overwriting it on the next save.
-            let aside = path.with_extension("json.corrupt");
-            warnings.push(match std::fs::rename(path, &aside) {
-                Ok(()) => format!("{} was corrupt ({e}); moved it to {}", path.display(), aside.display()),
+            warnings.push(match crate::atomic::set_aside(path) {
+                Ok(aside) => format!("{} was corrupt ({e}); moved it to {}", path.display(), aside.display()),
                 Err(r) => format!("{} was corrupt ({e}), and couldn't be moved aside ({r}): it will be overwritten", path.display()),
             });
             T::default()
@@ -662,42 +661,6 @@ fn hash(bytes: &[u8]) -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
     bytes.hash(&mut h);
     h.finish()
-}
-
-/// Write a file whole or not at all: to `<path>.tmp`, then renamed into place (its folder
-/// is created if needed). A symlink is written through, to the file it points to, and an
-/// existing file keeps its permissions.
-pub fn write_atomic(path: &Path, data: &[u8]) -> Result<()> {
-    use std::io::Write as _;
-    let target = link_target(path);
-    let path = target.as_path();
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
-    }
-    let mut tmp = path.as_os_str().to_owned();
-    tmp.push(".tmp");
-    let mode = std::fs::metadata(path).ok().map(|m| m.permissions());
-    let written = (|| {
-        let mut file = std::fs::File::create(&tmp)?;
-        // Before the content goes in, so a private file is never readable by others.
-        if let Some(mode) = mode {
-            file.set_permissions(mode)?;
-        }
-        file.write_all(data)
-    })();
-    written.with_context(|| format!("writing {}", path.display()))?;
-    std::fs::rename(&tmp, path).with_context(|| format!("writing {}", path.display()))
-}
-
-/// Where a write to `path` should go: the file a symlink points to (even one that isn't
-/// there yet), or `path` itself.
-fn link_target(path: &Path) -> PathBuf {
-    if !std::fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink()) {
-        return path.to_path_buf();
-    }
-    std::fs::canonicalize(path)
-        .or_else(|_| std::fs::read_link(path).map(|to| path.parent().map_or_else(|| to.clone(), |dir| dir.join(&to))))
-        .unwrap_or_else(|_| path.to_path_buf())
 }
 
 #[cfg(test)]
@@ -716,7 +679,8 @@ mod tests {
         assert!(s.toggle_watch(key(1), "one".into(), 5, 105));
         s.visit(&key(2), "two", 3, 203, 1000);
         s.save().unwrap();
-        assert!(!dir.path().join("watched.json.tmp").exists());
+        // No temp file is left behind.
+        assert!(std::fs::read_dir(dir.path()).unwrap().all(|e| e.unwrap().path().extension().is_none_or(|x| x != "tmp")));
 
         let (s2, _) = Store::load(Some(dir.path().to_path_buf()));
         assert_eq!(s2.watched[0].key, key(1));

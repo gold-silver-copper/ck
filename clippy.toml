@@ -3,7 +3,12 @@ allow-unwrap-in-tests = true
 allow-expect-in-tests = true
 allow-panic-in-tests = true
 allow-indexing-slicing-in-tests = true
+
+# Text is measured only as ratatui draws it (markup::columns); files land, and cache folders
+# are listed and trimmed, only through crate::atomic, so a temp file is never shared, never
+# left behind on error, and never counted or evicted.
 disallowed-methods = [
+  # Text width: one measure, the one ratatui draws with.
   { path = "unicode_width::UnicodeWidthStr::width", reason = "measures differently from what ratatui draws; use markup::columns or markup::spans_columns" },
   { path = "unicode_width::UnicodeWidthStr::width_cjk", reason = "measures differently from what ratatui draws; use markup::columns or markup::spans_columns" },
   { path = "unicode_width::UnicodeWidthChar::width", reason = "measures differently from what ratatui draws; use markup::columns or markup::spans_columns" },
@@ -12,4 +17,15 @@ disallowed-methods = [
   { path = "ratatui::text::Line::width", reason = "measures differently from what ratatui draws; use markup::columns or markup::spans_columns" },
   { path = "ratatui::text::Text::width", reason = "measures differently from what ratatui draws; use markup::columns or markup::spans_columns" },
   { path = "ratatui::buffer::CellWidth::cell_width", reason = "measures a whole string at once, not as ratatui draws it; use markup::columns" },
+  # Files: through crate::atomic.
+  { path = "std::fs::rename", reason = "land files through crate::atomic" },
+  { path = "std::fs::File::create", reason = "land files through crate::atomic" },
+  { path = "std::fs::File::create_new", reason = "land files through crate::atomic" },
+  { path = "std::fs::OpenOptions::open", reason = "land files through crate::atomic" },
+  { path = "std::fs::write", reason = "land files through crate::atomic::write" },
+  { path = "std::fs::copy", reason = "land files through crate::atomic::write_from" },
+  { path = "std::fs::hard_link", reason = "land files through crate::atomic" },
+  { path = "std::fs::read_dir", reason = "list folders with crate::atomic::files/trim so in-flight temps are skipped" },
+  { path = "std::path::Path::read_dir", reason = "list folders with crate::atomic::files/trim so in-flight temps are skipped" },
+  { path = "std::fs::remove_dir_all", reason = "trim folders with crate::atomic::trim so in-flight temps are spared" },
 ]

@@ -13,6 +13,7 @@ struct Log {
 
 static LOG: LazyLock<Option<Mutex<Log>>> = LazyLock::new(|| {
     let path = std::env::var_os("CK_INPUT_LOG")?;
+    #[allow(clippy::disallowed_methods)] // a log only ever appended to, never landed whole
     let file = std::fs::OpenOptions::new().create(true).append(true).open(path).ok()?;
     Some(Mutex::new(Log { file, start: Instant::now() }))
 });

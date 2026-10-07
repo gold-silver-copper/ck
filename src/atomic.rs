@@ -1,0 +1,432 @@
+//! The one way ck lands a file (whole or not at all, through a temp file of its own) and
+//! the one way it lists and trims a cache folder (never counting another writer's temp).
+#![allow(clippy::disallowed_methods)] // this module is the owner the lint points to
+
+use anyhow::{Context as _, Result};
+use std::collections::BTreeSet;
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, SystemTime};
+
+/// A temp file this old was left by a crash or kill; no live write takes this long.
+const STALE: Duration = Duration::from_secs(24 * 3600);
+
+/// Write `data` to `path` whole or not at all. A symlink is written through to its target
+/// (even one that isn't there yet), so a linked config or data file stays linked.
+pub fn write(path: &Path, data: &[u8]) -> Result<()> {
+    write_from(&link_target(path), data)
+}
+
+/// Write what `body` reads into `path` through a temp file of this write's own beside it,
+/// renamed into place, and removed on any error or panic. A symlink at `path` is replaced,
+/// not written through (a download never lands outside its folder). The folder is created
+/// if missing, and an existing file keeps its permissions. The first write into a folder in
+/// a run removes the stale temps a crash left there, so they can't pile up.
+pub fn write_from(path: &Path, mut body: impl std::io::Read) -> Result<()> {
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    static SWEPT: Mutex<BTreeSet<PathBuf>> = Mutex::new(BTreeSet::new());
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
+        if crate::http::lock(&SWEPT).insert(dir.to_path_buf()) {
+            walk(dir, 0).1.into_iter().filter(|t| stale(t.1) && ours(&t.0)).for_each(|t| drop(std::fs::remove_file(t.0)));
+        }
+    }
+    let mode = std::fs::symlink_metadata(path).ok().filter(std::fs::Metadata::is_file).map(|m| m.permissions());
+    let landed = (|| -> std::io::Result<()> {
+        let (mut tmp, mut file) = create_temp(path, &NEXT)?;
+        // Before the content goes in, so a private file is never readable by others.
+        if let Some(mode) = mode {
+            file.set_permissions(mode)?;
+        }
+        std::io::copy(&mut body, &mut file)?;
+        drop(file);
+        std::fs::rename(&tmp.0, path)?;
+        tmp.0 = PathBuf::new(); // landed: nothing for the drop to remove
+        Ok(())
+    })();
+    landed.with_context(|| format!("writing {}", path.display()))
+}
+
+/// A temp file, removed when dropped (by an error's early return or a panic's unwinding)
+/// unless it was renamed into place.
+struct Temp(PathBuf);
+
+impl Drop for Temp {
+    fn drop(&mut self) {
+        if !self.0.as_os_str().is_empty() {
+            let _ = std::fs::remove_file(&self.0);
+        }
+    }
+}
+
+/// A fresh `<path>.ck-<pid>-<n>.tmp`, created with create_new: no other write can share it. On
+/// a clash (a leftover from a dead process with the same pid) the next n is taken.
+fn create_temp(path: &Path, next: &AtomicU64) -> std::io::Result<(Temp, std::fs::File)> {
+    let mut clash = std::io::Error::from(std::io::ErrorKind::AlreadyExists);
+    for _ in 0..1000 {
+        let mut tmp = path.as_os_str().to_owned();
+        tmp.push(format!(".ck-{}-{}.tmp", std::process::id(), next.fetch_add(1, Ordering::Relaxed)));
+        match std::fs::File::options().write(true).create_new(true).open(&tmp) {
+            Ok(file) => return Ok((Temp(tmp.into()), file)),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => clash = e,
+            Err(e) => return Err(e),
+        }
+    }
+    Err(clash)
+}
+
+/// Where a write to `path` should go: the file a symlink points to (even one that isn't
+/// there yet), or `path` itself.
+fn link_target(path: &Path) -> PathBuf {
+    if !std::fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink()) {
+        return path.to_path_buf();
+    }
+    std::fs::canonicalize(path)
+        .or_else(|_| std::fs::read_link(path).map(|to| path.parent().map_or_else(|| to.clone(), |dir| dir.join(&to))))
+        .unwrap_or_else(|_| path.to_path_buf())
+}
+
+/// Move a file that won't load aside to `<x>.json.corrupt`, keeping it for the user; where it went.
+pub fn set_aside(path: &Path) -> std::io::Result<PathBuf> {
+    let aside = path.with_extension("json.corrupt");
+    std::fs::rename(path, &aside).map(|()| aside)
+}
+
+/// Whether `path` is a temp file: ours, an older version's `<x>.tmp`, or an old download's `.part`.
+fn is_temp(path: &Path) -> bool {
+    path.extension().is_some_and(|e| e == "tmp" || e == "part")
+}
+
+/// Whether `path` is named the way ck names a temp file, `<x>.ck-<pid>-<n>.tmp`: outside
+/// the caches, a user's own `notes.tmp` (or a downloaded `clip.2024-05.tmp`) is left alone.
+fn ours(path: &Path) -> bool {
+    let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
+    let tag = path.file_stem().map(Path::new).and_then(Path::extension).and_then(|e| e.to_str());
+    let tag = tag.and_then(|t| t.strip_prefix("ck-")).and_then(|t| t.split_once('-'));
+    path.extension().is_some_and(|e| e == "tmp") && tag.is_some_and(|(pid, n)| digits(pid) && digits(n))
+}
+
+/// Whether a temp file last modified then is a crash's leftover. One whose time can't be
+/// read is taken for a live one.
+fn stale(modified: Option<SystemTime>) -> bool {
+    modified.and_then(|m| SystemTime::now().duration_since(m).ok()).is_some_and(|age| age > STALE)
+}
+
+/// The regular files under `dir`, down to `depth` folders below it (path, size, last
+/// modified), and apart from them the temp files (path, last modified).
+type Listing = (Vec<(PathBuf, u64, SystemTime)>, Vec<(PathBuf, Option<SystemTime>)>);
+
+fn walk(dir: &Path, depth: u8) -> Listing {
+    let (mut files, mut temps) = (Vec::new(), Vec::new());
+    for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+        let path = entry.path();
+        let Ok(meta) = std::fs::metadata(&path) else { continue };
+        if meta.is_dir() && depth > 0 {
+            let (f, t) = walk(&path, depth - 1);
+            files.extend(f);
+            temps.extend(t);
+        } else if meta.is_file() && is_temp(&path) {
+            temps.push((path, meta.modified().ok()));
+        } else if meta.is_file() {
+            files.push((path, meta.len(), meta.modified().unwrap_or(SystemTime::UNIX_EPOCH)));
+        }
+    }
+    (files, temps)
+}
+
+/// The files under `dir`, down to `depth` folders below it, temp files left out. (A
+/// symlinked folder is followed; `depth` keeps a loop of them finite.)
+pub fn files(dir: &Path, depth: u8) -> Vec<PathBuf> {
+    walk(dir, depth).0.into_iter().map(|f| f.0).collect()
+}
+
+/// The bytes the files under `dir` take, down to `depth` folders below it, temp files left out.
+pub fn total(dir: &Path, depth: u8) -> u64 {
+    walk(dir, depth).0.iter().fold(0, |sum, f| sum.saturating_add(f.1))
+}
+
+/// For a cache folder, down to `depth` folders below it: remove temp files older than a
+/// day, then the least recently modified files until at most `target` bytes remain; the
+/// bytes left. A younger temp file is another write in flight: neither counted nor removed.
+pub fn trim(dir: &Path, depth: u8, target: u64) -> u64 {
+    let (mut files, temps) = walk(dir, depth);
+    temps.into_iter().filter(|t| stale(t.1)).for_each(|t| drop(std::fs::remove_file(t.0)));
+    files.sort_by_key(|f| f.2);
+    let mut left = files.iter().fold(0u64, |sum, f| sum.saturating_add(f.1));
+    for (path, len, _) in files {
+        if left <= target {
+            break;
+        }
+        if std::fs::remove_file(&path).is_ok() {
+            left = left.saturating_sub(len);
+        }
+    }
+    left
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn names(dir: &Path) -> Vec<std::ffi::OsString> {
+        let mut names: Vec<_> = std::fs::read_dir(dir).unwrap().map(|e| e.unwrap().file_name()).collect();
+        names.sort();
+        names
+    }
+
+    fn age(path: &Path, by: Duration) {
+        let f = std::fs::File::options().write(true).open(path).unwrap();
+        f.set_modified(SystemTime::now() - by).unwrap();
+    }
+
+    #[test]
+    fn creates_the_folder_and_keeps_permissions() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a/b/c.json");
+        write(&path, b"one").unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"one");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+            write(&path, b"two").unwrap();
+            assert_eq!(std::fs::read(&path).unwrap(), b"two");
+            assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+        }
+        assert_eq!(names(&dir.path().join("a/b")), vec![std::ffi::OsString::from("c.json")]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn writes_through_a_symlink() {
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().join("real.toml");
+        let link = dir.path().join("link.toml");
+        std::os::unix::fs::symlink("real.toml", &link).unwrap();
+        // Even when what it points to isn't there yet.
+        write(&link, b"one").unwrap();
+        assert!(std::fs::symlink_metadata(&link).unwrap().file_type().is_symlink());
+        assert_eq!(std::fs::read(&real).unwrap(), b"one");
+        write(&link, b"two").unwrap();
+        assert_eq!(std::fs::read(&real).unwrap(), b"two");
+    }
+
+    #[test]
+    fn two_writes_of_one_file_at_once_both_land_whole() {
+        // Pages::write runs on request threads: two tabs on one thread write its page at
+        // once. Each write must land whole, and neither may fail for the other's sake.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("1.json");
+        let payloads: Vec<Vec<u8>> = (0..4u8).map(|b| vec![b'a' + b; 256 * 1024]).collect();
+        let results: Vec<Vec<String>> = std::thread::scope(|s| {
+            let writers: Vec<_> = payloads
+                .iter()
+                .map(|data| {
+                    let (path, payloads) = (&path, &payloads);
+                    s.spawn(move || {
+                        let mut errors = Vec::new();
+                        for _ in 0..50 {
+                            if let Err(e) = write(path, data) {
+                                errors.push(format!("{e:#}"));
+                            }
+                            let now = std::fs::read(path).unwrap_or_default();
+                            if !payloads.contains(&now) {
+                                errors.push(format!("torn file: {} bytes", now.len()));
+                            }
+                        }
+                        errors
+                    })
+                })
+                .collect();
+            writers.into_iter().map(|w| w.join().unwrap()).collect()
+        });
+        let errors: Vec<&String> = results.iter().flatten().collect();
+        assert!(errors.is_empty(), "{} failed writes, e.g. {:?}", errors.len(), errors.iter().take(3).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn a_failed_write_leaves_no_temp_file() {
+        // The rename fails (a folder is in the way): nothing but the folder stays.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("watched.json");
+        std::fs::create_dir_all(path.join("in-the-way")).unwrap();
+        assert!(write(&path, b"[]").is_err());
+        assert_eq!(names(dir.path()), vec![std::ffi::OsString::from("watched.json")]);
+    }
+
+    #[test]
+    fn overlapping_downloads_of_a_file_both_land() {
+        /// Reads `data`, but first lets another download of the same file run start to end.
+        struct Overlapped<'a>(&'a Path, Option<&'static [u8]>, &'static [u8]);
+        impl std::io::Read for Overlapped<'_> {
+            fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+                if let Some(other) = self.1.take() {
+                    write_from(self.0, other).unwrap();
+                }
+                std::io::Read::read(&mut self.2, buf)
+            }
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("1.png");
+        write_from(&path, Overlapped(&path, Some(b"first"), b"second")).unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"second");
+        // No temp file is left behind.
+        assert_eq!(names(dir.path()), vec![std::ffi::OsString::from("1.png")]);
+    }
+
+    #[test]
+    fn a_leftover_temp_of_the_same_name_is_stepped_over_and_kept() {
+        // A dead process with this pid (or another pid namespace) left temps under the
+        // names the next writes would take: they're neither written into nor truncated.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("1.json");
+        let leftovers: Vec<PathBuf> = (0..200).map(|n| dir.path().join(format!("1.json.ck-{}-{n}.tmp", std::process::id()))).collect();
+        for l in &leftovers {
+            std::fs::write(l, b"leftover").unwrap();
+        }
+        let next = AtomicU64::new(0);
+        let (tmp, _) = create_temp(&path, &next).unwrap();
+        assert_eq!(tmp.0, dir.path().join(format!("1.json.ck-{}-200.tmp", std::process::id())));
+        for l in &leftovers {
+            assert_eq!(std::fs::read(l).unwrap(), b"leftover");
+        }
+        drop(tmp);
+        assert_eq!(names(dir.path()).len(), 200);
+    }
+
+    #[test]
+    fn a_panic_midway_leaves_no_temp_file() {
+        struct Panics;
+        impl std::io::Read for Panics {
+            fn read(&mut self, _: &mut [u8]) -> std::io::Result<usize> {
+                panic!("the body reader broke");
+            }
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("1.png");
+        assert!(crate::guard::result(|| write_from(&path, Panics)).is_err());
+        assert!(names(dir.path()).is_empty());
+    }
+
+    #[test]
+    fn the_first_write_into_a_folder_removes_a_crashs_leftovers_there() {
+        let dir = tempfile::tempdir().unwrap();
+        let old = dir.path().join("history.json.ck-4242-7.tmp");
+        let live = dir.path().join("history.json.ck-4243-0.tmp");
+        let mine = dir.path().join("notes.tmp");
+        for p in [&old, &live, &mine] {
+            std::fs::write(p, b"x").unwrap();
+        }
+        age(&old, STALE * 2);
+        age(&mine, STALE * 2);
+        age(&live, Duration::from_secs(60));
+        write(&dir.path().join("history.json"), b"{}").unwrap();
+        // A stale temp of ck's own naming goes; a live one, and a user's own file, stay.
+        assert!(!old.exists() && live.exists() && mine.exists());
+        // Only once per folder per run.
+        std::fs::write(&old, b"x").unwrap();
+        age(&old, STALE * 2);
+        write(&dir.path().join("history.json"), b"{}").unwrap();
+        assert!(old.exists());
+    }
+
+    #[test]
+    fn ours_knows_cks_temp_names() {
+        assert!(ours(Path::new("a/1.json.ck-12-0.tmp")));
+        assert!(!ours(Path::new("1_cat.png.12-3.part")));
+        assert!(!ours(Path::new("123_clip.2024-05.tmp")));
+        assert!(!ours(Path::new("history.json.tmp")));
+        assert!(!ours(Path::new("notes.tmp")));
+        assert!(!ours(Path::new("a.b-c.tmp")));
+        assert!(!ours(Path::new("1.json.ck-12-0.json")));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn listings_follow_a_linked_folder_and_keep_to_regular_files() {
+        let (dir, elsewhere) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        std::fs::create_dir_all(elsewhere.path().join("g")).unwrap();
+        std::fs::write(elsewhere.path().join("g/1.json"), b"{}").unwrap();
+        std::os::unix::fs::symlink(elsewhere.path(), dir.path().join("4chan")).unwrap();
+        // A link to a file it doesn't own, and one to nothing, aren't files of the folder.
+        std::os::unix::fs::symlink("/dev/null", dir.path().join("null")).unwrap();
+        std::os::unix::fs::symlink("nowhere", dir.path().join("dangling")).unwrap();
+        // A loop of links ends.
+        std::os::unix::fs::symlink(dir.path(), elsewhere.path().join("g/loop")).unwrap();
+        assert_eq!(files(dir.path(), 2), vec![dir.path().join("4chan/g/1.json")]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_flat_trim_never_reaches_into_a_linked_folder() {
+        // The thumbnail cache is flat: a folder linked into it isn't its to empty.
+        let (dir, elsewhere) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        std::fs::write(elsewhere.path().join("keep.png"), [0; 100]).unwrap();
+        std::os::unix::fs::symlink(elsewhere.path(), dir.path().join("linked")).unwrap();
+        std::fs::write(dir.path().join("thumb"), [0; 100]).unwrap();
+        assert_eq!(total(dir.path(), 0), 100);
+        assert_eq!(trim(dir.path(), 0, 0), 0);
+        assert!(elsewhere.path().join("keep.png").exists() && !dir.path().join("thumb").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_from_replaces_a_symlink_instead_of_writing_through_it() {
+        // A download onto a name some link already holds lands in the folder, not out of it.
+        let (dir, elsewhere) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let outside = elsewhere.path().join("x.png");
+        let path = dir.path().join("1_x.png");
+        std::os::unix::fs::symlink(&outside, &path).unwrap();
+        write_from(&path, &b"img"[..]).unwrap();
+        assert!(!outside.exists());
+        assert!(std::fs::symlink_metadata(&path).unwrap().is_file());
+        assert_eq!(std::fs::read(&path).unwrap(), b"img");
+    }
+
+    #[test]
+    fn trim_sweeps_stale_temps_and_spares_fresh_ones() {
+        let dir = tempfile::tempdir().unwrap();
+        let fresh = dir.path().join(format!("a.json.ck-{}-0.tmp", std::process::id()));
+        let stale = dir.path().join("b/c.json.tmp");
+        let part = dir.path().join("d.png.1-2.part");
+        std::fs::write(&fresh, [0; 100]).unwrap();
+        std::fs::create_dir_all(stale.parent().unwrap()).unwrap();
+        std::fs::write(&stale, [0; 100]).unwrap();
+        std::fs::write(&part, [0; 100]).unwrap();
+        std::fs::write(dir.path().join("e.json"), [0; 10]).unwrap();
+        age(&fresh, Duration::from_secs(3600));
+        age(&stale, STALE + Duration::from_secs(60));
+        age(&part, STALE * 3);
+        // Temps aren't counted or listed.
+        assert_eq!(total(dir.path(), 2), 10);
+        assert_eq!(files(dir.path(), 2), vec![dir.path().join("e.json")]);
+        // Even with nothing allowed, a write in flight stays; a crash's leftovers go.
+        assert_eq!(trim(dir.path(), 2, 0), 0);
+        assert!(fresh.exists());
+        assert!(!stale.exists() && !part.exists());
+        assert!(!dir.path().join("e.json").exists());
+    }
+
+    #[test]
+    fn trim_removes_the_least_recently_modified_first() {
+        let dir = tempfile::tempdir().unwrap();
+        for (i, name) in ["old", "mid", "new"].iter().enumerate() {
+            let p = dir.path().join("x").join(name);
+            write(&p, &[0; 100]).unwrap();
+            age(&p, Duration::from_secs(600 - i as u64 * 60));
+        }
+        assert_eq!(trim(dir.path(), 1, 250), 200);
+        assert_eq!(names(&dir.path().join("x")), vec![std::ffi::OsString::from("mid"), std::ffi::OsString::from("new")]);
+    }
+
+    #[test]
+    fn set_aside_keeps_the_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("history.json");
+        std::fs::write(&path, b"{").unwrap();
+        assert_eq!(set_aside(&path).unwrap(), dir.path().join("history.json.corrupt"));
+        assert_eq!(std::fs::read(dir.path().join("history.json.corrupt")).unwrap(), b"{");
+        assert!(set_aside(&path).is_err());
+    }
+}

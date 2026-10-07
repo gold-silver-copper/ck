@@ -71,12 +71,12 @@ pub fn data_file(data: &[u8]) {
         let _: Vec<crate::model::Post> = t.posts.into_iter().map(Into::into).collect();
     }
     let dir = std::env::temp_dir().join(format!("ck-fuzz-data-{}", std::process::id()));
-    let _ = std::fs::create_dir_all(&dir);
     for name in ["watched.json", "history.json", "hidden.json", "seen.json", "settings.json", "board_prefs.json", "recent_boards.json", "saved.json"] {
-        let _ = std::fs::write(dir.join(name), data);
+        let _ = crate::atomic::write(&dir.join(name), data);
     }
     let (store, _) = crate::store::Store::load(Some(dir.clone()));
     let _ = store.save();
+    #[allow(clippy::disallowed_methods)] // this run's own scratch folder
     let _ = std::fs::remove_dir_all(&dir);
 }
 

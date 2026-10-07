@@ -11,7 +11,6 @@ use serde_json::json;
 use crate::download;
 use crate::markup;
 use crate::model::{Post, Target};
-use crate::store::write_atomic;
 use crate::theme::{Theme, mark};
 
 /// Where and what a thread is, for the saved copies.
@@ -25,8 +24,8 @@ pub struct About<'a> {
 
 /// Write thread.html and thread.json into `dir` (replacing earlier copies).
 pub fn save(posts: &[Post], about: &About, theme: &Theme, dir: &Path) -> Result<()> {
-    write_atomic(&dir.join("thread.html"), html(posts, about, theme, dir).as_bytes())?;
-    write_atomic(&dir.join("thread.json"), &serde_json::to_vec_pretty(&data(posts, about, dir))?)
+    crate::atomic::write(&dir.join("thread.html"), html(posts, about, theme, dir).as_bytes())?;
+    crate::atomic::write(&dir.join("thread.json"), &serde_json::to_vec_pretty(&data(posts, about, dir))?)
 }
 
 /// Each file of a post with the name it has (or would have) after `d`/`D`, and whether
@@ -305,7 +304,10 @@ mod tests {
         assert_eq!(v["posts"][1]["quotes"], json!([1]));
         assert_eq!(v["posts"][0]["files"][0]["saved_as"], "1_cat.png");
         assert_eq!(v["posts"][0]["text"], "Hello world & secret\n>green");
-        assert!(!dir.path().join("thread.html.tmp").exists());
+        // No temp file is left behind.
+        let mut names: Vec<_> = std::fs::read_dir(dir.path()).unwrap().map(|e| e.unwrap().file_name().into_string().unwrap()).collect();
+        names.sort();
+        assert_eq!(names, ["1_cat.png", "thread.html", "thread.json"]);
     }
 
     #[test]

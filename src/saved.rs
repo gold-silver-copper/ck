@@ -10,7 +10,8 @@ use ratatui::text::{Line, Span};
 use serde::{Deserialize, Serialize};
 
 use crate::model::{Anchor, Attachment, Link, Post};
-use crate::store::{ThreadKey, write_atomic};
+use crate::atomic;
+use crate::store::ThreadKey;
 use crate::theme::mark;
 
 /// The format of a saved thread's file.
@@ -242,7 +243,7 @@ pub(crate) fn component(name: &str) -> String {
 pub fn write(dir: &Path, t: &SavedThread) -> Result<u64> {
     let bytes = serde_json::to_vec(t)?;
     let key = ThreadKey { site: t.site.clone(), board: t.board.clone(), no: t.no };
-    write_atomic(&path(dir, &key), &bytes)?;
+    atomic::write(&path(dir, &key), &bytes)?;
     Ok(bytes.len() as u64)
 }
 
@@ -254,8 +255,8 @@ pub fn read(dir: &Path, key: &ThreadKey) -> Result<SavedThread> {
     match serde_json::from_slice::<SavedThread>(&bytes) {
         Ok(t) => Ok(t),
         Err(e) => {
-            let moved = match std::fs::rename(&file, file.with_extension("json.corrupt")) {
-                Ok(()) => "moved it aside".to_string(),
+            let moved = match atomic::set_aside(&file) {
+                Ok(_) => "moved it aside".to_string(),
                 Err(r) => format!("couldn't move it aside: {r}"),
             };
             Err(e).with_context(|| format!("{} was corrupt; {moved}", file.display()))
@@ -266,24 +267,19 @@ pub fn read(dir: &Path, key: &ThreadKey) -> Result<SavedThread> {
 /// The list of saved threads, from their files (when `saved.json` is missing or broken).
 pub fn scan(dir: &Path) -> Vec<SavedMeta> {
     let mut out = Vec::new();
-    let read_dir = |p: &Path| std::fs::read_dir(p).into_iter().flatten().flatten().map(|e| e.path()).collect::<Vec<_>>();
-    for site in read_dir(&dir.join("threads")) {
-        for board in read_dir(&site) {
-            for file in read_dir(&board).into_iter().filter(|f| f.extension().is_some_and(|e| e == "json")) {
-                let Ok(bytes) = std::fs::read(&file) else { continue };
-                let Ok(t) = serde_json::from_slice::<SavedThread>(&bytes) else { continue };
-                out.push(SavedMeta {
-                    key: ThreadKey { site: t.site, board: t.board, no: t.no },
-                    subject: t.subject,
-                    saved: t.saved,
-                    dead: t.dead,
-                    bytes: bytes.len() as u64,
-                    posts: t.posts.len(),
-                    newest: t.posts.iter().map(|p| p.no).max().unwrap_or(0),
-                    hash: 0,
-                });
-            }
-        }
+    for file in atomic::files(&dir.join("threads"), 2).into_iter().filter(|f| f.extension().is_some_and(|e| e == "json")) {
+        let Ok(bytes) = std::fs::read(&file) else { continue };
+        let Ok(t) = serde_json::from_slice::<SavedThread>(&bytes) else { continue };
+        out.push(SavedMeta {
+            key: ThreadKey { site: t.site, board: t.board, no: t.no },
+            subject: t.subject,
+            saved: t.saved,
+            dead: t.dead,
+            bytes: bytes.len() as u64,
+            posts: t.posts.len(),
+            newest: t.posts.iter().map(|p| p.no).max().unwrap_or(0),
+            hash: 0,
+        });
     }
     out.sort_by_key(|m| std::cmp::Reverse(m.saved));
     out

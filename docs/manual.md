@@ -434,6 +434,9 @@ also lets the first request after a restart ask whether anything changed, so an 
 thread costs a "not modified" reply instead of the whole thread. When the refresh fails, the
 copy stays up, still marked (and "dead" if the thread is gone). Watched threads open from
 their saved copy the same way. A start that restores your tabs fills them in at once, too.
+The budget counts the pages only, not a page still being written; temp files left by a
+crash (`*.tmp` and `*.part`, older than a day) are removed when the cache is trimmed, here
+and in the thumbnail cache.
 
 ### Saved threads
 
@@ -527,6 +530,14 @@ instantly next time; they're refreshed quietly in the background once a day, and
 the Boards view refreshes them now. Lists that come in several pages (LynxChan and
 jschan board lists, FoolFuuka catalogs) show each page as it arrives.
 
+These files, the config file, saved threads, exports and downloads land whole or not at
+all: each write goes to a temp file of its own beside the file (`<name>.ck-<pid>-<n>.tmp`)
+and is renamed into place, so two writes at once (or two ck's) never mix, and a failed
+write removes its temp. A write to a symlinked state, config or saved-thread file goes to
+the file it points to. Temps of that name that a crash or kill left (older than a day) are
+removed the first time in a run that ck writes into that folder; a `<name>.tmp` left by an
+older ck is not, and can be deleted by hand.
+
 ## Searching archives
 
 `A` in a catalog searches the board's posts on a FoolFuuka archive: the site itself if
@@ -611,7 +622,8 @@ Files go into `~/Downloads/ck/{site}/{board}/{thread}/` (your system's Downloads
 Files are named `{post}_{original name}` with unsafe characters replaced; files that
 already exist are skipped, so saving all the thread's files again later only fetches
 what's new. Progress shows at the right of the footer. Downloads go through the same rate
-limiter as images.
+limiter as images. A file lands whole or not at all, like ck's state files: a download that
+fails leaves nothing behind, and a download never writes through a symlink at its name.
 
 ### Saving a thread
 
