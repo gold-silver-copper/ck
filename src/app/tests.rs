@@ -687,6 +687,44 @@ fn searching_a_thread_passes_hidden_posts_over() {
 }
 
 #[test]
+fn hiding_marks_every_tab_again() {
+    let mut app = local_app();
+    let post = |no, text: &str| Post { no, body: vec![Line::raw(text.to_string())], ..Default::default() };
+    let thread = || ThreadView::new("x".into(), 1, vec![post(1, "a thread"), post(2, "buy crypto"), post(3, "a reply")]);
+    app.tab.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
+    app.tab.thread = Some(thread());
+    app.tab.view = View::Thread;
+    // Tab 1: the same thread, and the board's catalog.
+    app.tabs.push(Tab::new(0, Instant::now()));
+    app.switch_tab(1);
+    app.tab.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
+    app.tab.thread = Some(thread());
+    app.tab.catalog = vec![post(1, "a thread"), post(7, "crypto general")];
+    app.tab.catalog_board = Some("x".into());
+    app.tab.view = View::Catalog;
+    app.remark_catalog();
+    app.switch_tab(0);
+    let hidden = |app: &mut App| {
+        app.switch_tab(1);
+        let t = app.tab.thread.as_ref().unwrap();
+        let marks = (t.marks.iter().map(|m| m.hidden.is_some()).collect::<Vec<_>>(), t.show_hidden);
+        let catalog = app.tab.catalog_marks.iter().map(|m| m.hidden.is_some()).collect::<Vec<_>>();
+        app.switch_tab(0);
+        (marks, catalog)
+    };
+    // A hidden word added in tab 0 hides in tab 1 too.
+    app.hidden_words = vec!["crypto".into()];
+    app.apply_filters();
+    assert_eq!(hidden(&mut app), ((vec![false, true, false], false), vec![false, true]));
+    // So does H, and Z shows them there too.
+    app.tab.thread.as_mut().unwrap().selected = 2;
+    app.act(Action::Hide);
+    assert_eq!(hidden(&mut app), ((vec![false, true, true], false), vec![false, true]));
+    app.act(Action::ShowHidden);
+    assert_eq!(hidden(&mut app).0, (vec![false, true, true], true));
+}
+
+#[test]
 fn gallery_of_the_threads_files() {
     let dir = tempfile::tempdir().unwrap();
     let mut app = local_app();

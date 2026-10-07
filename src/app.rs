@@ -1102,10 +1102,27 @@ impl App {
         self.save_now();
         let show = self.keys.key(Action::ShowHidden);
         self.info(if hidden { format!("Hid {what} {no} ({show} shows hidden ones)") } else { format!("Unhid {what} {no}") });
+        self.remark_tabs();
+        self.clamp_list();
+    }
+
+    /// What's hidden (or whether it's shown) changed: mark every tab's catalog, thread and
+    /// search results again, not just this one's.
+    pub(super) fn remark_tabs(&mut self) {
+        let active = self.active;
+        for i in (0..self.tabs.len()).filter(|&i| i != active) {
+            self.switch_tab(i);
+            self.remark_catalog();
+            self.remark_thread();
+            self.remark_search();
+            let (catalog, hits) = (self.visible_catalog().len(), self.visible_hits().len());
+            self.tab.catalog_list.clamp(catalog);
+            self.tab.search_list.clamp(hits);
+        }
+        self.switch_tab(active);
         self.remark_catalog();
         self.remark_thread();
         self.remark_search();
-        self.clamp_list();
     }
 
     /// `Z`: show hidden threads and posts (dimmed), or leave them out again.
@@ -1113,7 +1130,7 @@ impl App {
         // Keep the same thread selected in the catalog.
         let keep = self.selected_index().filter(|_| self.tab.view == View::Catalog);
         self.show_hidden = !self.show_hidden;
-        self.remark_thread();
+        self.remark_tabs();
         if let Some(i) = keep
             && let Some(pos) = self.visible_catalog().iter().position(|&v| v == i)
         {

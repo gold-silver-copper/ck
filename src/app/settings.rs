@@ -153,7 +153,7 @@ pub const SECTIONS: &[(&str, &[Setting])] = &[
                 a.recursive_hiding = !a.recursive_hiding;
                 let on = a.recursive_hiding;
                 a.save_config(if on { "hiding replies to hidden posts" } else { "showing replies to hidden posts" }, |d| d["recursive_hiding"] = toml_edit::value(on));
-                a.remark_thread();
+                a.remark_tabs();
             },
         ),
     ]),

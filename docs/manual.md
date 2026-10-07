@@ -291,7 +291,8 @@ the viewer's own commands apply.
 one line, so replies to them still make sense. They're marked just "hidden", not why
 (that would show what a filter or hidden word hides); `H` on one says why. Until `Z`
 shows them, they're left out of the thread's search and gallery too, and a quote of one
-previews only "hidden". What you hide is remembered per board in
+previews only "hidden". Hiding, `Z` and filter changes apply to every tab at once. What
+you hide is remembered per board in
 the data directory.
 
 `recursive_hiding = true` (or Settings › Hidden replies) hides the replies too: in a

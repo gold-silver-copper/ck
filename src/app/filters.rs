@@ -490,15 +490,13 @@ impl App {
         self.edit_config(|d| crate::config::edit_filters(d, edit)).map(drop)
     }
 
-    /// The filters changed: rebuild them, and mark the catalog and thread again.
+    /// The filters changed: rebuild them, and mark every tab's catalog and thread again.
     pub(super) fn apply_filters(&mut self) {
         match Filters::from_config(&self.filter_cfgs, &self.hidden_words) {
             Ok(f) => self.filters = f,
             Err(e) => self.error(format!("{e:#}")),
         }
-        self.remark_catalog();
-        self.remark_thread();
-        self.remark_search();
+        self.remark_tabs();
         let len = self.visible_catalog().len();
         self.tab.catalog_list.clamp(len);
     }
