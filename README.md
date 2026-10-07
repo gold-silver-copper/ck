@@ -1,10 +1,10 @@
 # ck
 
-<video src="https://github.com/gold-silver-copper/ck/raw/main/ck-demo.webm" controls width="100%"></video>
+[![A two-minute tour of ck](ck-demo.avif)](ck-demo.webm)
 
 A read-only terminal browser for imageboards, built with [ratatui](https://ratatui.rs): 4chan,
 vichan and LynxChan sites, jschan, 2ch and FoolFuuka archives, with images drawn in the
-terminal. ([The video](ck-demo.webm) is a two-minute tour.)
+terminal. (Click the tour for [the video](ck-demo.webm), with controls.)
 
 ## Features
 

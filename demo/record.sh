@@ -3,9 +3,9 @@
 # foot on a virtual Hyprland monitor that's never shown, captured frame by frame with grim,
 # then captioned (what's shown, and the keys pressed) and encoded.
 #
-#   demo/record.sh [out.webm]        (default: ck-demo.webm here)
+#   demo/record.sh [out.webm]        (default: ck-demo.webm here, and ck-demo.avif beside it)
 #
-# Needs Hyprland, foot, grim, ffmpeg (with libvpx-vp9 and libass) and python3; builds ck
+# Needs Hyprland, foot, grim, ffmpeg (with libvpx-vp9, libsvtav1 and libass) and python3; builds ck
 # first. ck gets a scratch config and data directory, so your own sites, watched threads
 # and history are neither used nor shown. It browses live /g/: watch the result before
 # publishing it.
@@ -121,3 +121,8 @@ ffmpeg -loglevel error -stats -y -ss "$from" -to "$to" -i "$work/raw.mkv" \
     -vf "select='$keep',setpts=N/FRAME_RATE/TB,pad=1920:1080:0:0:color=0x$band,ass=$work/captions.ass" \
     -c:v libvpx-vp9 -crf "${CK_DEMO_CRF:-38}" -b:v 0 -row-mt 1 -deadline good -cpu-used 2 -pix_fmt yuv420p "$out"
 echo "Wrote $out ($(du -h "$out" | cut -f1))"
+# The same as an animated AVIF: GitHub shows images in a README, but not videos from the
+# repository.
+avif="${out%.*}.avif"
+SVT_LOG=1 ffmpeg -loglevel error -y -i "$out" -c:v libsvtav1 -crf 42 -preset 6 -pix_fmt yuv420p "$avif"
+echo "Wrote $avif ($(du -h "$avif" | cut -f1))"
