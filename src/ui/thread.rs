@@ -98,7 +98,7 @@ pub(super) fn draw_thread(f: &mut Frame, app: &mut App, area: Rect) {
         let width = area.right().saturating_sub(x);
         let y = area.y + row;
         let card = if entry.depth % 2 == 1 { th.surface_high } else { th.surface };
-        let marked = t.marks.get(entry.post).is_some_and(|m| m.highlight.is_some());
+        let marked = t.marks.highlight(entry.post).is_some();
         paint_row(f, Rect::new(x, y, width, 1), Some(card), e == cursor, marked);
         if line.style == markup::CODE_LINE {
             let code_x = x + PAD + if l.thumbs.iter().any(|&(_, k)| k == e) { THUMB.width + 2 } else { 0 };
@@ -258,30 +258,26 @@ fn lay_out(t: &ThreadView, cache: &mut LineCache, e: usize, width: u16, thumbs: 
         return (Rc::from([]), Rc::from([]), false);
     };
     let i = entry.post;
-    if t.is_collapsed(i) {
-        // A hidden post is one line, so replies to it still make sense. Not why: that would
-        // show what was hidden (H on it says).
-        let block = vec![Line::styled(format!("No.{}  hidden", p.no), Style::new().fg(theme().text_dim)), Line::raw("")];
-        return (block.into(), Rc::from([]), false);
-    }
+    let Some(mut ctx) = post_ctx(t, i, clock) else {
+        return (vec![hidden_line(p.no), Line::raw("")].into(), Rc::from([]), false);
+    };
     let text_width = text_width_of(width, entry.depth);
     let thumb = with_thumb(thumbs, p, text_width);
-    let mut ctx = post_ctx(t, i, clock);
     ctx.focus = t.focus.as_ref().filter(|_| e == t.entry());
     let key = (p.no, text_width as u16, thumb);
-    let shows = shown_with(t, i, p, &ctx);
+    let shows = shown_with(t, i, &ctx);
     if let Some((_, block, at)) = cache.get(&key).filter(|(h, ..)| *h == shows) {
         return (block.clone(), at.clone(), thumb);
     }
     // A padding line above: the spots are a line further down.
     let mut lines = vec![Line::raw("")];
     let (text, mut at) = if thumb {
-        let (text, at) = post_lines(p, &ctx, text_width - THUMB.width as usize - 2);
+        let (text, at) = post_lines(&ctx, text_width - THUMB.width as usize - 2);
         let mut text = beside_tile(text, THUMB.width + 2);
         text.resize(text.len().max(THUMB.height as usize), Line::raw(""));
         (text, at.into_iter().map(|s| Spot { col: s.col + THUMB.width + 2, ..s }).collect())
     } else {
-        post_lines(p, &ctx, text_width)
+        post_lines(&ctx, text_width)
     };
     lines.extend(text);
     lines.extend([Line::raw(""), Line::raw("")]);
@@ -361,7 +357,8 @@ pub fn layout_all(t: &mut ThreadView, width: u16, thumbs: bool, clock: Clock) ->
 /// A hash of what a post's lines show besides the post itself, for the line cache: its
 /// "3h ago", OP/new/yours chips, revealed spoilers, filter marks, backlinks, and the search
 /// highlight where it can appear.
-fn shown_with(t: &ThreadView, i: usize, p: &Post, ctx: &PostCtx) -> u64 {
+fn shown_with(t: &ThreadView, i: usize, ctx: &PostCtx) -> u64 {
+    let p = ctx.post;
     use std::hash::{Hash, Hasher};
     let mut h = std::collections::hash_map::DefaultHasher::new();
     // The quotes drawn with " (OP)" or " (You)", found as drawing finds them (by the quote's
@@ -381,7 +378,7 @@ fn shown_with(t: &ThreadView, i: usize, p: &Post, ctx: &PostCtx) -> u64 {
     let s = ctx.search.as_str();
     let in_added = !s.is_empty() && (s.contains(['(', ')']) || " (op)".contains(s) || " (you)".contains(s));
     let highlighted = t.matches.binary_search(&i).is_ok() || (quotes_marked && in_added);
-    (ago(p.time, ctx.clock), ctx.is_op, ctx.is_new, ctx.deleted, ctx.reveal, ctx.mark, ctx.mine.contains(&p.no), &marked, ctx.backlinks).hash(&mut h);
+    (ago(p.time, ctx.clock), ctx.is_op, ctx.is_new, ctx.deleted, ctx.reveal, ctx.hidden, ctx.highlight, ctx.mine.contains(&p.no), &marked, ctx.backlinks).hash(&mut h);
     // The post itself, which a refresh may bring changed (a file deleted, say).
     (&p.name, &p.subject, p.plain_text(), p.body.len(), &p.id, &p.flag, ctx.id_count).hash(&mut h);
     for f in &p.files {
@@ -394,8 +391,10 @@ fn shown_with(t: &ThreadView, i: usize, p: &Post, ctx: &PostCtx) -> u64 {
     h.finish()
 }
 
-/// How to render one post of a thread.
-pub(super) struct PostCtx<'a> {
+/// A post of a thread, and how to render it: only one not collapsed has one (see
+/// `post_ctx`).
+struct PostCtx<'a> {
+    post: &'a Post,
     is_op: bool,
     is_new: bool,
     /// Deleted on the site since it was shown.
@@ -406,7 +405,9 @@ pub(super) struct PostCtx<'a> {
     /// Lowercase search query to highlight.
     search: String,
     clock: Clock,
-    mark: Option<&'a Mark>,
+    /// Hidden, and shown anyway (`Z`).
+    hidden: bool,
+    highlight: Option<&'a str>,
     /// Posts marked as yours.
     mine: &'a std::collections::HashSet<u64>,
     /// The focused part, when this is the selected entry.
@@ -417,9 +418,12 @@ pub(super) struct PostCtx<'a> {
     id_count: usize,
 }
 
-pub(super) fn post_ctx(t: &ThreadView, i: usize, clock: Clock) -> PostCtx<'_> {
-    let p = t.posts.get(i);
-    PostCtx {
+/// How to render post `i`; none for a post collapsed to a line, which says only that it's
+/// hidden (why would show what was hidden: H on it says).
+fn post_ctx(t: &ThreadView, i: usize, clock: Clock) -> Option<PostCtx<'_>> {
+    let p = t.posts.get(i).filter(|_| !t.is_collapsed(i))?;
+    Some(PostCtx {
+        post: p,
         clock,
         is_op: i == 0,
         is_new: t.is_new(i),
@@ -428,11 +432,25 @@ pub(super) fn post_ctx(t: &ThreadView, i: usize, clock: Clock) -> PostCtx<'_> {
         op_no: t.no,
         reveal: t.is_revealed(i),
         search: t.search.to_lowercase(),
-        mark: t.marks.get(i),
-        mine: &t.mine,
+        hidden: t.marks.why_hidden(i).is_some(),
+        highlight: t.marks.highlight(i),
+        mine: t.marks.mine(),
         focus: None,
-        anchor: t.conversation.as_ref().is_some_and(|c| c.poster.is_none() && p.is_some_and(|p| c.anchor == p.no)),
-        id_count: p.and_then(|p| p.id.as_deref()).map_or(0, |id| t.id_count(id)),
+        anchor: t.conversation.as_ref().is_some_and(|c| c.poster.is_none() && c.anchor == p.no),
+        id_count: p.id.as_deref().map_or(0, |id| t.id_count(id)),
+    })
+}
+
+/// A collapsed post's one line.
+fn hidden_line(no: u64) -> Line<'static> {
+    Line::styled(format!("No.{no}  hidden"), Style::new().fg(theme().text_dim))
+}
+
+/// Post `i`'s lines as the thread shows it: one line when it's collapsed.
+pub(super) fn post_card(t: &ThreadView, i: usize, clock: Clock, width: usize) -> Vec<Line<'static>> {
+    match post_ctx(t, i, clock) {
+        Some(ctx) => post_lines(&ctx, width).0,
+        None => t.posts.get(i).map(|p| vec![hidden_line(p.no)]).unwrap_or_default(),
     }
 }
 
@@ -457,7 +475,8 @@ pub(super) fn search_hl() -> Style {
 
 /// A post as wrapped lines, and where its parts landed in them. Parts are drawn with a
 /// tag (an underline color nothing else uses) that's found after wrapping, then cleared.
-pub(super) fn post_lines(p: &Post, ctx: &PostCtx, width: usize) -> (Vec<Line<'static>>, Vec<Spot>) {
+fn post_lines(ctx: &PostCtx, width: usize) -> (Vec<Line<'static>>, Vec<Spot>) {
+    let p = ctx.post;
     let t = theme();
     let parts = crate::app::parts(p, ctx.backlinks);
     let index = |part: &Part| parts.iter().position(|x| x == part);
@@ -488,13 +507,11 @@ pub(super) fn post_lines(p: &Post, ctx: &PostCtx, width: usize) -> (Vec<Line<'st
     if ctx.mine.contains(&p.no) {
         head.extend([chip("you", t.on_primary, t.primary), Span::raw(" ")]);
     }
-    if let Some(m) = ctx.mark {
-        if m.hidden.is_some() {
-            head.extend([chip("hidden", t.text_dim, t.surface_high), Span::raw(" ")]);
-        }
-        if let Some(label) = &m.highlight {
-            head.extend([chip(label.clone(), t.on_primary_container, t.primary_container), Span::raw(" ")]);
-        }
+    if ctx.hidden {
+        head.extend([chip("hidden", t.text_dim, t.surface_high), Span::raw(" ")]);
+    }
+    if let Some(label) = ctx.highlight {
+        head.extend([chip(label.to_string(), t.on_primary_container, t.primary_container), Span::raw(" ")]);
     }
     head.push(Span::styled(format!("{}  No.{}", fmt_time(p.time, ctx.clock), p.no), dim()));
     let mut out = markup::wrap(&Line::from(head), width);
@@ -600,15 +617,10 @@ pub(super) fn draw_peek(f: &mut Frame, app: &App, area: Rect) {
     let Some(Part::Link(Target::Quote(l))) = app.focused() else { return };
     let Some(t) = &app.tab.thread else { return };
     let Some(&i) = l.post.filter(|_| l.board.is_none() && l.thread.is_none_or(|n| n == t.no)).and_then(|n| t.index.get(&n)) else { return };
-    let Some(p) = t.posts.get(i) else { return };
     let th = theme();
     let width = area.width.saturating_sub(6);
     // A hidden post peeks as it shows in the thread: one line, not what it says.
-    let mut lines = if t.is_collapsed(i) {
-        vec![Line::styled(format!("No.{}  hidden", p.no), Style::new().fg(theme().text_dim))]
-    } else {
-        post_lines(p, &post_ctx(t, i, app.clock), width as usize).0
-    };
+    let mut lines = post_card(t, i, app.clock, width as usize);
     let h = (cells(lines.len()).saturating_add(2)).min(area.height / 2).max(3);
     lines.truncate(h.saturating_sub(2) as usize);
     // Where the quote is on screen decides where the peek goes.

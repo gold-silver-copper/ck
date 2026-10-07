@@ -761,11 +761,11 @@ impl World {
                 app.on_key(KeyEvent::from(KeyCode::Enter));
                 // A filter made from a post catches that post, at once.
                 if fresh && app.filter_cfgs.len() == before + 1 {
-                    let mark = match app.tab.view {
-                        View::Thread => app.tab.thread.as_ref().and_then(|t| t.marks.get(*t.index.get(&post)?).cloned()),
-                        _ => app.tab.catalog.iter().position(|p| p.no == post).and_then(|i| app.tab.catalog_marks.get(i).cloned()),
+                    let at = match app.tab.view {
+                        View::Thread => app.tab.thread.as_ref().and_then(|t| Some((&t.marks, *t.index.get(&post)?))),
+                        _ => app.tab.catalog.iter().position(|p| p.no == post).map(|i| (&app.tab.catalog_marks, i)),
                     };
-                    let caught = mark.is_some_and(|m| m.hidden.is_some() || m.highlight.is_some());
+                    let caught = at.is_some_and(|(m, i)| m.why_hidden(i).is_some() || m.highlight(i).is_some());
                     assert!(caught, "the filter {:?} added from post {post} doesn't catch it", app.filter_cfgs.last());
                 }
             }
@@ -929,10 +929,10 @@ fn replay(seed: u64, acts: &[Act]) -> Result<(), (String, String)> {
             check_images(&world.app, &asked_before);
             if std::env::var_os("FUZZ_TRACE").is_some() {
                 let a = &world.app;
-                let hid: Vec<String> = a.store.hidden.iter().map(|(k, v)| format!("{k}:{}", v.len())).collect();
-                let m: usize = a.tab.catalog_marks.iter().filter(|m| m.hidden.is_some()).count();
+                let hid = a.store.hidden_count();
+                let m = a.tab.catalog_marks.hidden_count();
                 eprintln!("TRACE {step} {act}: tab {} view {:?} site {} board {:?} cat_board {} cat {} hidden-marks {m} store {hid:?} filters {}", a.active, a.tab.view, a.current_site().cfg.name, a.tab.board.as_ref().map(|b| &b.uri), a.tab.catalog_board.as_deref().unwrap_or_default(), a.tab.catalog.len(), a.filter_cfgs.len());
-                let w: Vec<String> = a.store.watched.iter().map(|w| format!("{}/{}/{} dead={} seen={}", w.key.site, w.key.board, w.key.no, w.dead, w.last_seen)).collect();
+                let w: Vec<String> = a.store.all_watched().iter().map(|w| format!("{}/{}/{} dead={} seen={}", w.key.site, w.key.board, w.key.no, w.dead, w.last_seen)).collect();
                 let sv: Vec<String> = a.store.saved.iter().map(|m| format!("{}/{}/{}", m.key.site, m.key.board, m.key.no)).collect();
                 eprintln!("TRACE   watched {w:?} saved {sv:?} status {:?}", a.status.as_ref().map(|s| &s.text));
                 if let Some(t) = &a.tab.thread {
@@ -1100,7 +1100,7 @@ fn check(app: &App) {
         fail(format!("image search on row {:?} of {}", p.list.selected(), p.rows.len()));
     }
     let unique = |keys: Vec<&ThreadKey>| keys.len() == keys.iter().collect::<HashSet<_>>().len();
-    if !unique(app.store.watched.iter().map(|w| &w.key).collect()) {
+    if !unique(app.store.all_watched().iter().map(|w| &w.key).collect()) {
         fail("a thread watched twice".into());
     }
     if !unique(app.store.history.iter().map(|v| &v.key).collect()) {
@@ -1112,7 +1112,7 @@ fn check(app: &App) {
     if open < crate::http::MIN_REFETCH || open > cap(app.refresh_thread) {
         fail(format!("the open thread refreshes every {open:?}"));
     }
-    for w in &app.store.watched {
+    for w in app.store.all_watched() {
         let every = app.watched_every(&w.key);
         if every < crate::http::MIN_REFETCH || every > cap(app.refresh_watched) {
             fail(format!("{:?} refreshes every {every:?}", w.key));
@@ -1173,10 +1173,10 @@ fn check_thread(t: &ThreadView) -> Result<(), String> {
         }
     }
     // A post hidden as a reply to a hidden post quotes it, and it's hidden; the OP never is.
-    for (i, m) in t.marks.iter().enumerate() {
-        let Some(crate::filter::Hidden::Reply(to)) = m.hidden else { continue };
-        let parent = t.index.get(&to).and_then(|&k| t.marks.get(k));
-        if i == 0 || t.posts.get(i).is_none_or(|p| !p.quotes.contains(&to)) || parent.is_none_or(|p| p.hidden.is_none()) {
+    for (i, m) in t.marks.all_hidden().into_iter().enumerate() {
+        let Some(crate::filter::Hidden::Reply(to)) = m else { continue };
+        let parent = t.index.get(&to).and_then(|&k| t.marks.why_hidden(k));
+        if i == 0 || t.posts.get(i).is_none_or(|p| !p.quotes.contains(&to)) || parent.is_none() {
             return Err(format!("post {i} is hidden as a reply to No.{to}, which it doesn't quote or isn't hidden"));
         }
     }
@@ -1237,7 +1237,7 @@ impl Before {
             .as_ref()
             .filter(|_| app.tab.copy.is_none())
             .map(|t| ((app.active, app.tabs.len()), t.board.clone(), t.no, t.posts.iter().map(|p| p.no).collect(), t.shrinks));
-        Before { saved, in_saved_view: app.tab.view == View::Saved, offline_dead, log: gate.log_len(), filters: app.filter_cfgs.clone(), recursive_hiding: app.recursive_hiding, reading, live }
+        Before { saved, in_saved_view: app.tab.view == View::Saved, offline_dead, log: gate.log_len(), filters: app.filter_cfgs.clone(), recursive_hiding: app.hiding.recursive(), reading, live }
     }
 }
 
@@ -1356,28 +1356,18 @@ fn check_marks(app: &App, before: &Before) {
         let firsts: Vec<(bool, bool)> = app
             .visible_catalog()
             .iter()
-            .map(|&i| (app.tab.catalog_marks[i].top, app.watched_first && app.catalog_watching(&app.tab.catalog[i])))
+            .map(|&i| (app.tab.catalog_marks.top(i), app.watched_first && app.catalog_watching(&app.tab.catalog[i])))
             .collect();
         assert!(firsts.windows(2).all(|w| w[0] >= w[1]), "a top or watched thread after another (top, watched): {firsts:?}");
     }
-    if app.filter_cfgs == before.filters && app.recursive_hiding == before.recursive_hiding {
+    if app.filter_cfgs == before.filters && app.hiding.recursive() == before.recursive_hiding {
         return;
     }
     let tab = &app.tab;
     // (A catalog left loaded from another site is marked for that one.)
     if !tab.catalog.is_empty() && tab.catalog_site == tab.site {
-        let want = app.marks(&app.current_site().cfg.name, &tab.catalog, false, |p| app.board_of(p));
-        if let Some(i) = (0..want.len()).find(|&i| tab.catalog_marks.get(i) != Some(&want[i])) {
-            let p = &tab.catalog[i];
-            panic!(
-                "catalog marks don't match the filters: thread {} on /{}/ ({:?}) is marked {:?}, not {:?}",
-                p.no,
-                app.board_of(p),
-                app.current_site().cfg.name,
-                tab.catalog_marks.get(i),
-                want[i]
-            );
-        }
+        let want = app.catalog_marks_for(&app.current_site().cfg.name, &tab.catalog, |p| app.board_of(p));
+        assert!(want == tab.catalog_marks, "catalog marks don't match the filters on {:?}: {:?}, not {:?}", app.current_site().cfg.name, tab.catalog_marks, want);
     }
     if let Some(t) = tab.thread.as_ref().filter(|_| tab.view == View::Thread) {
         assert!(app.thread_marks(&app.current_site().cfg.name, t) == t.marks, "thread marks don't match the filters");
@@ -1399,7 +1389,7 @@ fn check_saved(app: &App, before: &Before, calls: &[String], removed: &mut HashS
             removed.insert(key.clone());
         }
     }
-    for w in &app.store.watched {
+    for w in app.store.all_watched() {
         if w.dead && w.last_seen > 0 && !removed.contains(&w.key) {
             assert!(app.store.saved(&w.key).is_some(), "watched thread {:?} died with no saved copy", w.key);
         }

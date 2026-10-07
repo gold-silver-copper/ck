@@ -20,13 +20,7 @@ impl App {
     pub fn open_gallery(&mut self) {
         let Some(t) = &self.tab.thread else { return };
         // In a conversation, its files; not hidden posts' (unless shown).
-        let files: Vec<(usize, Attachment)> = t
-            .posts
-            .iter()
-            .enumerate()
-            .filter(|&(i, _)| t.in_view(i) && !t.is_collapsed(i))
-            .flat_map(|(i, p)| p.files.iter().map(move |f| (i, f.clone())))
-            .collect();
+        let files: Vec<(usize, Attachment)> = t.gallery_files().map(|(i, f)| (i, f.clone())).collect();
         if files.is_empty() {
             self.info(if t.conversation.is_some() { "The conversation has no files" } else { "Thread has no files" });
             return;
@@ -119,7 +113,7 @@ impl App {
     pub(super) fn thread_viewer(&mut self, k: usize) -> bool {
         let Some(t) = self.tab.thread.as_ref().filter(|_| self.tab.view == View::Thread) else { return false };
         let (mut files, mut posts, mut start) = (Vec::new(), Vec::new(), None);
-        for (i, p) in t.posts.iter().enumerate().filter(|&(i, _)| t.in_view(i) && (i == t.selected || !t.is_collapsed(i))) {
+        for (i, p) in t.shown_and_selected() {
             for (j, f) in p.files.iter().enumerate() {
                 if i == t.selected && j == k {
                     start = Some(files.len());

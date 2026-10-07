@@ -192,8 +192,8 @@ pub(super) fn draw_preview(f: &mut Frame, app: &App) {
     let width = w.saturating_sub(4) as usize;
     let mut lines = Vec::new();
     // Quoted posts a refresh has since dropped are left out.
-    for (i, post) in p.posts.iter().filter_map(|no| t.index.get(no).and_then(|&i| Some((i, t.posts.get(i)?)))) {
-        lines.extend(post_lines(post, &post_ctx(t, i, app.clock), width).0);
+    for &i in p.posts.iter().filter_map(|no| t.index.get(no)) {
+        lines.extend(post_card(t, i, app.clock, width));
         lines.push(Line::raw(""));
     }
     for n in &p.elsewhere {

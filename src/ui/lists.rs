@@ -14,8 +14,8 @@ pub(super) fn draw_sites(f: &mut Frame, app: &mut App, area: Rect) {
         let Some(&row) = rows.get(k) else { return Vec::new() };
         match row {
             SiteRow::Watched => {
-                let n = app.store.watched.len();
-                let unread = app.store.watched.iter().fold(0usize, |n, w| n.saturating_add(w.unread));
+                let n = app.store.all_watched().len();
+                let unread = app.store.all_watched().iter().fold(0usize, |n, w| n.saturating_add(w.unread));
                 let mut spans = vec![
                     Span::styled("◉  ", Style::new().fg(t.primary)),
                     Span::styled(format!("{:<16}", "Watched"), bold(t.text)),
@@ -106,7 +106,7 @@ pub(super) fn draw_watched(f: &mut Frame, app: &mut App, area: Rect) {
     let rows = app.visible_watched();
     let mut state = app.watched_list.state;
     app.hit = draw_rows(f, area, rows.len(), &mut state, (1, 0), None, &|_| false, &mut |k| {
-        let Some(w) = rows.get(k).and_then(|&i| app.store.watched.get(i)) else { return Vec::new() };
+        let Some(w) = rows.get(k).and_then(|&i| app.store.all_watched().get(i)) else { return Vec::new() };
         let mut right = Vec::new();
         if app.refreshing.contains(&w.key) {
             right.push(Span::styled("↻  ", Style::new().fg(t.primary)));
@@ -224,16 +224,16 @@ pub(super) fn draw_catalog(f: &mut Frame, app: &mut App, area: Rect) {
     let mut build = |k: usize| -> Vec<Line<'static>> {
         let Some(&i) = visible.get(k) else { return Vec::new() };
         let Some(p) = app.tab.catalog.get(i) else { return Vec::new() };
-        let mark = app.tab.catalog_marks.get(i).cloned().unwrap_or_default();
+        let (hidden, highlight) = (app.tab.catalog_marks.why_hidden(i).is_some(), app.tab.catalog_marks.highlight(i));
         let mut head = Vec::new();
         if app.catalog_watching(p) {
             head.push(Span::styled(WATCHING, bold(t.primary)));
         }
-        if mark.hidden.is_some() {
+        if hidden {
             head.extend([chip("hidden", t.text_dim, t.surface_high), Span::raw(" ")]);
         }
-        if let Some(label) = &mark.highlight {
-            head.extend([chip(label.clone(), t.on_primary_container, t.primary_container), Span::raw(" ")]);
+        if let Some(label) = highlight {
+            head.extend([chip(label.to_string(), t.on_primary_container, t.primary_container), Span::raw(" ")]);
         }
         if app.tab.catalog_new.contains(&p.no) {
             head.extend([chip("new", t.background, t.new), Span::raw(" ")]);
@@ -248,7 +248,7 @@ pub(super) fn draw_catalog(f: &mut Frame, app: &mut App, area: Rect) {
         if let Some(b) = p.board.as_ref().filter(|b| app.tab.board.as_ref().is_some_and(|cur| cur.uri != **b)) {
             head.extend([chip(format!("/{b}/"), t.on_primary_container, t.primary_container), Span::raw(" ")]);
         }
-        let subject_style = if mark.hidden.is_some() { dim() } else { bold(t.text) };
+        let subject_style = if hidden { dim() } else { bold(t.text) };
         match &p.subject {
             Some(s) => head.push(Span::styled(s.clone(), subject_style)),
             None => head.push(Span::styled(format!("No.{}", p.no), dim())),
@@ -312,7 +312,7 @@ pub(super) fn draw_catalog(f: &mut Frame, app: &mut App, area: Rect) {
     } else {
         (2, 1, Some(t.surface))
     };
-    let highlighted = |k: usize| visible.get(k).and_then(|&i| app.tab.catalog_marks.get(i)).is_some_and(|m| m.highlight.is_some());
+    let highlighted = |k: usize| visible.get(k).is_some_and(|&i| app.tab.catalog_marks.highlight(i).is_some());
     let mut state = app.tab.catalog_list.state;
     app.hit = draw_rows(f, area, visible.len(), &mut state, (height, gap), card, &highlighted, &mut build);
     app.tab.catalog_list.state = state;
@@ -373,7 +373,7 @@ pub(super) fn draw_search(f: &mut Frame, app: &mut App, area: Rect) {
     let mut build = |row: usize| -> Vec<Line<'static>> {
         let Some(&k) = visible.get(row) else { return Vec::new() };
         let Some((thread, p)) = s.hits.get(k) else { return Vec::new() };
-        let hidden = s.hidden.get(k).copied().unwrap_or(false);
+        let hidden = s.marks.why_hidden(k).is_some();
         let mut head = Vec::new();
         if hidden {
             head.extend([chip("hidden", t.text_dim, t.surface_high), Span::raw(" ")]);
@@ -476,8 +476,8 @@ fn draw_grid(f: &mut Frame, app: &mut App, area: Rect) {
             continue;
         }
         let Some(p) = app.tab.catalog.get(i) else { continue };
-        let mark = app.tab.catalog_marks.get(i).cloned().unwrap_or_default();
-        paint_row(f, card, Some(t.surface), k == sel, mark.highlight.is_some());
+        let hidden = app.tab.catalog_marks.why_hidden(i).is_some();
+        paint_row(f, card, Some(t.surface), k == sel, app.tab.catalog_marks.highlight(i).is_some());
         let tile = Rect::new(x + PAD, y, THUMB.width, THUMB.height);
         match p.files.first() {
             Some(file) => draw_tile(f, &mut app.images, file, p.files.len(), off, tile, area),
@@ -494,7 +494,7 @@ fn draw_grid(f: &mut Frame, app: &mut App, area: Rect) {
         if app.tab.catalog_new.contains(&p.no) {
             head.extend([chip("new", t.background, t.new), Span::raw(" ")]);
         }
-        if mark.hidden.is_some() {
+        if hidden {
             head.extend([chip("hidden", t.text_dim, t.surface_high), Span::raw(" ")]);
         }
         let (title, rest) = match &p.subject {
@@ -502,7 +502,7 @@ fn draw_grid(f: &mut Frame, app: &mut App, area: Rect) {
             None => (p.plain_text().to_string(), String::new()),
         };
         let used: usize = head.iter().map(|s| s.width()).sum();
-        head.push(Span::styled(truncate(&title, (w as usize).saturating_sub(used)), if mark.hidden.is_some() { dim() } else { bold(t.text) }));
+        head.push(Span::styled(truncate(&title, (w as usize).saturating_sub(used)), if hidden { dim() } else { bold(t.text) }));
         let mut facts = Vec::new();
         if let Some(n) = app.new_replies(p) {
             facts.push(Span::styled(format!("+{n} "), bold(t.new)));

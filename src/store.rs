@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
+use crate::app::Changed;
 use crate::model::{Board, Post, max_no};
 use crate::saved::{self, SavedMeta, SavedPost, SavedThread};
 
@@ -36,7 +37,7 @@ pub struct Watched {
     pub dead: bool,
     /// Posts marked as yours (`m`); replies to them are counted and notified.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub mine: Vec<u64>,
+    mine: Vec<u64>,
     /// Unread replies to your posts.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub replies: usize,
@@ -47,6 +48,17 @@ pub struct Watched {
     /// The thread has reached its bump limit.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub at_limit: bool,
+    /// The posts new since `last_seen` as last refreshed, with what decides whether they're
+    /// hidden (`with_ancestry`): to count them again when that changes. In memory only.
+    #[serde(skip)]
+    pub fresh: Vec<Post>,
+}
+
+impl Watched {
+    /// The posts marked as yours (`Store::toggle_mine`).
+    pub fn mine(&self) -> &[u64] {
+        &self.mine
+    }
 }
 
 fn is_zero(n: &usize) -> bool {
@@ -138,12 +150,14 @@ pub fn board_key(site: &str, board: &str) -> String {
 #[derive(Default)]
 pub struct Store {
     dir: Option<PathBuf>,
-    pub watched: Vec<Watched>,
+    /// Changed only through the methods below, which say what changes what's hidden or
+    /// yours (`Changed`).
+    watched: Vec<Watched>,
     /// Most recent first.
     pub history: Vec<Visit>,
     pub settings: Settings,
     /// Thread and post numbers hidden by hand, by `site/board`, oldest first.
-    pub hidden: std::collections::BTreeMap<String, Vec<u64>>,
+    hidden: std::collections::BTreeMap<String, Vec<u64>>,
     /// Per-board catalog sort and layout, by `site/board`.
     pub board_prefs: std::collections::BTreeMap<String, BoardPrefs>,
     /// Boards whose catalogs were opened, `site/board`, most recent first.
@@ -346,8 +360,13 @@ impl Store {
         self.hidden.get(&board_key(site, board)).is_some_and(|l| l.contains(&no))
     }
 
-    /// Hide a thread or post, or unhide it; returns whether it's hidden now.
-    pub fn toggle_hidden(&mut self, site: &str, board: &str, no: u64) -> bool {
+    /// How many threads and posts are hidden by hand, on every board.
+    pub fn hidden_count(&self) -> usize {
+        self.hidden.values().map(Vec::len).sum()
+    }
+
+    /// Hide a thread or post, or unhide it; whether it's hidden now.
+    pub fn toggle_hidden(&mut self, site: &str, board: &str, no: u64) -> Changed<bool> {
         let key = board_key(site, board);
         let list = self.hidden.entry(key.clone()).or_default();
         if let Some(i) = list.iter().position(|&n| n == no) {
@@ -355,13 +374,23 @@ impl Store {
             if list.is_empty() {
                 self.hidden.remove(&key);
             }
-            return false;
+            return Changed::new(false);
         }
         list.push(no);
         if list.len() > HIDDEN_PER_BOARD {
             list.remove(0);
         }
-        true
+        Changed::new(true)
+    }
+
+    pub fn all_watched(&self) -> &[Watched] {
+        &self.watched
+    }
+
+    /// Watched, to change in tests as they like.
+    #[cfg(test)]
+    pub fn watched_vec(&mut self) -> &mut Vec<Watched> {
+        &mut self.watched
     }
 
     pub fn watched(&self, key: &ThreadKey) -> Option<&Watched> {
@@ -372,14 +401,31 @@ impl Store {
         self.watched.iter_mut().find(|w| &w.key == key)
     }
 
-    /// Start or stop watching; returns whether it's watched now.
-    pub fn toggle_watch(&mut self, key: ThreadKey, subject: String, posts: usize, last_seen: u64) -> bool {
+    /// Start or stop watching (forgetting which posts are yours); whether it's watched now.
+    pub fn toggle_watch(&mut self, key: ThreadKey, subject: String, posts: usize, last_seen: u64) -> Changed<bool> {
         if let Some(i) = self.watched.iter().position(|w| w.key == key) {
             self.watched.remove(i);
-            return false;
+            return Changed::new(false);
         }
         self.watched.push(Watched { key, subject, posts, last_seen, ..Default::default() });
-        true
+        Changed::new(true)
+    }
+
+    pub fn unwatch(&mut self, key: &ThreadKey) -> Changed<()> {
+        self.watched.retain(|w| &w.key != key);
+        Changed::new(())
+    }
+
+    /// Mark a post of a watched thread as yours, or not; whether it's yours now.
+    pub fn toggle_mine(&mut self, key: &ThreadKey, no: u64) -> Changed<bool> {
+        let Some(w) = self.watched_mut(key) else { return Changed::new(false) };
+        let mine = !w.mine.contains(&no);
+        if mine {
+            w.mine.push(no);
+        } else {
+            w.mine.retain(|&n| n != no);
+        }
+        Changed::new(mine)
     }
 
     /// The highest post number seen on the previous visit, from Watched or History.
@@ -401,6 +447,7 @@ impl Store {
             w.last_seen = w.last_seen.max(max_no);
             w.unread = 0;
             w.replies = 0;
+            w.fresh.clear();
             w.dead = false;
         }
     }
@@ -647,7 +694,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let (mut s, warnings) = Store::load(Some(dir.path().to_path_buf()));
         assert!(warnings.is_empty() && s.watched.is_empty());
-        assert!(s.toggle_watch(key(1), "one".into(), 5, 105));
+        assert!(s.toggle_watch(key(1), "one".into(), 5, 105).unchecked());
         s.visit(&key(2), "two", 3, 203, 1000);
         s.save().unwrap();
         assert!(!dir.path().join("watched.json.tmp").exists());
@@ -673,16 +720,16 @@ mod tests {
     fn hidden_threads_and_posts() {
         let dir = tempfile::tempdir().unwrap();
         let (mut s, _) = Store::load(Some(dir.path().to_path_buf()));
-        assert!(s.toggle_hidden("4chan", "g", 5));
+        assert!(s.toggle_hidden("4chan", "g", 5).unchecked());
         assert!(s.hidden_on("4chan", "g").contains(&5) && !s.hidden_on("4chan", "v").contains(&5));
         s.save().unwrap();
         let (mut s, w) = Store::load(Some(dir.path().to_path_buf()));
         assert!(w.is_empty() && s.hidden_on("4chan", "g").contains(&5));
-        assert!(!s.toggle_hidden("4chan", "g", 5));
+        assert!(!s.toggle_hidden("4chan", "g", 5).unchecked());
         assert!(s.hidden.is_empty());
         // Bounded per board, oldest out first.
         for no in 0..HIDDEN_PER_BOARD as u64 + 2 {
-            s.toggle_hidden("4chan", "g", no);
+            s.toggle_hidden("4chan", "g", no).unchecked();
         }
         assert!(!s.hidden_on("4chan", "g").contains(&0) && !s.hidden_on("4chan", "g").contains(&1) && s.hidden_on("4chan", "g").contains(&2));
     }
@@ -694,7 +741,7 @@ mod tests {
         // Nothing changed: nothing written (not even empty files).
         s.save().unwrap();
         assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
-        s.toggle_watch(key(1), "x".into(), 1, 1);
+        s.toggle_watch(key(1), "x".into(), 1, 1).unchecked();
         s.save().unwrap();
         assert!(dir.path().join("watched.json").exists() && !dir.path().join("history.json").exists());
         // Written once; an unchanged store doesn't write it again.
@@ -808,11 +855,11 @@ mod tests {
     #[test]
     fn toggle_and_visit_clear_unread() {
         let mut s = Store::default();
-        s.toggle_watch(key(1), "x".into(), 10, 110);
+        s.toggle_watch(key(1), "x".into(), 10, 110).unchecked();
         s.watched_mut(&key(1)).unwrap().unread = 4;
         s.visit(&key(1), "x", 14, 114, 0);
         assert_eq!((s.watched[0].unread, s.watched[0].last_seen, s.watched[0].posts), (0, 114, 14));
-        assert!(!s.toggle_watch(key(1), String::new(), 0, 0));
+        assert!(!s.toggle_watch(key(1), String::new(), 0, 0).unchecked());
         assert!(s.watched.is_empty());
     }
 
@@ -883,7 +930,7 @@ mod tests {
         s.saved_dead(&key(1));
         s.saved_dead(&key(2));
         for no in [1, 4, 5] {
-            s.toggle_watch(key(no), String::new(), 0, 0);
+            s.toggle_watch(key(no), String::new(), 0, 0).unchecked();
         }
         s.saved_max = one * 2;
         s.keep_thread(&key(5), "", "u", &posts(&many), 5);
@@ -901,7 +948,7 @@ mod tests {
         std::fs::remove_dir_all(dir.path().join("threads")).unwrap();
         std::fs::write(dir.path().join("threads"), "not a folder").unwrap();
         // (Watched, so it stays over the limit.)
-        s.toggle_watch(key(6), String::new(), 0, 0);
+        s.toggle_watch(key(6), String::new(), 0, 0).unchecked();
         s.keep_thread(&key(6), "", "u", &posts(&many), 6);
         let errors = s.flush(std::time::Duration::from_secs(10));
         assert!(errors.len() == 1 && errors[0].contains("Couldn't save a copy of thread 6"), "{errors:?}");

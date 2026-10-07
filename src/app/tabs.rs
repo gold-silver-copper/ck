@@ -4,8 +4,7 @@
 use std::collections::HashSet;
 use std::time::Instant;
 
-use super::{App, FilteredList, Gallery, LinksPanel, Preview, Search, Sort, ThreadView, View, Viewer, thread_subject};
-use crate::filter::Mark;
+use super::{App, FilteredList, Gallery, LinksPanel, Marks, Preview, Search, Sort, ThreadView, View, Viewer, thread_subject};
 use crate::model::{Board, Post};
 use crate::store::ThreadKey;
 
@@ -58,7 +57,7 @@ pub struct Tab {
     pub board: Option<Board>,
     pub catalog: Vec<Post>,
     /// What filters and hiding say about each catalog thread.
-    pub catalog_marks: Vec<Mark>,
+    pub catalog_marks: Marks,
     /// Catalog threads that weren't there on the previous visit.
     pub catalog_new: HashSet<u64>,
     pub thread: Option<ThreadView>,
@@ -139,7 +138,7 @@ impl Tab {
             site,
             board: None,
             catalog: Vec::new(),
-            catalog_marks: Vec::new(),
+            catalog_marks: Marks::default(),
             catalog_new: HashSet::new(),
             thread: None,
             loading: None,
@@ -306,7 +305,7 @@ impl App {
         }
         let (new, yours) = match self.tab.thread.as_ref().filter(|_| self.tab.view == View::Thread) {
             Some(th) => th.new_below(),
-            None => self.store.watched.iter().filter(|w| !w.dead).fold((0, 0), |(n, y): (usize, usize), w| (n.saturating_add(w.unread), y.saturating_add(w.replies))),
+            None => self.store.all_watched().iter().filter(|w| !w.dead).fold((0, 0), |(n, y): (usize, usize), w| (n.saturating_add(w.unread), y.saturating_add(w.replies))),
         };
         let new = if new > 0 { format!("({new}) ") } else { String::new() };
         let yours = if yours > 0 { "(You) " } else { "" };

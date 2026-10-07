@@ -100,13 +100,14 @@ impl App {
         let at = tilde(&dir.display().to_string());
         let (title, lines) = match what {
             Saving::Files => {
-                let posts: Vec<&Post> = t.posts.iter().collect();
+                // Not hidden posts' (unless shown).
+                let posts: Vec<&Post> = t.unhidden_posts().map(|(_, p)| p).collect();
                 let jobs = download::jobs(&posts, &dir);
                 if jobs.is_empty() {
                     return self.info("Thread has no files");
                 }
                 let have = jobs.iter().filter(|(_, path)| path.exists()).count();
-                let files: Vec<&Attachment> = t.posts.iter().flat_map(|p| &p.files).collect();
+                let files: Vec<&Attachment> = posts.iter().flat_map(|p| &p.files).collect();
                 let known = files.iter().filter_map(|f| f.size).fold(0u64, u64::saturating_add);
                 let mut first = format!("{} file{}", jobs.len() - have, if jobs.len() - have == 1 { "" } else { "s" });
                 if known > 0 {
@@ -180,7 +181,7 @@ impl App {
     /// Save the selected post's files, or the whole thread's.
     pub(super) fn download(&mut self, whole_thread: bool) {
         let Some(t) = &self.tab.thread else { return };
-        let posts: Vec<&Post> = if whole_thread { t.posts.iter().collect() } else { t.current().into_iter().collect() };
+        let posts: Vec<&Post> = if whole_thread { t.unhidden_posts().map(|(_, p)| p).collect() } else { t.current().into_iter().collect() };
         let dir = download::dir(self.download_dir.as_deref(), &self.current_site().cfg.name, &t.board, t.no);
         let jobs = download::jobs(&posts, &dir);
         self.start_download(jobs, dir, if whole_thread { "Thread has no files" } else { "Post has no file" });

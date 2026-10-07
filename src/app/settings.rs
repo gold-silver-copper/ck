@@ -131,7 +131,7 @@ pub const SECTIONS: &[(&str, &[Setting])] = &[
             "Filters",
             "Hide or highlight by pattern; X adds one from a post",
             |a| {
-                let hidden: usize = a.store.hidden.values().map(Vec::len).sum();
+                let hidden = a.store.hidden_count();
                 let off = a.filter_cfgs.iter().filter(|f| !f.enabled).count();
                 let off = if off > 0 { format!(" ({off} off)") } else { String::new() };
                 let n = a.filter_cfgs.len();
@@ -148,12 +148,11 @@ pub const SECTIONS: &[(&str, &[Setting])] = &[
         row(
             "Hidden replies",
             "In a thread, replies to a hidden post are hidden too",
-            |a| if a.recursive_hiding { "hidden with it" } else { "shown" }.into(),
+            |a| if a.hiding.recursive() { "hidden with it" } else { "shown" }.into(),
             |a| {
-                a.recursive_hiding = !a.recursive_hiding;
-                let on = a.recursive_hiding;
+                let on = !a.hiding.recursive();
+                a.rehide(|a| a.hiding.set_recursive(on));
                 a.save_config(if on { "hiding replies to hidden posts" } else { "showing replies to hidden posts" }, |d| d["recursive_hiding"] = toml_edit::value(on));
-                a.remark_tabs();
             },
         ),
     ]),

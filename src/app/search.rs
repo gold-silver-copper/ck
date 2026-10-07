@@ -5,14 +5,12 @@ use ratatui::crossterm::event::{KeyCode, KeyEvent};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use super::{App, FilteredList, View};
+use super::{App, FilteredList, Marks, View};
 use crate::store::ThreadKey;
 use crate::backend::SearchPage;
 use crate::config::SiteKind;
-use crate::filter::Filters;
 use crate::keys::Action;
 use crate::model::Post;
-use crate::store::Store;
 
 pub struct Search {
     /// Searching saved threads instead of an archive.
@@ -21,8 +19,8 @@ pub struct Search {
     pub query: String,
     /// `(thread, post)` results so far, and how many there are in all.
     pub hits: Vec<(u64, Post)>,
-    /// Whether each hit is hidden (beside `hits`): by a filter, a hidden word, or by hand.
-    pub hidden: Vec<bool>,
+    /// What hiding says about each hit (beside `hits`).
+    pub marks: Marks,
     pub total: Option<u64>,
     /// Pages loaded.
     pub pages: u32,
@@ -34,6 +32,9 @@ pub struct Search {
 pub struct SavedSearch {
     /// The saved copy each hit is in (beside `hits`).
     pub keys: Vec<ThreadKey>,
+    /// Each copy's hits, in turn: how many, and the posts that decide whether they're hidden
+    /// (`with_ancestry`).
+    pub copies: Vec<(Vec<Post>, usize)>,
     /// Copies read so far, of how many; and those that couldn't be read.
     pub done: usize,
     pub of: usize,
@@ -48,7 +49,7 @@ pub struct SavedSearch {
 impl SavedSearch {
     #[cfg(test)]
     pub fn for_tests(keys: Vec<ThreadKey>, done: usize, of: usize, finished: bool) -> Self {
-        Self { keys, done, of, skipped: 0, finished, id: 0, stop: Arc::default() }
+        Self { keys, copies: Vec::new(), done, of, skipped: 0, finished, id: 0, stop: Arc::default() }
     }
 }
 
@@ -61,28 +62,15 @@ impl Drop for SavedSearch {
 impl Search {
     #[cfg(test)]
     pub fn for_tests(board: &str, query: &str, page: SearchPage) -> Self {
-        Self { saved: None, board: board.into(), query: query.into(), hits: page.hits, hidden: Vec::new(), total: page.total, pages: 1, back: (0, View::Catalog) }
+        Self { saved: None, board: board.into(), query: query.into(), hits: page.hits, marks: Marks::default(), total: page.total, pages: 1, back: (0, View::Catalog) }
     }
-
-    fn is_hidden(&self, k: usize) -> bool {
-        self.hidden.get(k).copied().unwrap_or(false)
-    }
-}
-
-/// How many results are hidden.
-fn hidden_count(s: &Search) -> usize {
-    s.hidden.iter().filter(|&&h| h).count()
-}
-
-/// Whether a result is hidden: by a filter or hidden word, or by hand on its board.
-fn hit_hidden(filters: &Filters, store: &Store, (site, board): (&str, &str), thread: u64, p: &Post) -> bool {
-    filters.check(site, board, p, p.no == thread).hidden.is_some() || store.is_hidden(site, board, p.no)
 }
 
 /// What a search of the saved threads found in one copy (`None`: nothing, or it couldn't
 /// be read: `Err`).
 pub enum SavedFound {
-    Copy(ThreadKey, Vec<Post>),
+    /// The posts found, and with them what decides whether they're hidden.
+    Copy(ThreadKey, Vec<Post>, Vec<Post>),
     Nothing,
     Unreadable,
     Done,
@@ -130,7 +118,7 @@ impl App {
             None => (self.tab.site, self.tab.view),
         };
         self.switch_site(archive);
-        self.tab.search = Some(Search { saved: None, board, query, hits: Vec::new(), hidden: Vec::new(), total: None, pages: 0, back });
+        self.tab.search = Some(Search { saved: None, board, query, hits: Vec::new(), marks: Marks::default(), total: None, pages: 0, back });
         self.tab.search_list = FilteredList::top();
         self.tab.view = View::Search;
         self.load_search_page();
@@ -152,8 +140,8 @@ impl App {
         if of == 0 {
             self.info("Nothing is saved yet: watched threads are saved as they refresh");
         }
-        let saved = SavedSearch { keys: Vec::new(), done: 0, of, skipped: 0, finished: of == 0, id, stop: stop.clone() };
-        self.tab.search = Some(Search { saved: Some(saved), board: String::new(), query: query.to_string(), hits: Vec::new(), hidden: Vec::new(), total: None, pages: 0, back });
+        let saved = SavedSearch { keys: Vec::new(), copies: Vec::new(), done: 0, of, skipped: 0, finished: of == 0, id, stop: stop.clone() };
+        self.tab.search = Some(Search { saved: Some(saved), board: String::new(), query: query.to_string(), hits: Vec::new(), marks: Marks::default(), total: None, pages: 0, back });
         self.tab.search_list = FilteredList::top();
         self.tab.view = View::Search;
         // Saving waits for nothing: copies being written are read as they were.
@@ -165,8 +153,8 @@ impl App {
                     return;
                 }
                 let found = match std::fs::read(crate::saved::path(&dir, &key)).map_err(anyhow::Error::from).and_then(|b| crate::guard::result(|| crate::saved_search::matching(&b, &needle))) {
-                    Ok(posts) if posts.is_empty() => SavedFound::Nothing,
-                    Ok(posts) => SavedFound::Copy(key, posts),
+                    Ok((hits, _)) if hits.is_empty() => SavedFound::Nothing,
+                    Ok((hits, context)) => SavedFound::Copy(key, hits, context),
                     Err(_) => SavedFound::Unreadable,
                 };
                 if !later.run(move |app| app.saved_found(id, found)) {
@@ -181,19 +169,24 @@ impl App {
     pub(super) fn saved_found(&mut self, id: u64, found: SavedFound) {
         let ours = |s: &Option<Search>| s.as_ref().is_some_and(|s| s.saved.as_ref().is_some_and(|x| x.id == id));
         // The tab it was started in, if it isn't the one shown now.
-        let here = ours(&self.tab.search);
-        let active = self.active;
-        let tab = if here { Some(&mut self.tab) } else { self.tabs.iter_mut().enumerate().find(|(i, t)| *i != active && ours(&t.search)).map(|(_, t)| t) };
-        let Some(s) = tab.and_then(|t| t.search.as_mut()) else { return };
+        if !ours(&self.tab.search) {
+            let active = self.active;
+            if let Some(i) = self.tabs.iter().enumerate().position(|(i, t)| i != active && ours(&t.search)) {
+                self.handle_in_tab(i, Box::new(move |app| app.saved_found(id, found)));
+            }
+            return;
+        }
+        let Some(s) = &mut self.tab.search else { return };
         let Some(saved) = s.saved.as_mut() else { return };
         match found {
-            SavedFound::Copy(key, posts) => {
+            SavedFound::Copy(key, hits, context) => {
                 saved.done += 1;
-                for p in posts {
-                    s.hidden.push(hit_hidden(&self.filters, &self.store, (&key.site, &key.board), key.no, &p));
+                saved.copies.push((context, hits.len()));
+                for p in hits {
                     saved.keys.push(key.clone());
                     s.hits.push((key.no, p));
                 }
+                self.mark_hits();
             }
             SavedFound::Nothing => saved.done += 1,
             SavedFound::Unreadable => {
@@ -202,14 +195,12 @@ impl App {
             }
             SavedFound::Done => {
                 saved.finished = true;
-                if here {
-                    let msg = match hidden_count(s) {
-                        _ if s.hits.is_empty() => format!("No saved post matches \"{}\"", s.query),
-                        n if n == s.hits.len() && !self.show_hidden => self.all_hidden(n),
-                        _ => return,
-                    };
-                    self.info(msg);
-                }
+                let msg = match s.hits.len() {
+                    0 => format!("No saved post matches \"{}\"", s.query),
+                    n if self.visible_hits().is_empty() => self.all_hidden(n),
+                    _ => return,
+                };
+                self.info(msg);
             }
         }
     }
@@ -229,19 +220,17 @@ impl App {
     /// A page of archive search results arrived.
     pub fn search_results(&mut self, page: u32, res: anyhow::Result<SearchPage>) {
         self.tab.loading = None;
-        let site = self.current_site().cfg.name.clone();
         let Some(s) = &mut self.tab.search else { return };
         match res {
             Ok(p) => {
                 s.pages = page;
                 s.total = p.total.or(s.total);
-                for (thread, p) in &p.hits {
-                    s.hidden.push(hit_hidden(&self.filters, &self.store, (&site, p.board.as_deref().unwrap_or(&s.board)), *thread, p));
-                }
                 s.hits.extend(p.hits);
-                let msg = match hidden_count(s) {
-                    _ if s.hits.is_empty() => format!("No posts on /{}/ match \"{}\"", s.board, s.query),
-                    n if n == s.hits.len() && !self.show_hidden => self.all_hidden(n),
+                self.mark_hits();
+                let Some(s) = &self.tab.search else { return };
+                let msg = match s.hits.len() {
+                    0 => format!("No posts on /{}/ match \"{}\"", s.board, s.query),
+                    n if self.visible_hits().is_empty() => self.all_hidden(n),
                     _ => return,
                 };
                 self.info(msg);
@@ -253,23 +242,7 @@ impl App {
     /// The results shown: hidden ones only when `Z` shows them.
     pub fn visible_hits(&self) -> Vec<usize> {
         let Some(s) = &self.tab.search else { return Vec::new() };
-        (0..s.hits.len()).filter(|&k| self.show_hidden || !s.is_hidden(k)).collect()
-    }
-
-    /// Mark the results again (a filter, a hidden word or a post hidden by hand changed).
-    pub(super) fn remark_search(&mut self) {
-        let site = self.current_site().cfg.name.clone();
-        let Some(s) = &mut self.tab.search else { return };
-        let keys = s.saved.as_ref().map(|x| &x.keys);
-        s.hidden = s
-            .hits
-            .iter()
-            .enumerate()
-            .map(|(k, (thread, p))| match keys.and_then(|keys| keys.get(k)) {
-                Some(key) => hit_hidden(&self.filters, &self.store, (&key.site, &key.board), *thread, p),
-                None => hit_hidden(&self.filters, &self.store, (&site, p.board.as_deref().unwrap_or(&s.board)), *thread, p),
-            })
-            .collect();
+        (0..s.hits.len()).filter(|&k| s.marks.shown(k)).collect()
     }
 
     /// Every result found is hidden: say so, and how to see them.
