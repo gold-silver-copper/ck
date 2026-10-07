@@ -269,10 +269,12 @@ impl App {
     }
 
     fn rehide_tab(&mut self) {
-        let site = self.current_site().cfg.name.clone();
-        self.tab.catalog_marks = self.catalog_marks_for(&site, &self.tab.catalog, |p| self.board_of(p));
+        // Each by the site it's from: a search moves the tab to the archive, leaving them.
+        let site_name = |i: usize| self.sites.get(i).map_or(String::new(), |s| s.cfg.name.clone());
+        let (catalog_site, thread_site) = (site_name(self.tab.catalog_site), site_name(self.tab.thread_site));
+        self.tab.catalog_marks = self.catalog_marks_for(&catalog_site, &self.tab.catalog, |p| self.board_of(p));
         if let Some(t) = &self.tab.thread {
-            let marks = self.thread_marks(&site, t);
+            let marks = self.thread_marks(&thread_site, t);
             if let Some(t) = self.tab.thread.as_mut().filter(|t| t.marks != marks) {
                 t.marks = marks;
                 t.layout = None;

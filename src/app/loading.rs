@@ -308,7 +308,8 @@ impl App {
     /// waiting to be.
     pub(super) fn show_catalog(&mut self, posts: Vec<Post>) {
         let selected = self.tab.pending_catalog.or_else(|| self.selected_catalog_no());
-        self.tab.catalog_marks = self.catalog_marks_for(&self.current_site().cfg.name, &posts, |p| self.board_of(p));
+        let site = self.sites.get(self.tab.catalog_site).map_or(String::new(), |s| s.cfg.name.clone());
+        self.tab.catalog_marks = self.catalog_marks_for(&site, &posts, |p| self.board_of(p));
         self.tab.catalog = posts;
         if let Some(i) = selected.and_then(|no| self.catalog_row(no)) {
             self.tab.catalog_list.state.select(Some(i));
@@ -425,6 +426,7 @@ impl App {
             self.fetched_thread(&key, &tv.live_posts(), shown_max);
         }
         self.tab.thread = Some(tv);
+        self.tab.thread_site = self.tab.site;
         // Following: the first new entry that isn't hidden, revealed as `j` would.
         if let Some(last) = follow
             && let Some(t) = &mut self.tab.thread

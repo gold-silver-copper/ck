@@ -77,6 +77,8 @@ pub struct Tab {
     pub catalog_board: Option<String>,
     /// The site the loaded catalog is from.
     pub catalog_site: usize,
+    /// The site the open thread is from (an archive search moves the tab to the archive).
+    pub thread_site: usize,
     /// The board whose catalog is loaded, to return to from a thread opened on another board
     /// (an overboard's threads live on their own boards).
     pub catalog_of: Option<Board>,
@@ -148,6 +150,7 @@ impl Tab {
             pending_post: None,
             catalog_board: None,
             catalog_site: site,
+            thread_site: site,
             catalog_of: None,
             from_catalog: false,
             archive_offer: None,

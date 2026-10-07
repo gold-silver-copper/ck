@@ -3584,3 +3584,30 @@ fn unwatching_a_thread_forgets_which_posts_are_yours() {
     app.switch_tab(0);
     assert!(!app.tab.thread.as_ref().unwrap().marks.is_mine(2), "No.2 still shown as yours after x in Watched");
 }
+
+#[test]
+fn a_tab_searching_the_archive_keeps_its_catalog_and_thread_hidden() {
+    let mut app = app_with(
+        "[[site]]\nname = \"chan\"\nkind = \"vichan\"\nurl = \"http://127.0.0.1:3\"\nboards = [\"g\"]\narchive = \"arch\"\n\
+         [[site]]\nname = \"arch\"\nkind = \"foolfuuka\"\nurl = \"http://localhost:3\"\nboards = [\"g\"]",
+    );
+    app.tab.board = Some(Board { uri: "g".into(), title: String::new(), nsfw: None });
+    app.tab.catalog = nos(&[1, 2]);
+    app.set_thread(nos(&[1, 2]));
+    app.rehide(|a| a.store.toggle_hidden("chan", "g", 2));
+    let hidden = |app: &App| (app.tab.catalog_marks.why_hidden(1).is_some(), app.tab.thread.as_ref().unwrap().marks.why_hidden(1).is_some());
+    assert_eq!(hidden(&app), (true, true));
+    // The tab searches the archive (another site), and meanwhile what's hidden is decided
+    // again (here: `Z` twice in another tab): No.2 is still hidden on chan's /g/.
+    app.tab.view = View::Catalog;
+    app.act(Action::ArchiveSearch);
+    app.on_key(KeyEvent::from(KeyCode::Char('x')));
+    app.on_key(KeyEvent::from(KeyCode::Enter));
+    assert_eq!(app.tab.site, 1);
+    app.new_tab();
+    app.act(Action::ShowHidden);
+    app.act(Action::ShowHidden);
+    app.switch_tab(0);
+    app.close_search();
+    assert_eq!(hidden(&app), (true, true), "No.2 shown once the search closed");
+}
