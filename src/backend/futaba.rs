@@ -221,7 +221,7 @@ impl Backend for Futaba {
         Ok(self.parse_catalog(board, &v))
     }
 
-    fn thread(&self, board: &str, no: u64) -> Result<Vec<Post>> {
+    fn thread_unchecked(&self, board: &str, no: u64) -> Result<Vec<Post>> {
         let path = if self.is_4chan { "thread" } else { "res" };
         let v = get_json(&format!("{}/{}/{path}/{no}.json", self.api, enc(board)))?;
         Ok(self.parse_thread(board, &v))

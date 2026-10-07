@@ -196,14 +196,14 @@ impl App {
         let url = site.backend.thread_url(&b.uri, t.no);
         let about = crate::export::About { site: &site.cfg.name, board: &t.board, thread: t.no, url: &url, saved: self.clock.now() };
         let key = self.key(&t.board, t.no);
-        // As the site has it, like the saved copy it's also kept as.
-        let posts = t.live_posts().into_owned();
-        match crate::export::save(&posts, &about, &theme::theme(), &dir) {
+        // As the site has it, like the saved copy it's also kept as (unless it's cut short).
+        let whole = self.shown_whole(&key, t);
+        match crate::export::save(&t.live_posts(), &about, &theme::theme(), &dir) {
             Ok(()) => {
                 // Also kept as a saved copy, to read in ck (the Saved view).
-                self.keep_copy(&key, &posts, true);
+                let also = whole.map(|w| self.keep_copy(&key, &w)).map_or("", |()| " (and in Saved)");
                 self.save_now();
-                self.info(format!("Saved thread.html and thread.json in {} (and in Saved)", tilde(&dir.display().to_string())));
+                self.info(format!("Saved thread.html and thread.json in {}{also}", tilde(&dir.display().to_string())));
             }
             Err(e) => self.error(e.context("Couldn't save the thread")),
         }

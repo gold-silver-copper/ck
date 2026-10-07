@@ -578,8 +578,9 @@ fn backends_once(seed: u64) {
             look(&cat);
             let no = cat.first().map_or(1, |p| p.no);
             let _ = b.thread_pages(&board);
-            if let Ok(posts) = b.thread(&board, no) {
-                look(&posts);
+            if let Ok(t) = b.thread(&board, no) {
+                let posts = t.posts();
+                look(posts);
                 let _ = b.find_thread(&board, posts.last().map_or(no, |p| p.no));
             }
         }
@@ -649,7 +650,7 @@ fn data_dir_once(seed: u64) {
         let html = format!("<span class=\"quote\">&gt;{i}</span><br><a href=\"#p{}\" class=\"quotelink\">&gt;&gt;{}</a> <s>spoiler</s>", key.no, key.no);
         let parsed = crate::markup::parse_html(&html, crate::markup::Flavor::Fourchan);
         let posts: Vec<crate::model::Post> = (0..3).map(|k| crate::model::Post { no: key.no + k, body: parsed.lines.clone(), anchors: parsed.anchors.clone(), ..Default::default() }).collect();
-        store.keep_thread(&key, &format!("thread {i}"), "u", &posts, START + i as i64);
+        store.keep_thread(&key, &format!("thread {i}"), "u", &crate::test_fixtures::whole(&posts), START + i as i64);
         if rng.chance(50) {
             store.mark_dead(&key);
         }
@@ -729,7 +730,7 @@ fn pages_once(seed: u64) {
     let mut rng = Rng::new(seed);
     let dir = tempfile::tempdir().unwrap();
     let pages = Pages::new(dir.path().to_path_buf(), 1 << 22);
-    let fourchan = crate::backend::futaba::Futaba::fourchan(None);
+    let fourchan: &dyn Backend = &crate::backend::futaba::Futaba::fourchan(None);
     let fixture = crate::backend::fixture("4chan_thread.json");
     let n = 1 + rng.below(5) as u64;
     for no in 0..n {

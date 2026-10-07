@@ -428,9 +428,17 @@ between the last post you'd read and the first new one; `U` jumps to the first o
 A post the moderators delete while the thread is open stays where it was, marked
 "deleted" (the top bar counts them: "1 deleted"); its quotes, replies, previews and
 conversation still work, and it's never counted as new. That's kept in memory, for the
-open thread: saved copies, exports and post counts are the thread as the site has it. A
-refresh that comes back with fewer than half the posts shown is more likely a broken
-answer than mass deletion, so it's shown as it came, without keeping what it left out.
+open thread: saved copies, exports and post counts are the thread as the site has it. An
+answer with fewer than half the posts last known (shown, or counted for a watched thread)
+is more likely broken than mass deletion: it's shown as it came, without keeping what it
+left out, and the status line says so. It isn't a visit, doesn't change the watch list's
+counts, and doesn't replace the saved copy (nor does `e`, `w` or `m` while it's shown).
+The answer after it is judged against it, so a real mass deletion is taken one refresh
+later. An answer with no posts, or with another thread than the one asked for (as a site
+might answer a reply's number), is a failed load (`r` tries again); in the background it
+leaves a watched thread as it was. FoolFuuka and LynxChan error answers that say "not
+found" count as gone, like a 404 (on LynxChan, for boards and catalogs too); others show
+their text.
 
 ### Opening what you've seen before
 
@@ -815,10 +823,11 @@ Nothing here leaves the machine: fake sites answer on `*.invalid` hosts or on 12
   added from a post must catch it, and after any filter change the marks and the config
   agree with the filters in use. A conversation shows exactly its posts, and `M` the posts
   with files. A post shown before a refresh of the same thread is still there after it
-  (or marked deleted), unless the refresh came back too small to trust, and a deleted post
-  is never new. A post hidden as a reply quotes a hidden post. A failure prints the seed
-  that replays it and the fewest steps that still fail (`FUZZ_TRACE=1` prints the state
-  after each step).
+  (or marked deleted), unless the refresh came back with fewer than half the posts last
+  known, and a deleted post is never new. The fake sites now and then answer with no posts
+  or with another thread, as a site in trouble might. A post hidden as a reply quotes a
+  hidden post. A failure prints the seed that replays it and the fewest steps that still
+  fail (`FUZZ_TRACE=1` prints the state after each step).
 - **The rest** (`src/fuzz.rs`): every engine's parsers on mangled responses, the markup
   parser and wrapping, routes, the rate limiter and the cache against a model, broken data
   directories and saved threads (nothing the user had may be lost), broken configs and

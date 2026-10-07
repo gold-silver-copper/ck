@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
-use crate::app::Changed;
+use crate::app::{Changed, Whole};
 use crate::model::{Board, Post, max_no};
 use crate::saved::{self, SavedMeta, SavedPost, SavedThread};
 
@@ -542,11 +542,9 @@ impl Store {
     /// Keep a copy of a thread's posts; returns whether it's being written. Posts that
     /// haven't changed (by `signature`) aren't. The list is updated at once; the copy is
     /// converted and written in the background (see `settle`).
-    pub fn keep_thread(&mut self, key: &ThreadKey, subject: &str, url: &str, posts: &[Post], now: i64) -> bool {
+    pub fn keep_thread(&mut self, key: &ThreadKey, subject: &str, url: &str, t: &Whole, now: i64) -> bool {
         let (Some(dir), Some(writer)) = (self.dir.clone(), &self.writer) else { return false };
-        if posts.is_empty() {
-            return false;
-        }
+        let posts = t.posts();
         let sig = signature(posts);
         let before = self.saved(key);
         if before.is_some_and(|m| m.hash == sig && !m.dead) {
@@ -728,6 +726,7 @@ fn hash(bytes: &[u8]) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_fixtures::whole;
 
     fn key(no: u64) -> ThreadKey {
         ThreadKey { site: "4chan".into(), board: "g".into(), no }
@@ -934,32 +933,30 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let (mut s, _) = Store::load(Some(dir.path().to_path_buf()));
         let file = dir.path().join("threads/4chan/g/1.json");
-        assert!(s.keep_thread(&key(1), "one", "u", &posts(&[1, 2]), 10));
+        assert!(s.keep_thread(&key(1), "one", "u", &whole(&posts(&[1, 2])), 10));
         // std::time::Duration::from_secs(10)ritten in the background; the list knows at once.
         assert_eq!(s.saved[0].posts, 2);
         assert!(s.flush(std::time::Duration::from_secs(10)).is_empty());
         assert!(file.exists() && s.saved[0].bytes > 0);
         // The same posts again: not written.
         std::fs::remove_file(&file).unwrap();
-        assert!(!s.keep_thread(&key(1), "one", "u", &posts(&[1, 2]), 20));
+        assert!(!s.keep_thread(&key(1), "one", "u", &whole(&posts(&[1, 2])), 20));
         s.flush(std::time::Duration::from_secs(10));
         assert!(!file.exists());
         // An edited post (more text) or a file added is noticed.
         let mut edited = posts(&[1, 2]);
         edited[1].body.push("more".into());
-        assert!(s.keep_thread(&key(1), "one", "u", &edited, 25));
+        assert!(s.keep_thread(&key(1), "one", "u", &whole(&edited), 25));
         edited[0].files.push(crate::model::Attachment::at("f"));
-        assert!(s.keep_thread(&key(1), "one", "u", &edited, 26));
-        assert!(s.keep_thread(&key(1), "one", "u", &posts(&[1, 2, 3]), 30));
+        assert!(s.keep_thread(&key(1), "one", "u", &whole(&edited), 26));
+        assert!(s.keep_thread(&key(1), "one", "u", &whole(&posts(&[1, 2, 3])), 30));
         assert_eq!((s.saved[0].posts, s.saved[0].newest, s.saved[0].saved), (3, 3, 30));
         // std::time::Duration::from_secs(10)ritten in order: the last one is what's on disk.
         s.flush(std::time::Duration::from_secs(10));
         assert_eq!(s.load_saved(&key(1)).unwrap().posts.len(), 3);
-        // Nothing for an empty thread.
-        assert!(!s.keep_thread(&key(2), "", "u", &[], 30));
 
         // Dead: marked in the list and the file (after the writes before it), and kept.
-        assert!(s.keep_thread(&key(1), "one", "u", &posts(&[1, 2, 3, 4]), 31));
+        assert!(s.keep_thread(&key(1), "one", "u", &whole(&posts(&[1, 2, 3, 4])), 31));
         s.saved_dead(&key(1));
         assert!(s.saved(&key(1)).unwrap().dead);
         assert!(s.load_saved(&key(1)).unwrap().dead);
@@ -984,7 +981,7 @@ mod tests {
         let (mut s, _) = Store::load(Some(dir.path().to_path_buf()));
         let many: Vec<u64> = (1..50).collect();
         for no in 1..=4 {
-            s.keep_thread(&key(no), "", "u", &posts(&many), no as i64);
+            s.keep_thread(&key(no), "", "u", &whole(&posts(&many)), no as i64);
         }
         s.flush(std::time::Duration::from_secs(10));
         let one = s.saved[0].bytes;
@@ -995,7 +992,7 @@ mod tests {
             s.watch(key(no), String::new(), 0, 0);
         }
         s.saved_max = one * 2;
-        s.keep_thread(&key(5), "", "u", &posts(&many), 5);
+        s.keep_thread(&key(5), "", "u", &whole(&posts(&many)), 5);
         // Once written, the unwatched ones go, oldest first, dead or not; the watched ones
         // stay, even over the limit.
         s.flush(std::time::Duration::from_secs(10));
@@ -1011,12 +1008,12 @@ mod tests {
         std::fs::write(dir.path().join("threads"), "not a folder").unwrap();
         // (Watched, so it stays over the limit.)
         s.watch(key(6), String::new(), 0, 0);
-        s.keep_thread(&key(6), "", "u", &posts(&many), 6);
+        s.keep_thread(&key(6), "", "u", &whole(&posts(&many)), 6);
         let errors = s.flush(std::time::Duration::from_secs(10));
         assert!(errors.len() == 1 && errors[0].contains("Couldn't save a copy of thread 6"), "{errors:?}");
         // And the same posts are written again next time.
         std::fs::remove_file(dir.path().join("threads")).unwrap();
-        assert!(s.keep_thread(&key(6), "", "u", &posts(&many), 7));
+        assert!(s.keep_thread(&key(6), "", "u", &whole(&posts(&many)), 7));
         assert!(s.flush(std::time::Duration::from_secs(10)).is_empty());
         assert!(dir.path().join("threads/4chan/g/6.json").exists());
     }
@@ -1025,16 +1022,16 @@ mod tests {
     fn a_copy_counts_as_saved_once_written() {
         let dir = tempfile::tempdir().unwrap();
         let (mut s, _) = Store::load(Some(dir.path().to_path_buf()));
-        assert!(s.keep_thread(&key(1), "", "u", &posts(&[1, 2]), 1));
+        assert!(s.keep_thread(&key(1), "", "u", &whole(&posts(&[1, 2])), 1));
         // Saved before the write is known to be done (as at exit, when it takes too long):
         // the next start doesn't take the posts for written.
         s.save().unwrap();
         let next = tempfile::tempdir().unwrap();
         std::fs::copy(dir.path().join("saved.json"), next.path().join("saved.json")).unwrap();
         let (mut s2, _) = Store::load(Some(next.path().to_path_buf()));
-        assert!(s2.keep_thread(&key(1), "", "u", &posts(&[1, 2]), 2));
+        assert!(s2.keep_thread(&key(1), "", "u", &whole(&posts(&[1, 2])), 2));
         // Once it's done, it does.
         s.flush(std::time::Duration::from_secs(10));
-        assert!(!s.keep_thread(&key(1), "", "u", &posts(&[1, 2]), 3));
+        assert!(!s.keep_thread(&key(1), "", "u", &whole(&posts(&[1, 2])), 3));
     }
 }

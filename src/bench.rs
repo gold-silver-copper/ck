@@ -128,16 +128,17 @@ fn bench_saved() {
     eprintln!("\n== saved threads, {} posts ==", posts.len());
     // New posts each time: converted, hashed and written.
     let mut n = 0;
+    let both = [crate::test_fixtures::whole(&posts), crate::test_fixtures::whole(&posts[..posts.len() - 1])];
     time("saving a watched thread as posts arrive", 20, || {
         n += 1;
-        store.keep_thread(&key, "s", "u", &posts[..posts.len() - n % 2], 0)
+        store.keep_thread(&key, "s", "u", &both[n % 2], 0)
     });
-    time("a refresh with nothing new (not written)", 20, || store.keep_thread(&key, "s", "u", &posts[..posts.len() - n % 2], 0));
+    time("a refresh with nothing new (not written)", 20, || store.keep_thread(&key, "s", "u", &both[n % 2], 0));
     // The work the writer thread does for each (off the UI thread).
     store.flush(std::time::Duration::from_secs(30));
     time("saving: the background writer's part", 20, || {
         n += 1;
-        store.keep_thread(&key, "s", "u", &posts[..posts.len() - n % 2], 0);
+        store.keep_thread(&key, "s", "u", &both[n % 2], 0);
         store.flush(std::time::Duration::from_secs(30))
     });
     time("opening a saved copy", 20, || {

@@ -14,7 +14,7 @@ use std::sync::Arc;
 use anyhow::Result;
 
 use crate::config::{BoardConfig, SiteConfig, SiteKind};
-use crate::model::{Board, Post};
+use crate::model::{Board, Post, Thread};
 
 /// Receives the results so far while a multi-page load continues.
 pub type Partial<'a, T> = &'a dyn Fn(&[T]);
@@ -39,8 +39,9 @@ pub trait Backend: Send + Sync {
     fn boards(&self, partial: Partial<Board>) -> Result<Vec<Board>>;
     /// Thread OPs on a board, in catalog order, reporting pages through `partial`.
     fn catalog(&self, board: &str, partial: Partial<Post>) -> Result<Vec<Post>>;
-    /// All posts of a thread, OP first.
-    fn thread(&self, board: &str, no: u64) -> Result<Vec<Post>>;
+    /// All posts of a thread, OP first, as the site sent it; `dyn Backend::thread` checks it
+    /// (and is what the app calls).
+    fn thread_unchecked(&self, board: &str, no: u64) -> Result<Vec<Post>>;
     /// The thread a post is in, for engines that can look it up.
     fn find_thread(&self, _board: &str, _post: u64) -> Result<Option<u64>> {
         Ok(None)
@@ -60,6 +61,24 @@ pub trait Backend: Send + Sync {
     fn post_url(&self, board: &str, thread: u64, post: u64) -> String {
         format!("{}#{post}", self.thread_url(board, thread))
     }
+}
+
+impl dyn Backend + '_ {
+    /// Thread `no` of `board`, checked to be it.
+    pub fn thread(&self, board: &str, no: u64) -> Result<Thread> {
+        Thread::answer(no, self.thread_unchecked(board, no)?)
+    }
+}
+
+/// A site's error body: not found if its text says the thread or post is gone ("Thread not
+/// found.", "Post not found."), else a plain error with its text. Only those: a board or
+/// session the site can't find for now ("Board not found.") isn't the thread gone, and
+/// would mark a watched thread dead for good.
+pub(crate) fn site_error(url: &str, msg: &str) -> anyhow::Error {
+    let msg = crate::markup::decode(msg);
+    let lower = msg.to_lowercase();
+    let gone = lower.contains("not found") && (lower.contains("thread") || lower.contains("post"));
+    if gone { crate::http::HttpError::NotFound(url.into()).into() } else { anyhow::anyhow!("{msg}") }
 }
 
 /// An engine ck speaks.
@@ -258,6 +277,44 @@ pub fn fixture_threads() -> Vec<(&'static str, Vec<Post>)> {
 mod tests {
     use crate::config::Config;
 
+    /// Fetch thread `no` of /b/ from a backend answering `url` with `body` only.
+    fn answered(b: &dyn super::Backend, url: &str, body: serde_json::Value, no: u64) -> anyhow::Result<crate::model::Thread> {
+        let copies = [crate::http::Copy { url: url.into(), last_modified: None, body }];
+        crate::http::from_copies(&copies, || b.thread("b", no))
+    }
+
+    #[test]
+    fn a_foolfuuka_error_answer_is_not_found() {
+        // FoolFuuka answers a thread it doesn't have with `{"error": ...}` (as search does).
+        let ff = super::foolfuuka::Foolfuuka::new("https://arch.example".into(), None);
+        let res = answered(&ff, "https://arch.example/_/api/chan/thread/?board=b&num=5", serde_json::json!({"error": "Thread not found."}), 5);
+        assert!(res.as_ref().is_err_and(crate::http::is_not_found), "foolfuuka: {:?}", res.map(|t| t.posts().len()));
+        // And so is a post it doesn't have, looked up.
+        let copies = [crate::http::Copy { url: "https://arch.example/_/api/chan/post/?board=b&num=7".into(), last_modified: None, body: serde_json::json!({"error": "Post not found."}) }];
+        assert!(crate::http::from_copies(&copies, || super::Backend::find_thread(&ff, "b", 7)).is_err_and(|e| crate::http::is_not_found(&e)));
+    }
+
+    #[test]
+    fn a_lynxchan_error_answer_is_not_a_thread() {
+        // LynxChan wraps its errors as `{"status": "error", "data": "..."}`.
+        let lynx = super::lynxchan::Lynxchan::new("https://lynx.example".into(), None);
+        let res = answered(&lynx, "https://lynx.example/b/res/5.json", serde_json::json!({"status": "error", "data": "Thread not found."}), 5);
+        assert!(res.as_ref().is_err_and(crate::http::is_not_found), "lynxchan: {:?}", res.map(|t| t.posts().len()));
+    }
+
+    #[test]
+    fn other_error_answers_are_errors_with_their_text() {
+        // Not a thread, and not gone either: a watched thread stays watched.
+        let ff = super::foolfuuka::Foolfuuka::new("https://arch.example".into(), None);
+        let res = answered(&ff, "https://arch.example/_/api/chan/thread/?board=b&num=5", serde_json::json!({"error": "Too many requests."}), 5);
+        assert_eq!(res.map(|t| t.posts().len()).map_err(|e| (crate::http::is_not_found(&e), e.to_string())), Err((false, "Too many requests.".into())));
+        let lynx = super::lynxchan::Lynxchan::new("https://lynx.example".into(), None);
+        let res = answered(&lynx, "https://lynx.example/b/res/5.json", serde_json::json!({"status": "maintenance", "data": "Back soon"}), 5);
+        assert_eq!(res.map(|t| t.posts().len()).map_err(|e| (crate::http::is_not_found(&e), e.to_string())), Err((false, "maintenance: Back soon".into())));
+        let res = answered(&lynx, "https://lynx.example/b/res/5.json", serde_json::json!({"status": "error", "data": "Flood detected"}), 5);
+        assert!(res.is_err_and(|e| !crate::http::is_not_found(&e)));
+    }
+
     /// Hits the network: `cargo test -- --ignored --nocapture`.
     #[test]
     #[ignore = "network: hits every default site"]
@@ -281,8 +338,8 @@ mod tests {
                     anyhow::ensure!(!b.catalog(&real.uri, &|_| {})?.is_empty(), "empty catalog on /{}/", real.uri);
                 }
                 let board = thread_board;
-                let posts = b.thread(board, op.no)?;
-                anyhow::ensure!(!posts.is_empty() && posts[0].no == op.no, "thread mismatch");
+                let t = b.thread(board, op.no)?;
+                let posts = t.posts();
                 // Engines that can look up a post's thread must find this one.
                 if let Some(reply) = posts.get(1) {
                     let found = b.find_thread(board, reply.no)?;
@@ -314,5 +371,15 @@ mod tests {
             }
         }
         assert!(failures.is_empty(), "failed: {failures:?}");
+    }
+}
+
+#[cfg(test)]
+mod site_error_tests {
+    #[test]
+    fn only_a_thread_or_post_not_found_is_gone() {
+        for (text, gone) in [("Thread not found.", true), ("Post not found.", true), ("Board not found.", false), ("Session not found", false), ("Flood detected", false)] {
+            assert_eq!(crate::http::is_not_found(&super::site_error("https://x.invalid/t", text)), gone, "{text}");
+        }
     }
 }

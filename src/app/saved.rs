@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use super::tabs::{Offline, ThreadCopy};
 use super::{App, View};
 use crate::images::Kind;
-use crate::model::{Attachment, Post};
+use crate::model::{Attachment, Thread};
 use crate::store::ThreadKey;
 
 impl App {
@@ -25,12 +25,11 @@ impl App {
                 return;
             }
         };
-        let dead = copy.dead || self.store.saved(key).is_some_and(|m| m.dead);
-        let posts: Vec<Post> = copy.posts.into_iter().map(Post::from).collect();
-        if posts.is_empty() {
+        let (dead, saved) = (copy.dead || self.store.saved(key).is_some_and(|m| m.dead), copy.saved);
+        let Some(t) = Thread::saved(copy) else {
             self.error("The saved copy has no posts");
             return;
-        }
+        };
         if self.tab.view != View::Thread {
             self.tab.return_to = Some(self.tab.view);
         }
@@ -49,7 +48,7 @@ impl App {
             self.tab.thread = None;
         }
         self.tab.view = View::Thread;
-        self.show_thread(posts, Some(ThreadCopy::Saved(Offline { saved: copy.saved, dead })));
+        self.show_thread(t, Some(ThreadCopy::Saved(Offline { saved, dead })));
     }
 
     /// `r` on a saved copy: the live thread, unless it's known to be gone.

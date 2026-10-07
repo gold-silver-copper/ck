@@ -266,7 +266,7 @@ impl Backend for Fake {
         Ok(posts)
     }
 
-    fn thread(&self, board: &str, no: u64) -> Result<Vec<Post>> {
+    fn thread_unchecked(&self, board: &str, no: u64) -> Result<Vec<Post>> {
         let _pass = self.gate.enter(format!("{} thread /{board}/{no}", self.site));
         let generation = {
             let mut f = lock(&self.fetched);
@@ -285,6 +285,10 @@ impl Backend for Fake {
         }
         if rng.chance(3) {
             return Ok(Vec::new());
+        }
+        // Another thread, as a site in trouble might answer.
+        if rng.chance(2) {
+            return Ok(vec![self.post(&mut rng, board, no.saturating_add(1), &[])]);
         }
         // The same thread each time, more of it each fetch, and now and then a post deleted.
         let mut base = Rng::new(hash(&[&self.seed, &self.site, &board, &no]));
@@ -378,12 +382,12 @@ impl Backend for Gated {
         self.data.catalog(board, partial)
     }
 
-    fn thread(&self, board: &str, no: u64) -> Result<Vec<Post>> {
+    fn thread_unchecked(&self, board: &str, no: u64) -> Result<Vec<Post>> {
         if crate::http::from_copies_only() {
-            return self.data.thread(board, no);
+            return self.data.thread_unchecked(board, no);
         }
         let _pass = self.gate.enter(format!("{} thread /{board}/{no}", self.site));
-        self.data.thread(board, no)
+        self.data.thread_unchecked(board, no)
     }
 
     fn find_thread(&self, board: &str, post: u64) -> Result<Option<u64>> {
@@ -1209,14 +1213,13 @@ struct Before {
     /// and the post at the top of the screen.
     reading: Option<(usize, String, u64, usize, bool, u64)>,
     /// The open tab's thread as fetched (not a copy): its board and number, its posts'
-    /// numbers, and how many refreshes of it came back too small to keep what they left out.
-    /// (Its tab by place and the number of tabs: closing one moves the others.)
+    /// numbers. (Its tab by place and the number of tabs: closing one moves the others.)
     live: Option<Live>,
 }
 
 /// The open tab's place and the number of tabs, its thread's board and number, its posts'
-/// numbers, and its shrunk refreshes.
-type Live = ((usize, usize), String, u64, Vec<u64>, u32);
+/// numbers.
+type Live = ((usize, usize), String, u64, Vec<u64>);
 
 impl Before {
     fn of(app: &App, gate: &Gate) -> Self {
@@ -1238,7 +1241,7 @@ impl Before {
             .thread
             .as_ref()
             .filter(|_| app.tab.copy.is_none())
-            .map(|t| ((app.active, app.tabs.len()), t.board.clone(), t.no, t.posts.iter().map(|p| p.no).collect(), t.shrinks));
+            .map(|t| ((app.active, app.tabs.len()), t.board.clone(), t.no, t.posts.iter().map(|p| p.no).collect()));
         Before { saved, in_saved_view: app.tab.view == View::Saved, offline_dead, log: gate.log_len(), filters: app.filter_cfgs.clone(), recursive_hiding: app.hiding.recursive(), reading, live }
     }
 }
@@ -1341,8 +1344,9 @@ fn check_deleted(app: &App, before: &Before) {
     if t.deleted.iter().any(|no| !t.index.contains_key(no)) || t.deleted.contains(&t.no) {
         panic!("deleted posts {:?} aren't (reply) posts of the thread", t.deleted);
     }
-    let Some((tab, board, no, nos, shrinks)) = &before.live else { return };
-    if (app.active, app.tabs.len()) != *tab || app.tab.copy.is_some() || t.board != *board || t.no != *no || t.shrinks != *shrinks {
+    let Some((tab, board, no, nos)) = &before.live else { return };
+    // (An answer cut short is shown as it came.)
+    if (app.active, app.tabs.len()) != *tab || app.tab.copy.is_some() || t.board != *board || t.no != *no || crate::model::shrank(t.known, t.live_posts().len()) {
         return;
     }
     if let Some(lost) = nos.iter().find(|n| !t.index.contains_key(n)) {

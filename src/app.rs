@@ -21,7 +21,7 @@ use crate::filter::{Filters, Hidden};
 use crate::http;
 use crate::images::Images;
 use crate::keys::{Action, KeyMap, Scope};
-use crate::model::{Attachment, Board, FileKind, Link, Post, max_no};
+use crate::model::{Attachment, Board, FileKind, Link, Post, Thread, max_no, shrank};
 use crate::store::{Store, ThreadKey};
 use crate::theme::{self, ThemeDef, ThemeSetting};
 
@@ -52,6 +52,7 @@ mod goto;
 mod hiding;
 pub use hiding::{Changed, Hiding, Marks, ancestry, with_ancestry};
 pub use goto::start_error;
+pub use loading::Whole;
 mod home;
 mod links;
 mod saved;
@@ -376,6 +377,9 @@ pub struct App {
     /// The newest post seen in each watched thread by a refresh this session; notifications
     /// are for posts past it.
     notified_max: HashMap<ThreadKey, u64>,
+    /// The last answer for each thread that came back cut short (by posts): the next is
+    /// judged against it (`accept`).
+    short: HashMap<ThreadKey, usize>,
     /// The same for followed generals' boards (site, board): the newest thread seen there,
     /// for `notify` filters.
     board_notified_max: HashMap<(String, String), u64>,
@@ -532,6 +536,7 @@ impl App {
             pages_asked: HashMap::new(),
             pages_asking: HashSet::new(),
             notified_max: HashMap::new(),
+            short: HashMap::new(),
             board_notified_max: HashMap::new(),
             generals_checked: HashMap::new(),
             generals_searching: HashSet::new(),
@@ -1180,7 +1185,7 @@ impl App {
             (View::Thread, _) => {
                 let Some(t) = &self.tab.thread else { return };
                 let posts = t.live_posts();
-                (t.board.clone(), t.no, thread_subject(&posts), posts.len(), max_no(&posts))
+                (t.board.clone(), t.no, thread_subject(&posts), t.known, max_no(&posts))
             }
             (View::Catalog, Some(b)) => {
                 let Some(op) = self.selected_post() else { return };
@@ -1264,28 +1269,24 @@ impl App {
         self.tab.thread.as_ref().is_none_or(|t| t.media != Media::NoImages && self.images_on(self.tab.site, &t.board))
     }
 
-    /// Keep a copy of a thread's posts in the data directory (a watched thread's, or with
-    /// `always`, any). Unchanged posts aren't written again.
-    fn keep_copy(&mut self, key: &ThreadKey, posts: &[Post], always: bool) {
-        if !always && self.store.watched(key).is_none() {
-            return;
-        }
+    /// Keep a copy of a thread's posts in the data directory. Unchanged posts aren't written
+    /// again.
+    fn keep_copy(&mut self, key: &ThreadKey, t: &Whole) {
         let url = self.thread_link(key, None).unwrap_or_default();
-        if self.store.keep_thread(key, &thread_subject(posts), &url, posts, self.clock.now()) {
+        if self.store.keep_thread(key, &thread_subject(t.posts()), &url, t, self.clock.now()) {
             self.save();
         }
     }
 
     /// A thread just watched: if it's the one open (and loaded), it's saved at once. A saved
-    /// copy open is kept as it is (a copy saved under another number, when the site answered
-    /// with another thread, is kept under this one too).
+    /// copy open is kept as it is.
     fn keep_open_thread(&mut self, key: &ThreadKey) {
         if self.tab.view != View::Thread || (self.tab.saved().is_some() && self.store.saved(key).is_some()) {
             return;
         }
-        let Some(t) = self.tab.thread.as_ref().filter(|t| self.key(&t.board, t.no) == *key) else { return };
-        let posts = t.live_posts().into_owned();
-        self.keep_copy(key, &posts, false);
+        if let Some(w) = self.tab.thread.as_ref().filter(|t| self.key(&t.board, t.no) == *key).and_then(|t| self.shown_whole(key, t)) {
+            self.keep_copy(key, &w);
+        }
         if self.tab.saved().is_some_and(|o| o.dead) {
             self.store.saved_dead(key);
         }
@@ -1299,7 +1300,7 @@ impl App {
         let Some(no) = t.current().map(|p| p.no) else { return };
         if self.store.watched(&key).is_none() {
             let posts = t.live_posts();
-            let (subject, len, max_no) = (thread_subject(&posts), posts.len(), max_no(&posts));
+            let (subject, len, max_no) = (thread_subject(&posts), t.known, max_no(&posts));
             self.store.watch(key.clone(), subject, len, max_no);
             self.keep_open_thread(&key);
         }
@@ -1441,6 +1442,7 @@ impl App {
             Ok(None) => {
                 self.error(format!("Post {post} isn't in this thread, and this site can't say which thread it's in"));
             }
+            Err(e) if http::is_not_found(&e) => self.error(format!("Post {post} isn't on /{}/ (deleted, or never there)", board.uri)),
             Err(e) => self.error(e),
         }
     }

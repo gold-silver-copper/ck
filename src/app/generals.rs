@@ -41,7 +41,7 @@ impl App {
             (View::Thread, _) => {
                 let Some(t) = &self.tab.thread else { return };
                 let posts = t.live_posts();
-                (self.key(&t.board, t.no), thread_subject(&posts), posts.len(), max_no(&posts))
+                (self.key(&t.board, t.no), thread_subject(&posts), t.known, max_no(&posts))
             }
             (View::Catalog, Some(_)) => {
                 let Some(op) = self.selected_index().and_then(|i| self.tab.catalog.get(i)) else { return };

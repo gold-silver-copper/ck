@@ -124,6 +124,17 @@ fn sleeps_until_the_next_thing_to_do() {
 }
 
 /// What request `id`'s job sends back once it has `found` something: `apply` it.
+/// `refreshed`, with the site's answer for `key`: `posts` as it sent them.
+fn refresh(app: &mut App, key: ThreadKey, posts: Vec<Post>) {
+    let no = key.no;
+    app.refreshed(key, Thread::answer(no, posts));
+}
+
+/// A thread answer: `posts`, of the thread their first post starts.
+fn arrived(posts: Vec<Post>) -> anyhow::Result<Thread> {
+    Thread::answer(posts.first().map_or(0, |p| p.no), posts)
+}
+
 fn answer<T: Send + 'static>(id: u64, apply: fn(&mut App, T), found: T) -> Msg {
     Msg::request(id, move |a| apply(a, found))
 }
@@ -469,18 +480,18 @@ fn hidden_posts_are_not_new_in_watched_threads() {
     app.store.watch(key.clone(), "One".into(), 2, 5);
     app.store.toggle_mine(&key, 5).unchecked();
     let start = vec![post(1, vec![], ""), post(5, vec![], "")];
-    app.refreshed(key.clone(), Ok(start.clone()));
+    refresh(&mut app, key.clone(), start.clone());
     // A hidden reply to yours, a reply to that (hidden with it), and one you can see.
     let mut posts = start;
     posts.extend([post(6, vec![5], "buy spam"), post(7, vec![6, 5], "agreed"), post(8, vec![5], "hello")]);
-    app.refreshed(key.clone(), Ok(posts.clone()));
+    refresh(&mut app, key.clone(), posts.clone());
     app.flush_notes(Instant::now());
     assert_eq!(app.notified, ["New reply to your post in /x/ One"]);
     assert_eq!(app.store.watched(&key).unwrap().status, Status::Live { unread: 1, replies: 1 });
     // A `notify` filter still tells about what it catches, hidden or not.
     app.notified.clear();
     posts.push(post(9, vec![], "rust spam"));
-    app.refreshed(key.clone(), Ok(posts));
+    refresh(&mut app, key.clone(), posts);
     app.flush_notes(Instant::now());
     assert_eq!(app.notified, ["A new post caught by \"rust\" in /x/ One"]);
     assert_eq!(app.store.watched(&key).unwrap().status.counts().0, 1);
@@ -495,20 +506,20 @@ fn notifies_about_new_posts_and_replies_to_yours() {
     app.store.watch(key(2), "Two".into(), 1, 20);
     app.store.toggle_mine(&key(1), 5).unchecked();
     // The first refresh of the session tells nothing.
-    app.refreshed(key(1), Ok(vec![post(1, vec![]), post(5, vec![]), post(6, vec![5])]));
+    refresh(&mut app, key(1), vec![post(1, vec![]), post(5, vec![]), post(6, vec![5])]);
     app.flush_notes(Instant::now());
     assert!(app.notified.is_empty());
     assert_eq!(app.store.watched(&key(1)).unwrap().status.counts().1, 1);
     // Then: a reply to your post, and another post.
-    app.refreshed(key(1), Ok(vec![post(1, vec![]), post(5, vec![]), post(6, vec![5]), post(7, vec![5]), post(8, vec![1])]));
+    refresh(&mut app, key(1), vec![post(1, vec![]), post(5, vec![]), post(6, vec![5]), post(7, vec![5]), post(8, vec![1])]);
     app.flush_notes(Instant::now());
     assert_eq!(app.notified, ["New reply to your post in /x/ One", "1 new post in /x/ One"]);
     assert_eq!(app.store.watched(&key(1)).unwrap().status.counts().1, 2);
     // Several threads at once make one notification.
     app.notified.clear();
-    app.refreshed(key(2), Ok(vec![post(20, vec![])]));
-    app.refreshed(key(1), Ok(vec![post(1, vec![]), post(9, vec![])]));
-    app.refreshed(key(2), Ok(vec![post(20, vec![]), post(21, vec![])]));
+    refresh(&mut app, key(2), vec![post(2, vec![]), post(20, vec![])]);
+    refresh(&mut app, key(1), vec![post(1, vec![]), post(5, vec![]), post(6, vec![5]), post(7, vec![5]), post(8, vec![1]), post(9, vec![])]);
+    refresh(&mut app, key(2), vec![post(2, vec![]), post(20, vec![]), post(21, vec![])]);
     // ...once nothing is still refreshing.
     app.refreshing.insert(key(3));
     app.flush_notes(Instant::now());
@@ -528,15 +539,15 @@ fn notify_filters_tell_about_what_they_catch_once() {
     let post = |no, id: &str| Post { no, id: Some(id.into()), ..Default::default() };
     app.store.watch(key(1), "One".into(), 1, 1);
     // The first refresh of the session tells nothing, though it catches one.
-    app.refreshed(key(1), Ok(vec![post(1, "x"), post(2, "Ab3d")]));
+    refresh(&mut app, key(1), vec![post(1, "x"), post(2, "Ab3d")]);
     app.flush_notes(Instant::now());
     assert!(app.notified.is_empty());
     // A new post it catches: told, once.
-    app.refreshed(key(1), Ok(vec![post(1, "x"), post(2, "Ab3d"), post(3, "Ab3d"), post(4, "zz")]));
+    refresh(&mut app, key(1), vec![post(1, "x"), post(2, "Ab3d"), post(3, "Ab3d"), post(4, "zz")]);
     app.flush_notes(Instant::now());
     assert_eq!(app.notified, ["A new post caught by \"that guy\" in /x/ One", "2 new posts in /x/ One"]);
     app.notified.clear();
-    app.refreshed(key(1), Ok(vec![post(1, "x"), post(2, "Ab3d"), post(3, "Ab3d"), post(4, "zz")]));
+    refresh(&mut app, key(1), vec![post(1, "x"), post(2, "Ab3d"), post(3, "Ab3d"), post(4, "zz")]);
     app.flush_notes(Instant::now());
     assert!(app.notified.is_empty());
     // A followed general's board: new threads it catches, after the first look.
@@ -1072,7 +1083,7 @@ fn tabs_keep_their_own_place_and_responses() {
     // Tab 0's catalog arrives: it goes to tab 0, not here.
     app.handle(answer(first_req, App::catalog_arrived, Ok(vec![Post { no: 1, ..Default::default() }])));
     assert!(app.tab.catalog.is_empty());
-    app.handle(answer(app.tab.req.unwrap(), App::thread_arrived, Ok(vec![Post { no: 5, ..Default::default() }])));
+    app.handle(answer(app.tab.req.unwrap(), App::thread_arrived, arrived(vec![Post { no: 5, ..Default::default() }])));
     assert_eq!(app.tab.thread.as_ref().unwrap().no, 5);
     app.switch_tab(0);
     assert_eq!((app.tab.site, app.tab.view, app.tab.catalog.len(), app.tab.loading.is_none()), (0, View::Catalog, 1, true));
@@ -1080,9 +1091,9 @@ fn tabs_keep_their_own_place_and_responses() {
     // A thread with no posts at all is an error, and what was shown stays.
     app.handle(answer(app.tab.req.unwrap(), App::catalog_arrived, Ok(vec![])));
     app.goto_str("a/x/1");
-    app.handle(answer(app.tab.req.unwrap(), App::thread_arrived, Ok(vec![Post { no: 1, ..Default::default() }])));
+    app.handle(answer(app.tab.req.unwrap(), App::thread_arrived, arrived(vec![Post { no: 1, ..Default::default() }])));
     app.act(Action::Reload);
-    app.handle(answer(app.tab.req.unwrap(), App::thread_arrived, Ok(vec![])));
+    app.handle(answer(app.tab.req.unwrap(), App::thread_arrived, Thread::answer(1, vec![])));
     assert!(app.tab.thread.as_ref().is_some_and(|t| t.posts.len() == 1) && app.footer.get().is_some_and(|s| s.error));
     // A post's thread found while the settings are open opens behind them.
     app.goto_str("a/x/1#77");
@@ -1101,7 +1112,7 @@ fn tabs_keep_their_own_place_and_responses() {
     // A response for a tab that's gone is dropped.
     let stale = app.tabs[1].req.unwrap();
     app.tabs.truncate(1);
-    app.handle(answer(stale, App::thread_arrived, Ok(vec![Post { no: 9, ..Default::default() }])));
+    app.handle(answer(stale, App::thread_arrived, arrived(vec![Post { no: 9, ..Default::default() }])));
     assert!(app.tab.thread.is_none());
 }
 
@@ -1267,7 +1278,7 @@ fn following_a_general() {
     let mut full = op(10, "/lmg/ - Local Models General #5");
     full.bumplimit = true;
     app.tab.view = View::Sites;
-    app.refreshed(key(10), Ok(vec![full, Post { no: 11, ..Default::default() }]));
+    refresh(&mut app, key(10), vec![full, Post { no: 11, ..Default::default() }]);
     assert!(app.store.watched(&key(10)).unwrap().at_limit);
     app.check_generals(now);
     app.check_generals(now);
@@ -1398,7 +1409,7 @@ fn tab_focuses_parts_and_the_verbs_follow_it() {
     let html = r##"<a href="#p1" class="quotelink">&gt;&gt;1</a> see https://example.com/a"##;
     let file = |name: &str| Attachment { filename: name.into(), ..Attachment::at(format!("http://127.0.0.1:3/x/src/{name}")) };
     let reply = Post { no: 2, files: vec![file("a.png"), file("b.webm")], ..crate::markup::parse_html(html, crate::markup::Flavor::Vichan).into() };
-    app.handle(answer(app.tab.req.unwrap(), App::thread_arrived, Ok(vec![Post { no: 1, ..Default::default() }, reply, Post { no: 3, ..Default::default() }])));
+    app.handle(answer(app.tab.req.unwrap(), App::thread_arrived, arrived(vec![Post { no: 1, ..Default::default() }, reply, Post { no: 3, ..Default::default() }])));
     let tab = |app: &mut App, shift: bool| app.on_key(if shift { KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT) } else { KeyEvent::from(KeyCode::Tab) });
     let focus = |app: &App| app.tab.thread.as_ref().unwrap().focus.clone();
     let selected = |app: &App| app.tab.thread.as_ref().unwrap().selected;
@@ -1453,7 +1464,7 @@ fn tab_focuses_parts_and_the_verbs_follow_it() {
 fn the_menu_runs_what_it_lists() {
     let mut app = local_app();
     app.goto_str("a/x/1");
-    app.handle(answer(app.tab.req.unwrap(), App::thread_arrived, Ok(vec![Post { no: 1, files: vec![Attachment { filename: "a.png".into(), ..Attachment::at("http://127.0.0.1:3/a.png") }], ..Default::default() }])));
+    app.handle(answer(app.tab.req.unwrap(), App::thread_arrived, arrived(vec![Post { no: 1, files: vec![Attachment { filename: "a.png".into(), ..Attachment::at("http://127.0.0.1:3/a.png") }], ..Default::default() }])));
     app.on_key(KeyEvent::from(KeyCode::Char('.')));
     let m = app.menu().unwrap();
     let has = |a: Action| m.items.iter().any(|i| matches!(i, MenuItem::Act(x, _) if *x == a));
@@ -1487,7 +1498,7 @@ fn watched_threads_are_saved_as_posts_arrive() {
     let file = |no: u64| dir.path().join(format!("threads/a/x/{no}.json"));
     // Not watched: not saved.
     app.goto_str("a/x/1");
-    app.handle(answer(app.tab.req.unwrap(), App::thread_arrived, Ok(nos(&[1, 2]))));
+    app.handle(answer(app.tab.req.unwrap(), App::thread_arrived, arrived(nos(&[1, 2]))));
     assert!(!file(1).exists());
     // Watching a loaded thread saves it at once; refreshes save the changes only.
     app.act(Action::Watch);
@@ -1501,7 +1512,7 @@ fn watched_threads_are_saved_as_posts_arrive() {
     assert_eq!(app.store.saved(&key(1)).unwrap().posts, 3);
     // A watched thread refreshed in the background, too.
     app.store.watch(key(7), "seven".into(), 1, 7);
-    app.refreshed(key(7), Ok(nos(&[7, 8])));
+    refresh(&mut app, key(7), nos(&[7, 8]));
     app.flush_writes();
     assert!(file(7).exists());
     // The index is written with the rest of the data.
@@ -1516,7 +1527,7 @@ fn a_search_of_saved_threads_is_stopped_only_by_its_own_tab() {
     let n = 50;
     for no in 1..=n {
         let key = ThreadKey { site: "a".into(), board: "x".into(), no };
-        app.store.keep_thread(&key, "t", "u", &nos(&[no]), 1000);
+        app.store.keep_thread(&key, "t", "u", &whole(&nos(&[no])), 1000);
     }
     app.flush_writes();
     // Tab 0 searches them; meanwhile tab 1 starts a search of its own and leaves it.
@@ -1540,7 +1551,7 @@ fn a_dead_thread_offers_its_saved_copy() {
     let key = ThreadKey { site: "a".into(), board: "x".into(), no: 1 };
     // A watched thread opens from its saved copy at once, and when it's gone, that's it.
     app.store.watch(key.clone(), "one".into(), 2, 2);
-    app.store.keep_thread(&key, "one", "u", &nos(&[1, 2]), 10_000 - 7200);
+    app.store.keep_thread(&key, "one", "u", &whole(&nos(&[1, 2])), 10_000 - 7200);
     app.goto_str("a/x/1");
     assert_eq!(app.tab.cached(), Some(tabs::Offline { saved: 10_000 - 7200, dead: false }));
     assert!(app.tab.loading.is_some() && app.tab.thread.as_ref().unwrap().posts.len() == 2);
@@ -1578,7 +1589,7 @@ fn a_thread_dying_on_screen_becomes_its_saved_copy() {
     let mut app = saving_app(dir.path(), 1000);
     let key = ThreadKey { site: "a".into(), board: "x".into(), no: 1 };
     app.goto_str("a/x/1");
-    app.handle(answer(app.tab.req.unwrap(), App::thread_arrived, Ok(nos(&[1, 2]))));
+    app.handle(answer(app.tab.req.unwrap(), App::thread_arrived, arrived(nos(&[1, 2]))));
     app.act(Action::Watch);
     app.refreshed(key, Err(gone()));
     assert_eq!(app.tab.saved(), Some(tabs::Offline { saved: 1000, dead: true }));
@@ -1597,7 +1608,7 @@ fn a_saved_copy_of_a_live_thread_goes_live_with_r() {
     let dir = tempfile::tempdir().unwrap();
     let mut app = saving_app(dir.path(), 1000);
     let key = ThreadKey { site: "a".into(), board: "x".into(), no: 1 };
-    app.store.keep_thread(&key, "one", "u", &nos(&[1, 2]), 900);
+    app.store.keep_thread(&key, "one", "u", &whole(&nos(&[1, 2])), 900);
     app.tab.view = View::Saved;
     app.saved_list.state.select(Some(0));
     app.enter();
@@ -1606,7 +1617,7 @@ fn a_saved_copy_of_a_live_thread_goes_live_with_r() {
     app.act(Action::Reload);
     assert!(app.tab.saved().is_none() && app.tab.loading.is_some());
     // The copy stays up, and the live thread arrives in its place, keeping the selection.
-    app.handle(answer(app.tab.req.unwrap(), App::thread_arrived, Ok(nos(&[1, 2, 3]))));
+    app.handle(answer(app.tab.req.unwrap(), App::thread_arrived, arrived(nos(&[1, 2, 3]))));
     let t = app.tab.thread.as_ref().unwrap();
     assert_eq!((t.posts.len(), t.current().unwrap().no), (3, 2));
     // Back goes to the Saved view.
@@ -1620,7 +1631,7 @@ fn the_saved_view_lists_and_removes_after_asking() {
     let mut app = saving_app(dir.path(), 1000);
     let key = |no| ThreadKey { site: "a".into(), board: "x".into(), no };
     for (no, at) in [(1, 100), (2, 300), (3, 200)] {
-        app.store.keep_thread(&key(no), &format!("thread {no}"), "u", &nos(&[no]), at);
+        app.store.keep_thread(&key(no), &format!("thread {no}"), "u", &whole(&nos(&[no])), at);
     }
     app.tab.view = View::Sites;
     app.site_list.state.select(Some(2));
@@ -1657,7 +1668,7 @@ fn export_saves_a_copy() {
     let mut app = saving_app(&dir.path().join("data"), 1000);
     app.download_dir = Some(dir.path().join("dl").display().to_string());
     app.goto_str("a/x/1");
-    app.handle(answer(app.tab.req.unwrap(), App::thread_arrived, Ok(nos(&[1, 2]))));
+    app.handle(answer(app.tab.req.unwrap(), App::thread_arrived, arrived(nos(&[1, 2]))));
     // It asks first; enter saves.
     app.act(Action::Export);
     assert!(!dir.path().join("dl/thread.json").exists());
@@ -1673,7 +1684,7 @@ fn a_saved_copy_is_remembered_in_the_session() {
     let dir = tempfile::tempdir().unwrap();
     let mut app = saving_app(dir.path(), 1000);
     let key = ThreadKey { site: "b".into(), board: "y".into(), no: 5 };
-    app.store.keep_thread(&key, "five", "u", &nos(&[5, 6]), 900);
+    app.store.keep_thread(&key, "five", "u", &whole(&nos(&[5, 6])), 900);
     app.open_saved(&key);
     app.tab.thread.as_mut().unwrap().selected = 1;
     let place = app.place();
@@ -1694,7 +1705,7 @@ fn watching_a_saved_copy_keeps_it_under_its_own_number() {
     let dir = tempfile::tempdir().unwrap();
     let mut app = saving_app(dir.path(), 1000);
     let key = |no| ThreadKey { site: "a".into(), board: "x".into(), no };
-    app.store.keep_thread(&key(5), "five", "u", &nos(&[9, 10]), 900);
+    app.store.keep_thread(&key(5), "five", "u", &whole(&nos(&[9, 10])), 900);
     app.open_saved(&key(5));
     assert_eq!(app.tab.thread.as_ref().unwrap().no, 9);
     app.act(Action::Watch);
@@ -1715,7 +1726,7 @@ fn filter_app(dir: &std::path::Path) -> App {
     app.config_path = Some(path);
     app.goto_str("a/x/1");
     let named = |no, name: &str| Post { no, name: name.into(), ..Default::default() };
-    app.handle(answer(app.tab.req.unwrap(), App::thread_arrived, Ok(vec![named(1, "Anonymous"), named(2, "Named !Trip"), named(3, "Anonymous"), named(4, "Named !Trip")])));
+    app.handle(answer(app.tab.req.unwrap(), App::thread_arrived, arrived(vec![named(1, "Anonymous"), named(2, "Named !Trip"), named(3, "Anonymous"), named(4, "Named !Trip")])));
     app
 }
 
@@ -1915,7 +1926,7 @@ fn c_shows_a_conversation_until_esc() {
     app.goto_str("a/x/1");
     let posts = [(1, vec![]), (2, vec![1]), (3, vec![2]), (4, vec![3]), (5, vec![2]), (6, vec![99])];
     let post = |&(no, ref quotes): &(u64, Vec<u64>)| Post { no, quotes: quotes.clone(), ..Default::default() };
-    app.handle(answer(app.tab.req.unwrap(), App::thread_arrived, Ok(posts.iter().map(post).collect())));
+    app.handle(answer(app.tab.req.unwrap(), App::thread_arrived, arrived(posts.iter().map(post).collect())));
     let t = app.tab.thread.as_mut().unwrap();
     t.scroll = 7;
     t.select(2);
@@ -1958,7 +1969,7 @@ fn i_shows_a_posters_posts_until_esc() {
     app.goto_str("a/x/1");
     let post = |no: u64, id: Option<&str>| Post { no, id: id.map(String::from), quotes: if no > 1 { vec![no - 1] } else { vec![] }, ..Default::default() };
     let posts = || vec![post(1, Some("aa")), post(2, Some("bb")), post(3, Some("aa")), post(4, None), post(5, Some("bb"))];
-    app.handle(answer(app.tab.req.unwrap(), App::thread_arrived, Ok(posts())));
+    app.handle(answer(app.tab.req.unwrap(), App::thread_arrived, arrived(posts())));
     let shown = |app: &App| app.tab.thread.as_ref().unwrap().entries.iter().map(|e| app.tab.thread.as_ref().unwrap().posts[e.post].no).collect::<Vec<_>>();
     let t = app.tab.thread.as_mut().unwrap();
     assert_eq!(t.id_count("aa"), 2);
@@ -2012,7 +2023,7 @@ fn a_conversation_is_remembered_in_the_session() {
     app.store = Store::load(Some(dir.path().to_path_buf())).0;
     app.goto_str("a/x/1");
     let posts = || vec![Post { no: 1, ..Default::default() }, Post { no: 2, quotes: vec![1], ..Default::default() }, Post { no: 3, quotes: vec![2], ..Default::default() }, Post { no: 4, quotes: vec![1], ..Default::default() }];
-    app.handle(answer(app.tab.req.unwrap(), App::thread_arrived, Ok(posts())));
+    app.handle(answer(app.tab.req.unwrap(), App::thread_arrived, arrived(posts())));
     app.tab.thread.as_mut().unwrap().select(1);
     app.act(Action::Conversation);
     app.tab.thread.as_mut().unwrap().select(2);
@@ -2024,7 +2035,7 @@ fn a_conversation_is_remembered_in_the_session() {
     assert_eq!(old.conversation, None);
     let mut next = local_app();
     next.go_to_place(&place);
-    next.handle(answer(next.tab.req.unwrap(), App::thread_arrived, Ok(posts())));
+    next.handle(answer(next.tab.req.unwrap(), App::thread_arrived, arrived(posts())));
     let t = next.tab.thread.as_ref().unwrap();
     assert_eq!((t.conversation.as_ref().map(|c| c.anchor), t.current().unwrap().no, t.entries.len()), (Some(2), 3, 3));
 }
@@ -2052,7 +2063,7 @@ fn the_viewer_goes_through_the_whole_thread_and_zooms() {
     app.goto_str("a/x/1");
     let file = |name: &str| Attachment { filename: name.into(), ..Attachment::at(format!("http://127.0.0.1:9/{name}")) };
     let post = |no, files: Vec<Attachment>| Post { no, files, ..Default::default() };
-    app.handle(answer(app.tab.req.unwrap(), App::thread_arrived, Ok(vec![post(1, vec![file("a.png")]), post(2, vec![]), post(3, vec![file("b.png"), file("c.png")]), post(4, vec![file("d.png")])])));
+    app.handle(answer(app.tab.req.unwrap(), App::thread_arrived, arrived(vec![post(1, vec![file("a.png")]), post(2, vec![]), post(3, vec![file("b.png"), file("c.png")]), post(4, vec![file("d.png")])])));
     app.tab.thread.as_mut().unwrap().select(2);
     // v: every file of the thread, from the selected post's.
     app.act(Action::View);
@@ -2229,7 +2240,7 @@ fn saving_needs_a_target_or_asks_first() {
         Post { no: 2, files: vec![file("b.png"), file("c.png")], ..Default::default() },
         Post { no: 3, ..Default::default() },
     ];
-    app.handle(answer(app.tab.req.unwrap(), App::thread_arrived, Ok(posts)));
+    app.handle(answer(app.tab.req.unwrap(), App::thread_arrived, arrived(posts)));
     let press = |app: &mut App, c: char| app.on_key(KeyEvent::from(KeyCode::Char(c)));
     let total = |app: &App| app.downloads.total;
     // d on a post with nothing focused saves nothing, and says how.
@@ -2286,7 +2297,7 @@ fn an_action_without_a_key_is_in_the_menu() {
     app.download_dir = Some(dir.path().display().to_string());
     app.goto_str("a/x/1");
     let file = Attachment { filename: "a.png".into(), ..Attachment::at("http://127.0.0.1:3/x/src/a.png") };
-    app.handle(answer(app.tab.req.unwrap(), App::thread_arrived, Ok(vec![Post { no: 1, files: vec![file], ..Default::default() }])));
+    app.handle(answer(app.tab.req.unwrap(), App::thread_arrived, arrived(vec![Post { no: 1, files: vec![file], ..Default::default() }])));
     app.on_key(KeyEvent::from(KeyCode::Tab));
     app.on_key(KeyEvent::from(KeyCode::Char('d')));
     assert_eq!(app.downloads.total, 0);
@@ -2724,9 +2735,9 @@ fn searching_inside_saved_threads() {
     let dir = tempfile::tempdir().unwrap();
     let mut app = saving_app(dir.path(), 1000);
     let key = |board: &str, no| ThreadKey { site: "a".into(), board: board.into(), no };
-    app.store.keep_thread(&key("x", 1), "one", "u", &posts_saying(&[(1, "about rust"), (2, "nothing here"), (3, "Rust again")]), 900);
-    app.store.keep_thread(&key("xy", 7), "seven", "u", &posts_saying(&[(7, "no match"), (8, "a crab: RUST")]), 950);
-    app.store.keep_thread(&key("x", 9), "nine", "u", &posts_saying(&[(9, "quiet")]), 980);
+    app.store.keep_thread(&key("x", 1), "one", "u", &whole(&posts_saying(&[(1, "about rust"), (2, "nothing here"), (3, "Rust again")])), 900);
+    app.store.keep_thread(&key("xy", 7), "seven", "u", &whole(&posts_saying(&[(7, "no match"), (8, "a crab: RUST")])), 950);
+    app.store.keep_thread(&key("x", 9), "nine", "u", &whole(&posts_saying(&[(9, "quiet")])), 980);
     app.flush_writes();
     app.tab.view = View::Saved;
     // From the Saved view's menu: `:` with "saved " typed.
@@ -2774,8 +2785,8 @@ fn searching_saved_threads_leaves_out_hidden_posts() {
     let dir = tempfile::tempdir().unwrap();
     let mut app = saving_app(dir.path(), 1000);
     let key = |board: &str, no| ThreadKey { site: "a".into(), board: board.into(), no };
-    app.store.keep_thread(&key("x", 1), "one", "u", &posts_saying(&[(1, "about rust"), (2, "nothing here"), (3, "Rust again")]), 900);
-    app.store.keep_thread(&key("xy", 7), "seven", "u", &posts_saying(&[(7, "no match"), (8, "a crab: RUST")]), 950);
+    app.store.keep_thread(&key("x", 1), "one", "u", &whole(&posts_saying(&[(1, "about rust"), (2, "nothing here"), (3, "Rust again")])), 900);
+    app.store.keep_thread(&key("xy", 7), "seven", "u", &whole(&posts_saying(&[(7, "no match"), (8, "a crab: RUST")])), 950);
     app.flush_writes();
     // A hidden word, and a post hidden by hand on its own board.
     app.hidden_words = vec!["crab".into()];
@@ -3034,7 +3045,7 @@ fn huge_refresh_intervals_in_the_config_dont_overflow_the_clock() {
 fn a_request_that_panics_ends_like_one_that_failed() {
     let mut app = local_app();
     app.tab.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
-    app.spawn("Loading the thread".into(), |_, _, _| -> Result<Vec<Post>> { std::panic::panic_any("deliberate: index out of bounds") }, App::thread_arrived);
+    app.spawn("Loading the thread".into(), |_, _, _| -> Result<Thread> { std::panic::panic_any("deliberate: index out of bounds") }, App::thread_arrived);
     settle_until(&mut app, |a| a.tab.loading.is_none());
     let status = app.footer.get().unwrap();
     assert!(status.error && status.text.contains("ck hit a bug: deliberate: index out of bounds"), "{}", status.text);
@@ -3058,8 +3069,8 @@ fn new_posts_wait_for_notifying_by_the_app_clock() {
     let later = Instant::now() + Duration::from_secs(3600);
     app.clock = Clock { instant: Some(later), ..Default::default() };
     app.store.watch(key.clone(), "One".into(), 1, 1);
-    app.refreshed(key.clone(), Ok(vec![post(1)]));
-    app.refreshed(key, Ok(vec![post(1), post(2)]));
+    refresh(&mut app, key.clone(), vec![post(1)]);
+    refresh(&mut app, key, vec![post(1), post(2)]);
     assert_eq!(app.notes_since, Some(later));
 }
 
@@ -3068,7 +3079,7 @@ fn removing_a_saved_copy_asks_again_once_the_question_is_gone() {
     let dir = tempfile::tempdir().unwrap();
     let mut app = saving_app(dir.path(), 1000);
     let key = ThreadKey { site: "a".into(), board: "x".into(), no: 3 };
-    app.store.keep_thread(&key, "thread 3", "u", &nos(&[3]), 100);
+    app.store.keep_thread(&key, "thread 3", "u", &whole(&nos(&[3])), 100);
     app.tab.view = View::Saved;
     app.saved_list.state.select(Some(0));
     app.act(Action::Remove);
@@ -3173,10 +3184,10 @@ fn a_refresh_much_smaller_than_the_thread_is_shown_as_it_came() {
     // Half is still deletion; fewer is more likely a broken answer.
     app.set_thread(posts_upto(5));
     let t = app.tab.thread.as_ref().unwrap();
-    assert_eq!((t.posts.len(), t.deleted.len(), t.shrinks), (10, 5, 0));
+    assert_eq!((t.posts.len(), t.deleted.len(), t.known), (10, 5, 5));
     app.set_thread(posts_upto(2));
     let t = app.tab.thread.as_ref().unwrap();
-    assert_eq!((t.posts.len(), t.deleted.len(), t.shrinks), (2, 0, 1));
+    assert_eq!((t.posts.len(), t.deleted.len(), t.known), (2, 0, 5));
     // Another thread isn't a refresh of this one.
     app.set_thread(nos(&[20, 21]));
     app.set_thread(nos(&[30]));
@@ -3317,15 +3328,15 @@ fn quiet_threads_are_refreshed_less_often() {
     app.store.watch(key(1), "One".into(), 2, 2);
     let mut every = Vec::new();
     for _ in 0..9 {
-        app.refreshed(key(1), Ok(nos(&[1, 2])));
+        refresh(&mut app, key(1), nos(&[1, 2]));
         every.push(secs(app.watched_every(&key(1))));
     }
     assert_eq!(every, [60.0, 90.0, 135.0, 202.5, 303.75, 455.625, 600.0, 600.0, 600.0]);
-    app.refreshed(key(1), Ok(nos(&[1, 2, 3])));
+    refresh(&mut app, key(1), nos(&[1, 2, 3]));
     assert_eq!(app.watched_every(&key(1)), Duration::from_secs(60));
     // The next one waits for it, on the app's clock.
-    app.refreshed(key(1), Ok(nos(&[1, 2, 3])));
-    app.refreshed(key(1), Ok(nos(&[1, 2, 3])));
+    refresh(&mut app, key(1), nos(&[1, 2, 3]));
+    refresh(&mut app, key(1), nos(&[1, 2, 3]));
     app.watched_checked.insert(key(1), t0);
     at(&mut app, 134);
     app.background();
@@ -3344,19 +3355,19 @@ fn quiet_threads_are_refreshed_less_often() {
     // The open thread the same, from 10s up to 100s; opening it (or r) starts over.
     at(&mut app, 1000);
     app.goto_str("a/x/5");
-    app.handle(answer(app.tab.req.unwrap(), App::thread_arrived, Ok(nos(&[5, 6]))));
+    app.handle(answer(app.tab.req.unwrap(), App::thread_arrived, arrived(nos(&[5, 6]))));
     let mut every = Vec::new();
     for _ in 0..8 {
-        app.refreshed(key(5), Ok(nos(&[5, 6])));
+        refresh(&mut app, key(5), nos(&[5, 6]));
         every.push(secs(app.thread_every()));
     }
     assert_eq!(every, [15.0, 22.5, 33.75, 50.625, 75.9375, 100.0, 100.0, 100.0]);
     // A deleted post isn't news.
-    app.refreshed(key(5), Ok(nos(&[5])));
+    refresh(&mut app, key(5), nos(&[5]));
     assert_eq!(app.thread_every(), Duration::from_secs(100));
-    app.refreshed(key(5), Ok(nos(&[5, 7])));
+    refresh(&mut app, key(5), nos(&[5, 7]));
     assert_eq!(app.thread_every(), Duration::from_secs(10));
-    app.refreshed(key(5), Ok(nos(&[5, 7])));
+    refresh(&mut app, key(5), nos(&[5, 7]));
     app.tab.thread_checked = t0 + Duration::from_secs(1000);
     at(&mut app, 1014);
     app.background();
@@ -3436,7 +3447,7 @@ fn m_shows_posts_with_files_then_hides_images() {
     let mut posts = posts_saying(&[(1, "op"), (3, "three")]);
     posts.insert(1, Post { quotes: vec![3], ..with_file(2, None) });
     posts.push(with_file(4, None));
-    app.handle(answer(app.tab.req.unwrap(), App::thread_arrived, Ok(posts.clone())));
+    app.handle(answer(app.tab.req.unwrap(), App::thread_arrived, arrived(posts.clone())));
     let shown = |app: &App| {
         let t = app.tab.thread.as_ref().unwrap();
         t.entries.iter().map(|e| t.posts[e.post].no).collect::<Vec<_>>()
@@ -3457,7 +3468,8 @@ fn m_shows_posts_with_files_then_hides_images() {
     // A refresh keeps it, with what it brings.
     posts.push(with_file(5, None));
     posts.push(posts_saying(&[(6, "six")]).remove(0));
-    app.refreshed(app.key("x", 1), Ok(posts.clone()));
+    let key = app.key("x", 1);
+    refresh(&mut app, key, posts.clone());
     assert_eq!(shown(&app), [1, 2, 4, 5]);
     // A quote to a post without files: everything again, there.
     let t = app.tab.thread.as_mut().unwrap();
@@ -3486,7 +3498,7 @@ fn m_shows_posts_with_files_then_hides_images() {
     assert_eq!(shown(&app), [1, 2, 4, 5]);
     // Another thread starts with everything.
     app.goto_str("a/x/7");
-    app.handle(answer(app.tab.req.unwrap(), App::thread_arrived, Ok(nos(&[7, 8]))));
+    app.handle(answer(app.tab.req.unwrap(), App::thread_arrived, arrived(nos(&[7, 8]))));
     assert_eq!((media(&app), shown(&app)), (Media::All, vec![7, 8]));
 }
 
@@ -3584,8 +3596,8 @@ fn hiding_recounts_new_posts_in_watched_threads() {
     let key = ThreadKey { site: "a".into(), board: "x".into(), no: 1 };
     app.store.watch(key.clone(), "One".into(), 1, 1);
     let start = posts_saying(&[(1, "a thread")]);
-    app.refreshed(key.clone(), Ok(start));
-    app.refreshed(key.clone(), Ok(posts_saying(&[(1, "a thread"), (2, "buy crypto"), (3, "hello")])));
+    refresh(&mut app, key.clone(), start);
+    refresh(&mut app, key.clone(), posts_saying(&[(1, "a thread"), (2, "buy crypto"), (3, "hello")]));
     assert_eq!(app.store.watched(&key).unwrap().status.counts().0, 2);
     // A hidden word hides No.2: Watched's "new" leaves it out at once, not at the next refresh.
     app.hidden_words = vec!["crypto".into()];
@@ -3604,8 +3616,8 @@ fn hiding_recounts_nothing_in_a_dead_watched_thread() {
     let mut app = local_app();
     let key = ThreadKey { site: "a".into(), board: "x".into(), no: 1 };
     app.store.watch(key.clone(), "One".into(), 1, 1);
-    app.refreshed(key.clone(), Ok(posts_saying(&[(1, "a thread")])));
-    app.refreshed(key.clone(), Ok(posts_saying(&[(1, "a thread"), (2, "buy crypto"), (3, "hello")])));
+    refresh(&mut app, key.clone(), posts_saying(&[(1, "a thread")]));
+    refresh(&mut app, key.clone(), posts_saying(&[(1, "a thread"), (2, "buy crypto"), (3, "hello")]));
     assert_eq!(app.store.watched_new(), (2, 0));
     app.refreshed(key.clone(), Err(gone()));
     assert_eq!(app.store.watched(&key).unwrap().status, Status::Dead);
@@ -3643,7 +3655,7 @@ fn searching_saved_threads_leaves_out_replies_to_hidden_posts() {
     let mut posts = posts_saying(&[(1, "a thread"), (2, "buy crypto"), (3, "crypto, rust says"), (4, "rust, by that guy")]);
     posts[2].quotes = vec![2];
     posts[3].id = Some("Ab3d".into());
-    app.store.keep_thread(&key, "one", "u", &posts, 900);
+    app.store.keep_thread(&key, "one", "u", &whole(&posts), 900);
     let that_guy = crate::filter::FilterConfig::new("^Ab3d$".into(), &[crate::filter::Field::Id]);
     app.rehide(|a| a.hiding.set_filters(crate::filter::Filters::new(&[that_guy]).unwrap()));
     app.flush_writes();
@@ -3768,7 +3780,7 @@ fn gallery_files_keep_their_posts_when_the_live_thread_replaces_a_cached_copy() 
     let file = |name: &str| Attachment { filename: name.into(), ..Attachment::at(format!("http://127.0.0.1:3/x/src/{name}")) };
     let post = |no, files: Vec<Attachment>| Post { no, files, ..Default::default() };
     // The cached copy has No.2; the live thread, arriving with the gallery open, doesn't.
-    app.set_cached_thread(vec![post(1, vec![]), post(2, vec![]), post(3, vec![file("3.png")]), post(4, vec![file("4.png")])], 0);
+    app.set_cached_thread(arrived(vec![post(1, vec![]), post(2, vec![]), post(3, vec![file("3.png")]), post(4, vec![file("4.png")])]).unwrap(), 0);
     app.act(Action::Gallery);
     app.set_thread(vec![post(1, vec![]), post(3, vec![file("3.png")]), post(4, vec![file("4.png")]), post(5, vec![])]);
     // The first file is still 3.png, from No.3: its link, its save and esc go there.
@@ -3782,7 +3794,7 @@ fn gallery_files_keep_their_posts_when_the_live_thread_replaces_a_cached_copy() 
 #[test]
 fn a_thread_hint_picks_its_post_after_a_refresh_moves_it() {
     let mut app = thread_app();
-    app.set_cached_thread(nos(&[1, 2, 3, 4, 5]), 0);
+    app.set_cached_thread(arrived(nos(&[1, 2, 3, 4, 5])).unwrap(), 0);
     draw_at(&mut app, 100, 30);
     app.on_key(KeyEvent::from(KeyCode::Char('f')));
     let label = app.hints().unwrap().targets.iter().find(|x| matches!(x.to, HintTo::Thread(ref p, None) if p == &[4])).unwrap().label.clone();
@@ -3811,7 +3823,7 @@ fn a_catalog_hint_opens_its_thread_after_a_refresh_reorders_them() {
 #[test]
 fn u_skips_a_post_a_refresh_took_away() {
     let mut app = thread_app();
-    app.set_cached_thread(nos(&[1, 2, 3, 4, 5]), 0);
+    app.set_cached_thread(arrived(nos(&[1, 2, 3, 4, 5])).unwrap(), 0);
     let t = app.tab.thread.as_mut().unwrap();
     t.select(1);
     assert!(t.jump_to(3) && t.jump_to(5));
@@ -3821,7 +3833,7 @@ fn u_skips_a_post_a_refresh_took_away() {
     assert_eq!(app.tab.thread.as_ref().unwrap().current().unwrap().no, 2);
     // With only a dropped post to go back to, there's nowhere: the menu doesn't offer u.
     let mut app = thread_app();
-    app.set_cached_thread(nos(&[1, 2, 3]), 0);
+    app.set_cached_thread(arrived(nos(&[1, 2, 3])).unwrap(), 0);
     let t = app.tab.thread.as_mut().unwrap();
     t.select(1);
     assert!(t.jump_to(3) && app.can_jump_back());
@@ -4029,4 +4041,197 @@ fn an_archive_search_that_fails_is_said_in_plain_words() {
     app.on_key(KeyEvent::from(KeyCode::Enter));
     app.search_results(1, Err(unreachable_request()));
     assert_eq!(footer(&app).0, plain, "archive search");
+}
+
+#[test]
+fn a_watched_thread_answered_without_posts_keeps_its_counts() {
+    let mut app = local_app();
+    let key = ThreadKey { site: "a".into(), board: "x".into(), no: 1 };
+    app.store.watch(key.clone(), "One".into(), 2, 2);
+    refresh(&mut app, key.clone(), nos(&[1, 2, 3, 4]));
+    let before = app.store.watched(&key).unwrap().status;
+    assert_eq!(before.counts(), (2, 0));
+    // A site in trouble answers with no posts: that's no answer, not a thread without any.
+    app.refreshed(key.clone(), Thread::answer(1, Vec::new()));
+    let w = app.store.watched(&key).unwrap();
+    assert_eq!((w.status, w.posts), (before, 4));
+}
+
+#[test]
+fn a_watched_thread_answered_without_posts_tells_nothing_twice() {
+    let mut app = local_app();
+    let key = ThreadKey { site: "a".into(), board: "x".into(), no: 1 };
+    app.store.watch(key.clone(), "One".into(), 2, 2);
+    refresh(&mut app, key.clone(), nos(&[1, 2, 3, 4]));
+    app.refreshed(key.clone(), Thread::answer(1, Vec::new()));
+    // The next good answer has nothing new: posts already told about aren't told again.
+    refresh(&mut app, key, nos(&[1, 2, 3, 4]));
+    app.flush_notes(Instant::now());
+    assert!(app.notified.is_empty(), "{:?}", app.notified);
+}
+
+#[test]
+fn a_watched_thread_answered_with_another_thread_is_left_as_it_was() {
+    let mut app = local_app();
+    let key = ThreadKey { site: "a".into(), board: "x".into(), no: 1 };
+    app.store.watch(key.clone(), "One".into(), 2, 2);
+    refresh(&mut app, key.clone(), nos(&[1, 2]));
+    // The site answers with thread 7: none of its posts are thread 1's.
+    app.refreshed(key.clone(), Thread::answer(1, nos(&[7, 8, 9])));
+    app.flush_notes(Instant::now());
+    let w = app.store.watched(&key).unwrap();
+    assert_eq!((w.status.counts(), w.posts), ((0, 0), 2));
+    assert!(app.notified.is_empty(), "{:?}", app.notified);
+}
+
+#[test]
+fn an_answer_with_another_thread_does_not_open_it() {
+    let mut app = local_app();
+    app.goto_str("a/x/5");
+    app.handle(answer(app.tab.req.unwrap(), App::thread_arrived, Thread::answer(5, nos(&[7, 8]))));
+    // Thread 5 was asked for; thread 7 isn't shown (or visited) as if it were.
+    assert_ne!(app.tab.thread.as_ref().map(|t| t.no), Some(7));
+    assert!(app.store.history.iter().all(|v| v.key.no != 7));
+}
+
+#[test]
+fn a_cut_short_answer_does_not_replace_a_watched_threads_saved_copy() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = saving_app(dir.path(), 1000);
+    let key = ThreadKey { site: "a".into(), board: "x".into(), no: 1 };
+    let all: Vec<u64> = (1..=10).collect();
+    app.store.watch(key.clone(), "One".into(), 10, 10);
+    refresh(&mut app, key.clone(), nos(&all));
+    app.flush_writes();
+    assert_eq!(app.store.saved(&key).unwrap().posts, 10);
+    // A refresh with fewer than half the posts is a broken answer when the thread is open;
+    // in the background it's the same answer, and the copy kept for when the thread dies
+    // shouldn't become it.
+    refresh(&mut app, key.clone(), nos(&[1, 11]));
+    app.flush_writes();
+    assert!(app.store.saved(&key).unwrap().posts >= 10, "{}", app.store.saved(&key).unwrap().posts);
+    app.refreshed(key.clone(), Err(gone()));
+    assert!(app.store.load_saved(&key).unwrap().posts.len() >= 10);
+}
+
+#[test]
+fn a_second_answer_just_as_short_is_taken() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = saving_app(dir.path(), 1000);
+    let key = ThreadKey { site: "a".into(), board: "x".into(), no: 1 };
+    app.store.watch(key.clone(), "One".into(), 10, 10);
+    refresh(&mut app, key.clone(), posts_upto(10));
+    app.flush_writes();
+    // Cut short: not counted (or kept), but what's known of the thread is now its length...
+    refresh(&mut app, key.clone(), nos(&[1, 11, 12]));
+    app.flush_writes();
+    let counted = |app: &App| (app.store.watched(&key).unwrap().status.counts(), app.store.saved(&key).unwrap().posts);
+    assert_eq!(counted(&app), ((0, 0), 10));
+    // ...so another answer just as small is taken: moderators did delete most of it.
+    refresh(&mut app, key.clone(), nos(&[1, 11, 12]));
+    app.flush_writes();
+    assert_eq!(counted(&app), ((2, 0), 3));
+    // And so is one with half the posts or more.
+    refresh(&mut app, key.clone(), nos(&[1, 13]));
+    app.flush_writes();
+    assert_eq!(counted(&app).1, 2);
+}
+
+#[test]
+fn a_cut_short_refresh_of_the_open_thread_changes_no_count_or_copy() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = saving_app(&dir.path().join("data"), 1000);
+    app.download_dir = Some(dir.path().join("dl").display().to_string());
+    let key = ThreadKey { site: "a".into(), board: "x".into(), no: 1 };
+    app.store.watch(key.clone(), "One".into(), 10, 10);
+    app.goto_str("a/x/1");
+    app.handle(answer(app.tab.req.unwrap(), App::thread_arrived, arrived(posts_upto(10))));
+    app.flush_writes();
+    refresh(&mut app, key.clone(), nos(&[1, 11]));
+    // Shown as it came, and said so; the watch list and the copy are as they were.
+    assert_eq!(app.tab.thread.as_ref().unwrap().posts.len(), 2);
+    assert_eq!(app.store.watched(&key).unwrap().posts, 10);
+    assert!(app.status().unwrap().text.contains("2 of the 10 posts"), "{:?}", app.status());
+    // What's shown isn't kept either: exported, watched again, or a post marked as yours.
+    app.act(Action::Export);
+    app.on_key(KeyEvent::from(KeyCode::Enter));
+    assert!(dir.path().join("dl/thread.json").exists() && !app.status().unwrap().text.contains("(and in Saved)"));
+    app.act(Action::Watch);
+    app.act(Action::Watch);
+    app.act(Action::Mine);
+    app.flush_writes();
+    assert_eq!((app.store.saved(&key).unwrap().posts, app.store.load_saved(&key).unwrap().posts.len()), (10, 10));
+}
+
+/// Thread /x/1 open with posts 1..=10 (unwatched), and its key.
+fn ten_open() -> (App, ThreadKey) {
+    let mut app = local_app();
+    app.goto_str("a/x/1");
+    app.handle(answer(app.tab.req.unwrap(), App::thread_arrived, arrived(posts_upto(10))));
+    let key = app.key("x", 1);
+    (app, key)
+}
+
+#[test]
+fn answers_cut_short_again_are_told_against_the_posts_last_known_whole() {
+    let (mut app, key) = ten_open();
+    refresh(&mut app, key.clone(), nos(&[1, 2, 3, 4]));
+    refresh(&mut app, key, nos(&[1]));
+    assert!(app.status().unwrap().text.contains("1 of the 10 posts"), "{:?}", app.status());
+    assert_eq!(app.tab.thread.as_ref().unwrap().known, 10);
+}
+
+#[test]
+fn watching_a_thread_shown_cut_short_counts_the_posts_known() {
+    let (mut app, key) = ten_open();
+    refresh(&mut app, key.clone(), nos(&[1, 11]));
+    app.act(Action::Watch);
+    assert_eq!(app.store.watched(&key).unwrap().posts, 10);
+}
+
+#[test]
+fn an_answer_cut_short_long_ago_is_not_the_bar_for_opening_it_again() {
+    let (mut app, key) = ten_open();
+    refresh(&mut app, key.clone(), nos(&[1, 11, 12]));
+    // Left, watched later (known with 10 posts), and opened again to a broken answer: it's
+    // judged against those 10, not the 3 of before.
+    app.goto_str("a/x/5");
+    app.handle(answer(app.tab.req.unwrap(), App::thread_arrived, arrived(nos(&[5]))));
+    app.store.watch(key.clone(), "One".into(), 10, 10);
+    app.goto_str("a/x/1");
+    app.handle(answer(app.tab.req.unwrap(), App::thread_arrived, arrived(nos(&[1, 13, 14, 15]))));
+    assert_eq!(app.store.watched(&key).unwrap().posts, 10);
+}
+
+#[test]
+fn a_mass_deletion_on_the_open_thread_is_taken_and_stays_taken() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = saving_app(dir.path(), 1000);
+    let key = ThreadKey { site: "a".into(), board: "x".into(), no: 1 };
+    app.store.watch(key.clone(), "One".into(), 10, 10);
+    app.goto_str("a/x/1");
+    app.handle(answer(app.tab.req.unwrap(), App::thread_arrived, arrived(posts_upto(10))));
+    // Moderators delete all but two posts: the first answer is doubted, the second taken.
+    refresh(&mut app, key.clone(), nos(&[1, 2]));
+    refresh(&mut app, key.clone(), nos(&[1, 2]));
+    app.flush_writes();
+    // Taken is taken: the thread is now known with two posts, and the same answer again
+    // isn't doubted (it brought nothing new, so it isn't a visit either).
+    app.footer = Footer::default();
+    refresh(&mut app, key.clone(), nos(&[1, 2]));
+    assert!(app.status().is_none(), "{:?}", app.status());
+    assert_eq!((app.tab.thread.as_ref().unwrap().known, app.store.watched(&key).unwrap().posts), (2, 2));
+    assert_eq!(app.store.saved(&key).unwrap().posts, 2);
+}
+
+#[test]
+fn a_thread_opened_again_shows_what_came_since_as_new() {
+    let mut app = local_app();
+    for (no, posts) in [(1, nos(&[1, 2])), (5, nos(&[5])), (1, nos(&[1, 2, 3]))] {
+        app.goto_str(&format!("a/x/{no}"));
+        app.handle(answer(app.tab.req.unwrap(), App::thread_arrived, Thread::answer(no, posts)));
+    }
+    // New since the last visit, which this one is (counted once it's shown).
+    assert_eq!(app.tab.thread.as_ref().map(|t| t.new_after), Some(2));
+    assert_eq!(app.store.last_seen(&app.key("x", 1)), 3);
 }

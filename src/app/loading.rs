@@ -3,6 +3,26 @@
 
 use super::*;
 
+/// A site's answer for a thread whole enough to count, visit and keep: only `App::accept`
+/// makes one (and `App::shown_whole`, of what's shown).
+pub struct Whole(Thread);
+
+impl Whole {
+    pub fn posts(&self) -> &[Post] {
+        self.0.posts()
+    }
+
+    pub fn into_posts(self) -> Vec<Post> {
+        self.0.into_posts()
+    }
+
+    /// Tests' shorthand: `t` taken as whole.
+    #[cfg(test)]
+    pub(crate) fn assumed(t: Thread) -> Whole {
+        Whole(t)
+    }
+}
+
 impl App {
     /// Run `job` on a thread, as the current request (shown as `label`), then `apply` what
     /// it came to in the request's tab. The job gets the request id and a sender for partial
@@ -169,18 +189,18 @@ impl App {
 
     /// The last copy kept of the thread being fetched, fetched at `fetched`: shown only
     /// before anything fetched (or saved) is.
-    fn cached_thread_arrived(&mut self, posts: Vec<Post>, fetched: i64) {
+    fn cached_thread_arrived(&mut self, t: Thread, fetched: i64) {
         if self.tab.thread.is_none() && self.tab.view == View::Thread && self.tab.saved().is_none() {
-            self.set_cached_thread(posts, fetched);
+            self.set_cached_thread(t, fetched);
         }
     }
 
-    pub(super) fn thread_arrived(&mut self, res: Result<Vec<Post>>) {
+    pub(super) fn thread_arrived(&mut self, res: Result<Thread>) {
         self.tab.loading = None;
         self.tab.thread_checked = self.clock.instant();
         let restoring = std::mem::take(&mut self.tab.restoring);
         match res {
-            Ok(posts) => self.set_thread(posts),
+            Ok(t) => self.show_thread(t, None),
             Err(e) if http::is_not_found(&e) => {
                 let key = self.tab.board.as_ref().map(|b| self.key(&b.uri, self.tab.pending_thread.unwrap_or_default()));
                 if key.as_ref().is_some_and(|k| self.store.mark_dead(k)) {
@@ -257,12 +277,9 @@ impl App {
         if opening
             && watched
             && let Some(at) = saved
-            && let Ok(copy) = self.store.load_saved(&key)
+            && let Some(t) = self.store.load_saved(&key).ok().and_then(Thread::saved)
         {
-            let posts: Vec<Post> = copy.posts.into_iter().map(Post::from).collect();
-            if !posts.is_empty() {
-                self.set_cached_thread(posts, at);
-            }
+            self.set_cached_thread(t, at);
         }
         let pages = self.pages.clone().filter(|_| !watched);
         let read = pages.clone().filter(|_| opening && self.tab.thread.is_none());
@@ -271,17 +288,13 @@ impl App {
             let kept = read.and_then(|p| p.read(&site, &board.uri, Some(no)));
             if let Some((copies, fetched)) = &kept {
                 http::seed(copies);
-                if let Ok(posts) = http::from_copies(copies, || b.thread(&board.uri, no))
-                    && !posts.is_empty()
-                {
+                if let Ok(t) = http::from_copies(copies, || b.thread(&board.uri, no)) {
                     let fetched = *fetched;
-                    let _ = tx.send(Msg::request(id, move |app| app.cached_thread_arrived(posts, fetched)));
+                    let _ = tx.send(Msg::request(id, move |app| app.cached_thread_arrived(t, fetched)));
                 }
             }
             let (res, copies) = http::recording(|| b.thread(&board.uri, no));
-            if let (Ok(posts), Some(p)) = (&res, &pages)
-                && !posts.is_empty()
-            {
+            if let (Ok(_), Some(p)) = (&res, &pages) {
                 p.write(&site, &board.uri, Some(no), &copies, now);
             }
             res
@@ -308,18 +321,46 @@ impl App {
         self.tab.catalog_list.clamp(len);
     }
 
-    /// Show a thread's posts as fetched (replacing a copy shown meanwhile).
-    pub(super) fn set_thread(&mut self, posts: Vec<Post>) {
-        self.show_thread(posts, None);
+    /// Show posts as thread fetched (tests' shorthand for an answer of the thread they start).
+    #[cfg(test)]
+    pub(crate) fn set_thread(&mut self, posts: Vec<Post>) {
+        if let Some(t) = posts.first().map(|p| p.no).and_then(|no| Thread::answer(no, posts).ok()) {
+            self.show_thread(t, None);
+        }
     }
 
     /// Show the last copy kept of a thread being fetched, fetched at `at`. It's not a visit.
-    pub(super) fn set_cached_thread(&mut self, posts: Vec<Post>, at: i64) {
-        self.show_thread(posts, Some(ThreadCopy::Cached(tabs::Offline { saved: at, dead: false })));
+    pub(super) fn set_cached_thread(&mut self, t: Thread, at: i64) {
+        self.show_thread(t, Some(ThreadCopy::Cached(tabs::Offline { saved: at, dead: false })));
     }
 
-    /// Show a thread's posts: fetched (`None`), or a copy.
-    pub(super) fn show_thread(&mut self, posts: Vec<Post>, copy: Option<ThreadCopy>) {
+    /// How many posts a thread was last known with, whole: shown (`shown`), or counted while
+    /// watched.
+    fn known(&self, key: &ThreadKey, shown: usize) -> usize {
+        shown.max(self.store.watched(key).map_or(0, |w| w.posts))
+    }
+
+    /// The one place a site's answer for a thread becomes whole enough to count, visit and
+    /// keep: not when it has fewer than half the posts last known (`known`), when it comes
+    /// back with that number. The answer after one cut short is judged against it, so a real
+    /// mass deletion gets through on the next refresh.
+    fn accept(&mut self, key: &ThreadKey, t: Thread, shown: usize) -> Result<Whole, (Thread, usize)> {
+        let known = self.known(key, shown);
+        if shrank(self.short.remove(key).unwrap_or(known), t.posts().len()) {
+            self.short.insert(key.clone(), t.posts().len());
+            return Err((t, known));
+        }
+        Ok(Whole(t))
+    }
+
+    /// What `view` shows of the thread as the site has it, to keep a copy of, unless it's an
+    /// answer cut short (`known`). Not an answer: nothing is remembered.
+    pub(super) fn shown_whole(&self, key: &ThreadKey, view: &ThreadView) -> Option<Whole> {
+        view.live().filter(|t| !shrank(self.known(key, view.known), t.posts().len())).map(Whole)
+    }
+
+    /// Show a thread: fetched (`None`), or a copy.
+    pub(super) fn show_thread(&mut self, t: Thread, copy: Option<ThreadCopy>) {
         // Posts replacing the copy shown while they loaded (fetched ones, or a saved copy): a
         // first open, as far as visits go (the copy wasn't one).
         let replacing = self.tab.cached().is_some() && !matches!(copy, Some(ThreadCopy::Cached(_)));
@@ -332,31 +373,46 @@ impl App {
             None => {}
         }
         let Some(board) = self.tab.board.as_ref().map(|b| b.uri.clone()) else { return };
-        if posts.is_empty() {
-            self.error("The site sent the thread without any posts");
-            return;
-        }
-        let no = posts.first().map(|p| p.no).unwrap_or(0);
+        let no = t.no();
         let key = self.key(&board, no);
         let old = self.tab.thread.take().filter(|t| t.no == no && t.board == board);
-        // Fetched again: posts shown before that it leaves out were deleted, and stay.
-        let (posts, deleted, shrank) = match &old {
-            Some(old) if copy.is_none() && !replacing => thread_view::keep_deleted(old, posts),
-            _ => (posts, HashSet::new(), false),
+        // On a refresh, the newest post already shown.
+        let shown_max = old.as_ref().filter(|_| !replacing).and_then(|o| o.posts.iter().filter(|p| !o.deleted.contains(&p.no)).map(|p| p.no).max());
+        // Fetched again over what's shown (not a copy shown while it loaded).
+        let refresh = old.as_ref().filter(|_| copy.is_none() && !replacing);
+        // What was seen before this visit.
+        let last_seen = self.store.last_seen(&key);
+        // A cut-short answer from before is for the refresh after it, not for opening it again.
+        if refresh.is_none() {
+            self.short.remove(&key);
+        }
+        // A saved or cached copy isn't a visit, and isn't saved again; nor is an answer cut
+        // short, which is shown as it came.
+        let fetched = if copy.is_some() || self.tab.copy.is_some() { Err((t, 0)) } else { self.accept(&key, t, refresh.map_or(0, |o| o.known)) };
+        let (posts, deleted, had) = match fetched {
+            Ok(w) => {
+                self.fetched_thread(&key, &w, shown_max);
+                // Fetched again: posts shown before that it leaves out were deleted, and stay.
+                let (posts, deleted) = thread_view::keep_deleted(refresh, w);
+                (posts, deleted, 0)
+            }
+            Err((t, had)) => {
+                if had > 0 {
+                    self.info(format!("The site sent {} of the {had} posts known; shown as it came, and not kept", t.posts().len()));
+                }
+                (t.into_posts(), HashSet::new(), had)
+            }
         };
         let mut tv = ThreadView::new(board, no, posts);
         tv.marks = self.thread_marks(&key.site, &tv);
         tv.margin = self.scroll_margin;
         tv.deleted = deleted;
-        tv.shrinks = old.as_ref().map_or(0, |o| o.shrinks) + u32::from(shrank);
-        // On a refresh, the newest post already shown.
-        let mut shown_max = None;
+        tv.known = had.max(tv.posts.len().saturating_sub(tv.deleted.len()));
         // Reading the end: the last entry shown, to go on from once the posts are marked.
         let mut follow = None;
         match old {
             // On refresh, keep the selected post and what's at the top of the view.
             Some(old) => {
-                shown_max = old.posts.iter().filter(|p| !old.deleted.contains(&p.no)).map(|p| p.no).max().filter(|_| !replacing);
                 // Reading the end: posts this brings come into view.
                 if self.follow_new_posts && !replacing && old.at_end() {
                     follow = old.entries.last().map(|e| e.path.clone());
@@ -394,7 +450,7 @@ impl App {
                 }
             }
             None => {
-                tv.new_after = self.store.last_seen(&key);
+                tv.new_after = last_seen;
                 if let Some(i) = self.tab.pending_post.take().and_then(|no| tv.index.get(&no).copied()) {
                     tv.selected = i;
                 }
@@ -407,10 +463,6 @@ impl App {
                     }
                 }
             }
-        }
-        // A saved or cached copy isn't a visit, and isn't saved again.
-        if copy.is_none() && self.tab.copy.is_none() {
-            self.fetched_thread(&key, &tv.live_posts(), shown_max);
         }
         self.tab.thread = Some(tv);
         self.tab.thread_site = self.tab.site;
@@ -429,7 +481,8 @@ impl App {
     }
 
     /// A thread's posts arrived: note the visit, and keep a copy if it's watched.
-    fn fetched_thread(&mut self, key: &ThreadKey, posts: &[Post], shown_max: Option<u64>) {
+    fn fetched_thread(&mut self, key: &ThreadKey, t: &Whole, shown_max: Option<u64>) {
+        let posts = t.posts();
         // Just fetched: a watched thread's next background refresh counts from now.
         self.watched_checked.insert(key.clone(), self.clock.instant());
         let max_no = max_no(posts);
@@ -440,10 +493,13 @@ impl App {
             self.watched_quiet.remove(key);
         }
         self.store.opened(&key.site, &key.board, key.no, posts.len().saturating_sub(1) as u32, self.clock.now());
+        // A watched thread's count (new posts or not: it's what the next answer is judged
+        // against) and copy are kept.
         if let Some(w) = self.store.watched_mut(key) {
+            w.posts = posts.len();
             generals::note_limit(w, posts);
+            self.keep_copy(key, t);
         }
-        self.keep_copy(key, posts, false);
         self.save();
     }
 
@@ -532,9 +588,7 @@ impl App {
         let (now, asked) = (self.clock.now(), self.clock.instant());
         std::thread::spawn(move || {
             let (res, copies) = http::recording(|| crate::guard::result(|| http::background_at(asked, || backend.thread(&key.board, key.no))));
-            if let (Ok(posts), Some(p)) = (&res, &pages)
-                && !posts.is_empty()
-            {
+            if let (Ok(_), Some(p)) = (&res, &pages) {
                 p.write(&key.site, &key.board, Some(key.no), &copies, now);
             }
             later.run(move |app| app.refreshed(key, res));
@@ -581,7 +635,7 @@ impl App {
         pages.page.get(&key.no).map(|&p| (p, pages.of))
     }
 
-    pub(super) fn refreshed(&mut self, key: ThreadKey, res: Result<Vec<Post>>) {
+    pub(super) fn refreshed(&mut self, key: ThreadKey, res: Result<Thread>) {
         self.refreshing.remove(&key);
         let is_open = self.tab.view == View::Thread
             && self.tab.saved().is_none()
@@ -592,20 +646,23 @@ impl App {
             self.tab.thread_checked = self.clock.instant();
         }
         match res {
-            Ok(posts) if is_open => {
+            Ok(t) if is_open => {
                 let newest = |app: &App| app.tab.thread.as_ref().map_or(0, |t| max_no(&t.live_posts()));
                 let before = newest(self);
-                self.set_thread(posts);
+                self.show_thread(t, None);
                 self.tab.thread_quiet = if newest(self) > before { 0 } else { self.tab.thread_quiet.saturating_add(1) };
             }
-            Ok(posts) => {
-                let subject = thread_subject(&posts);
+            Ok(t) => {
+                // Cut short: counts, notes and the copy stay as they were.
+                let Ok(t) = self.accept(&key, t, 0) else { return };
+                let posts = t.posts();
+                let subject = thread_subject(posts);
                 let prev = self.notified_max.get(&key).copied();
                 // Quiet: nothing past what the last refresh found (the first one of the
                 // session starts over).
-                let quiet = prev.is_some_and(|m| max_no(&posts) <= m);
+                let quiet = prev.is_some_and(|m| max_no(posts) <= m);
                 let Some(w) = self.store.watched_mut(&key) else { return };
-                let max_no = max_no(&posts);
+                let max_no = max_no(posts);
                 if w.last_seen == 0 {
                     w.last_seen = max_no;
                 }
@@ -613,7 +670,7 @@ impl App {
                 // Hidden posts (by a filter, a hidden word, by hand, or as replies to those)
                 // aren't new or replies to you: the thread passes them over when it's open.
                 // What decides it is kept, to count them again when what's hidden changes.
-                let fresh = with_ancestry(&posts, |p| p.no > last_seen);
+                let fresh = with_ancestry(posts, |p| p.no > last_seen);
                 let count = self.unread_counter(&key, &fresh);
                 let (unread, replies) = count(last_seen);
                 // Tell about posts newer than this session's last refresh (not on the first
@@ -634,13 +691,13 @@ impl App {
                     filter: caught.into_iter().next().unwrap_or_default(),
                 };
                 w.posts = posts.len();
-                generals::note_limit(w, &posts);
+                generals::note_limit(w, posts);
                 if w.subject.is_empty() {
                     w.subject = subject;
                 }
                 let n = if quiet { self.watched_quiet.get(&key).map_or(1, |n| n.saturating_add(1)) } else { 0 };
                 self.watched_quiet.insert(key.clone(), n);
-                self.keep_copy(&key, &posts, false);
+                self.keep_copy(&key, &t);
                 self.notified_max.insert(key, max_no);
                 if note.new > 0 || note.caught > 0 {
                     self.notes_since.get_or_insert_with(|| self.clock.instant());
