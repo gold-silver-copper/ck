@@ -5,7 +5,7 @@ use ratatui::buffer::Buffer;
 use crate::app::{App, Clock, Part, Popup, Preview, SettingsPopup, ThreadView, View, Viewer};
 use crate::images::Images;
 use crate::model::{Board, Post};
-use crate::store::{ThreadKey, Visit, Watched};
+use crate::store::{Status, ThreadKey, Visit, Watched};
 use crate::test_fixtures::*;
 use crate::theme::theme;
 
@@ -15,15 +15,9 @@ fn app(images: bool) -> App {
     let mut app = test_app();
     let key = |board: &str, no| ThreadKey { site: "4chan".into(), board: board.into(), no };
     app.store.watched = vec![
-        Watched { key: key("g", 1000), subject: "Snapshot thread".into(), posts: 5, last_seen: 1002, unread: 2, ..Default::default() },
-        Watched { key: key("g", 900), subject: "Old thread".into(), posts: 300, last_seen: 1199, dead: true, ..Default::default() },
-        Watched {
-            key: ThreadKey { site: "lainchan".into(), board: "λ".into(), no: 42 },
-            subject: "Programming Employment".into(),
-            posts: 92,
-            last_seen: 77,
-            ..Default::default()
-        },
+        Watched { status: Status::Live { unread: 2, replies: 0 }, ..Watched::new(key("g", 1000), "Snapshot thread".into(), 5, 1002) },
+        Watched { status: Status::Dead, ..Watched::new(key("g", 900), "Old thread".into(), 300, 1199) },
+        Watched::new(ThreadKey { site: "lainchan".into(), board: "λ".into(), no: 42 }, "Programming Employment".into(), 92, 77),
     ];
     app.store.history = vec![
         Visit { key: key("g", 1000), subject: "Snapshot thread".into(), last_seen: 1004, opened: NOW - 120 },
@@ -545,11 +539,11 @@ fn a_tab_counts_its_watched_threads_new_posts() {
     let (text, _) = render(&mut a);
     assert!(text.lines().nth(1).unwrap().contains("2 Snapshot thread (2)"), "{text}");
     // Read (or not watched): no count.
-    a.store.watched[0].unread = 0;
+    a.store.watched[0].status = Status::READ;
     let (text, _) = render(&mut a);
     assert!(!text.lines().nth(1).unwrap().contains('('), "{text}");
     // A narrow tab keeps the count and cuts the subject.
-    a.store.watched[0].unread = 12;
+    a.store.watched[0].status = Status::Live { unread: 12, replies: 0 };
     let (text, _) = render_at(&mut a, 30, 20);
     assert!(text.lines().nth(1).unwrap().contains("(12)"), "{text}");
 }
@@ -972,7 +966,7 @@ fn filtered_catalog_and_thread() {
 fn your_posts_and_replies() {
     let mut a = thread_app(false);
     a.tab.thread.as_mut().unwrap().mine.insert(1001);
-    a.store.watched[0].replies = 1;
+    a.store.watched[0].status = Status::Live { unread: 2, replies: 1 };
     insta::assert_snapshot!(snapshot(&mut a));
     a.tab.view = View::Watched;
     insta::assert_snapshot!("watched_with_replies", snapshot(&mut a));
@@ -1694,7 +1688,7 @@ fn huge_counts_from_the_data_files_dont_overflow() {
         let key = ThreadKey { site: "4chan".into(), board: "g".into(), no };
         a.store.toggle_watch(key.clone(), "t".into(), 1, 1);
         let w = a.store.watched_mut(&key).unwrap();
-        (w.unread, w.replies) = (usize::MAX, usize::MAX);
+        w.status = Status::Live { unread: usize::MAX, replies: usize::MAX };
     }
     render(&mut a);
     a.tab.view = View::Watched;
@@ -1733,4 +1727,28 @@ fn arabic_text_fits_where_it_is_drawn() {
     assert_eq!(text.matches("لا").count(), 36, "{text}");
     let cut = crate::ui::truncate(&"لا".repeat(10), 7);
     assert_eq!((cut.as_str(), crate::markup::columns(&cut)), ("لالالا…", 7));
+}
+
+/// A dead watched thread's last counts (unread posts, replies to you) aren't new anywhere:
+/// not on the Sites screen's Watched row, the Watched view's bar, its own row, nor the
+/// terminal title. One live thread with 2 new is all there is. The dead one comes from a
+/// watched.json written when a dead thread could keep its counts: they're dropped on load.
+#[test]
+fn a_dead_watched_threads_counts_show_nowhere() {
+    let mut a = app(false);
+    let old = r#"{"site":"4chan","board":"g","no":900,"subject":"Old thread","posts":300,"last_seen":1199,"unread":3,"dead":true,"replies":2}"#;
+    a.store.watched[1] = serde_json::from_str(old).unwrap();
+    let line = |text: &str, has: &str| text.lines().find(|l| l.contains(has)).unwrap_or_default().to_string();
+    a.tab.view = View::Sites;
+    let sites = render(&mut a).0;
+    let row = line(&sites, "Watched");
+    assert!(row.contains("2 new") && !row.contains("5 new"), "Sites row: {row:?}");
+    a.tab.view = View::Watched;
+    let watched = render(&mut a).0;
+    let bar = watched.lines().next().unwrap_or_default().to_string();
+    assert!(bar.contains("2 new") && !bar.contains("5 new"), "Watched bar: {bar:?}");
+    let old = line(&watched, "Old thread");
+    assert!(old.contains("archived/deleted") && !old.contains("repl"), "dead row: {old:?}");
+    // The title agrees: 2 new, and no reply to you.
+    assert_eq!(a.terminal_title().as_deref(), Some("ck: (2) Watched"));
 }

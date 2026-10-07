@@ -22,7 +22,7 @@ pub struct ThreadKey {
     pub no: u64,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Watched {
     #[serde(flatten)]
     pub key: ThreadKey,
@@ -30,16 +30,12 @@ pub struct Watched {
     pub posts: usize,
     /// Highest post number seen while the thread was open; 0 until first known.
     pub last_seen: u64,
-    pub unread: usize,
-    /// The thread 404'd: archived or deleted. It's no longer refreshed.
-    #[serde(default)]
-    pub dead: bool,
+    /// Live with what's new since it was read, or 404'd (archived or deleted) with nothing new.
+    #[serde(flatten)]
+    pub status: Status,
     /// Posts marked as yours (`m`); replies to them are counted and notified.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub mine: Vec<u64>,
-    /// Unread replies to your posts.
-    #[serde(default, skip_serializing_if = "is_zero")]
-    pub replies: usize,
     /// Followed as a general: when the thread dies or hits the bump limit, the next thread
     /// whose subject matches this is watched instead.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -47,6 +43,64 @@ pub struct Watched {
     /// The thread has reached its bump limit.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub at_limit: bool,
+}
+
+impl Watched {
+    /// Newly watched: live, with nothing new yet.
+    pub fn new(key: ThreadKey, subject: String, posts: usize, last_seen: u64) -> Self {
+        Watched { key, subject, posts, last_seen, status: Status::READ, mine: Vec::new(), general: None, at_limit: false }
+    }
+}
+
+/// A watched thread: refreshed, with what's new in it, or 404'd and no longer refreshed.
+/// Anything counted as new belongs in Live, so a dead thread can't keep or show it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(from = "StatusFile", into = "StatusFile")]
+pub enum Status {
+    Live { unread: usize, replies: usize },
+    Dead,
+}
+
+impl Status {
+    /// Live with nothing new: newly watched, or just read. It revives a dead thread, so it's
+    /// set only on a thread known to be there.
+    pub const READ: Status = Status::Live { unread: 0, replies: 0 };
+
+    /// (unread posts, unread replies to you); a dead thread has none.
+    pub fn counts(self) -> (usize, usize) {
+        match self {
+            Status::Live { unread, replies } => (unread, replies),
+            Status::Dead => (0, 0),
+        }
+    }
+
+    pub fn is_dead(self) -> bool {
+        self == Status::Dead
+    }
+}
+
+/// Status as watched.json has always kept it, in flat fields. Dead with counts (as older
+/// files can have) loads as Dead.
+#[derive(Serialize, Deserialize)]
+struct StatusFile {
+    unread: usize,
+    #[serde(default)]
+    dead: bool,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    replies: usize,
+}
+
+impl From<StatusFile> for Status {
+    fn from(f: StatusFile) -> Self {
+        if f.dead { Status::Dead } else { Status::Live { unread: f.unread, replies: f.replies } }
+    }
+}
+
+impl From<Status> for StatusFile {
+    fn from(s: Status) -> Self {
+        let (unread, replies) = s.counts();
+        StatusFile { unread, dead: s.is_dead(), replies }
+    }
 }
 
 fn is_zero(n: &usize) -> bool {
@@ -372,13 +426,27 @@ impl Store {
         self.watched.iter_mut().find(|w| &w.key == key)
     }
 
+    /// All watched threads' unread posts and replies to you (dead ones have none).
+    pub fn watched_new(&self) -> (usize, usize) {
+        self.watched.iter().map(|w| w.status.counts()).fold((0, 0), |(n, y), (u, r)| (n.saturating_add(u), y.saturating_add(r)))
+    }
+
+    /// The thread 404'd. If it's watched, it's now dead with nothing new; its saved copy is
+    /// marked dead. Returns whether it's watched (so Watched is to be saved).
+    pub fn mark_dead(&mut self, key: &ThreadKey) -> bool {
+        self.saved_dead(key);
+        let Some(w) = self.watched_mut(key) else { return false };
+        w.status = Status::Dead;
+        true
+    }
+
     /// Start or stop watching; returns whether it's watched now.
     pub fn toggle_watch(&mut self, key: ThreadKey, subject: String, posts: usize, last_seen: u64) -> bool {
         if let Some(i) = self.watched.iter().position(|w| w.key == key) {
             self.watched.remove(i);
             return false;
         }
-        self.watched.push(Watched { key, subject, posts, last_seen, ..Default::default() });
+        self.watched.push(Watched::new(key, subject, posts, last_seen));
         true
     }
 
@@ -399,9 +467,7 @@ impl Store {
             w.subject = subject.to_string();
             w.posts = posts;
             w.last_seen = w.last_seen.max(max_no);
-            w.unread = 0;
-            w.replies = 0;
-            w.dead = false;
+            w.status = Status::READ;
         }
     }
 }
@@ -809,11 +875,27 @@ mod tests {
     fn toggle_and_visit_clear_unread() {
         let mut s = Store::default();
         s.toggle_watch(key(1), "x".into(), 10, 110);
-        s.watched_mut(&key(1)).unwrap().unread = 4;
+        s.watched_mut(&key(1)).unwrap().status = Status::Live { unread: 4, replies: 1 };
         s.visit(&key(1), "x", 14, 114, 0);
-        assert_eq!((s.watched[0].unread, s.watched[0].last_seen, s.watched[0].posts), (0, 114, 14));
+        assert_eq!((s.watched[0].status, s.watched[0].last_seen, s.watched[0].posts), (Status::READ, 114, 14));
         assert!(!s.toggle_watch(key(1), String::new(), 0, 0));
         assert!(s.watched.is_empty());
+    }
+
+    #[test]
+    fn watched_status_keeps_its_file_format() {
+        let json = |w: &Watched| serde_json::to_string(w).unwrap();
+        let head = r#"{"site":"4chan","board":"g","no":1,"subject":"s","posts":2,"last_seen":3,"#;
+        // A dead thread with counts, as older files have it: dead, with nothing new.
+        let old: Watched = serde_json::from_str(&format!(r#"{head}"unread":3,"dead":true,"replies":2}}"#)).unwrap();
+        assert_eq!(old.status, Status::Dead);
+        assert_eq!(json(&old), format!(r#"{head}"unread":0,"dead":true}}"#));
+        // A live one is written as it always was.
+        let live = format!(r#"{head}"unread":3,"dead":false,"replies":2}}"#);
+        let w: Watched = serde_json::from_str(&live).unwrap();
+        assert_eq!((w.status, json(&w)), (Status::Live { unread: 3, replies: 2 }, live));
+        // `unread` is still required.
+        assert!(serde_json::from_str::<Watched>(&format!(r#"{head}"dead":true}}"#)).is_err());
     }
 
     fn posts(nos: &[u64]) -> Vec<Post> {

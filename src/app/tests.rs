@@ -8,6 +8,7 @@ use ratatui::text::Line;
 
 use super::*;
 use crate::keys::ACTIONS;
+use crate::store::Status;
 use crate::test_fixtures::*;
 
 fn mouse(kind: MouseEventKind, column: u16, row: u16) -> MouseEvent {
@@ -104,7 +105,7 @@ fn sleeps_until_the_next_thing_to_do() {
     app.status_since = None;
     // A watched thread that was never refreshed is due now.
     let key = ThreadKey { site: "4chan".into(), board: "g".into(), no: 1 };
-    app.store.watched.push(crate::store::Watched { key, posts: 1, last_seen: 1, ..Default::default() });
+    app.store.watched.push(crate::store::Watched::new(key, String::new(), 1, 1));
     assert_eq!(app.next_wake(now), Duration::ZERO);
     // But while the maximum number of refreshes is running, due ones don't spin the loop.
     for no in [2, 3] {
@@ -466,15 +467,14 @@ fn hidden_posts_are_not_new_in_watched_threads() {
     app.refreshed(key.clone(), Ok(posts.clone()));
     app.flush_notes(Instant::now());
     assert_eq!(app.notified, ["New reply to your post in /x/ One"]);
-    let w = app.store.watched(&key).unwrap();
-    assert_eq!((w.unread, w.replies), (1, 1));
+    assert_eq!(app.store.watched(&key).unwrap().status, Status::Live { unread: 1, replies: 1 });
     // A `notify` filter still tells about what it catches, hidden or not.
     app.notified.clear();
     posts.push(post(9, vec![], "rust spam"));
     app.refreshed(key.clone(), Ok(posts));
     app.flush_notes(Instant::now());
     assert_eq!(app.notified, ["A new post caught by \"rust\" in /x/ One"]);
-    assert_eq!(app.store.watched(&key).unwrap().unread, 1);
+    assert_eq!(app.store.watched(&key).unwrap().status.counts().0, 1);
 }
 
 #[test]
@@ -489,12 +489,12 @@ fn notifies_about_new_posts_and_replies_to_yours() {
     app.refreshed(key(1), Ok(vec![post(1, vec![]), post(5, vec![]), post(6, vec![5])]));
     app.flush_notes(Instant::now());
     assert!(app.notified.is_empty());
-    assert_eq!(app.store.watched(&key(1)).unwrap().replies, 1);
+    assert_eq!(app.store.watched(&key(1)).unwrap().status.counts().1, 1);
     // Then: a reply to your post, and another post.
     app.refreshed(key(1), Ok(vec![post(1, vec![]), post(5, vec![]), post(6, vec![5]), post(7, vec![5]), post(8, vec![1])]));
     app.flush_notes(Instant::now());
     assert_eq!(app.notified, ["New reply to your post in /x/ One", "1 new post in /x/ One"]);
-    assert_eq!(app.store.watched(&key(1)).unwrap().replies, 2);
+    assert_eq!(app.store.watched(&key(1)).unwrap().status.counts().1, 2);
     // Several threads at once make one notification.
     app.notified.clear();
     app.refreshed(key(2), Ok(vec![post(20, vec![])]));
@@ -1228,7 +1228,7 @@ fn following_a_general() {
     assert_eq!(app.store.watched(&key(10)).unwrap().general, None);
     assert!(app.notified.last().unwrap().starts_with("New /lmg/ thread on /x/"));
     // When the followed thread dies, it's replaced in Watched.
-    app.store.watched_mut(&key(13)).unwrap().dead = true;
+    app.store.watched_mut(&key(13)).unwrap().status = Status::Dead;
     app.check_generals(now + Duration::from_secs(1200));
     app.general_catalog(&key(13), Ok(vec![op(20, "/lmg/ - Local Models General #7")]));
     assert!(app.store.watched(&key(13)).is_none());
@@ -1490,7 +1490,7 @@ fn a_dead_thread_offers_its_saved_copy() {
     assert_eq!(app.tab.cached(), Some(tabs::Offline { saved: 10_000 - 7200, dead: false }));
     assert!(app.tab.loading.is_some() && app.tab.thread.as_ref().unwrap().posts.len() == 2);
     app.handle(answer(app.tab.req.unwrap(), App::thread_arrived, Err(gone())));
-    assert!(app.store.watched(&key).unwrap().dead && app.store.saved(&key).unwrap().dead);
+    assert!(app.store.watched(&key).unwrap().status.is_dead() && app.store.saved(&key).unwrap().dead);
     assert_eq!((app.tab.cached(), app.tab.saved().map(|o| o.dead)), (None, Some(true)));
     // An exported copy of a thread that isn't watched: offered when the thread is gone.
     app.store.toggle_watch(key.clone(), String::new(), 0, 0);
@@ -3201,11 +3201,10 @@ fn the_terminal_title_says_where_and_whats_new() {
     assert_eq!(title(&app), "ck: Sites");
     app.store.toggle_watch(key(1), "One".into(), 2, 5);
     app.store.toggle_watch(key(9), "Gone".into(), 2, 5);
-    app.store.watched_mut(&key(1)).unwrap().unread = 3;
+    app.store.watched_mut(&key(1)).unwrap().status = Status::Live { unread: 3, replies: 0 };
     assert_eq!(title(&app), "ck: (3) Sites");
-    app.store.watched_mut(&key(1)).unwrap().replies = 1;
-    let gone = app.store.watched_mut(&key(9)).unwrap();
-    (gone.unread, gone.dead) = (4, true);
+    app.store.watched_mut(&key(1)).unwrap().status = Status::Live { unread: 3, replies: 1 };
+    app.store.watched_mut(&key(9)).unwrap().status = Status::Dead;
     assert_eq!(title(&app), "ck: (3) (You) Sites");
     // In a thread: its new posts below the screen. The subject is the site's text: nothing
     // in it reaches the terminal as an escape.
@@ -3464,4 +3463,30 @@ fn following_a_general_through_the_site() {
     let urls: Vec<String> = http::lock(&asked).iter().map(|(u, _)| u.clone()).collect();
     assert!(urls.iter().any(|u| u.ends_with("/g/catalog.json")), "{urls:?}");
     crate::http::serve_test_host(host, None);
+}
+
+/// A watched thread that 404s has nothing new any more: its unread posts and replies to
+/// you go with it, whichever load found it gone (a background refresh, opening it, or
+/// restoring last session's place).
+#[test]
+fn a_watched_thread_that_404s_keeps_no_counts() {
+    let mut app = local_app();
+    let key = |no| ThreadKey { site: "a".into(), board: "x".into(), no };
+    app.store.toggle_watch(key(1), "One".into(), 2, 5);
+    app.store.watched_mut(&key(1)).unwrap().status = Status::Live { unread: 3, replies: 2 };
+    app.refreshed(key(1), Err(gone()));
+    assert_eq!(app.store.watched(&key(1)).unwrap().status, Status::Dead, "refresh 404");
+    // Opened and found gone.
+    app.store.toggle_watch(key(2), "Two".into(), 2, 5);
+    app.store.watched_mut(&key(2)).unwrap().status = Status::Live { unread: 4, replies: 1 };
+    app.goto_str("a/x/2");
+    app.handle(answer(app.tab.req.unwrap(), App::thread_arrived, Err(gone())));
+    assert_eq!(app.store.watched(&key(2)).unwrap().status, Status::Dead, "open 404");
+    // Last session's thread, found gone on restoring it.
+    app.store.toggle_watch(key(3), "Three".into(), 2, 5);
+    app.store.watched_mut(&key(3)).unwrap().status = Status::Live { unread: 5, replies: 1 };
+    app.goto_str("a/x/3");
+    app.tab.restoring = true;
+    app.handle(answer(app.tab.req.unwrap(), App::thread_arrived, Err(gone())));
+    assert_eq!((app.store.watched(&key(3)).unwrap().status, app.tab.view), (Status::Dead, View::Catalog), "restore 404");
 }

@@ -371,7 +371,7 @@ fn location(app: &App) -> (Vec<String>, Vec<Span<'static>>) {
             }
         }
         View::Watched => {
-            let unread = app.store.watched.iter().fold(0usize, |n, w| n.saturating_add(w.unread));
+            let (unread, _) = app.store.watched_new();
             meta.push(plural(app.store.watched.len(), "thread"));
             if unread > 0 {
                 meta.push(format!("{unread} new"));
