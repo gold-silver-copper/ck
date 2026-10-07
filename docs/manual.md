@@ -616,8 +616,9 @@ ck draws flat: no lines or boxes, just areas of color. The screen is the darkest
 catalog entries and posts are cards a step lighter, and popups another step up; the
 selected row, card or post is tinted and marked by a stripe in the theme's accent color.
 
-`,` opens Settings. Its options are saved to your config file, keeping your comments,
-and the file is created from the default if you don't have one yet:
+`,` opens Settings. Its options are saved to your config file, keeping your comments
+(a symlinked config is written through the link, and keeps its permissions), and the file
+is created from the default if you don't have one yet:
 
 - **Theme**: pick from the built-in themes (material, material-light, nord, gruvbox,
   catppuccin, tokyo-night, solarized-light, terminal, which uses your terminal's own

@@ -584,15 +584,39 @@ fn hash(bytes: &[u8]) -> u64 {
 }
 
 /// Write a file whole or not at all: to `<path>.tmp`, then renamed into place (its folder
-/// is created if needed).
+/// is created if needed). A symlink is written through, to the file it points to, and an
+/// existing file keeps its permissions.
 pub fn write_atomic(path: &Path, data: &[u8]) -> Result<()> {
+    use std::io::Write as _;
+    let target = link_target(path);
+    let path = target.as_path();
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
     }
     let mut tmp = path.as_os_str().to_owned();
     tmp.push(".tmp");
-    std::fs::write(&tmp, data).with_context(|| format!("writing {}", path.display()))?;
+    let mode = std::fs::metadata(path).ok().map(|m| m.permissions());
+    let written = (|| {
+        let mut file = std::fs::File::create(&tmp)?;
+        // Before the content goes in, so a private file is never readable by others.
+        if let Some(mode) = mode {
+            file.set_permissions(mode)?;
+        }
+        file.write_all(data)
+    })();
+    written.with_context(|| format!("writing {}", path.display()))?;
     std::fs::rename(&tmp, path).with_context(|| format!("writing {}", path.display()))
+}
+
+/// Where a write to `path` should go: the file a symlink points to (even one that isn't
+/// there yet), or `path` itself.
+fn link_target(path: &Path) -> PathBuf {
+    if !std::fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink()) {
+        return path.to_path_buf();
+    }
+    std::fs::canonicalize(path)
+        .or_else(|_| std::fs::read_link(path).map(|to| path.parent().map_or_else(|| to.clone(), |dir| dir.join(&to))))
+        .unwrap_or_else(|_| path.to_path_buf())
 }
 
 #[cfg(test)]

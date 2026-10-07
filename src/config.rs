@@ -690,6 +690,24 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn edits_keep_a_linked_config_and_its_mode() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let (real, link) = (dir.path().join("dotfiles/ck.toml"), dir.path().join("config.toml"));
+        std::fs::create_dir(dir.path().join("dotfiles")).unwrap();
+        std::fs::write(&real, "[[site]]\nname = \"x\"\nkind = \"4chan\"\n").unwrap();
+        std::fs::set_permissions(&real, std::fs::Permissions::from_mode(0o600)).unwrap();
+        std::os::unix::fs::symlink("dotfiles/ck.toml", &link).unwrap();
+        edit_at(&link, |d| d["compact_catalog"] = value(true)).unwrap();
+        // The link is still a link, and the file it points to has the edit and its mode.
+        assert!(std::fs::symlink_metadata(&link).unwrap().file_type().is_symlink());
+        assert!(std::fs::read_to_string(&real).unwrap().contains("compact_catalog = true"));
+        assert_eq!(std::fs::metadata(&real).unwrap().permissions().mode() & 0o777, 0o600);
+        assert!(!dir.path().join("dotfiles/ck.toml.tmp").exists() && !dir.path().join("config.toml.tmp").exists());
+    }
+
     #[test]
     fn key_edits() {
         let dir = tempfile::tempdir().unwrap();
