@@ -34,9 +34,10 @@ impl Makaba {
         items(&v["threads"])
             .map(|t| {
                 let mut p = self.post(t);
-                // posts_count includes the OP.
+                // posts_count and files_count include the OP and its files; ck counts replies'.
                 p.replies = as_u64(&t["posts_count"]).map(|n| saturate(n.saturating_sub(1)));
-                p.images = as_u32(&t["files_count"]);
+                let op_files = saturate(items(&t["files"]).count() as u64);
+                p.images = as_u32(&t["files_count"]).map(|n| n.saturating_sub(op_files));
                 p
             })
             .collect()
@@ -186,6 +187,8 @@ mod tests {
         assert_eq!(cat.len(), 6);
         assert!(cat[0].sticky && cat[0].locked);
         assert_eq!(cat[0].replies, Some(0));
+        // Images in replies, as elsewhere: not the OP's.
+        assert_eq!((cat[0].images, cat[2].replies, cat[2].images), (Some(0), Some(103), Some(15)));
         let f = &cat[0].files[0];
         assert_eq!(f.url, "https://2ch.su/b/src/328868282/17686951847150.jpg");
         assert_eq!(f.thumb.as_deref(), Some("https://2ch.su/b/thumb/328868282/17686951847150s.jpg"));
