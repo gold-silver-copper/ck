@@ -934,7 +934,7 @@ fn replay(seed: u64, acts: &[Act]) -> Result<(), (String, String)> {
                 eprintln!("TRACE {step} {act}: tab {} view {:?} site {} board {:?} cat_board {} cat {} hidden-marks {m} store {hid:?} filters {}", a.active, a.tab.view, a.current_site().cfg.name, a.tab.board.as_ref().map(|b| &b.uri), a.tab.catalog_board.as_deref().unwrap_or_default(), a.tab.catalog.len(), a.filter_cfgs.len());
                 let w: Vec<String> = a.store.all_watched().iter().map(|w| format!("{}/{}/{} dead={} seen={}", w.key.site, w.key.board, w.key.no, w.status.is_dead(), w.last_seen)).collect();
                 let sv: Vec<String> = a.store.saved.iter().map(|m| format!("{}/{}/{}", m.key.site, m.key.board, m.key.no)).collect();
-                eprintln!("TRACE   watched {w:?} saved {sv:?} status {:?}", a.status.as_ref().map(|s| &s.text));
+                eprintln!("TRACE   watched {w:?} saved {sv:?} status {:?}", a.footer.get().map(|s| &s.text));
                 if let Some(t) = &a.tab.thread {
                     let l = t.layout.as_ref().map(|l| (l.starts.clone(), l.exact.clone()));
                     eprintln!("TRACE   thread entry {} selected {} scroll {} view {} entries {} focus {:?} conv {:?} layout {l:?}", t.entry(), t.selected, t.scroll, t.viewport, t.entries.len(), t.focus, t.conversation.as_ref().map(|c| c.anchor));

@@ -64,8 +64,8 @@ fn main() -> Result<()> {
     if let Err(e) = app.quit_on_signals() {
         app.error(format!("Closing the terminal won't save first: {e}"));
     }
-    if let Some(w) = warnings.first() {
-        app.error(w);
+    for w in &warnings {
+        app.error(w.as_str());
     }
     // A panic still saves what can be saved and restores the terminal (the hook has
     // already put it back and printed the message).

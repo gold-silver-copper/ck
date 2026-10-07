@@ -189,12 +189,12 @@ impl App {
 
     /// Handle a response for an inactive tab, as that tab, then switch back.
     pub(super) fn handle_in_tab(&mut self, i: usize, apply: Box<dyn FnOnce(&mut App) + Send>) {
-        let (active, status) = (self.active, self.status.clone());
+        let (active, before) = (self.active, self.footer.clone());
         self.switch_tab(i);
         apply(self);
         self.switch_tab(active);
         // What happens in other tabs isn't news here.
-        self.status = status;
+        self.footer = before;
     }
 
     /// The inactive tab whose request this is.

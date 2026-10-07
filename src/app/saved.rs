@@ -19,7 +19,7 @@ impl App {
         let copy = match self.store.load_saved(key) {
             Ok(t) => t,
             Err(e) => {
-                self.error(format!("Couldn't open the saved copy: {e:#}"));
+                self.error(e.context("Couldn't open the saved copy"));
                 self.clamp_list();
                 self.save();
                 return;

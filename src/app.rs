@@ -40,6 +40,9 @@ macro_rules! take_popup {
 
 mod filters;
 mod focus;
+mod footer;
+use footer::Footer;
+pub use footer::{Problem, Status};
 mod gallery;
 mod input;
 mod generals;
@@ -206,20 +209,6 @@ pub enum Hit {
     Grid { area: Rect, offset: usize, cols: usize, cell: (u16, u16) },
     /// The settings screen, laid out as `settings::rows()` from `offset`.
     Settings { area: Rect, offset: usize },
-}
-
-/// A message in the footer, for a moment (errors a little longer).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Status {
-    pub text: String,
-    pub error: bool,
-}
-
-impl Status {
-    /// How long it replaces the key hints.
-    fn ttl(&self) -> Duration {
-        Duration::from_secs(if self.error { 5 } else { 2 })
-    }
 }
 
 /// New posts in a watched thread, for a notification.
@@ -415,9 +404,7 @@ pub struct App {
     pub hidden_words: Vec<String>,
     /// The filter just added (and where): `u` as the next key takes it back.
     pub filter_undo: Option<filters::Undo>,
-    pub status: Option<Status>,
-    /// The status message as last seen by `expire_status`, and when it appeared.
-    status_since: Option<(String, Instant)>,
+    footer: Footer,
     pub images: Images,
     /// Reverse image search engines (`R`), and the panel choosing one.
     pub image_search: Vec<crate::config::ImageSearch>,
@@ -561,8 +548,7 @@ impl App {
                 .filter(|_| !cfg!(test) && cfg.page_cache_mb > 0)
                 .map(|d| crate::pages::Pages::new(d, cfg.page_cache_mb.saturating_mul(1024 * 1024))),
             filter_undo: None,
-            status: None,
-            status_since: None,
+            footer: Footer::default(),
             popup: None,
             images: Images::new(picker, {
                 let tx = tx.clone();
@@ -795,7 +781,7 @@ impl App {
         if self.save_pending && self.clock.instant().saturating_duration_since(self.saved_at) >= SAVE_EVERY {
             self.save_now();
         }
-        self.expire_status(self.clock.instant());
+        self.footer.tick(self.clock.instant(), self.status_on_screen());
     }
 
     /// Send waiting notifications together: once no refresh is running, or 3s after the
@@ -840,11 +826,11 @@ impl App {
         }
         for m in &messages {
             if let Err(e) = crate::notify::send(&method, "ck", m) {
-                self.error(format!("Couldn't notify: {e:#}"));
+                self.error(e.context("Couldn't notify"));
             }
         }
         if let Some(m) = messages.first() {
-            self.status.get_or_insert_with(|| Status { text: m.clone(), error: false });
+            self.footer.offer(m.clone());
         }
         self.notified.extend(messages);
         let len = self.notified.len();
@@ -875,8 +861,8 @@ impl App {
         if let Some(t) = self.images.next_frame() {
             after(t, Duration::ZERO);
         }
-        if let (Some(s), Some((_, since))) = (&self.status, &self.status_since) {
-            after(*since, s.ttl());
+        if let Some(t) = self.footer.due() {
+            after(t, Duration::ZERO);
         }
         if self.tab.view == View::Thread && self.tab.thread.is_some() && self.tab.loading.is_none() && self.tab.saved().is_none() {
             after(self.tab.thread_checked, self.thread_every());
@@ -970,44 +956,43 @@ impl App {
         }
     }
 
-    /// Status messages replace the footer's key hints only briefly: info for 2 seconds,
-    /// errors for 5. A new or changed message restarts the timer.
-    fn expire_status(&mut self, now: Instant) {
-        let Some(status) = &self.status else {
-            self.status_since = None;
-            return;
-        };
-        match &self.status_since {
-            Some((seen, since)) if *seen == status.text => {
-                if now.duration_since(*since) >= status.ttl() {
-                    self.status = None;
-                    self.status_since = None;
-                }
-            }
-            _ => self.status_since = Some((status.text.clone(), now)),
-        }
+    /// The footer's message, if it has one.
+    pub fn status(&self) -> Option<&Status> {
+        self.footer.get()
     }
 
-    /// Say something in the footer for a moment.
+    /// Whether the next draw shows the footer's message: not behind the spinner or a prompt
+    /// (ui's draw_footer and draw_viewer).
+    pub(crate) fn status_on_screen(&self) -> bool {
+        self.tab.viewer().is_some() || matches!((&self.typing, &self.tab.loading), (Some(Typing::Goto(_)), _) | (None, None))
+    }
+
+    /// Say something in the footer for a moment (unless an error is waiting to be seen).
     pub fn info(&mut self, text: impl Into<String>) {
-        self.status = Some(Status { text: text.into(), error: false });
+        self.footer.say(Status { text: text.into(), error: false });
     }
 
     /// The tab's load failed: say so, and keep saying it where what it loads would be.
-    fn load_failed(&mut self, why: &str) {
-        let retry = format!("{why}. {} tries again", self.keys.key(Action::Reload));
+    fn load_failed(&mut self, why: impl Into<Problem>) {
+        let why = why.into().0;
+        self.tab.failed = Some(format!("{why}. {} tries again", self.keys.key(Action::Reload)));
         self.error(why);
-        self.tab.failed = Some(retry);
     }
 
     /// Say something went wrong (shown a little longer).
-    pub fn error(&mut self, e: impl std::fmt::Display) {
-        self.status = Some(Status { text: format!("{e:#}"), error: true });
+    pub fn error(&mut self, e: impl Into<Problem>) {
+        self.footer.say(Status { text: e.into().0, error: true });
     }
 
-    /// A change that holds until ck quits, because writing it to the config failed.
-    fn error_unsaved(&mut self, done: &str, e: &anyhow::Error) {
-        self.error(format!("{done} for now; couldn't save it: {e:#}"));
+    /// What was saved to the config, or `done` until ck quits because it couldn't be; whether
+    /// it was saved.
+    pub(super) fn say_saved(&mut self, done: &str, saved: Result<String>) -> bool {
+        let ok = saved.is_ok();
+        match saved {
+            Ok(text) => self.info(text),
+            Err(e) => self.error(format!("{done} for now; couldn't save it: {}", http::plain(&e))),
+        }
+        ok
     }
 
     /// A thread of the current site.
@@ -1033,7 +1018,7 @@ impl App {
         self.save_pending = false;
         self.saved_at = self.clock.instant();
         if let Err(e) = self.store.save() {
-            self.error(format!("Couldn't save watched threads: {e:#}"));
+            self.error(e.context("Couldn't save to the data directory"));
         }
     }
 
@@ -1150,7 +1135,7 @@ impl App {
                 self.store.settings.compact_catalog = None;
                 self.store.settings.catalog_layout = Some(self.default_layout);
                 self.save_now();
-                self.info(format!("Default catalog layout: {name} (kept in the data directory: {e:#})"));
+                self.info(format!("Default catalog layout: {name} (kept in the data directory: {})", http::plain(&e)));
             }
         }
     }
@@ -1514,7 +1499,7 @@ impl App {
             std::os::unix::process::CommandExt::process_group(&mut cmd, 0);
             match cmd.spawn() {
                 Ok(_) => self.info(format!("Playing {} in mpv", f.filename)),
-                Err(e) => self.error(format!("Couldn't start mpv: {e}")),
+                Err(e) => self.error(anyhow::Error::from(e).context("Couldn't start mpv")),
             }
         } else {
             self.open_url(&f.url);
@@ -1554,7 +1539,7 @@ impl App {
                 // Asked first: a copy can't be fetched again once the thread is gone. The
                 // second press counts only while the question is still showing.
                 let ask = format!("Press {} again to remove the saved copy of thread {}", self.keys.key(Action::Remove), key.no);
-                let asked = self.status.as_ref().is_some_and(|s| s.text == ask);
+                let asked = self.footer.get().is_some_and(|s| s.text == ask);
                 if self.saved_confirm.take().as_ref() != Some(&key) || !asked {
                     self.info(ask);
                     self.saved_confirm = Some(key);
@@ -1763,7 +1748,7 @@ impl App {
         match crate::clipboard::copy(&text) {
             Ok(()) if what == "text" => self.info(format!("Copied {} characters", text.chars().count())),
             Ok(()) => self.info(format!("Copied {what}: {text}")),
-            Err(e) => self.error(format!("Couldn't copy: {e:#}")),
+            Err(e) => self.error(e.context("Couldn't copy")),
         }
         self.copied = Some(text);
     }
@@ -1802,7 +1787,7 @@ impl App {
         }
         match open::that_detached(url) {
             Ok(()) => self.info(format!("Opened {url}")),
-            Err(e) => self.error(format!("Couldn't open {url}: {e}")),
+            Err(e) => self.error(anyhow::Error::from(e).context(format!("Couldn't open {url}"))),
         }
     }
 }

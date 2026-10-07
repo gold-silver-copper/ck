@@ -67,7 +67,7 @@ pub(super) fn draw_viewer(f: &mut Frame, app: &mut App) {
     put(f, top.x, top.y, top.width, line);
     fill(f, bottom, t.bar);
     let mut hints = vec![Span::raw(" ")];
-    if let Some(s) = &app.status {
+    if let Some(s) = app.status() {
         hints.extend(status_spans(s, t));
     } else {
         let save = app.keys.key(Action::Download);
