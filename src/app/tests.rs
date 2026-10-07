@@ -1455,6 +1455,30 @@ fn watched_threads_are_saved_as_posts_arrive() {
 }
 
 #[test]
+fn a_search_of_saved_threads_is_stopped_only_by_its_own_tab() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = saving_app(dir.path(), 1000);
+    let n = 50;
+    for no in 1..=n {
+        let key = ThreadKey { site: "a".into(), board: "x".into(), no };
+        app.store.keep_thread(&key, "t", "u", &nos(&[no]), 1000);
+    }
+    app.flush_writes();
+    // Tab 0 searches them; meanwhile tab 1 starts a search of its own and leaves it.
+    app.search_saved("post");
+    app.tabs.push(Tab::new(0, Instant::now()));
+    app.switch_tab(1);
+    app.search_saved("post");
+    app.search_saved("post");
+    app.close_search();
+    app.switch_tab(0);
+    // Tab 0's search reads every copy.
+    let finished = |a: &App| a.tab.search.as_ref().and_then(|s| s.saved.as_ref()).is_some_and(|s| s.finished);
+    settle_until(&mut app, finished);
+    assert_eq!(app.tab.search.as_ref().unwrap().hits.len(), n as usize);
+}
+
+#[test]
 fn a_dead_thread_offers_its_saved_copy() {
     let dir = tempfile::tempdir().unwrap();
     let mut app = saving_app(dir.path(), 10_000);

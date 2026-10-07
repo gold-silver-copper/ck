@@ -344,8 +344,8 @@ pub struct App {
     pub saved_list: FilteredList,
     /// The saved copy `x` was pressed on once: a second `x` removes it.
     pub saved_confirm: Option<ThreadKey>,
-    /// The search of saved threads that's wanted; a running one stops when it changes.
-    saved_search: Arc<std::sync::atomic::AtomicU64>,
+    /// The last search of saved threads started (each has its own number).
+    saved_search: u64,
     /// Sites taken out of the config in Settings: off the home screen until ck restarts.
     pub removed_sites: std::collections::BTreeSet<String>,
     pub store: Store,
@@ -513,7 +513,7 @@ impl App {
             history_list: FilteredList::top(),
             saved_list: FilteredList::top(),
             saved_confirm: None,
-            saved_search: Arc::default(),
+            saved_search: 0,
             removed_sites: Default::default(),
             store,
             refresh_thread,
