@@ -31,7 +31,8 @@ impl App {
         if matches!(ev.kind, MouseEventKind::ScrollDown | MouseEventKind::ScrollUp) {
             let key = |c| KeyEvent::from(if c { KeyCode::Down } else { KeyCode::Up });
             match self.modal() {
-                Some(Modal::Help | Modal::Menu | Modal::Viewer | Modal::Preview | Modal::Links | Modal::ImageSearch) => self.on_key(key(down)),
+                // The gallery's wheel moves through its grid, a row a notch.
+                Some(Modal::Help | Modal::Menu | Modal::Viewer | Modal::Preview | Modal::Gallery | Modal::Links | Modal::ImageSearch) => self.on_key(key(down)),
                 Some(Modal::Hints) => self.popup = None,
                 _ if self.tab.view == View::Thread => {
                     if let Some(t) = &mut self.tab.thread {

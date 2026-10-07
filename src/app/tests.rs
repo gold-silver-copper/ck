@@ -831,6 +831,15 @@ fn gallery_of_the_threads_files() {
     press(&mut app, KeyCode::Esc);
     assert!(app.tab.viewer().is_none());
     assert_eq!(app.tab.gallery.as_ref().unwrap().state.selected(), Some(1));
+    // The wheel moves through the grid a row at a time, not the thread behind it.
+    let scroll = app.tab.thread.as_ref().unwrap().scroll;
+    app.on_mouse(mouse(MouseEventKind::ScrollUp, 5, 5), Instant::now());
+    assert_eq!(app.tab.gallery.as_ref().unwrap().state.selected(), Some(0));
+    app.on_mouse(mouse(MouseEventKind::ScrollDown, 5, 5), Instant::now());
+    assert_eq!(app.tab.gallery.as_ref().unwrap().state.selected(), Some(2));
+    app.on_mouse(mouse(MouseEventKind::ScrollUp, 5, 5), Instant::now());
+    press(&mut app, KeyCode::Char('l'));
+    assert_eq!(app.tab.thread.as_ref().unwrap().scroll, scroll);
     // d saves the one file.
     press(&mut app, KeyCode::Char('d'));
     assert_eq!((app.downloads.total, app.downloads.running), (1, 1));

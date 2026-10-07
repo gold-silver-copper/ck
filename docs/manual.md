@@ -196,8 +196,9 @@ ID:…", everything works as in the whole thread, and `esc` or `I` goes back. It
 remembered across starts (IDs are the thread's alone). Filters can catch IDs and flags too
 (see Filters).
 
-In the gallery (`V`), `h`/`j`/`k`/`l` move, `enter` views (`h`/`l` there go through every
-file of the thread), `d` saves the file, `esc` returns to its post.
+In the gallery (`V`), `h`/`j`/`k`/`l` move (the wheel a row at a time), `enter` views
+(`h`/`l` there go through every file of the thread), `d` saves the file, `esc` returns to
+its post.
 
 Copying uses the terminal's clipboard escape (OSC 52), which also works over SSH; in tmux it
 needs `set -g set-clipboard on`. On a local machine ck also uses `pbcopy`, `wl-copy`,
