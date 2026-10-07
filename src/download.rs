@@ -12,7 +12,8 @@ const DEFAULT_DIR: &str = "{downloads}/ck/{site}/{board}/{thread}";
 pub fn sanitize(name: &str) -> String {
     let bad = |c: char| c.is_control() || matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|');
     let s: String = name.chars().map(|c| if bad(c) { '_' } else { c }).collect();
-    let s = s.trim().trim_start_matches('.').trim();
+    // Dots and spaces both, so ". .." can't come out as "..".
+    let s = s.trim_start_matches(|c: char| c == '.' || c.is_whitespace()).trim_end();
     let mut out = String::new();
     for c in s.chars() {
         if out.len() + c.len_utf8() > 180 {
@@ -79,6 +80,9 @@ mod tests {
         assert_eq!(sanitize(".hidden"), "hidden");
         assert_eq!(sanitize("a\\b:c\n.png"), "a_b_c_.png");
         assert_eq!(sanitize(".."), "file");
+        // Dots behind spaces are leading dots too.
+        assert_eq!(sanitize(". .."), "file");
+        assert_eq!(sanitize(" . . .x"), "x");
         assert_eq!(sanitize("  "), "file");
         assert!(sanitize(&"é".repeat(200)).len() <= 180);
     }

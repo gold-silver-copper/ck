@@ -4,6 +4,7 @@ use ratatui::crossterm::event::{KeyCode, KeyEvent};
 
 use super::{App, Popup, View};
 use crate::config::SiteConfig;
+use crate::model::Board;
 use crate::route::{self, SiteInfo, Target};
 
 /// The lists, by name (before boards that happen to be called that).
@@ -73,28 +74,33 @@ impl App {
             self.leave_trail(b);
         }
         let back_to = self.tab.view;
-        self.switch_site(target.site);
         let Some(uri) = target.board else {
+            self.switch_site(target.site);
             self.tab.view = View::Boards;
             return;
         };
-        let board = self.find_board(&uri);
         match (target.thread, target.post) {
             (Some(no), post) => {
-                self.open_thread_at(board, no, post);
+                self.switch_site(target.site);
+                self.open_thread_at(self.find_board(&uri), no, post);
                 if !from_thread && back_to != View::Settings {
                     self.tab.return_to = Some(back_to);
                 }
             }
             (None, Some(post)) => {
-                // A post without its thread (FoolFuuka's /post/ links): ask the engine.
-                let label = format!("Looking up post {post}");
-                let job_board = uri;
-                self.spawn(label, move |b, _, _| b.find_thread(&job_board, post), move |app, r| app.thread_found(board, post, r));
+                // A post without its thread (FoolFuuka's /post/ links): ask the engine of the
+                // post's site. The tab moves there only once it's found; `u` comes back here.
+                let Some(backend) = self.sites.get(target.site).map(|s| s.backend.clone()) else { return };
+                let board = self.known_boards(target.site).and_then(|b| b.into_iter().find(|b| b.uri == uri));
+                let board = board.unwrap_or_else(|| Board { uri: uri.clone(), title: String::new(), nsfw: None });
+                let trail = self.tab.board.clone().filter(|_| from_thread).and_then(|b| self.trail_here(b));
+                let (label, site) = (format!("Looking up post {post}"), target.site);
+                self.spawn(label, move |_, _, _| backend.find_thread(&uri, post), move |app, r| app.thread_found(site, board, post, trail, r));
             }
             (None, None) => {
+                self.switch_site(target.site);
                 self.tab.return_to = None;
-                self.open_catalog(board);
+                self.open_catalog(self.find_board(&uri));
             }
         }
     }

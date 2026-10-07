@@ -2,7 +2,8 @@
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 
-use std::sync::atomic::Ordering;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use super::{App, FilteredList, View};
 use crate::store::ThreadKey;
@@ -39,12 +40,21 @@ pub struct SavedSearch {
     pub skipped: usize,
     pub finished: bool,
     id: u64,
+    /// Set when the search is dropped (another search in its tab, the results left, the tab
+    /// closed): the copies left aren't read. Other tabs' searches go on.
+    stop: Arc<AtomicBool>,
 }
 
 impl SavedSearch {
     #[cfg(test)]
     pub fn for_tests(keys: Vec<ThreadKey>, done: usize, of: usize, finished: bool) -> Self {
-        Self { keys, done, of, skipped: 0, finished, id: 0 }
+        Self { keys, done, of, skipped: 0, finished, id: 0, stop: Arc::default() }
+    }
+}
+
+impl Drop for SavedSearch {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::SeqCst);
     }
 }
 
@@ -127,7 +137,7 @@ impl App {
     }
 
     /// Search every saved copy for `query`, newest first, off the UI thread: results come in
-    /// as they're found. Another search, or leaving the results, stops it.
+    /// as they're found. Another search in the tab, or leaving the results, stops it.
     pub fn search_saved(&mut self, query: &str) {
         let Some((dir, keys)) = self.store.saved_files() else {
             return self.error("No data folder: nothing is saved");
@@ -136,21 +146,22 @@ impl App {
             Some(s) => s.back,
             None => (self.tab.site, if self.tab.view == View::Search { View::Saved } else { self.tab.view }),
         };
-        let id = self.saved_search.fetch_add(1, Ordering::SeqCst) + 1;
+        self.saved_search += 1;
+        let (id, stop) = (self.saved_search, Arc::new(AtomicBool::new(false)));
         let of = keys.len();
         if of == 0 {
             self.info("Nothing is saved yet: watched threads are saved as they refresh");
         }
-        let saved = SavedSearch { keys: Vec::new(), done: 0, of, skipped: 0, finished: of == 0, id };
+        let saved = SavedSearch { keys: Vec::new(), done: 0, of, skipped: 0, finished: of == 0, id, stop: stop.clone() };
         self.tab.search = Some(Search { saved: Some(saved), board: String::new(), query: query.to_string(), hits: Vec::new(), hidden: Vec::new(), total: None, pages: 0, back });
         self.tab.search_list = FilteredList::top();
         self.tab.view = View::Search;
         // Saving waits for nothing: copies being written are read as they were.
-        let (later, current) = (self.later(), self.saved_search.clone());
+        let later = self.later();
         let needle = query.to_lowercase();
         std::thread::spawn(move || {
             for key in keys {
-                if current.load(Ordering::SeqCst) != id {
+                if stop.load(Ordering::SeqCst) {
                     return;
                 }
                 let found = match std::fs::read(crate::saved::path(&dir, &key)).map_err(anyhow::Error::from).and_then(|b| crate::guard::result(|| crate::saved_search::matching(&b, &needle))) {
@@ -307,9 +318,8 @@ impl App {
 
     /// Leave the results for where the search started.
     pub fn close_search(&mut self) -> View {
+        // A search of saved threads still running stops (as it's dropped).
         let Some(s) = self.tab.search.take() else { return View::Sites };
-        // A search of saved threads still running stops.
-        self.saved_search.fetch_add(1, Ordering::SeqCst);
         self.switch_site(s.back.0);
         s.back.1
     }

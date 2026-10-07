@@ -197,6 +197,8 @@ enum Slot {
         pending: Option<View>,
         /// A view asked for since, and when (for the resize debounce).
         asked: Option<(View, Instant)>,
+        /// The last view that couldn't be encoded, not asked for again.
+        failed: Option<View>,
         bytes: usize,
         used: u64,
         /// An animated GIF's frames, their encoding, and the size being encoded.
@@ -321,7 +323,7 @@ impl Images {
     #[cfg(test)]
     pub fn insert_decoded(&mut self, url: &str, img: DynamicImage) {
         let bytes = img.as_bytes().len().saturating_mul(2);
-        let slot = Slot::Ready { img: Arc::new(img), protos: Vec::new(), pending: None, asked: None, bytes, used: 0, frames: None, animation: None, animating: None };
+        let slot = Slot::Ready { img: Arc::new(img), protos: Vec::new(), pending: None, asked: None, failed: None, bytes, used: 0, frames: None, animation: None, animating: None };
         self.slots.insert(url.to_string(), slot);
     }
 
@@ -390,7 +392,7 @@ impl Images {
             Some(Slot::Failed) => return State::Failed,
             _ => return State::Loading,
         }
-        let Some(Slot::Ready { img, protos, pending, asked, used, frames, animation, animating, .. }) = self.slots.get_mut(url) else {
+        let Some(Slot::Ready { img, protos, pending, asked, failed, used, frames, animation, animating, .. }) = self.slots.get_mut(url) else {
             return State::Loading;
         };
         *used = self.tick;
@@ -418,6 +420,14 @@ impl Images {
         }
         if let Some(i) = protos.iter().position(|(v, _)| *v == view) {
             return protos.get(i).map_or(State::Loading, |(_, p)| State::Ready(p));
+        }
+        if *failed == Some(view) {
+            // Shown as it is at another size if one fits, else it failed.
+            return protos
+                .iter()
+                .rev()
+                .find(|(_, p)| p.size().width <= size.width && p.size().height <= size.height)
+                .map_or(State::Failed, |(_, p)| State::Ready(p));
         }
         if *pending != Some(view) {
             // The first encoding starts at once, and so does a zoom or a move (a key, once);
@@ -513,12 +523,12 @@ impl Images {
                     let bytes = img.as_bytes().len().saturating_mul(2).saturating_add(frame_bytes);
                     self.bytes = self.bytes.saturating_add(bytes);
                     self.tick = self.tick.saturating_add(1);
-                    let slot = Slot::Ready { img, protos: Vec::new(), pending, asked: None, bytes, used: self.tick, frames, animation: None, animating: None };
+                    let slot = Slot::Ready { img, protos: Vec::new(), pending, asked: None, failed: None, bytes, used: self.tick, frames, animation: None, animating: None };
                     self.slots.insert(url, slot);
                     self.evict();
                 }
                 Done::Encoded(url, view, res) => {
-                    let Some(Slot::Ready { protos, pending, .. }) = self.slots.get_mut(&url) else { continue };
+                    let Some(Slot::Ready { protos, pending, failed, .. }) = self.slots.get_mut(&url) else { continue };
                     if *pending == Some(view) {
                         *pending = None;
                     }
@@ -530,9 +540,9 @@ impl Images {
                             }
                             protos.push((view, p));
                         }
-                        Err(_) => {
-                            self.slots.insert(url, Slot::Failed);
-                        }
+                        // Only this view failed: the image and its other views stay (and stay
+                        // counted), and it isn't encoded again and again.
+                        Err(_) => *failed = Some(view),
                     }
                 }
                 Done::EncodedFrames(url, size, res) => {
@@ -1199,6 +1209,27 @@ mod tests {
         tx.send(Done::Fetched("big".into(), Ok((img, None)), None)).unwrap();
         im.poll();
         assert!(matches!(im.slots.get("big"), Some(Slot::Ready { .. })));
+    }
+
+    #[test]
+    fn a_size_that_fails_to_encode_fails_alone() {
+        let mut im = Images::offline();
+        let (tx, rx) = channel();
+        im.rx = rx;
+        let img = DynamicImage::new_rgb8(64, 48);
+        let (big, small) = (Size::new(20, 10), Size::new(4, 2));
+        let p = encode(&Picker::halfblocks(), &img, big).unwrap();
+        tx.send(Done::Fetched("u".into(), Ok((Arc::new(img), None)), None)).unwrap();
+        tx.send(Done::Encoded("u".into(), (big, Crop::FIT), Ok(p))).unwrap();
+        tx.send(Done::Encoded("u".into(), (small, Crop::FIT), Err("no".into()))).unwrap();
+        im.poll();
+        // The size that was encoded still shows; the one that failed says so.
+        assert!(matches!(im.get("u", big, Kind::Full), State::Ready(_)));
+        assert!(matches!(im.get("u", small, Kind::Full), State::Failed));
+        // Whatever is kept is what's counted.
+        let kept: usize = im.slots.values().map(|s| if let Slot::Ready { bytes, .. } = s { *bytes } else { 0 }).sum();
+        assert_eq!(im.bytes, kept);
+        assert!(kept > 0);
     }
 
     #[test]

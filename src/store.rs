@@ -70,6 +70,9 @@ pub struct SeenThread {
     pub last: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub replies: Option<u32>,
+    /// Opened, but not (yet) seen in its board's catalog: `last` is when it was last opened.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub opened_only: bool,
 }
 
 /// A board's own catalog sort and layout (set with `s` and `c` there).
@@ -149,7 +152,7 @@ pub struct Store {
     pub seen: std::collections::BTreeMap<String, std::collections::BTreeMap<u64, SeenThread>>,
     /// Threads kept in `threads/` (see `saved`), newest first.
     pub saved: Vec<SavedMeta>,
-    /// Past this many bytes, the oldest dead, unwatched copies are removed.
+    /// Past this many bytes, the oldest unwatched copies are removed.
     pub saved_max: u64,
     /// Writes saved copies in the background (with a data directory).
     writer: Option<crate::writer::Writer<Wrote>>,
@@ -160,8 +163,8 @@ pub struct Store {
 
 /// What a background write of a saved copy came to.
 pub enum Wrote {
-    /// Written: its size.
-    Saved(ThreadKey, u64),
+    /// Written: its size, and the `signature` of the posts written (none when only marked dead).
+    Saved(ThreadKey, u64, Option<u64>),
     Failed(String),
     /// Nothing to tell (a removal, or marking a copy that isn't there dead).
     Nothing,
@@ -280,14 +283,15 @@ impl Store {
     }
 
     /// A board's catalog was loaded: remember its threads, and return the ones that weren't
-    /// there on the previous load (none on the first).
+    /// there on the previous load (none on the first: threads only opened don't make one).
     pub fn catalog_seen(&mut self, site: &str, board: &str, threads: &[u64], now: i64) -> std::collections::HashSet<u64> {
-        let key = board_key(site, board);
-        let first = !self.seen.contains_key(&key);
-        let map = self.seen.entry(key).or_default();
+        let map = self.seen.entry(board_key(site, board)).or_default();
+        let first = map.values().all(|t| t.opened_only);
         let new = if first { Default::default() } else { threads.iter().copied().filter(|no| !map.contains_key(no)).collect() };
         for &no in threads {
-            map.entry(no).or_default().last = now;
+            let t = map.entry(no).or_default();
+            t.last = now;
+            t.opened_only = false;
         }
         map.retain(|_, t| now.saturating_sub(t.last) <= SEEN_FOR);
         new
@@ -303,10 +307,16 @@ impl Store {
 
     /// A thread was opened with `replies` replies.
     pub fn opened(&mut self, site: &str, board: &str, no: u64, replies: u32, now: i64) {
-        let t = self.seen.entry(board_key(site, board)).or_default().entry(no).or_default();
+        // Threads only opened are forgotten a week after their last opening, on every board
+        // (a catalog's own threads go when it's loaded).
+        for map in self.seen.values_mut() {
+            map.retain(|_, t| !t.opened_only || now.saturating_sub(t.last) <= SEEN_FOR);
+        }
+        self.seen.retain(|_, map| !map.is_empty());
+        let t = self.seen.entry(board_key(site, board)).or_default().entry(no).or_insert_with(|| SeenThread { opened_only: true, ..Default::default() });
         t.replies = Some(replies);
         // A thread opened from elsewhere (not seen in a catalog) is kept a while too.
-        if t.last == 0 {
+        if t.opened_only || t.last == 0 {
             t.last = now;
         }
     }
@@ -430,29 +440,33 @@ impl Store {
                 posts: posts.iter().map(SavedPost::from).collect(),
             };
             match saved::write(&dir, &thread) {
-                Ok(bytes) => Wrote::Saved(key2, bytes),
+                Ok(bytes) => Wrote::Saved(key2, bytes, Some(sig)),
                 Err(e) => Wrote::Failed(format!("Couldn't save a copy of thread {}: {e:#}", key2.no)),
             }
         });
+        // The posts count as saved once they're written (see `settle`): a write that fails,
+        // or hasn't finished at exit, is tried again with the same posts.
+        let hash = before.map_or(0, |m| m.hash);
         self.saved.retain(|m| &m.key != key);
-        let meta = SavedMeta { key: key.clone(), subject: subject.to_string(), saved: now, dead: false, bytes, posts: count, newest, hash: sig };
+        let meta = SavedMeta { key: key.clone(), subject: subject.to_string(), saved: now, dead: false, bytes, posts: count, newest, hash };
         // Newest first.
         let at = self.saved.iter().position(|m| m.saved <= now).unwrap_or(self.saved.len());
         self.saved.insert(at, meta);
         true
     }
 
-    /// Collect what background writes came to: copies' sizes (then the oldest dead copies
-    /// go, past `saved_max`), and errors to tell about.
+    /// Collect what background writes came to: copies' sizes (then the oldest unwatched
+    /// copies go, past `saved_max`), and errors to tell about.
     pub fn settle(&mut self) -> Vec<String> {
         let Some(writer) = &self.writer else { return Vec::new() };
         let mut errors = Vec::new();
         let mut wrote = false;
         for r in writer.results() {
             match r {
-                Wrote::Saved(key, bytes) => {
+                Wrote::Saved(key, bytes, sig) => {
                     if let Some(m) = self.saved.iter_mut().find(|m| m.key == key) {
                         m.bytes = bytes;
+                        m.hash = sig.unwrap_or(m.hash);
                         wrote = true;
                     }
                 }
@@ -495,7 +509,7 @@ impl Store {
         writer.run(move || match saved::read(&dir, &key) {
             Ok(mut t) => {
                 t.dead = true;
-                saved::write(&dir, &t).map_or(Wrote::Nothing, |bytes| Wrote::Saved(key, bytes))
+                saved::write(&dir, &t).map_or(Wrote::Nothing, |bytes| Wrote::Saved(key, bytes, None))
             }
             Err(_) => Wrote::Nothing,
         });
@@ -534,8 +548,9 @@ impl Store {
         }
     }
 
-    /// Past `saved_max` bytes, remove the oldest copies that are dead and not watched (never
-    /// a watched thread's).
+    /// Past `saved_max` bytes, remove the oldest copies of threads not watched, dead or not
+    /// (a thread that's still up is only known to be once it's refetched, which an unwatched
+    /// one isn't). Never a watched thread's.
     fn prune_saved(&mut self) {
         if self.saved_max == 0 {
             return;
@@ -543,7 +558,7 @@ impl Store {
         let mut total = self.saved.iter().fold(0u64, |sum, m| sum.saturating_add(m.bytes));
         while total > self.saved_max {
             let watched = |m: &SavedMeta| self.watched.iter().any(|w| w.key == m.key);
-            let Some(m) = self.saved.iter().rev().find(|m| m.dead && !watched(m)) else { break };
+            let Some(m) = self.saved.iter().rev().find(|m| !watched(m)) else { break };
             total = total.saturating_sub(m.bytes);
             let key = m.key.clone();
             self.forget_saved(&key);
@@ -584,15 +599,39 @@ fn hash(bytes: &[u8]) -> u64 {
 }
 
 /// Write a file whole or not at all: to `<path>.tmp`, then renamed into place (its folder
-/// is created if needed).
+/// is created if needed). A symlink is written through, to the file it points to, and an
+/// existing file keeps its permissions.
 pub fn write_atomic(path: &Path, data: &[u8]) -> Result<()> {
+    use std::io::Write as _;
+    let target = link_target(path);
+    let path = target.as_path();
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
     }
     let mut tmp = path.as_os_str().to_owned();
     tmp.push(".tmp");
-    std::fs::write(&tmp, data).with_context(|| format!("writing {}", path.display()))?;
+    let mode = std::fs::metadata(path).ok().map(|m| m.permissions());
+    let written = (|| {
+        let mut file = std::fs::File::create(&tmp)?;
+        // Before the content goes in, so a private file is never readable by others.
+        if let Some(mode) = mode {
+            file.set_permissions(mode)?;
+        }
+        file.write_all(data)
+    })();
+    written.with_context(|| format!("writing {}", path.display()))?;
     std::fs::rename(&tmp, path).with_context(|| format!("writing {}", path.display()))
+}
+
+/// Where a write to `path` should go: the file a symlink points to (even one that isn't
+/// there yet), or `path` itself.
+fn link_target(path: &Path) -> PathBuf {
+    if !std::fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink()) {
+        return path.to_path_buf();
+    }
+    std::fs::canonicalize(path)
+        .or_else(|_| std::fs::read_link(path).map(|to| path.parent().map_or_else(|| to.clone(), |dir| dir.join(&to))))
+        .unwrap_or_else(|_| path.to_path_buf())
 }
 
 #[cfg(test)]
@@ -708,9 +747,34 @@ mod tests {
         assert!(!s.seen["4chan/g"].contains_key(&1) && !s.seen["4chan/g"].contains_key(&3));
         assert_eq!(s.catalog_seen("4chan", "g", &[1, 4], 9 * day), [1].into());
         // A corrupt time in the file is just old.
-        s.seen.get_mut("4chan/g").unwrap().insert(7, SeenThread { last: i64::MIN, replies: None });
+        s.seen.get_mut("4chan/g").unwrap().insert(7, SeenThread { last: i64::MIN, ..Default::default() });
         s.catalog_seen("4chan", "g", &[4], i64::MAX);
         assert!(!s.seen["4chan/g"].contains_key(&7));
+    }
+
+    #[test]
+    fn opening_a_thread_first_leaves_the_catalog_its_first_load() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut s, _) = Store::load(Some(dir.path().to_path_buf()));
+        let day = 24 * 3600;
+        // A thread opened from a link before the board's catalog was ever loaded.
+        s.opened("4chan", "g", 2, 5, 0);
+        s.save().unwrap();
+        let (mut s, _) = Store::load(Some(dir.path().to_path_buf()));
+        assert!(s.catalog_seen("4chan", "g", &[1, 2, 3], day).is_empty());
+        assert_eq!(s.replies_seen("4chan", "g", 2), Some(5));
+        assert_eq!(s.catalog_seen("4chan", "g", &[1, 2, 3, 4], day), [4].into());
+        // On a board whose catalog is never loaded, opened threads are forgotten a week
+        // after they were last opened.
+        s.opened("4chan", "v", 7, 1, 0);
+        s.opened("4chan", "v", 8, 1, 0);
+        s.opened("4chan", "v", 8, 2, 3 * day);
+        s.opened("4chan", "g", 9, 1, 9 * day);
+        assert_eq!((s.replies_seen("4chan", "v", 7), s.replies_seen("4chan", "v", 8)), (None, Some(2)));
+        s.opened("4chan", "g", 9, 1, 11 * day);
+        assert!(!s.seen.contains_key("4chan/v"));
+        // A catalog's threads go only with its own loads.
+        assert_eq!(s.replies_seen("4chan", "g", 2), Some(5));
     }
 
     #[test]
@@ -806,7 +870,7 @@ mod tests {
     }
 
     #[test]
-    fn pruning_spares_watched_and_live_copies() {
+    fn pruning_spares_only_watched_copies() {
         let dir = tempfile::tempdir().unwrap();
         let (mut s, _) = Store::load(Some(dir.path().to_path_buf()));
         let many: Vec<u64> = (1..50).collect();
@@ -815,17 +879,20 @@ mod tests {
         }
         s.flush(std::time::Duration::from_secs(10));
         let one = s.saved[0].bytes;
-        // 1 and 2 dead; 1 watched.
+        // 1 and 2 dead; 1, 4 and 5 watched. 3 is up but unwatched (say, saved as a page).
         s.saved_dead(&key(1));
         s.saved_dead(&key(2));
-        s.toggle_watch(key(1), String::new(), 0, 0);
+        for no in [1, 4, 5] {
+            s.toggle_watch(key(no), String::new(), 0, 0);
+        }
         s.saved_max = one * 2;
         s.keep_thread(&key(5), "", "u", &posts(&many), 5);
-        // Once written, only 2 can go; the rest stay over the limit.
+        // Once written, the unwatched ones go, oldest first, dead or not; the watched ones
+        // stay, even over the limit.
         s.flush(std::time::Duration::from_secs(10));
         let left: Vec<u64> = s.saved.iter().map(|m| m.key.no).collect();
-        assert_eq!(left, [5, 4, 3, 1]);
-        assert!(!dir.path().join("threads/4chan/g/2.json").exists());
+        assert_eq!(left, [5, 4, 1]);
+        assert!(!dir.path().join("threads/4chan/g/2.json").exists() && !dir.path().join("threads/4chan/g/3.json").exists());
         assert!(dir.path().join("threads/4chan/g/1.json").exists());
         s.forget_saved(&key(4));
         s.flush(std::time::Duration::from_secs(10));
@@ -833,8 +900,32 @@ mod tests {
         // A write that fails is told about.
         std::fs::remove_dir_all(dir.path().join("threads")).unwrap();
         std::fs::write(dir.path().join("threads"), "not a folder").unwrap();
+        // (Watched, so it stays over the limit.)
+        s.toggle_watch(key(6), String::new(), 0, 0);
         s.keep_thread(&key(6), "", "u", &posts(&many), 6);
         let errors = s.flush(std::time::Duration::from_secs(10));
         assert!(errors.len() == 1 && errors[0].contains("Couldn't save a copy of thread 6"), "{errors:?}");
+        // And the same posts are written again next time.
+        std::fs::remove_file(dir.path().join("threads")).unwrap();
+        assert!(s.keep_thread(&key(6), "", "u", &posts(&many), 7));
+        assert!(s.flush(std::time::Duration::from_secs(10)).is_empty());
+        assert!(dir.path().join("threads/4chan/g/6.json").exists());
+    }
+
+    #[test]
+    fn a_copy_counts_as_saved_once_written() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut s, _) = Store::load(Some(dir.path().to_path_buf()));
+        assert!(s.keep_thread(&key(1), "", "u", &posts(&[1, 2]), 1));
+        // Saved before the write is known to be done (as at exit, when it takes too long):
+        // the next start doesn't take the posts for written.
+        s.save().unwrap();
+        let next = tempfile::tempdir().unwrap();
+        std::fs::copy(dir.path().join("saved.json"), next.path().join("saved.json")).unwrap();
+        let (mut s2, _) = Store::load(Some(next.path().to_path_buf()));
+        assert!(s2.keep_thread(&key(1), "", "u", &posts(&[1, 2]), 2));
+        // Once it's done, it does.
+        s.flush(std::time::Duration::from_secs(10));
+        assert!(!s.keep_thread(&key(1), "", "u", &posts(&[1, 2]), 3));
     }
 }

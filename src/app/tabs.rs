@@ -9,6 +9,9 @@ use crate::filter::Mark;
 use crate::model::{Board, Post};
 use crate::store::ThreadKey;
 
+/// A thread left for another, for `u` to come back to: (site, board, thread, selected post).
+pub type Trail = (usize, Board, u64, u64);
+
 /// Tabs open at once, at most.
 pub const MAX_TABS: usize = 9;
 
@@ -65,8 +68,8 @@ pub struct Tab {
     pub popup: Option<TabPopup>,
     /// The thread's files as a grid (`V`), over the thread.
     pub gallery: Option<Gallery>,
-    /// Threads left by following cross-thread links: (site, board, thread, selected post), for `u`.
-    pub trail: Vec<(usize, Board, u64, u64)>,
+    /// Threads left by following cross-thread links, for `u`.
+    pub trail: Vec<Trail>,
     /// Post to select once the loading thread arrives.
     pub pending_post: Option<u64>,
     /// Post whose conversation to show once the loading thread arrives (a session's).

@@ -93,11 +93,6 @@ pub fn run(name: &str, long: bool, seed: u64, runs: u64, mut body: impl FnMut(u6
     }
 }
 
-/// Cells a line takes on screen: ratatui skips control characters when drawing.
-fn drawn_width(line: &Line) -> usize {
-    use unicode_width::UnicodeWidthStr;
-    line.spans.iter().map(|s| s.content.chars().filter(|c| !c.is_control()).collect::<String>().width()).sum()
-}
 
 /// The text of a line, spans joined.
 fn text(line: &Line) -> String {
@@ -153,9 +148,9 @@ fn markup_once(seed: u64) {
             let wrapped = markup::wrap(line, width);
             for w in &wrapped {
                 // `wrap` treats widths under 2 as 2, so a wide character always fits.
-                // Only a character wider than the whole width may stick out, alone.
-                let drawn = drawn_width(w);
-                let alone = text(w).trim_start_matches('↪').chars().count() == 1;
+                // Only a grapheme wider than the whole width may stick out, alone.
+                let drawn = markup::line_columns(w);
+                let alone = unicode_segmentation::UnicodeSegmentation::graphemes(text(w).trim_start_matches('↪'), true).count() == 1;
                 assert!(drawn <= width.max(2) || alone, "a {drawn}-wide line at width {width}: {:?} ({})", text(w), ctx());
             }
             if line.style != markup::CODE_LINE {
@@ -330,9 +325,10 @@ fn cache_once(seed: u64) {
         let fresh = known.get(&url).filter(|(_, _, checked)| clock.get().saturating_duration_since(*checked) < MIN_REFETCH);
         match (asked, fresh) {
             (Some(_), Some(_)) => panic!("refetched within {MIN_REFETCH:?} ({ctx})"),
-            (None, Some(&(v, _, _))) => {
-                let (body, age) = res.unwrap_or_else(|e| panic!("a cached answer failed: {e:#} ({ctx})"));
-                assert_eq!(body["v"], v, "the cached body isn't the last one ({ctx})");
+            (None, Some((v, lm, _))) => {
+                let (body, date, age) = res.unwrap_or_else(|e| panic!("a cached answer failed: {e:#} ({ctx})"));
+                assert_eq!(body["v"], *v, "the cached body isn't the last one ({ctx})");
+                assert_eq!(date.as_ref(), Some(lm), "the cached body without its date ({ctx})");
                 assert!(age.is_some_and(|a| a < MIN_REFETCH), "a cached answer without its age ({ctx})");
                 continue;
             }
@@ -341,8 +337,9 @@ fn cache_once(seed: u64) {
                 // If-Modified-Since exactly when there's a copy, with what it last said.
                 assert_eq!(since.as_ref(), known.get(&url).map(|(_, lm, _)| lm), "wrong If-Modified-Since ({ctx})");
                 match (reply, res) {
-                    (Reply::Fresh(lm), Ok((body, None))) => {
+                    (Reply::Fresh(lm), Ok((body, date, None))) => {
                         assert_eq!(body["v"], version, "({ctx})");
+                        assert_eq!(date, lm.then(|| format!("v{version}")), "({ctx})");
                         if lm {
                             // A full cache drops the copy checked longest ago.
                             if !known.contains_key(&url) && known.len() >= 48 {
@@ -350,12 +347,16 @@ fn cache_once(seed: u64) {
                                 known.remove(&oldest.unwrap_or_default());
                             }
                             known.insert(url.clone(), (version, format!("v{version}"), clock.get()));
+                        } else {
+                            // An undated body replaces the copy: none is kept.
+                            known.remove(&url);
                         }
                     }
-                    (Reply::NotModified, Ok((body, None))) => {
+                    (Reply::NotModified, Ok((body, date, None))) => {
                         let entry = known.get_mut(&url).filter(|_| since.is_some());
                         let entry = entry.unwrap_or_else(|| panic!("a 304 answered without a copy ({ctx})"));
                         assert_eq!(body["v"], entry.0, "({ctx})");
+                        assert_eq!(date.as_ref(), Some(&entry.1), "({ctx})");
                         entry.2 = clock.get();
                     }
                     (Reply::NotModified, Err(_)) => assert!(since.is_none(), "a 304 for a copy we have failed ({ctx})"),

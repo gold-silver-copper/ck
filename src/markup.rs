@@ -5,7 +5,8 @@ use std::collections::HashSet;
 
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use unicode_width::UnicodeWidthStr;
+use ratatui::buffer::CellWidth;
+use unicode_segmentation::UnicodeSegmentation;
 
 use crate::model::{Anchor, Link, Target};
 use crate::theme::mark;
@@ -69,7 +70,7 @@ struct Open {
     name: String,
     style: Style,
     href: Option<String>,
-    /// `<pre>` or a highlighted code `<div>`.
+    /// `<pre>`, a highlighted code `<div>` or jschan's `span.code`.
     code: bool,
 }
 
@@ -93,7 +94,13 @@ pub fn parse_html(html: &str, flavor: Flavor) -> Parsed {
             } else {
                 let text = text.replace('\r', "");
                 let newlines = matches!(flavor, Flavor::Lynxchan | Flavor::Jschan);
-                let text = if newlines { text } else { text.replace('\n', " ") };
+                // Elsewhere a newline is a space, but none at the start of a line, where a
+                // browser shows nothing (FoolFuuka writes `<br />\n`).
+                let text = match (newlines, b.cur.is_empty()) {
+                    (true, _) => text,
+                    (false, true) => text.trim_start_matches('\n').replace('\n', " "),
+                    (false, false) => text.replace('\n', " "),
+                };
                 let href = stack.iter().rev().find_map(|o| o.href.as_deref());
                 for (i, part) in text.split('\n').enumerate() {
                     if i > 0 {
@@ -133,7 +140,10 @@ pub fn parse_html(html: &str, flavor: Flavor) -> Parsed {
             }
             _ => {
                 let class = attr(tag_body, "class").unwrap_or_default().to_ascii_lowercase();
-                let block = name == "pre" || (name == "div" && class.contains("hljs"));
+                // jschan's code blocks are `<span class='code hljs'>` (or just 'code' when not highlighted).
+                let block = name == "pre"
+                    || (name == "div" && class.contains("hljs"))
+                    || (name == "span" && class.split_whitespace().any(|c| c == "code"));
                 let base = stack.last().map(|o| o.style).unwrap_or_default();
                 let href = if name == "a" { attr(tag_body, "href").map(|h| decode(&h)) } else { None };
                 // Links to other sites, as opposed to quote links (which have a class saying so).
@@ -174,6 +184,7 @@ pub fn parse_html(html: &str, flavor: Flavor) -> Parsed {
                 }
                 if block {
                     b.end_line();
+                    b.code_start = true;
                 }
                 stack.push(Open { name, style, href, code: block });
             }
@@ -228,6 +239,8 @@ struct Builder {
     cur_len: usize,
     /// The current line is part of a code block.
     cur_code: bool,
+    /// A code block has just opened: a newline right at its start is no line (as in `<pre>`).
+    code_start: bool,
     /// Don't merge the next text into the last span (it's a quote link).
     sealed: bool,
     quotes: Vec<u64>,
@@ -319,7 +332,12 @@ impl Builder {
 
     /// Text inside a code block: whitespace kept, newlines are line breaks, no quote links.
     fn code_text(&mut self, text: &str, style: Style) {
-        for (i, part) in text.replace('\r', "").split('\n').enumerate() {
+        let text = text.replace('\r', "");
+        let text = match std::mem::take(&mut self.code_start) {
+            true => text.strip_prefix('\n').unwrap_or(&text),
+            false => &text,
+        };
+        for (i, part) in text.split('\n').enumerate() {
             if i > 0 {
                 self.newline();
             }
@@ -511,6 +529,27 @@ pub fn for_terminal(s: &str) -> std::borrow::Cow<'_, str> {
     std::borrow::Cow::Owned(out)
 }
 
+/// The cells `s` takes as ratatui draws it: a grapheme at a time, control characters left
+/// out. Measured whole, some text is narrower than that (unicode-width counts Arabic "لا"
+/// as one cell, but it's two graphemes, drawn in two), and a line measured so runs past
+/// the edge and is cut off.
+pub fn columns(s: &str) -> usize {
+    if s.is_ascii() {
+        return s.bytes().filter(|b| !b.is_ascii_control()).count();
+    }
+    // Latin, Greek and Cyrillic letters are each a grapheme of their own: no need to find them.
+    let alone = |c: char| matches!(c, '\0'..='\u{2ff}' | '\u{370}'..='\u{482}' | '\u{48a}'..='\u{52f}');
+    if s.chars().all(alone) {
+        return s.chars().filter(|c| !c.is_control()).map(|c| unicode_width::UnicodeWidthChar::width(c).unwrap_or(0)).sum();
+    }
+    s.graphemes(true).filter(|g| !g.contains(char::is_control)).map(|g| usize::from(g.cell_width())).sum()
+}
+
+/// The cells a line takes, as `columns` measures them.
+pub fn line_columns(line: &Line) -> usize {
+    line.spans.iter().map(|s| columns(&s.content)).sum()
+}
+
 /// `line` with each byte range in `ranges` restyled by `f` (given the range's index), its
 /// spans split where needed.
 pub fn restyle(line: &Line<'static>, ranges: &[(usize, usize)], f: impl Fn(Style, usize) -> Style) -> Line<'static> {
@@ -656,7 +695,7 @@ pub fn wrap(line: &Line<'static>, width: usize) -> Vec<Line<'static>> {
 
     for span in &line.spans {
         for token in split_keep_spaces(&span.content) {
-            let tw = token.width();
+            let tw = columns(token);
             let is_space = token.starts_with(' ');
             if cur_w.saturating_add(tw) <= width {
                 push_merged(&mut cur, token, span.style);
@@ -670,13 +709,13 @@ pub fn wrap(line: &Line<'static>, width: usize) -> Vec<Line<'static>> {
                 push_merged(&mut cur, token, span.style);
                 cur_w = tw;
             } else {
-                for ch in token.chars() {
-                    let cw = ch.to_string().width();
+                for g in token.graphemes(true) {
+                    let cw = columns(g);
                     if cur_w.saturating_add(cw) > width {
                         out.push(Line::from(std::mem::take(&mut cur)));
                         cur_w = 0;
                     }
-                    push_merged(&mut cur, &ch.to_string(), span.style);
+                    push_merged(&mut cur, g, span.style);
                     cur_w = cur_w.saturating_add(cw);
                 }
             }
@@ -692,11 +731,8 @@ fn wrap_code(line: &Line<'static>, width: usize) -> Vec<Line<'static>> {
     let mut cur: Vec<Span<'static>> = Vec::new();
     let mut cur_w = 0usize;
     for span in &line.spans {
-        for ch in span.content.chars() {
-            let mut buf = [0; 4];
-            let ch = &*ch.encode_utf8(&mut buf);
-            // Measured as a string, as it's drawn (a few characters are wider that way).
-            let cw = ch.width();
+        for ch in span.content.graphemes(true) {
+            let cw = columns(ch);
             if cur_w > 0 && cur_w.saturating_add(cw) > width {
                 out.push(Line::from(std::mem::take(&mut cur)).style(CODE_LINE));
                 // The marker only where the character still fits beside it (not at width 2).
@@ -923,12 +959,45 @@ mod tests {
     }
 
     #[test]
+    fn jschan_samples() {
+        // Code blocks are span.code: kept as written, no quote links or URLs, and the
+        // highlighter's note on the language isn't shown.
+        let p = parse_html(&sample("jschan_code"), Flavor::Jschan);
+        let code = code_lines(&p);
+        assert_eq!(code, ["def main():", "    print(\">>2 see https://example.com/x\")", ">>3   kept   apart"]);
+        assert_eq!((p.quotes.as_slice(), p.urls.len()), (&[1, 4][..], 0));
+        let lines: Vec<_> = p.lines.iter().map(text).collect();
+        assert_eq!(lines.first().map(String::as_str), Some(">>1  "));
+        assert_eq!(lines.last().map(String::as_str), Some(">>4 after"));
+        assert_ne!(p.lines.last().map(|l| l.style), Some(CODE_LINE));
+    }
+
+    #[test]
     fn wrapping() {
         let l = Line::from("aaa bbb ccc");
         let w: Vec<_> = wrap(&l, 7).iter().map(text).collect();
         assert_eq!(w, ["aaa bbb", "ccc"]);
         let w: Vec<_> = wrap(&Line::from("abcdefghij"), 4).iter().map(text).collect();
         assert_eq!(w, ["abcd", "efgh", "ij"]);
+    }
+
+    #[test]
+    fn text_is_measured_as_drawn() {
+        use ratatui::buffer::Buffer;
+        use ratatui::layout::Rect;
+        // unicode-width counts "لا" as one cell, but ratatui draws its two graphemes in two.
+        assert_eq!([columns("لا"), columns("日本"), columns("e\u{301}"), columns("a\tb")], [2, 4, 1, 2]);
+        // Each wrapped line is drawn whole; no word is cut off at the edge.
+        for (line, width) in [("لا ".repeat(36), 40), ("لا".repeat(30), 7)] {
+            let wrapped = wrap(&Line::from(line.clone()), width);
+            assert_eq!(wrapped.iter().map(text).collect::<String>().replace(' ', ""), line.replace(' ', ""));
+            for l in &wrapped {
+                let mut buf = Buffer::empty(Rect::new(0, 0, 50, 1));
+                let (x, _) = buf.set_line(0, 0, l, u16::try_from(width).unwrap());
+                assert_eq!(usize::from(x), line_columns(l), "{:?}", text(l));
+                assert!(line_columns(l) <= width);
+            }
+        }
     }
 
     #[test]

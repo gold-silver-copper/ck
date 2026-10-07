@@ -342,11 +342,12 @@ impl Cache {
         Self { entries: HashMap::new(), cap }
     }
 
-    /// The cached body if it was checked less than `MIN_REFETCH` ago, with its age.
-    fn fresh(&self, url: &str, now: Instant) -> Option<(Value, Duration)> {
+    /// The cached body and its date if it was checked less than `MIN_REFETCH` ago, with its
+    /// age.
+    fn fresh(&self, url: &str, now: Instant) -> Option<(Value, Option<String>, Duration)> {
         let e = self.entries.get(url)?;
         let age = now.saturating_duration_since(e.checked?);
-        (age < MIN_REFETCH).then(|| (e.body.clone(), age))
+        (age < MIN_REFETCH).then(|| (e.body.clone(), e.last_modified.clone(), age))
     }
 
     fn seed(&mut self, url: &str, last_modified: Option<String>, body: Value) {
@@ -371,13 +372,13 @@ impl Cache {
         self.entries.get(url)?.last_modified.clone()
     }
 
-    /// Fold a response into the cache and return the body to use.
-    fn update(&mut self, url: &str, raw: Raw, now: Instant) -> Result<Value> {
+    /// Fold a response into the cache and return the body to use, with its date.
+    fn update(&mut self, url: &str, raw: Raw, now: Instant) -> Result<(Value, Option<String>)> {
         match raw.status {
             304 => {
                 if let Some(e) = self.entries.get_mut(url) {
                     e.checked = Some(now);
-                    return Ok(e.body.clone());
+                    return Ok((e.body.clone(), e.last_modified.clone()));
                 }
                 anyhow::bail!("{url} answered 304 Not Modified to a request we have no copy for")
             }
@@ -386,10 +387,14 @@ impl Cache {
                     serde_json::from_str(&raw.body).with_context(|| format!("{url} did not return JSON"))?;
                 if raw.last_modified.is_some() {
                     self.make_room(url);
-                    let entry = Entry { last_modified: raw.last_modified, body: body.clone(), checked: Some(now) };
+                    let entry = Entry { last_modified: raw.last_modified.clone(), body: body.clone(), checked: Some(now) };
                     self.entries.insert(url.to_string(), entry);
+                } else {
+                    // Without a date the new body can't be revalidated, and the old one's date
+                    // could get a 304 that brings the old body back.
+                    self.entries.remove(url);
                 }
-                Ok(body)
+                Ok((body, raw.last_modified))
             }
             code @ (404 | 410) => {
                 self.entries.remove(url);
@@ -415,22 +420,25 @@ fn check_status(code: u16, url: &str) -> Result<()> {
 }
 
 /// The cache logic around a transport, separated so it can be tested without the network.
+/// The body comes with its own `Last-Modified` (not whatever the cache holds by the time
+/// the caller asks, which another fetch of the URL may have replaced), and its age if it
+/// was answered from the cache.
 pub fn cached_get(
     cache: &Mutex<Cache>,
     url: &str,
     now: impl Fn() -> Instant,
     transport: impl FnOnce(&str, Option<&str>) -> Result<Raw>,
-) -> Result<(Value, Option<Duration>)> {
+) -> Result<(Value, Option<String>, Option<Duration>)> {
     let since = {
         let c = lock(cache);
-        if let Some((body, age)) = c.fresh(url, now()) {
-            return Ok((body, Some(age)));
+        if let Some((body, last_modified, age)) = c.fresh(url, now()) {
+            return Ok((body, last_modified, Some(age)));
         }
         c.last_modified(url)
     };
     let raw = transport(url, since.as_deref())?;
-    let body = lock(cache).update(url, raw, now())?;
-    Ok((body, None))
+    let (body, last_modified) = lock(cache).update(url, raw, now())?;
+    Ok((body, last_modified, None))
 }
 
 fn transport(url: &str, since: Option<&str>) -> Result<Raw> {
@@ -464,11 +472,10 @@ pub fn get_json(url: &str) -> Result<Value> {
     if let Some(copy) = COPIES.with(|c| c.borrow().as_ref().map(|m| m.get(url).cloned())) {
         return copy.ok_or_else(|| anyhow::anyhow!("{url}: no copy kept"));
     }
-    let (body, age) = cached_get(&CACHE, url, Instant::now, transport)?;
+    let (body, last_modified, age) = cached_get(&CACHE, url, Instant::now, transport)?;
     CACHED_AGE.set(age);
     RECORD.with(|r| {
         if let Some(r) = r.borrow_mut().as_mut() {
-            let last_modified = lock(&CACHE).last_modified(url);
             r.push(Copy { url: url.to_string(), last_modified, body: body.clone() });
         }
     });
@@ -508,13 +515,22 @@ pub fn download_to(url: &str, path: &std::path::Path) -> Result<()> {
     throttle(url, Priority::Low)?;
     let mut resp = AGENT.get(url).call().with_context(|| format!("GET {url}"))?;
     check_status(resp.status().as_u16(), url)?;
+    let body = resp.body_mut().with_config().limit(1 << 30).reader();
+    write_through_temp(path, body).with_context(|| format!("downloading {url}"))
+}
+
+/// Write what `body` reads into `path` through a temp file beside it, renamed into place.
+/// Each write has a temp file of its own, so two downloads of one file at once (saving a
+/// file and then the whole thread, say) don't write into one, or remove the other's.
+fn write_through_temp(path: &std::path::Path, mut body: impl std::io::Read) -> Result<()> {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let mut tmp = path.as_os_str().to_owned();
-    tmp.push(".part");
+    tmp.push(format!(".{}-{n}.part", std::process::id()));
     let tmp = std::path::PathBuf::from(tmp);
     let result = (|| -> Result<()> {
         let mut file = std::fs::File::create(&tmp).with_context(|| format!("creating {}", tmp.display()))?;
-        let mut body = resp.body_mut().with_config().limit(1 << 30).reader();
-        std::io::copy(&mut body, &mut file).with_context(|| format!("downloading {url}"))?;
+        std::io::copy(&mut body, &mut file)?;
         std::fs::rename(&tmp, path).with_context(|| format!("renaming to {}", path.display()))
     })();
     if result.is_err() {
@@ -663,7 +679,7 @@ mod tests {
         let seen = RefCell::new(Vec::new());
 
         // First fetch: no If-Modified-Since.
-        let (v, age) = cached_get(&cache, "u", clock, |_, since| {
+        let (v, _, age) = cached_get(&cache, "u", clock, |_, since| {
             seen.borrow_mut().push(since.map(String::from));
             Ok(raw(200, Some("LM1"), r#"{"n":1}"#))
         })
@@ -672,12 +688,12 @@ mod tests {
 
         // Within MIN_REFETCH: answered from cache, transport not called.
         *now.borrow_mut() = t0 + Duration::from_secs(4);
-        let (v, age) = cached_get(&cache, "u", clock, |_, _| panic!("should not fetch")).unwrap();
+        let (v, _, age) = cached_get(&cache, "u", clock, |_, _| panic!("should not fetch")).unwrap();
         assert_eq!((v["n"].as_u64(), age), (Some(1), Some(Duration::from_secs(4))));
 
         // After MIN_REFETCH: revalidate with If-Modified-Since, 304 serves the cached copy.
         *now.borrow_mut() = t0 + Duration::from_secs(11);
-        let (v, age) = cached_get(&cache, "u", clock, |_, since| {
+        let (v, _, age) = cached_get(&cache, "u", clock, |_, since| {
             seen.borrow_mut().push(since.map(String::from));
             Ok(raw(304, None, ""))
         })
@@ -690,9 +706,71 @@ mod tests {
 
         // New content replaces the entry.
         *now.borrow_mut() = t0 + Duration::from_secs(30);
-        let (v, _) = cached_get(&cache, "u", clock, |_, _| Ok(raw(200, Some("LM2"), r#"{"n":2}"#))).unwrap();
+        let (v, _, _) = cached_get(&cache, "u", clock, |_, _| Ok(raw(200, Some("LM2"), r#"{"n":2}"#))).unwrap();
         assert_eq!(v["n"].as_u64(), Some(2));
         assert_eq!(*seen.borrow(), [None, Some("LM1".to_string())]);
+    }
+
+    #[test]
+    fn a_body_comes_with_its_own_date() {
+        let cache = Mutex::new(Cache::new(4));
+        let t0 = Instant::now();
+        let got = |t, lm: &str, n| cached_get(&cache, "u", || t, |_, _| Ok(raw(200, Some(lm), &format!(r#"{{"n":{n}}}"#)))).unwrap();
+        assert_eq!(got(t0, "LM1", 1).1.as_deref(), Some("LM1"));
+        // Answered from the cache, and after a 304: the cached copy's date.
+        let (_, lm, age) = got(t0 + Duration::from_secs(1), "LMx", 9);
+        assert_eq!((lm.as_deref(), age.is_some()), (Some("LM1"), true));
+        let t1 = t0 + Duration::from_secs(11);
+        let (v, lm, _) = cached_get(&cache, "u", || t1, |_, _| Ok(raw(304, None, ""))).unwrap();
+        assert_eq!((v["n"].as_u64(), lm.as_deref()), (Some(1), Some("LM1")));
+        // Another fetch of the URL answered while this one waited: each keeps its own date,
+        // whichever the cache ends up with.
+        let t2 = t1 + Duration::from_secs(11);
+        let (v, lm, _) = cached_get(&cache, "u", || t2, |_, _| {
+            let (v, lm, _) = got(t2, "LM3", 3);
+            assert_eq!((v["n"].as_u64(), lm.as_deref()), (Some(3), Some("LM3")));
+            Ok(raw(200, Some("LM2"), r#"{"n":2}"#))
+        })
+        .unwrap();
+        assert_eq!((v["n"].as_u64(), lm.as_deref()), (Some(2), Some("LM2")));
+    }
+
+    #[test]
+    fn a_new_body_without_a_date_drops_the_old_copy() {
+        let cache = Mutex::new(Cache::new(4));
+        let t0 = Instant::now();
+        cached_get(&cache, "u", || t0, |_, _| Ok(raw(200, Some("LM1"), r#"{"n":1}"#))).unwrap();
+        let t1 = t0 + Duration::from_secs(11);
+        let (v, _, _) = cached_get(&cache, "u", || t1, |_, _| Ok(raw(200, None, r#"{"n":2}"#))).unwrap();
+        assert_eq!(v["n"].as_u64(), Some(2));
+        // Asking If-Modified-Since LM1 could be answered 304, and that would bring back n=1.
+        let t2 = t1 + Duration::from_secs(11);
+        let (v, _, _) = cached_get(&cache, "u", || t2, |_, since| {
+            assert_eq!(since, None);
+            Ok(raw(200, None, r#"{"n":3}"#))
+        })
+        .unwrap();
+        assert_eq!(v["n"].as_u64(), Some(3));
+    }
+
+    #[test]
+    fn overlapping_downloads_of_a_file_both_land() {
+        /// Reads `data`, but first lets another download of the same file run start to end.
+        struct Overlapped<'a>(&'a std::path::Path, Option<&'static [u8]>, &'static [u8]);
+        impl std::io::Read for Overlapped<'_> {
+            fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+                if let Some(other) = self.1.take() {
+                    write_through_temp(self.0, other).unwrap();
+                }
+                std::io::Read::read(&mut self.2, buf)
+            }
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("1.png");
+        write_through_temp(&path, Overlapped(&path, Some(b"first"), b"second")).unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"second");
+        // No temp file is left behind.
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
     }
 
     #[test]

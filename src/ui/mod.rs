@@ -118,7 +118,7 @@ fn wrap_words(text: &str, width: usize) -> Vec<String> {
     let mut lines = vec![String::new()];
     for word in text.split(' ') {
         let Some(line) = lines.last_mut() else { break };
-        if !line.is_empty() && line.width() + 1 + word.width() > width {
+        if !line.is_empty() && markup::columns(line) + 1 + markup::columns(word) > width {
             lines.push(word.to_string());
         } else {
             if !line.is_empty() {
@@ -152,6 +152,8 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     // A saved copy is read offline: its images only come from disk.
     app.images.offline = app.tab.view == View::Thread && app.tab.saved().is_some();
     f.buffer_mut().set_style(all, Style::new().fg(t.text).bg(t.background));
+    // Only chips drawn this frame can be clicked: none under the viewer.
+    app.tab_chips.clear();
     if app.tab.viewer().is_some() {
         draw_viewer(f, app);
     } else {
@@ -198,9 +200,11 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         _ => {}
     }
     app.images.end_frame();
-    // Every 24-bit color to the nearest of 256, for terminals without 24-bit color.
-    if !app.truecolor {
-        for cell in f.buffer_mut().content.iter_mut() {
+    // Text in the terminal's own color on a filled color, in one that reads on it; and every
+    // 24-bit color to the nearest of 256, for terminals without 24-bit color.
+    for cell in f.buffer_mut().content.iter_mut() {
+        cell.fg = theme::ink(cell.fg, cell.bg);
+        if !app.truecolor {
             cell.fg = theme::to_256(cell.fg);
             cell.bg = theme::to_256(cell.bg);
         }
@@ -210,7 +214,6 @@ pub fn draw(f: &mut Frame, app: &mut App) {
 /// With more than one tab, their chips in the row under the bar (the current one stands
 /// out); clicking one switches to it.
 fn draw_tab_row(f: &mut Frame, app: &mut App, area: Rect) {
-    app.tab_chips.clear();
     let n = app.tabs.len();
     if n < 2 {
         return;
@@ -506,7 +509,7 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
 /// others, in order, as fit whole.
 fn fit_hints(mut hints: Vec<(String, &'static str)>, width: usize) -> Line<'static> {
     let t = theme();
-    let wide = |(key, label): &(String, &str)| key.width() + 1 + label.width() + 3;
+    let wide = |(key, label): &(String, &str)| markup::columns(key) + 1 + markup::columns(label) + 3;
     let last = hints.pop();
     let mut room = width.saturating_sub(1).saturating_sub(last.as_ref().map_or(0, wide));
     let fitting = hints.into_iter().take_while(|h| {
@@ -792,8 +795,8 @@ fn draw_rows(
 
 /// Left and right parts of a line, the right one pushed to `width`.
 fn spread(mut left: Vec<Span<'static>>, right: Vec<Span<'static>>, width: usize) -> Line<'static> {
-    let lw: usize = left.iter().map(|s| s.width()).sum();
-    let rw: usize = right.iter().map(|s| s.width()).sum();
+    let lw: usize = left.iter().map(|s| markup::columns(&s.content)).sum();
+    let rw: usize = right.iter().map(|s| markup::columns(&s.content)).sum();
     if lw + rw + 2 <= width {
         left.push(Span::raw(" ".repeat(width - lw - rw)));
         left.extend(right);
@@ -812,8 +815,8 @@ fn panel(f: &mut Frame, width: u16, height: u16, title: &str, hint: &str) -> Rec
     let title_row = Rect::new(r.x, r.y, r.width, 1);
     fill(f, title_row, t.primary_container);
     // When both don't fit, the title wins.
-    let fits = title.width() + hint.width() + 6 <= r.width as usize;
-    let hint_w = if fits { hint.width() as u16 + 2 } else { 0 };
+    let fits = markup::columns(title) + markup::columns(hint) + 6 <= r.width as usize;
+    let hint_w = if fits { cells(markup::columns(hint)) + 2 } else { 0 };
     let title = truncate(title, (r.width.saturating_sub(hint_w) as usize).saturating_sub(3));
     put(f, r.x, r.y, r.width.saturating_sub(hint_w), Line::styled(format!("  {title}"), bold(t.on_primary_container)));
     if fits {
@@ -822,20 +825,21 @@ fn panel(f: &mut Frame, width: u16, height: u16, title: &str, hint: &str) -> Rec
     Rect::new(r.x + 2, r.y + 2, r.width.saturating_sub(4), r.height.saturating_sub(3))
 }
 
+/// `s` in `width` cells (as drawn), cut short with "…" if it's wider.
 pub(crate) fn truncate(s: &str, width: usize) -> String {
-    if s.width() <= width {
+    if markup::columns(s) <= width {
         return s.to_string();
     }
     let mut out = String::new();
     let mut w = 0;
-    for c in s.chars() {
-        let cw = unicode_width::UnicodeWidthChar::width(c).unwrap_or(0);
-        if w + cw > width.saturating_sub(1) {
+    for g in unicode_segmentation::UnicodeSegmentation::graphemes(s, true) {
+        let gw = markup::columns(g);
+        if w + gw > width.saturating_sub(1) {
             out.push('…');
             return out;
         }
-        out.push(c);
-        w += cw;
+        out.push_str(g);
+        w += gw;
     }
     out
 }

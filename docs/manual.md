@@ -153,7 +153,8 @@ screen), posts a refresh brings come into view: the first new one is selected, p
 `j` would place it, and `j` reads on through the rest. Hidden posts are passed over, and in
 a conversation only new posts that belong to it count. Reading anywhere else, nothing
 moves; the top bar says how many new posts are below ("3 new, 2 below ↓"), and `U` goes to
-the first. `follow_new_posts = false` (or Settings › Background refresh › Reading the end)
+the first. Hidden posts aren't new there either (nor in the terminal title) until `Z` shows
+them. `follow_new_posts = false` (or Settings › Background refresh › Reading the end)
 turns it off. A thread in another tab follows when you come back to it and it refreshes.
 
 ### Long posts
@@ -195,8 +196,9 @@ ID:…", everything works as in the whole thread, and `esc` or `I` goes back. It
 remembered across starts (IDs are the thread's alone). Filters can catch IDs and flags too
 (see Filters).
 
-In the gallery (`V`), `h`/`j`/`k`/`l` move, `enter` views (`h`/`l` there go through every
-file of the thread), `d` saves the file, `esc` returns to its post.
+In the gallery (`V`), `h`/`j`/`k`/`l` move (the wheel a row at a time), `enter` views
+(`h`/`l` there go through every file of the thread), `d` saves the file, `esc` returns to
+its post.
 
 Copying uses the terminal's clipboard escape (OSC 52), which also works over SSH; in tmux it
 needs `set -g set-clipboard on`. On a local machine ck also uses `pbcopy`, `wl-copy`,
@@ -243,8 +245,10 @@ anyway). The tabs are part of the session that's restored at the next start.
 ### Going to a URL
 
 `:` asks where to go. Paste a thread or board URL from any of your sites (pasting while
-nothing else is being typed starts this by itself), or type a short form. A link to a site
-ck doesn't have yet offers to add it (see [Adding sites](#adding-sites)), then goes there.
+nothing else is being typed starts this by itself), or type a short form. A site's own page
+(`https://lainchan.org/index.html`) goes to its board list, and a jschan site's
+`/overboard.html` to its overboard. A link to a site ck doesn't have yet offers to add it
+(see [Adding sites](#adding-sites)), then goes there.
 
 | input                  | goes to                                            |
 |------------------------|----------------------------------------------------|
@@ -290,7 +294,8 @@ the viewer's own commands apply.
 one line, so replies to them still make sense. They're marked just "hidden", not why
 (that would show what a filter or hidden word hides); `H` on one says why. Until `Z`
 shows them, they're left out of the thread's search and gallery too, and a quote of one
-previews only "hidden". What you hide is remembered per board in
+previews only "hidden". Hiding, `Z` and filter changes apply to every tab at once. What
+you hide is remembered per board in
 the data directory.
 
 `recursive_hiding = true` (or Settings › Hidden replies) hides the replies too: in a
@@ -453,8 +458,9 @@ half.
 When the thread you open has 404'd and there's a copy, ck offers it ("a saved copy from
 2h ago: enter opens it"), and a thread that dies while you read it becomes its copy.
 Copies take at most `saved_max_mb` (500 MB by default; 0 for no limit): past that, the
-oldest copies of dead threads you no longer watch are removed. A watched thread's copy is
-never removed.
+oldest copies of threads you don't watch are removed, dead or not (one you saved as a page,
+or stopped watching, counts too). A watched thread's copy is never removed, even when
+watched threads alone take more.
 
 ### Following a general
 
@@ -471,8 +477,10 @@ Watched shows "follows /lmg/" on followed threads; `F` again stops following.
 
 Catalogs mark threads that weren't there on your previous visit with "new" (the header
 counts them), and threads you've opened before show how many replies they've gained since,
-like `+12`. This is kept per board in the data directory (threads are forgotten a week
-after they leave the catalog) and needs no extra requests.
+like `+12`. A board's first catalog marks nothing new, even when you've opened some of
+its threads before from elsewhere. This is kept per board in the data directory (threads
+are forgotten a week after they leave the catalog, or, if you never saw them in it, a
+week after you last opened them) and needs no extra requests.
 
 Threads you watch are marked ◉. `watched_first = true` (or Settings › Watched first) puts
 them first in every catalog, then the rest, each in the order the sort gives them. Threads
@@ -616,12 +624,15 @@ ck draws flat: no lines or boxes, just areas of color. The screen is the darkest
 catalog entries and posts are cards a step lighter, and popups another step up; the
 selected row, card or post is tinted and marked by a stripe in the theme's accent color.
 
-`,` opens Settings. Its options are saved to your config file, keeping your comments,
-and the file is created from the default if you don't have one yet:
+`,` opens Settings. Its options are saved to your config file, keeping your comments
+(a symlinked config is written through the link, and keeps its permissions), and the file
+is created from the default if you don't have one yet:
 
 - **Theme**: pick from the built-in themes (material, material-light, nord, gruvbox,
   catppuccin, tokyo-night, solarized-light, terminal, which uses your terminal's own
-  colors, and mono, which uses none: the default when `NO_COLOR` is set) and your own.
+  colors on its own background, light or dark (cards, panels and bars aren't filled, and
+  the selection shows by its bar), and mono, which uses none: the default when `NO_COLOR`
+  is set) and your own.
   Nothing depends on color alone: the selection has a bar, a focused part is bold and
   underlined, and spoilers are shaded out until revealed. The screen changes as you move through the list; `enter` keeps
   the theme, `esc` goes back.

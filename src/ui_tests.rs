@@ -1081,6 +1081,23 @@ fn tabs_row() {
     insta::assert_snapshot!("tabs_row_backgrounds", bg_map(&mut a));
 }
 
+#[test]
+fn tab_chips_hidden_under_the_viewer_cant_be_clicked() {
+    use ratatui::crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+    let mut a = catalog_app(false);
+    a.tab.catalog_list.state.select(Some(1));
+    a.new_tab();
+    snapshot(&mut a);
+    let (chip, other) = a.tab_chips.iter().find(|&&(_, i)| i != a.active).copied().unwrap();
+    // The viewer is drawn over the whole screen: the row the chips were on is its own.
+    a.tab.popup = Some(crate::app::TabPopup::Viewer(Viewer::new(vec![file("op.png")], 0, None)));
+    snapshot(&mut a);
+    let active = a.active;
+    let click = MouseEvent { kind: MouseEventKind::Down(MouseButton::Left), column: chip.x, row: chip.y, modifiers: KeyModifiers::NONE };
+    a.on_mouse(click, std::time::Instant::now());
+    assert!(a.active == active && active != other && a.tab.viewer().is_some());
+}
+
 
 #[test]
 fn help_fits_at_110x36_and_scrolls_when_small() {
@@ -1702,4 +1719,18 @@ fn footer_offers_what_the_selected_post_has() {
     // The catalog: v views the OP's image.
     let mut a = catalog_app(false);
     assert!(footer(&mut a).contains("v view image"));
+}
+
+#[test]
+fn arabic_text_fits_where_it_is_drawn() {
+    // unicode-width counts "لا" as one cell; it's drawn in two, and measured so.
+    let mut a = thread_app(false);
+    let t = a.tab.thread.as_mut().unwrap();
+    t.posts[0].body = vec![ratatui::text::Line::from("لا ".repeat(36))];
+    t.cache.clear();
+    t.layout = None;
+    let (text, _) = render_at(&mut a, 60, 30);
+    assert_eq!(text.matches("لا").count(), 36, "{text}");
+    let cut = crate::ui::truncate(&"لا".repeat(10), 7);
+    assert_eq!((cut.as_str(), crate::markup::columns(&cut)), ("لالالا…", 7));
 }

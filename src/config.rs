@@ -24,7 +24,7 @@ pub struct Config {
     #[serde(default = "default_refresh_watched")]
     pub refresh_watched_secs: u64,
     /// Saved copies of threads (see the Saved view) are kept to this many megabytes: past it,
-    /// the oldest dead, unwatched ones go. 0 keeps everything.
+    /// the oldest ones of threads not watched go. 0 keeps everything.
     #[serde(default = "default_saved_max_mb")]
     pub saved_max_mb: u64,
     /// The last copy of each catalog and thread opened is kept (in the cache directory) to
@@ -688,6 +688,24 @@ mod tests {
             let e = toml::from_str::<Config>(text).unwrap_err().to_string();
             assert!(e.contains(&format!("unknown field `{key}`")), "{e}");
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn edits_keep_a_linked_config_and_its_mode() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let (real, link) = (dir.path().join("dotfiles/ck.toml"), dir.path().join("config.toml"));
+        std::fs::create_dir(dir.path().join("dotfiles")).unwrap();
+        std::fs::write(&real, "[[site]]\nname = \"x\"\nkind = \"4chan\"\n").unwrap();
+        std::fs::set_permissions(&real, std::fs::Permissions::from_mode(0o600)).unwrap();
+        std::os::unix::fs::symlink("dotfiles/ck.toml", &link).unwrap();
+        edit_at(&link, |d| d["compact_catalog"] = value(true)).unwrap();
+        // The link is still a link, and the file it points to has the edit and its mode.
+        assert!(std::fs::symlink_metadata(&link).unwrap().file_type().is_symlink());
+        assert!(std::fs::read_to_string(&real).unwrap().contains("compact_catalog = true"));
+        assert_eq!(std::fs::metadata(&real).unwrap().permissions().mode() & 0o777, 0o600);
+        assert!(!dir.path().join("dotfiles/ck.toml.tmp").exists() && !dir.path().join("config.toml.tmp").exists());
     }
 
     #[test]

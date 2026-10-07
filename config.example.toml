@@ -70,7 +70,7 @@ refresh_backoff = true
 
 # Watched threads are saved as they refresh, and kept when they die; saving a thread as a
 # page (the . menu) saves one too. They open from the Saved row on the home screen, offline. Past this many megabytes,
-# the oldest copies of dead threads you no longer watch are removed (0 keeps everything).
+# the oldest copies of threads you don't watch are removed (0 keeps everything).
 saved_max_mb = 500
 
 # The last copy of each catalog and thread you open is kept in the cache directory, so
