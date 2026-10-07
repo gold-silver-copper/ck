@@ -1,5 +1,9 @@
 # ck
 
+<video src="https://github.com/gold-silver-copper/ck/raw/main/ck-demo.webm" controls width="100%"></video>
+
+[A two-minute tour](ck-demo.webm), recorded with `demo/record.sh`.
+
 A terminal imageboard browser built with [ratatui](https://ratatui.rs). One interface for 4chan, lainchan, and any other chan running a supported engine:
 
 | kind       | engines                                  | examples                         |
