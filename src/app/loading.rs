@@ -129,7 +129,7 @@ impl App {
             self.tab.catalog_cached = Some(tabs::Offline { saved: fetched, dead: false });
             self.show_catalog(posts);
             if let Some(no) = self.tab.pending_catalog
-                && let Some(i) = self.catalog_row(no)
+                && let Some(i) = self.row_of(View::Catalog, &RowKey::Thread(no))
             {
                 self.tab.catalog_list.state.select(Some(i));
             }
@@ -142,7 +142,7 @@ impl App {
         self.tab.catalog_cached = None;
         let keep = self.tab.pending_catalog.or_else(|| self.selected_catalog_no());
         self.show_catalog(posts);
-        self.tab.pending_catalog = keep.filter(|&no| self.catalog_row(no).is_none());
+        self.tab.pending_catalog = keep.filter(|&no| self.row_of(View::Catalog, &RowKey::Thread(no)).is_none());
     }
 
     pub(super) fn catalog_arrived(&mut self, res: Result<Vec<Post>>) {
@@ -153,7 +153,7 @@ impl App {
                 self.show_catalog(posts);
                 self.catalog_seen();
                 if let Some(no) = self.tab.pending_catalog.take()
-                    && let Some(i) = self.catalog_row(no)
+                    && let Some(i) = self.row_of(View::Catalog, &RowKey::Thread(no))
                 {
                     self.tab.catalog_list.state.select(Some(i));
                 }
@@ -292,11 +292,6 @@ impl App {
         self.spawn(format!("Loading thread {no}"), job, App::thread_arrived);
     }
 
-    /// Where thread `no` is among the catalog's rows shown.
-    fn catalog_row(&self, no: u64) -> Option<usize> {
-        self.visible_catalog().iter().position(|&k| self.tab.catalog.get(k).is_some_and(|p| p.no == no))
-    }
-
     /// The selected catalog thread's number, when the catalog is shown.
     fn selected_catalog_no(&self) -> Option<u64> {
         self.selected_index().filter(|_| self.tab.view == View::Catalog).and_then(|i| self.tab.catalog.get(i)).map(|p| p.no)
@@ -308,7 +303,7 @@ impl App {
         let selected = self.tab.pending_catalog.or_else(|| self.selected_catalog_no());
         self.tab.catalog = posts;
         self.remark_catalog();
-        if let Some(i) = selected.and_then(|no| self.catalog_row(no)) {
+        if let Some(i) = selected.and_then(|no| self.row_of(View::Catalog, &RowKey::Thread(no))) {
             self.tab.catalog_list.state.select(Some(i));
         }
         let len = self.visible_catalog().len();
@@ -376,21 +371,18 @@ impl App {
                 tv.media = old.media;
                 let cursor_path = old.entries.get(old.entry()).map(|e| e.path.clone());
                 tv.rebuild_entries();
-                if let Some(e) = cursor_path.and_then(|p| tv.entries.iter().position(|e| e.path == p)) {
+                if let Some(e) = cursor_path.and_then(|p| tv.entry_of(&p)) {
                     tv.set_cursor(e);
                 }
-                let at = |p: &Vec<u64>| tv.entries.iter().position(|e| e.path == *p);
-                tv.anchor = old.top_anchor().and_then(|(i, off)| Some((at(&old.entries.get(i)?.path)?, off)));
+                tv.anchor = old.top_anchor().and_then(|(i, off)| Some((tv.entry_of(&old.entries.get(i)?.path)?, off)));
                 tv.scroll = old.scroll;
                 tv.viewport = old.viewport;
                 tv.cache = old.cache;
                 tv.cache_width = old.cache_width;
                 tv.estimates = old.estimates;
-                // Jumps back and revealed spoilers by post number, since indices can shift.
-                let moved = |i: &usize| old.posts.get(*i).and_then(|p| tv.index.get(&p.no)).copied();
-                tv.jumps = old.jumps.iter().filter_map(moved).collect();
+                tv.jumps = old.jumps;
                 tv.new_after = old.new_after;
-                tv.revealed = old.revealed.iter().filter_map(moved).collect();
+                tv.revealed = old.revealed;
                 tv.reveal_all = old.reveal_all;
                 tv.set_search(old.search);
                 // The focused part, if the post still has it.
@@ -426,7 +418,7 @@ impl App {
         // Following: the first new entry that isn't hidden, revealed as `j` would.
         if let Some(last) = follow
             && let Some(t) = &mut self.tab.thread
-            && let Some(at) = t.entries.iter().position(|e| e.path == last)
+            && let Some(at) = t.entry_of(&last)
             && let Some(next) = t.entries.iter().enumerate().skip(at + 1).find(|(_, e)| !t.is_collapsed(e.post)).map(|(i, _)| i)
         {
             t.set_cursor(next);

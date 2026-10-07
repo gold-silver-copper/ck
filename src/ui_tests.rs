@@ -452,7 +452,8 @@ fn poster_ids_and_flags() {
     render(&mut a);
     a.on_key(KeyEvent::from(KeyCode::Char('f')));
     render(&mut a);
-    let label = a.hints().unwrap().targets.iter().find(|t| matches!(t.to, HintTo::Thread(1, Some(Part::Poster)))).unwrap().label.clone();
+    let second = a.tab.thread.as_ref().unwrap().entries[1].path.clone();
+    let label = a.hints().unwrap().targets.iter().find(|t| matches!(t.to, HintTo::Thread(ref p, Some(Part::Poster)) if *p == second)).unwrap().label.clone();
     type_text(&mut a, &label);
     let (text, _) = render(&mut a);
     let t = a.tab.thread.as_ref().unwrap();
@@ -1294,7 +1295,7 @@ fn link_hints() {
     insta::assert_snapshot!("link_hints_thread", snapshot(&mut a));
     // A label picks its target: here, post 1001's quote of the OP, which jumps there.
     let h = a.hints().unwrap();
-    let label = h.targets.iter().find(|x| matches!(&x.to, crate::app::HintTo::Thread(1, Some(_)))).unwrap().label.clone();
+    let label = h.targets.iter().find(|x| matches!(&x.to, crate::app::HintTo::Thread(p, Some(_)) if p == &[1001])).unwrap().label.clone();
     type_text(&mut a, &label);
     assert!(a.hints().is_none());
     assert_eq!(a.tab.thread.as_ref().unwrap().selected, 0);

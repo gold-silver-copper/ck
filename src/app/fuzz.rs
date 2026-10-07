@@ -1146,8 +1146,8 @@ fn check_thread(t: &ThreadView) -> Result<(), String> {
     if t.entries.get(t.entry()).is_none_or(|e| e.post != t.selected) {
         return Err(format!("entry {} of {} doesn't hold the selected post {}", t.entry(), t.entries.len(), t.selected));
     }
-    if t.entries.iter().any(|e| e.post >= n) || t.matches.iter().any(|&m| m >= n) || t.revealed.iter().any(|&m| m >= n) {
-        return Err(format!("an entry, match or revealed post past the {n} posts"));
+    if t.entries.iter().any(|e| e.post >= n) || t.matches.iter().any(|&m| m >= n) {
+        return Err(format!("an entry or match past the {n} posts"));
     }
     // A conversation shows just its posts, all of them, its own post among them; without
     // one, every post is there, or (`M`) the OP and every post with files.
