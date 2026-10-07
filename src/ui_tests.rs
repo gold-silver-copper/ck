@@ -1720,3 +1720,17 @@ fn footer_offers_what_the_selected_post_has() {
     let mut a = catalog_app(false);
     assert!(footer(&mut a).contains("v view image"));
 }
+
+#[test]
+fn arabic_text_fits_where_it_is_drawn() {
+    // unicode-width counts "لا" as one cell; it's drawn in two, and measured so.
+    let mut a = thread_app(false);
+    let t = a.tab.thread.as_mut().unwrap();
+    t.posts[0].body = vec![ratatui::text::Line::from("لا ".repeat(36))];
+    t.cache.clear();
+    t.layout = None;
+    let (text, _) = render_at(&mut a, 60, 30);
+    assert_eq!(text.matches("لا").count(), 36, "{text}");
+    let cut = crate::ui::truncate(&"لا".repeat(10), 7);
+    assert_eq!((cut.as_str(), crate::markup::columns(&cut)), ("لالالا…", 7));
+}

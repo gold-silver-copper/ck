@@ -105,7 +105,7 @@ pub(super) fn draw_thread(f: &mut Frame, app: &mut App, area: Rect) {
             fill(f, Rect::new(code_x, y, area.right().saturating_sub(code_x + 1), 1), th.code_bg);
         }
         put(f, x + PAD, y, width.saturating_sub(PAD + 2), Line::from(line.spans.clone()));
-        let end = x.saturating_add(PAD).saturating_add(cells(line.width()));
+        let end = x.saturating_add(PAD).saturating_add(cells(markup::line_columns(line)));
         if row == 0 {
             ends.0 = end;
         }
@@ -235,10 +235,10 @@ fn estimate(t: &ThreadView, estimates: &mut HashMap<(u64, u16, bool), usize>, e:
     let rows = |width: usize| width.div_ceil(w).max(1);
     let mut n = 2 + p.files.len();
     if let Some(s) = &p.subject {
-        n += rows(s.width());
+        n += rows(markup::columns(s));
     }
     if !p.body.is_empty() {
-        n += 1 + p.body.iter().map(|l| rows(l.spans.iter().map(|s| s.content.width()).sum())).sum::<usize>();
+        n += 1 + p.body.iter().map(|l| rows(markup::line_columns(l))).sum::<usize>();
     }
     if t.backlinks.get(entry.post).is_some_and(|b| !b.is_empty()) {
         n += 2;
@@ -571,7 +571,7 @@ pub(super) fn post_lines(p: &Post, ctx: &PostCtx, width: usize) -> (Vec<Line<'st
     for (row, line) in out.iter_mut().enumerate() {
         let mut col = 0u16;
         for s in &mut line.spans {
-            let w = s.width() as u16;
+            let w = cells(markup::columns(&s.content));
             if let Some(Color::Rgb(0xfe, hi, lo)) = s.style.underline_color {
                 s.style.underline_color = None;
                 let k = (hi as usize) << 8 | lo as usize;

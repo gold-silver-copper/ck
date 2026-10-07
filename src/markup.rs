@@ -5,7 +5,8 @@ use std::collections::HashSet;
 
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use unicode_width::UnicodeWidthStr;
+use ratatui::buffer::CellWidth;
+use unicode_segmentation::UnicodeSegmentation;
 
 use crate::model::{Anchor, Link, Target};
 use crate::theme::mark;
@@ -528,6 +529,27 @@ pub fn for_terminal(s: &str) -> std::borrow::Cow<'_, str> {
     std::borrow::Cow::Owned(out)
 }
 
+/// The cells `s` takes as ratatui draws it: a grapheme at a time, control characters left
+/// out. Measured whole, some text is narrower than that (unicode-width counts Arabic "لا"
+/// as one cell, but it's two graphemes, drawn in two), and a line measured so runs past
+/// the edge and is cut off.
+pub fn columns(s: &str) -> usize {
+    if s.is_ascii() {
+        return s.bytes().filter(|b| !b.is_ascii_control()).count();
+    }
+    // Latin, Greek and Cyrillic letters are each a grapheme of their own: no need to find them.
+    let alone = |c: char| matches!(c, '\0'..='\u{2ff}' | '\u{370}'..='\u{482}' | '\u{48a}'..='\u{52f}');
+    if s.chars().all(alone) {
+        return s.chars().filter(|c| !c.is_control()).map(|c| unicode_width::UnicodeWidthChar::width(c).unwrap_or(0)).sum();
+    }
+    s.graphemes(true).filter(|g| !g.contains(char::is_control)).map(|g| usize::from(g.cell_width())).sum()
+}
+
+/// The cells a line takes, as `columns` measures them.
+pub fn line_columns(line: &Line) -> usize {
+    line.spans.iter().map(|s| columns(&s.content)).sum()
+}
+
 /// `line` with each byte range in `ranges` restyled by `f` (given the range's index), its
 /// spans split where needed.
 pub fn restyle(line: &Line<'static>, ranges: &[(usize, usize)], f: impl Fn(Style, usize) -> Style) -> Line<'static> {
@@ -673,7 +695,7 @@ pub fn wrap(line: &Line<'static>, width: usize) -> Vec<Line<'static>> {
 
     for span in &line.spans {
         for token in split_keep_spaces(&span.content) {
-            let tw = token.width();
+            let tw = columns(token);
             let is_space = token.starts_with(' ');
             if cur_w.saturating_add(tw) <= width {
                 push_merged(&mut cur, token, span.style);
@@ -687,13 +709,13 @@ pub fn wrap(line: &Line<'static>, width: usize) -> Vec<Line<'static>> {
                 push_merged(&mut cur, token, span.style);
                 cur_w = tw;
             } else {
-                for ch in token.chars() {
-                    let cw = ch.to_string().width();
+                for g in token.graphemes(true) {
+                    let cw = columns(g);
                     if cur_w.saturating_add(cw) > width {
                         out.push(Line::from(std::mem::take(&mut cur)));
                         cur_w = 0;
                     }
-                    push_merged(&mut cur, &ch.to_string(), span.style);
+                    push_merged(&mut cur, g, span.style);
                     cur_w = cur_w.saturating_add(cw);
                 }
             }
@@ -709,11 +731,8 @@ fn wrap_code(line: &Line<'static>, width: usize) -> Vec<Line<'static>> {
     let mut cur: Vec<Span<'static>> = Vec::new();
     let mut cur_w = 0usize;
     for span in &line.spans {
-        for ch in span.content.chars() {
-            let mut buf = [0; 4];
-            let ch = &*ch.encode_utf8(&mut buf);
-            // Measured as a string, as it's drawn (a few characters are wider that way).
-            let cw = ch.width();
+        for ch in span.content.graphemes(true) {
+            let cw = columns(ch);
             if cur_w > 0 && cur_w.saturating_add(cw) > width {
                 out.push(Line::from(std::mem::take(&mut cur)).style(CODE_LINE));
                 // The marker only where the character still fits beside it (not at width 2).
@@ -960,6 +979,25 @@ mod tests {
         assert_eq!(w, ["aaa bbb", "ccc"]);
         let w: Vec<_> = wrap(&Line::from("abcdefghij"), 4).iter().map(text).collect();
         assert_eq!(w, ["abcd", "efgh", "ij"]);
+    }
+
+    #[test]
+    fn text_is_measured_as_drawn() {
+        use ratatui::buffer::Buffer;
+        use ratatui::layout::Rect;
+        // unicode-width counts "لا" as one cell, but ratatui draws its two graphemes in two.
+        assert_eq!([columns("لا"), columns("日本"), columns("e\u{301}"), columns("a\tb")], [2, 4, 1, 2]);
+        // Each wrapped line is drawn whole; no word is cut off at the edge.
+        for (line, width) in [("لا ".repeat(36), 40), ("لا".repeat(30), 7)] {
+            let wrapped = wrap(&Line::from(line.clone()), width);
+            assert_eq!(wrapped.iter().map(text).collect::<String>().replace(' ', ""), line.replace(' ', ""));
+            for l in &wrapped {
+                let mut buf = Buffer::empty(Rect::new(0, 0, 50, 1));
+                let (x, _) = buf.set_line(0, 0, l, u16::try_from(width).unwrap());
+                assert_eq!(usize::from(x), line_columns(l), "{:?}", text(l));
+                assert!(line_columns(l) <= width);
+            }
+        }
     }
 
     #[test]

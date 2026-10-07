@@ -93,11 +93,6 @@ pub fn run(name: &str, long: bool, seed: u64, runs: u64, mut body: impl FnMut(u6
     }
 }
 
-/// Cells a line takes on screen: ratatui skips control characters when drawing.
-fn drawn_width(line: &Line) -> usize {
-    use unicode_width::UnicodeWidthStr;
-    line.spans.iter().map(|s| s.content.chars().filter(|c| !c.is_control()).collect::<String>().width()).sum()
-}
 
 /// The text of a line, spans joined.
 fn text(line: &Line) -> String {
@@ -153,9 +148,9 @@ fn markup_once(seed: u64) {
             let wrapped = markup::wrap(line, width);
             for w in &wrapped {
                 // `wrap` treats widths under 2 as 2, so a wide character always fits.
-                // Only a character wider than the whole width may stick out, alone.
-                let drawn = drawn_width(w);
-                let alone = text(w).trim_start_matches('↪').chars().count() == 1;
+                // Only a grapheme wider than the whole width may stick out, alone.
+                let drawn = markup::line_columns(w);
+                let alone = unicode_segmentation::UnicodeSegmentation::graphemes(text(w).trim_start_matches('↪'), true).count() == 1;
                 assert!(drawn <= width.max(2) || alone, "a {drawn}-wide line at width {width}: {:?} ({})", text(w), ctx());
             }
             if line.style != markup::CODE_LINE {
