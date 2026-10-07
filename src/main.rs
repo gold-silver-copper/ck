@@ -154,7 +154,7 @@ cache:   {}   (thumbnails, at most 200 MB)
 pages:   {}   (the last copy of each catalog and thread, page_cache_mb)
 files:   {}   (downloads, in a folder per thread; download_dir)
 
-Press ? inside ck for the keys. See the README for configuration.
+Press ? inside ck for the keys. The manual (docs/manual.md) has the rest.
 ",
         env!("CARGO_PKG_VERSION"),
         path(Config::path()),
