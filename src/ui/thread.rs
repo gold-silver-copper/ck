@@ -21,7 +21,6 @@ pub(super) fn draw_thread(f: &mut Frame, app: &mut App, area: Rect) {
         t.viewport = area.height as usize;
         t.reveal.get_or_insert(Reveal::Visible);
     }
-    app.hit = Some(Hit::Thread { area });
     let thumbs = app.images.enabled() && area.width >= MIN_THUMB_WIDTH;
     let clock = app.clock;
     if t.layout.as_ref().is_none_or(|l| l.width != area.width || l.thumbs_on != thumbs) {
@@ -78,6 +77,7 @@ pub(super) fn draw_thread(f: &mut Frame, app: &mut App, area: Rect) {
         settle(t, clock);
     }
     let Some(l) = t.layout.as_ref() else { return };
+    app.drawn.body = Some(Hit::Thread { area, scroll: t.scroll });
     let unread = t.unread_line();
     // Where the text on the first and last rows ends, for the markers of a tall post.
     let mut ends = (area.x, area.x);
@@ -382,7 +382,7 @@ fn shown_with(t: &ThreadView, i: usize, ctx: &PostCtx) -> u64 {
     // The post itself, which a refresh may bring changed (a file deleted, say).
     (&p.name, &p.subject, p.plain_text(), p.body.len(), &p.id, &p.flag, ctx.id_count).hash(&mut h);
     for f in &p.files {
-        (&f.url, &f.filename, f.width, f.height, f.size).hash(&mut h);
+        (&f.url, f.kind, &f.filename, f.width, f.height, f.size).hash(&mut h);
     }
     (ctx.focus, ctx.anchor).hash(&mut h);
     if highlighted {
@@ -612,7 +612,7 @@ fn post_lines(ctx: &PostCtx, width: usize) -> (Vec<Line<'static>>, Vec<Spot>) {
 
 /// A focused quote of a post in this thread shows that post, without taking the keys: at
 /// the bottom of the thread, or the top when the quote is down there.
-pub(super) fn draw_peek(f: &mut Frame, app: &App, area: Rect) {
+pub(super) fn draw_peek(f: &mut Frame, app: &mut App, area: Rect) {
     use crate::model::Target;
     let Some(Part::Link(Target::Quote(l))) = app.focused() else { return };
     let Some(t) = &app.tab.thread else { return };
@@ -637,5 +637,13 @@ pub(super) fn draw_peek(f: &mut Frame, app: &App, area: Rect) {
     fill(f, Rect::new(r.x, r.y, 1, r.height), th.primary);
     for (row, line) in lines.into_iter().enumerate() {
         put(f, r.x + 2, r.y + 1 + row as u16, r.width.saturating_sub(4), line);
+    }
+    // The rows it covers can't be clicked, nor labeled.
+    if let Some(Hit::Thread { area: a, scroll }) = &mut app.drawn.body {
+        if top {
+            a.y = a.y.saturating_add(h);
+            *scroll += h as usize;
+        }
+        a.height = a.height.saturating_sub(h);
     }
 }

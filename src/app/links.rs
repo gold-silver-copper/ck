@@ -2,8 +2,7 @@
 
 use std::time::Instant;
 
-use ratatui::crossterm::event::KeyCode;
-use ratatui::layout::Rect;
+use ratatui::crossterm::event::{KeyCode, MouseEvent};
 use ratatui::widgets::ListState;
 
 use super::{App, Popup, TabPopup, View};
@@ -19,9 +18,6 @@ pub enum LinkItem {
 pub struct LinksPanel {
     pub items: Vec<LinkItem>,
     pub list: ListState,
-    /// Where the rows were drawn, for clicks (set by the UI).
-    pub area: Rect,
-    last_click: Option<(Instant, usize)>,
 }
 
 impl App {
@@ -47,13 +43,13 @@ impl App {
             items.push(LinkItem::Quote(l.clone(), label));
         }
         items.extend(post.urls.iter().cloned().map(LinkItem::Url));
-        items.extend(post.files.iter().cloned().map(LinkItem::File));
+        items.extend(post.files.iter().filter(|f| f.link().is_some()).cloned().map(LinkItem::File));
         if items.is_empty() {
             self.info("Post has no links");
             return;
         }
         let list = ListState::default().with_selected(Some(0));
-        self.tab.popup = Some(TabPopup::Links(LinksPanel { items, list, area: Rect::default(), last_click: None }));
+        self.tab.popup = Some(TabPopup::Links(LinksPanel { items, list }));
     }
 
     pub fn on_links_key(&mut self, code: KeyCode) {
@@ -75,19 +71,15 @@ impl App {
     }
 
     /// A click in the panel selects a row; a second quick click opens it. Clicks outside close it.
-    pub fn on_links_click(&mut self, col: u16, row: u16, now: Instant) {
+    pub(super) fn on_links_click(&mut self, ev: MouseEvent, now: Instant) {
+        let at = self.popup_row(ev.column, ev.row);
         let Some(TabPopup::Links(p)) = &mut self.tab.popup else { return };
-        let pos = ratatui::layout::Position::new(col, row);
-        let first = p.list.offset();
-        let i = first + row.saturating_sub(p.area.y) as usize;
-        if !p.area.contains(pos) || i >= p.items.len() {
+        let Some(i) = at.filter(|&i| i < p.items.len()) else {
             self.tab.popup = None;
             return;
-        }
-        let double = p.last_click.is_some_and(|(t, k)| k == i && now.duration_since(t).as_millis() < 400);
-        p.last_click = if double { None } else { Some((now, i)) };
+        };
         p.list.select(Some(i));
-        if double {
+        if self.double_click(now, i) {
             self.open_link_item(i);
         }
     }
@@ -106,7 +98,7 @@ impl App {
         let Some(TabPopup::Links(p)) = &self.tab.popup else { return None };
         Some(match p.items.get(i)? {
             LinkItem::Url(u) => u.clone(),
-            LinkItem::File(f) => f.url.clone(),
+            LinkItem::File(f) => f.link()?.1.to_string(),
             LinkItem::Quote(l, _) => {
                 let backend = &self.current_site().backend;
                 let board = l.board.clone().or_else(|| self.tab.board.as_ref().map(|b| b.uri.clone()))?;
@@ -127,7 +119,6 @@ pub struct ImageSearchPanel {
     /// `Ok((file URL, engine))` rows open a search.
     pub rows: Vec<Result<(String, usize), String>>,
     pub list: ListState,
-    pub area: Rect,
 }
 
 impl App {
@@ -138,7 +129,7 @@ impl App {
         };
         // Videos and others: their thumbnail is what can be searched.
         let files: Vec<(String, String)> =
-            files.iter().filter_map(|f| Some((f.filename.clone(), if f.is_image() { f.url.clone() } else { f.thumb.clone()? }))).collect();
+            files.iter().filter_map(|f| Some((f.filename.clone(), f.image().or(f.thumb.as_deref())?.to_string()))).collect();
         if files.is_empty() {
             self.info("Post has no image to search for");
             return;
@@ -151,7 +142,7 @@ impl App {
             rows.extend((0..self.image_search.len()).map(|e| Ok((url.clone(), e))));
         }
         let list = ListState::default().with_selected(rows.iter().position(Result::is_ok));
-        self.popup = Some(Popup::ImageSearch(ImageSearchPanel { rows, list, area: Rect::default() }));
+        self.popup = Some(Popup::ImageSearch(ImageSearchPanel { rows, list }));
     }
 
     pub fn on_image_search_key(&mut self, code: KeyCode) {
@@ -180,15 +171,16 @@ impl App {
         }
     }
 
-    pub fn on_image_search_click(&mut self, col: u16, row: u16) {
+    pub(super) fn on_image_search_click(&mut self, ev: MouseEvent, _: Instant) {
+        let at = self.popup_row(ev.column, ev.row);
         let Some(Popup::ImageSearch(p)) = &mut self.popup else { return };
-        let r = p.list.offset() + row.saturating_sub(p.area.y) as usize;
-        match p.rows.get(r) {
-            Some(Ok(_)) if p.area.contains(ratatui::layout::Position::new(col, row)) => {
+        match at.map(|r| (r, p.rows.get(r))) {
+            Some((r, Some(Ok(_)))) => {
                 p.list.select(Some(r));
                 self.on_image_search_key(KeyCode::Enter);
             }
-            Some(Err(_)) if p.area.contains(ratatui::layout::Position::new(col, row)) => {}
+            // A file's heading.
+            Some((_, Some(Err(_)))) => {}
             _ => self.popup = None,
         }
     }

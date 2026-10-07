@@ -29,16 +29,16 @@ impl App {
             files.extend(p.files.iter().map(|f| (p.no, f.clone())));
         }
         if files.is_empty() {
-            let msg = self.no_files(if t.conversation.is_some() { "The conversation has no files" } else { "Thread has no files" }, true);
+            let msg = self.no_files(if t.conversation.is_some() { "The conversation has no files" } else { "Thread has no files" }, true, |_| true);
             return self.info(msg);
         }
         let state = ListState::default().with_selected(Some(start.unwrap_or(0)));
         self.tab.gallery = Some(Gallery { files, state, cols: 1 });
     }
 
-    /// `none`, or that only hidden posts (of those in view, `in_view`) have files.
-    pub(super) fn no_files(&self, none: &str, in_view: bool) -> String {
-        let hidden = self.tab.thread.as_ref().is_some_and(|t| t.posts.iter().enumerate().any(|(i, p)| !p.files.is_empty() && (!in_view || t.in_view(i))));
+    /// `none`, or that only hidden posts (of those in view, `in_view`) have files that are `wanted`.
+    pub(super) fn no_files(&self, none: &str, in_view: bool, wanted: fn(&Attachment) -> bool) -> String {
+        let hidden = self.tab.thread.as_ref().is_some_and(|t| t.posts.iter().enumerate().any(|(i, p)| p.files.iter().any(wanted) && (!in_view || t.in_view(i))));
         if hidden { format!("Only hidden posts have files ({} shows them)", self.keys.key(Action::ShowHidden)) } else { none.to_string() }
     }
 
@@ -81,8 +81,11 @@ impl App {
             Action::Export => self.ask_to_save(super::Saving::Page),
             Action::Menu => self.open_menu(),
             Action::Copy => {
-                if let Some(url) = g.files.get(cur).map(|(_, f)| f.url.clone()) {
-                    self.copy_text("file URL", url);
+                if let Some((_, f)) = g.files.get(cur) {
+                    match f.link() {
+                        Some((what, url)) => self.copy_text(what, url.to_string()),
+                        None => self.info(super::NEITHER),
+                    }
                 }
             }
             Action::CopyLink => {
@@ -157,7 +160,7 @@ impl App {
         // A refresh may have taken the post away since the gallery opened.
         let Some(((_, file), p)) = g.files.get(k).and_then(|f| Some((f, t.posts.get(*t.index.get(&f.0)?)?))) else { return };
         let dir = download::dir(self.download_dir.as_deref(), &self.current_site().cfg.name, &t.board, t.no);
-        let jobs: Vec<_> = download::jobs(&[p], &dir).into_iter().filter(|(url, _)| *url == file.url).collect();
-        self.start_download(jobs, dir, "No file to save");
+        let (jobs, none) = (download::job(p, file, &dir), super::saving::nothing_to_save(file));
+        self.start_download(jobs, dir, none);
     }
 }

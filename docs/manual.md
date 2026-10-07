@@ -40,7 +40,30 @@ Navigation (fixed):
 | `J`/`K`                 | scroll a thread by line                       |
 | `enter`, `l`            | open (in a thread: follow a `>>quote`, also into other threads and boards) |
 | `esc`, `h`, backspace   | back                                          |
-| mouse                   | wheel scrolls, click selects, double-click opens |
+| mouse                   | wheel scrolls, click selects, double-click opens, right-click opens the menu (over popups: below) |
+
+The mouse works on what's on top. Over a list popup (the menu, links, image search, the
+filter maker's choices, a settings picker) the wheel moves its rows; over the help, the
+quoted posts, the gallery and the viewer it does what the arrow keys do there; over hint
+labels it closes them; over a question (save this? the add-site box) it does nothing, even
+with a thread behind; and while the key editor waits for a key it does nothing at all. A
+click on the menu, the links or image search picks the row under it (on a link, a double
+click opens it), and anywhere else closes them; in the gallery a click selects a file and a
+double click views it; a right click closes the menu; a click anywhere closes the filter
+maker, the help, hint labels, the quoted posts or a question, and only the one on top: a
+question over the quoted posts leaves them open. Over the other Settings popups and the
+viewer a click does nothing. While a go-to or archive search is typed, the wheel scrolls a
+thread behind it (over a list it does nothing) and a double click on a post opens it,
+leaving the box open; while a thread search or list filter is typed, a click does nothing.
+
+A click (left or right) lands on what the screen showed. Once that may have changed (a
+key, paste, resize or wheel notch, a click that goes somewhere else, even another thread,
+or opens or closes Settings over where you are, or anything arriving from a site or
+background work, except an image) it does nothing until the next frame is drawn, a moment
+later: click again. `f` typed in that moment finds nothing to label either. The quote peek can't be
+clicked (nor does `f` label what's under it), a loading thread has no posts to click, the
+quoted posts or links drawn over the tab chips cover them, and a double click is two clicks
+on the same thing with none of those changes between them.
 
 Commands are remappable in Settings or the config (see [Remapping keys](#remapping-keys));
 the action name is in brackets. The `?` help lists them with your keys, starting with the
@@ -85,8 +108,8 @@ ones for where you are.
 | `h`/`l`, arrows | previous / next file (animated GIFs play); from a thread, every file in it (or in the conversation shown) |
 | space | pause an animated GIF |
 | `+` / `-` / `0` | zoom in / out (up to 800%) / fit again; zoomed in, `h`/`j`/`k`/`l` and the arrows move around, page up / down change file, `esc` fits |
-| `i`  | open the file externally |
-| `y` / `Y` | copy the file's URL / the post's link [`copy`, `copy_link`] |
+| `i`  | open the file externally (its thumbnail, when that's all there is) |
+| `y` / `Y` | copy the file's URL (or its thumbnail's) / the post's link [`copy`, `copy_link`] |
 | `d`  | save the file [`download`] |
 | `R`  | reverse image search [`image_search`] |
 | `esc`, `q` | close |
@@ -320,14 +343,18 @@ its flag, its image's MD5, its file's name, and an OP's subject; never the site'
 anonymous name), whether to hide or highlight
 (`a`), where (`s`: this board, this site, or everywhere) and a label (`e`). `enter` adds
 it: it's written to the config as a `[[filter]]`, applies at once, and the footer says
-what it caught; `u` as the next key takes it back.
+what it caught; `u` as the next key takes it back (also when it couldn't be written; a left
+click gives that up, the wheel or a right click doesn't).
 
 Settings › Filters lists every filter with what it catches in the open catalog and thread.
 `enter` edits one (pattern, label, action, the fields it looks at, sites and boards, OPs
 or replies only, and its options; a pattern that isn't a valid regex says why and isn't
 saved), `space` turns it off or on
 (`enabled = false`), `a` adds one and `x` removes one. Each change is written at once;
-the rest of the config, comments included, stays as it was. In the config:
+the rest of the config, comments included, stays as it was. A change that can't be written
+holds only until ck quits, and the footer says so as an error. No message replaces an
+error before it has been on screen (a second error joins it), and loading something new
+clears one that has. In the config:
 
 ```toml
 [[filter]]
@@ -425,9 +452,17 @@ between the last post you'd read and the first new one; `U` jumps to the first o
 A post the moderators delete while the thread is open stays where it was, marked
 "deleted" (the top bar counts them: "1 deleted"); its quotes, replies, previews and
 conversation still work, and it's never counted as new. That's kept in memory, for the
-open thread: saved copies, exports and post counts are the thread as the site has it. A
-refresh that comes back with fewer than half the posts shown is more likely a broken
-answer than mass deletion, so it's shown as it came, without keeping what it left out.
+open thread: saved copies, exports and post counts are the thread as the site has it. An
+answer with fewer than half the posts last known (shown, or counted for a watched thread)
+is more likely broken than mass deletion: it's shown as it came, without keeping what it
+left out, and the status line says so. It isn't a visit, doesn't change the watch list's
+counts, and doesn't replace the saved copy (nor does `e`, `w` or `m` while it's shown).
+The answer after it is judged against it, so a real mass deletion is taken one refresh
+later. An answer with no posts, or with another thread than the one asked for (as a site
+might answer a reply's number), is a failed load (`r` tries again); in the background it
+leaves a watched thread as it was. FoolFuuka and LynxChan error answers that say "not
+found" count as gone, like a 404 (on LynxChan, for boards and catalogs too); others show
+their text.
 
 ### Opening what you've seen before
 
@@ -568,7 +603,11 @@ title bar. Thumbnails are skipped in terminals narrower than 60 columns.
 
 Animated GIFs play in the viewer, at up to 20 frames a second (frames are prepared in the
 background, and scaled down if a long GIF would take too much memory). Videos open
-externally with `i`.
+externally with `i`. When the site or archive has only a file's thumbnail, the viewer
+shows it and says so; `i` and `y` in the viewer, and `o` and `y` on the focused file in a
+thread, act on the thumbnail's address and say so, and `d` says there's no file to save.
+A spoilered file the archive didn't keep has no thumbnail either: the viewer, and opening,
+copying or saving it, say neither is available. The menu offers only what there is.
 
 Images load in the background through the same rate limiter as everything else, only for
 what's on screen (or about to be), and are kept in a bounded in-memory cache. Thumbnails
@@ -634,15 +673,19 @@ already exist are skipped, so saving all the thread's files again later only fet
 what's new. Progress shows at the right of the footer. Downloads go through the same rate
 limiter as images. A file lands whole or not at all, like ck's state files: a download that
 fails leaves nothing behind, and a download never writes through a symlink at its name.
+When the site or archive has only a file's thumbnail, saving skips it.
 
 ### Saving a thread
 
 "Save the thread as a page…" in the `.` menu writes the open thread into its download
 folder as `thread.html`, a page with the current theme's colors that reads offline, and
 `thread.json`, the posts as data (`"format": 1`). Files already saved there are shown from
-the folder; the others link to the site. So saving all the thread's files and then the
-page makes a complete offline copy. Saving again replaces both. The thread is also saved
-for ck itself, to open from the Saved view.
+the folder; the others link to the site (to the thumbnail when that's all the site has,
+and nowhere when it has neither). So saving all the thread's files and then the page
+makes a complete offline copy. Saving again replaces both. Each file in `thread.json` has
+a `kind` (`image`, `video` or `other`); a file the site or archive has only the thumbnail
+of has `"url": null`. The thread is also saved for ck itself, to open from the Saved view;
+there such a file's `url` is `""`, so older versions of ck still read the copy.
 
 ## Themes and settings
 
@@ -810,10 +853,11 @@ Nothing here leaves the machine: fake sites answer on `*.invalid` hosts or on 12
   added from a post must catch it, and after any filter change the marks and the config
   agree with the filters in use. A conversation shows exactly its posts, and `M` the posts
   with files. A post shown before a refresh of the same thread is still there after it
-  (or marked deleted), unless the refresh came back too small to trust, and a deleted post
-  is never new. A post hidden as a reply quotes a hidden post. A failure prints the seed
-  that replays it and the fewest steps that still fail (`FUZZ_TRACE=1` prints the state
-  after each step).
+  (or marked deleted), unless the refresh came back with fewer than half the posts last
+  known, and a deleted post is never new. The fake sites now and then answer with no posts
+  or with another thread, as a site in trouble might. A post hidden as a reply quotes a
+  hidden post. A failure prints the seed that replays it and the fewest steps that still
+  fail (`FUZZ_TRACE=1` prints the state after each step).
 - **The rest** (`src/fuzz.rs`): every engine's parsers on mangled responses, the markup
   parser and wrapping, routes, the rate limiter and the cache against a model, broken data
   directories and saved threads (nothing the user had may be lost), broken configs and

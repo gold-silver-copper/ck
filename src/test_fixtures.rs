@@ -8,11 +8,11 @@ use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 use ratatui::text::Line;
 
-use crate::app::{App, Clock, MenuItem};
+use crate::app::{App, Clock, MenuItem, Whole};
 use crate::config::Config;
 use crate::keys::KeyMap;
 use crate::markup::{Flavor, parse_html};
-use crate::model::{Attachment, Post};
+use crate::model::{Attachment, Post, Thread};
 use crate::store::Store;
 
 /// 2026-09-21 14:13:20 UTC: the snapshots' clock.
@@ -59,6 +59,12 @@ pub fn nos(nos: &[u64]) -> Vec<Post> {
     nos.iter().map(|&no| Post { no, body: vec![Line::from(format!("post {no}"))], ..Default::default() }).collect()
 }
 
+/// Posts as a whole thread to keep, under their first post's number.
+pub fn whole(posts: &[Post]) -> Whole {
+    let no = posts.first().map_or(0, |p| p.no);
+    Whole::assumed(Thread::answer(no, posts.to_vec()).unwrap())
+}
+
 /// Posts 1..=n, some taller than others.
 pub fn posts_upto(n: u64) -> Vec<Post> {
     (1..=n).map(|no| Post { no, body: (0..1 + no % 4).map(|k| Line::from(format!("post {no} line {k}"))).collect(), ..Default::default() }).collect()
@@ -71,7 +77,7 @@ pub fn posts_saying(list: &[(u64, &str)]) -> Vec<Post> {
 
 /// A post with one PNG on the local app's first site.
 pub fn with_file(no: u64, board: Option<&str>) -> Post {
-    let file = Attachment { filename: format!("{no}.png"), url: format!("http://127.0.0.1:3/src/{no}.png"), thumb: Some(format!("http://127.0.0.1:3/thumb/{no}.png")), ..Default::default() };
+    let file = Attachment { filename: format!("{no}.png"), thumb: Some(format!("http://127.0.0.1:3/thumb/{no}.png")), ..Attachment::at(format!("http://127.0.0.1:3/src/{no}.png")) };
     Post { no, files: vec![file], board: board.map(String::from), body: vec![Line::from("text")], ..Default::default() }
 }
 
@@ -91,12 +97,11 @@ pub fn post(no: u64, age: i64, subject: Option<&str>, html: &str) -> Post {
 pub fn file(name: &str) -> Attachment {
     Attachment {
         filename: name.into(),
-        url: format!("https://i.example/{name}"),
         thumb: Some(format!("https://i.example/thumb/{name}")),
         width: Some(800),
         height: Some(600),
         size: Some(123_456),
-        ..Default::default()
+        ..Attachment::at(format!("https://i.example/{name}"))
     }
 }
 

@@ -98,25 +98,17 @@ impl Media {
     }
 }
 
-/// A refresh with fewer posts than 1/`SHRUNK` of those shown is more likely a broken answer
-/// (cut short, or a page the site sent while in trouble) than moderators deleting most of
-/// the thread: it's shown as it came, and the posts it leaves out aren't kept as deleted.
-pub const SHRUNK: usize = 2;
-
-/// A refresh of `old`'s thread, with the posts shown before that it leaves out put back
-/// where they were (by number), and their numbers: deleted on the site. Posts still deleted
-/// stay; one back again isn't any more. True when it came back too small to trust
-/// (`SHRUNK`): then it's as it came.
-pub fn keep_deleted(old: &ThreadView, fetched: Vec<Post>) -> (Vec<Post>, HashSet<u64>, bool) {
-    let live = old.posts.len().saturating_sub(old.deleted.len());
-    if fetched.len().saturating_mul(SHRUNK) < live {
-        return (fetched, HashSet::new(), true);
-    }
+/// A thread fetched (again, over `old`), with the posts shown before that it leaves out put
+/// back where they were (by number), and their numbers: deleted on the site. Posts still
+/// deleted stay; one back again isn't any more. Only a whole answer (not one with fewer than
+/// half the posts shown) is trusted to say what was deleted.
+pub fn keep_deleted(old: Option<&ThreadView>, fetched: super::Whole) -> (Vec<Post>, HashSet<u64>) {
+    let fetched = fetched.into_posts();
     let have: HashSet<u64> = fetched.iter().map(|p| p.no).collect();
     // (The OP is the thread: a refresh without it is another thread.)
-    let mut gone: Vec<&Post> = old.posts.iter().skip(1).filter(|p| !have.contains(&p.no)).collect();
+    let mut gone: Vec<&Post> = old.iter().flat_map(|o| o.posts.iter().skip(1)).filter(|p| !have.contains(&p.no)).collect();
     if gone.is_empty() {
-        return (fetched, HashSet::new(), false);
+        return (fetched, HashSet::new());
     }
     gone.sort_by_key(|p| p.no);
     let deleted = gone.iter().map(|p| p.no).collect();
@@ -132,7 +124,7 @@ pub fn keep_deleted(old: &ThreadView, fetched: Vec<Post>) -> (Vec<Post>, HashSet
         out.push(p);
     }
     out.extend(gone.cloned());
-    (out, deleted, false)
+    (out, deleted)
 }
 
 #[derive(Default)]
@@ -189,8 +181,9 @@ pub struct ThreadView {
     /// Posts (by number) shown before that a refresh left out: deleted on the site, kept
     /// here as they were. In memory only.
     pub deleted: HashSet<u64>,
-    /// Refreshes that came back too small to keep what they left out (`SHRUNK`).
-    pub shrinks: u32,
+    /// How many posts the thread was last known with, whole: more than it has when it shows
+    /// an answer cut short (`App::accept`).
+    pub known: usize,
     /// How many posts each poster ID has in the thread.
     ids: HashMap<String, usize>,
     /// Only the posts with files, or images hidden (`M`).
@@ -350,7 +343,7 @@ impl ThreadView {
         for id in posts.iter().filter_map(|p| p.id.as_ref()) {
             *ids.entry(id.clone()).or_default() += 1;
         }
-        Self { entries, board, no, posts, index, backlinks, ids, ..Default::default() }
+        Self { entries, board, no, known: posts.len(), posts, index, backlinks, ids, ..Default::default() }
     }
 
     /// The post is collapsed to a line: hidden, not shown anyway, and not the OP.
@@ -526,6 +519,11 @@ impl ThreadView {
     /// Whether post `i` is kept after the site deleted it.
     pub fn is_deleted(&self, i: usize) -> bool {
         !self.deleted.is_empty() && self.posts.get(i).is_some_and(|p| self.deleted.contains(&p.no))
+    }
+
+    /// The thread as the site has it (`live_posts`), as an answer for it.
+    pub fn live(&self) -> Option<Thread> {
+        Thread::answer(self.no, self.live_posts().into_owned()).ok()
     }
 
     /// The posts as the site has them, without the deleted ones kept: what's counted,

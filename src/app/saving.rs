@@ -59,16 +59,16 @@ impl App {
     }
 
     /// Save one file of a post into its thread's folder.
-    fn save_file(&mut self, board: &str, thread: u64, post: &Post, url: &str) {
+    fn save_file(&mut self, board: &str, thread: u64, post: &Post, file: &Attachment) {
         let dir = download::dir(self.download_dir.as_deref(), &self.current_site().cfg.name, board, thread);
-        let jobs = download::jobs(&[post], &dir).into_iter().filter(|(u, _)| u == url).collect();
-        self.start_download(jobs, dir, "No file to save");
+        let jobs = download::job(post, file, &dir);
+        self.start_download(jobs, dir, nothing_to_save(file));
     }
 
     /// `d` in the image viewer: the file shown.
     fn save_viewed(&mut self) {
         let Some(v) = self.tab.viewer() else { return };
-        let Some(url) = v.files.get(v.index).map(|f| f.url.clone()) else { return };
+        let Some(file) = v.files.get(v.index).cloned() else { return };
         let no = v.posts.get(v.index).copied();
         let from = if self.tab.view() == View::Thread {
             self.tab.thread.as_ref().and_then(|t| {
@@ -86,8 +86,8 @@ impl App {
                 Some((board, p.no, p.clone()))
             })
         };
-        match from.filter(|(.., p)| p.files.iter().any(|f| f.url == url)) {
-            Some((board, thread, p)) => self.save_file(&board, thread, &p, &url),
+        match from.filter(|(.., p)| p.files.iter().any(|f| f.url == file.url)) {
+            Some((board, thread, p)) => self.save_file(&board, thread, &p, &file),
             None => self.info("Can't tell which thread this file is from; o opens it in the browser"),
         }
     }
@@ -104,10 +104,10 @@ impl App {
                 let posts: Vec<&Post> = t.unhidden_posts().map(|(_, p)| p).collect();
                 let jobs = download::jobs(&posts, &dir);
                 if jobs.is_empty() {
-                    return self.info(self.no_files("Thread has no files", false));
+                    return self.info(self.no_files("Thread has no files to save", false, |f| f.url.is_some()));
                 }
                 let have = jobs.iter().filter(|(_, path)| path.exists()).count();
-                let files: Vec<&Attachment> = posts.iter().flat_map(|p| &p.files).collect();
+                let files: Vec<&Attachment> = posts.iter().flat_map(|p| &p.files).filter(|f| f.url.is_some()).collect();
                 let known = files.iter().filter_map(|f| f.size).fold(0u64, u64::saturating_add);
                 let mut first = format!("{} file{}", jobs.len() - have, if jobs.len() - have == 1 { "" } else { "s" });
                 if known > 0 {
@@ -184,7 +184,7 @@ impl App {
         let posts: Vec<&Post> = if whole_thread { t.unhidden_posts().map(|(_, p)| p).collect() } else { t.current().into_iter().collect() };
         let dir = download::dir(self.download_dir.as_deref(), &self.current_site().cfg.name, &t.board, t.no);
         let jobs = download::jobs(&posts, &dir);
-        let none = if whole_thread { self.no_files("Thread has no files", false) } else { "Post has no file".into() };
+        let none = if whole_thread { self.no_files("Thread has no files to save", false, |f| f.url.is_some()) } else { "Post has no file to save".into() };
         self.start_download(jobs, dir, &none);
     }
 
@@ -196,16 +196,16 @@ impl App {
         let url = site.backend.thread_url(&b.uri, t.no);
         let about = crate::export::About { site: &site.cfg.name, board: &t.board, thread: t.no, url: &url, saved: self.clock.now() };
         let key = self.key(&t.board, t.no);
-        // As the site has it, like the saved copy it's also kept as.
-        let posts = t.live_posts().into_owned();
-        match crate::export::save(&posts, &about, &theme::theme(), &dir) {
+        // As the site has it, like the saved copy it's also kept as (unless it's cut short).
+        let whole = self.shown_whole(&key, t);
+        match crate::export::save(&t.live_posts(), &about, &theme::theme(), &dir) {
             Ok(()) => {
                 // Also kept as a saved copy, to read in ck (the Saved view).
-                self.keep_copy(&key, &posts, true);
+                let also = whole.map(|w| self.keep_copy(&key, &w)).map_or("", |()| " (and in Saved)");
                 self.save_now();
-                self.info(format!("Saved thread.html and thread.json in {} (and in Saved)", tilde(&dir.display().to_string())));
+                self.info(format!("Saved thread.html and thread.json in {}{also}", tilde(&dir.display().to_string())));
             }
-            Err(e) => self.error(format!("Couldn't save the thread: {e:#}")),
+            Err(e) => self.error(e.context("Couldn't save the thread")),
         }
     }
 
@@ -216,7 +216,7 @@ impl App {
             return;
         }
         if let Err(e) = std::fs::create_dir_all(&dir) {
-            self.error(format!("Couldn't create {}: {e}", dir.display()));
+            self.error(anyhow::Error::from(e).context(format!("Couldn't create {}", dir.display())));
             return;
         }
         let d = &mut self.downloads;
@@ -234,7 +234,7 @@ impl App {
                 } else {
                     match crate::guard::result(|| http::download_to(&url, &path)) {
                         Ok(()) => DlEvent::Done,
-                        Err(e) => DlEvent::Failed(format!("{e:#}")),
+                        Err(e) => DlEvent::Failed(http::plain(&e)),
                     }
                 };
                 if !later.run(move |app| app.download_event(ev)) {
@@ -265,9 +265,18 @@ impl App {
                     if d.failed > 0 {
                         let _ = write!(msg, ", {} failed ({})", d.failed, d.last_error.as_deref().unwrap_or(""));
                     }
-                    self.status = Some(Status { text: msg, error: d.failed > 0 });
+                    if d.failed > 0 { self.error(msg) } else { self.info(msg) }
                 }
             }
         }
+    }
+}
+
+/// What `d` on one file says when there's nothing to fetch.
+pub(super) fn nothing_to_save(file: &Attachment) -> &'static str {
+    match (&file.url, &file.thumb) {
+        (Some(_), _) => "No file to save",
+        (None, Some(_)) => "Only the thumbnail is available; there's no file to save",
+        (None, None) => super::NEITHER,
     }
 }

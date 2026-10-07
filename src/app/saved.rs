@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use super::tabs::{Offline, ThreadCopy};
 use super::{App, Opening, View};
 use crate::images::Kind;
-use crate::model::{Attachment, Post};
+use crate::model::{Attachment, Thread};
 use crate::store::ThreadKey;
 
 impl App {
@@ -19,18 +19,17 @@ impl App {
         let copy = match self.store.load_saved(key) {
             Ok(t) => t,
             Err(e) => {
-                self.error(format!("Couldn't open the saved copy: {e:#}"));
+                self.error(e.context("Couldn't open the saved copy"));
                 self.clamp_list();
                 self.save();
                 return;
             }
         };
-        let dead = copy.dead || self.store.saved(key).is_some_and(|m| m.dead);
-        let posts: Vec<Post> = copy.posts.into_iter().map(Post::from).collect();
-        if posts.is_empty() {
+        let (dead, saved) = (copy.dead || self.store.saved(key).is_some_and(|m| m.dead), copy.saved);
+        let Some(t) = Thread::saved(copy) else {
             self.error("The saved copy has no posts");
             return;
-        }
+        };
         if self.tab.place_view() != View::Thread {
             self.tab.return_to = Some(self.tab.place_view());
         }
@@ -45,7 +44,7 @@ impl App {
         }
         self.tab.navigate(View::Thread);
         self.tab.from_catalog = false;
-        self.show_thread(posts, Some(ThreadCopy::Saved(Offline { saved: copy.saved, dead })), open);
+        self.show_thread(t, Some(ThreadCopy::Saved(Offline { saved, dead })), open);
     }
 
     /// `r` on a saved copy: the live thread, unless it's known to be gone.
@@ -73,22 +72,20 @@ impl App {
     /// What the viewer shows for a file: the image itself, or the thumbnail for other files.
     /// A saved copy's images come from the download folder, else their cached thumbnail.
     pub fn viewer_source(&self, file: &Attachment) -> Option<(String, Kind)> {
-        let thumb = || file.thumb.clone().map(|u| (u, Kind::Thumb));
-        if self.tab.saved().is_none() || self.tab.view() != View::Thread {
-            return if file.is_image() { Some((file.url.clone(), Kind::Full)) } else { thumb() };
-        }
-        match self.downloaded(file).filter(|_| file.is_image()) {
-            Some(path) => Some((format!("file://{}", path.display()), Kind::Full)),
-            None => thumb(),
-        }
+        let full = if self.tab.saved().is_some() && self.tab.view() == View::Thread {
+            self.downloaded(file).filter(|_| file.is_image()).map(|path| format!("file://{}", path.display()))
+        } else {
+            file.image().map(Into::into)
+        };
+        full.map(|u| (u, Kind::Full)).or_else(|| file.thumb.clone().map(|u| (u, Kind::Thumb)))
     }
 
     /// Where `d` saved the open thread's file, if it did.
     pub fn downloaded(&self, file: &Attachment) -> Option<PathBuf> {
         let t = self.tab.thread.as_ref()?;
-        let p = t.posts.iter().find(|p| p.files.iter().any(|f| f.url == file.url))?;
+        let p = t.posts.iter().find(|p| p.files.iter().any(|f| f.url.is_some() && f.url == file.url))?;
         let dir = crate::download::dir(self.download_dir.as_deref(), &self.current_site().cfg.name, &t.board, t.no);
-        let path = crate::download::jobs(&[p], &dir).into_iter().find(|(u, _)| *u == file.url)?.1;
+        let path = crate::download::job(p, file, &dir).into_iter().next()?.1;
         path.is_file().then_some(path)
     }
 

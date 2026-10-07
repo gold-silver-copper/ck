@@ -6,10 +6,10 @@ use std::fmt::Write as _;
 use anyhow::Result;
 use serde_json::Value;
 
-use super::{Backend, Partial, SearchPage, as_u32, saturate};
+use super::{Backend, Partial, SearchPage, as_u32, saturate, site_error};
 use crate::http::{as_bool, as_i64, as_str, as_u64, encode_segment as enc, get_json, items, register_media_host};
 use crate::markup::{self, Flavor};
-use crate::model::{Attachment, Board, Flag, Post};
+use crate::model::{Attachment, Board, FileKind, Flag, Post};
 
 /// Index pages fetched for the "catalog" (each is one rate-limited request).
 const INDEX_PAGES: u32 = 3;
@@ -26,6 +26,12 @@ impl Foolfuuka {
 
     fn api(&self, query: &str) -> Result<Value> {
         get_json(&format!("{}/_/api/chan/{query}", self.base))
+    }
+
+    /// `api`, with an `{"error": ...}` answer an error (not found, if it says so).
+    fn checked(&self, query: &str) -> Result<Value> {
+        let v = self.api(query)?;
+        v.get("error").and_then(as_str).map_or(Ok(v), |msg| Err(site_error(&format!("{}/_/api/chan/{query}", self.base), &msg)))
     }
 }
 
@@ -138,15 +144,15 @@ fn attachment(m: &Value) -> Option<Attachment> {
         return None;
     }
     let thumb = as_str(&m["thumb_link"]);
-    // The full file isn't always archived; fall back to the thumbnail.
-    let url = as_str(&m["media_link"]).or_else(|| as_str(&m["remote_media_link"])).or_else(|| thumb.clone())?;
-    if let Some(t) = &thumb {
-        register_media_host(t);
-    }
-    register_media_host(&url);
+    // The full file isn't always archived; then there's only the thumbnail (or nothing).
+    let url = as_str(&m["media_link"]).or_else(|| as_str(&m["remote_media_link"]));
+    url.as_ref().or(thumb.as_ref())?;
+    url.iter().chain(&thumb).for_each(|u| register_media_host(u));
     let spoiler = as_bool(&m["spoiler"]);
+    let filename = as_str(&m["media_filename_processed"]).or_else(|| as_str(&m["media_filename"])).map(|f| markup::decode(&f)).unwrap_or_default();
     Some(Attachment {
-        filename: as_str(&m["media_filename_processed"]).or_else(|| as_str(&m["media_filename"])).map(|f| markup::decode(&f)).unwrap_or_default(),
+        kind: FileKind::of(None, url.as_deref(), &filename),
+        filename,
         url,
         thumb: if spoiler { None } else { thumb },
         spoiler,
@@ -195,12 +201,12 @@ impl Backend for Foolfuuka {
         parse_search(&self.api(&format!("search/?boards={}&text={}&page={page}", enc(board), enc(query)))?)
     }
 
-    fn thread(&self, board: &str, no: u64) -> Result<Vec<Post>> {
-        Ok(parse_thread(&self.api(&format!("thread/?board={}&num={no}", enc(board)))?))
+    fn thread_unchecked(&self, board: &str, no: u64) -> Result<Vec<Post>> {
+        Ok(parse_thread(&self.checked(&format!("thread/?board={}&num={no}", enc(board)))?))
     }
 
     fn find_thread(&self, board: &str, post: u64) -> Result<Option<u64>> {
-        let v = self.api(&format!("post/?board={}&num={post}", enc(board)))?;
+        let v = self.checked(&format!("post/?board={}&num={post}", enc(board)))?;
         Ok(v.get("thread_num").and_then(as_u64))
     }
 
@@ -231,7 +237,7 @@ mod tests {
         let op = threads.iter().find(|t| t.no == 109960193).unwrap();
         assert_eq!(op.subject.as_deref(), Some("I feel myself becoming dumber when I use LLMs"));
         let f = &op.files[0];
-        assert_eq!(f.url, "https://desu-usergeneratedcontent.xyz/g/image/1790/89/1790897522450.jpg");
+        assert_eq!(f.url.as_deref(), Some("https://desu-usergeneratedcontent.xyz/g/image/1790/89/1790897522450.jpg"));
         assert_eq!(f.thumb.as_deref(), Some("https://desu-usergeneratedcontent.xyz/g/thumb/1790/89/1790897522450s.jpg"));
         assert_eq!((f.width, f.height, f.size), (Some(1536), Some(2048), Some(288112)));
         assert!(!op.sticky && op.replies.is_some());
@@ -266,6 +272,25 @@ mod tests {
         let p = super::post(&v).unwrap();
         assert_eq!((p.id.as_deref(), p.flag.as_ref().map(|f| f.short())), (Some("Ab3dEf+g"), Some("FI".into())));
         assert_eq!((p.trip.as_deref(), p.capcode.as_deref()), (Some("!!Fz3mQwerty"), Some("Mod")));
+    }
+
+    #[test]
+    fn unarchived_file_is_not_its_thumbnail() {
+        // A webm the archive kept only the thumbnail of: the file is still a video, and
+        // a download must not save the JPEG thumbnail as `<no>_clip.webm`.
+        let mut v = fixture("foolfuuka_post.json");
+        let thumb = "https://desu-usergeneratedcontent.xyz/g/thumb/1790/89/1790897522450s.jpg";
+        v["media"] = serde_json::json!({
+            "media_status": "normal", "media_link": null, "remote_media_link": null, "thumb_link": thumb,
+            "media_filename": "clip.webm", "media_w": 1280, "media_h": 720, "media_size": 3_000_000, "spoiler": "0",
+        });
+        let p = super::post(&v).unwrap();
+        let f = &p.files[0];
+        assert!(f.is_video(), "a .webm post's file is a video; ext() read the thumbnail's {:?}", f.ext());
+        assert!(!f.is_image(), "the viewer would show the thumbnail as the full file");
+        let jobs = crate::download::jobs(&[&p], std::path::Path::new("/d"));
+        let bad: Vec<_> = jobs.iter().filter(|(url, path)| url == thumb && path.to_string_lossy().ends_with("clip.webm")).collect();
+        assert!(bad.is_empty(), "the thumbnail is saved under the original's name: {bad:?}");
     }
 
     #[test]

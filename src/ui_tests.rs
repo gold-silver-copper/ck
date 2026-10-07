@@ -855,7 +855,7 @@ fn hint_labels_from_before_a_refresh_dont_focus_what_is_gone() {
     a.tab.thread = Some(ThreadView::new("g".into(), 1000, posts));
     type_text(&mut a, &label);
     assert!(a.tab.thread.as_ref().unwrap().focus.is_none());
-    assert!(a.status.as_ref().unwrap().text.contains("changed since the labels went up"));
+    assert!(a.status().unwrap().text.contains("changed since the labels went up"));
 }
 
 #[test]
@@ -1084,7 +1084,7 @@ fn tab_chips_hidden_under_the_viewer_cant_be_clicked() {
     a.tab.catalog_list.state.select(Some(1));
     a.new_tab();
     snapshot(&mut a);
-    let (chip, other) = a.tab_chips.iter().find(|&&(_, i)| i != a.active).copied().unwrap();
+    let (chip, other) = a.drawn.tabs.iter().find(|&&(_, i)| i != a.active).copied().unwrap();
     // The viewer is drawn over the whole screen: the row the chips were on is its own.
     a.tab.popup = Some(crate::app::TabPopup::Viewer(Viewer::new(vec![file("op.png")], 0, None)));
     snapshot(&mut a);
@@ -1571,7 +1571,7 @@ fn thread_gone_without_a_copy_offers_the_archive() {
     let mut a = app(false);
     a.tab.navigate(View::Thread);
     a.thread_gone(&ThreadKey { site: "4chan".into(), board: "g".into(), no: 901 });
-    let text = &a.status.as_ref().unwrap().text;
+    let text = &a.status().unwrap().text;
     assert_eq!(text, "Thread was deleted or archived: a opens it in desuarchive");
 }
 
@@ -1932,4 +1932,20 @@ fn ui_pads_columns_by_cells() {
     assert_eq!(col("Watched", 16), format!("{:<16}", "Watched"));
     // A column with no room is blank, not an ellipsis sticking out of it.
     assert_eq!((col("Watched", 1), col("Watched", 0)), (" ".to_string(), String::new()));
+}
+
+#[test]
+fn the_footer_message_is_drawn_exactly_when_the_app_counts_it_seen() {
+    use crate::app::Typing;
+    let typing = [None, Some(Typing::Goto("a/".into())), Some(Typing::ThreadSearch), Some(Typing::ListFilter)];
+    for (typing, loading) in typing.into_iter().flat_map(|t| [(t.clone(), None), (t, Some("Loading".to_string()))]) {
+        let mut app = catalog_app(false);
+        app.error("Boom");
+        app.typing = typing.clone();
+        if let Some(l) = &loading {
+            app.tab.fake_load(1, l, crate::app::Then::Show);
+        }
+        let (text, _) = render(&mut app);
+        assert_eq!(text.contains("Boom"), app.status_on_screen(), "typing {typing:?}, loading {loading:?}");
+    }
 }

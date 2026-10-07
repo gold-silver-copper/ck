@@ -16,11 +16,12 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 
 use super::*;
+use ratatui::crossterm::event::MouseEventKind;
 use crate::backend::{Partial, SearchPage, ThreadPages};
 use crate::fuzz::{self, Rng};
 use crate::markup;
 use crate::http::{HttpError, lock};
-use crate::model::Attachment;
+use crate::model::{Attachment, FileKind};
 
 // ----- fake sites -----
 
@@ -190,7 +191,9 @@ impl Fake {
             height: rng.chance(70).then(|| rng.below(5000) as u32),
             size: rng.chance(70).then(|| rng.below(1 << 30) as u64),
             md5: rng.chance(30).then(|| format!("{:x}", rng.next())),
-            url,
+            kind: FileKind::of(None, Some(&url), ""),
+            // Sometimes the archive kept only the thumbnail.
+            url: (!rng.chance(5)).then_some(url),
         }
     }
 
@@ -264,7 +267,7 @@ impl Backend for Fake {
         Ok(posts)
     }
 
-    fn thread(&self, board: &str, no: u64) -> Result<Vec<Post>> {
+    fn thread_unchecked(&self, board: &str, no: u64) -> Result<Vec<Post>> {
         let _pass = self.gate.enter(format!("{} thread /{board}/{no}", self.site));
         let generation = {
             let mut f = lock(&self.fetched);
@@ -283,6 +286,10 @@ impl Backend for Fake {
         }
         if rng.chance(3) {
             return Ok(Vec::new());
+        }
+        // Another thread, as a site in trouble might answer.
+        if rng.chance(2) {
+            return Ok(vec![self.post(&mut rng, board, no.saturating_add(1), &[])]);
         }
         // The same thread each time, more of it each fetch, and now and then a post deleted.
         let mut base = Rng::new(hash(&[&self.seed, &self.site, &board, &no]));
@@ -376,12 +383,12 @@ impl Backend for Gated {
         self.data.catalog(board, partial)
     }
 
-    fn thread(&self, board: &str, no: u64) -> Result<Vec<Post>> {
+    fn thread_unchecked(&self, board: &str, no: u64) -> Result<Vec<Post>> {
         if crate::http::from_copies_only() {
-            return self.data.thread(board, no);
+            return self.data.thread_unchecked(board, no);
         }
         let _pass = self.gate.enter(format!("{} thread /{board}/{no}", self.site));
-        self.data.thread(board, no)
+        self.data.thread_unchecked(board, no)
     }
 
     fn find_thread(&self, board: &str, post: u64) -> Result<Option<u64>> {
@@ -692,25 +699,30 @@ impl World {
     fn apply(&mut self, act: &Act) {
         let (w, h) = self.size;
         let app = &mut self.app;
+        // Input goes through `handle`, as the terminal's does, so a click after a key in one
+        // batch finds the frame stale as it would.
+        let input = |app: &mut App, ev| app.handle(Msg::Input(ev));
         match act {
-            Act::Key(k) => app.on_key(*k),
+            Act::Key(k) => input(app, Event::Key(*k)),
             Act::Mouse(kind, x, y, double) => {
                 let ev = MouseEvent { kind: *kind, column: x % w, row: y % h, modifiers: KeyModifiers::NONE };
-                let now = app.clock.instant();
-                app.on_mouse(ev, now);
+                input(app, Event::Mouse(ev));
                 if *double {
-                    app.on_mouse(ev, now);
+                    input(app, Event::Mouse(ev));
                 }
             }
-            Act::Paste(t) => app.paste(t),
+            Act::Paste(t) => input(app, Event::Paste(t.clone())),
             Act::Goto(t) => {
-                app.on_key(KeyEvent::from(KeyCode::Char(':')));
+                input(app, Event::Key(KeyEvent::from(KeyCode::Char(':'))));
                 if app.goto_text().is_some() {
-                    app.paste(t);
-                    app.on_key(KeyEvent::from(KeyCode::Enter));
+                    input(app, Event::Paste(t.clone()));
+                    input(app, Event::Key(KeyEvent::from(KeyCode::Enter)));
                 }
             }
-            Act::Resize(nw, nh) => self.size = (*nw, *nh),
+            Act::Resize(nw, nh) => {
+                self.size = (*nw, *nh);
+                input(app, Event::Resize(*nw, *nh));
+            }
             Act::Answer(k) => {
                 let waiting = self.gate.waiting();
                 if let Some((ticket, _)) = waiting.get(k % waiting.len().max(1)) {
@@ -934,7 +946,7 @@ fn replay(seed: u64, acts: &[Act]) -> Result<(), (String, String)> {
                 eprintln!("TRACE {step} {act}: tab {} view {:?} site {} board {:?} cat_board {} cat {} hidden-marks {m} store {hid:?} filters {}", a.active, a.tab.view(), a.current_site().cfg.name, a.tab.board.as_ref().map(|b| &b.uri), a.tab.catalog_board.as_deref().unwrap_or_default(), a.tab.catalog.len(), a.filter_cfgs.len());
                 let w: Vec<String> = a.store.all_watched().iter().map(|w| format!("{}/{}/{} dead={} seen={}", w.key.site, w.key.board, w.key.no, w.status.is_dead(), w.last_seen)).collect();
                 let sv: Vec<String> = a.store.saved.iter().map(|m| format!("{}/{}/{}", m.key.site, m.key.board, m.key.no)).collect();
-                eprintln!("TRACE   watched {w:?} saved {sv:?} status {:?}", a.status.as_ref().map(|s| &s.text));
+                eprintln!("TRACE   watched {w:?} saved {sv:?} status {:?}", a.footer.get().map(|s| &s.text));
                 if let Some(t) = &a.tab.thread {
                     let l = t.layout.as_ref().map(|l| (l.starts.clone(), l.exact.clone()));
                     eprintln!("TRACE   thread entry {} selected {} scroll {} view {} entries {} focus {:?} conv {:?} layout {l:?}", t.entry(), t.selected, t.scroll, t.viewport, t.entries.len(), t.focus, t.conversation.as_ref().map(|c| c.anchor));
@@ -1208,14 +1220,13 @@ struct Before {
     /// and the post at the top of the screen.
     reading: Option<(usize, String, u64, usize, bool, u64)>,
     /// The open tab's thread as fetched (not a copy): its board and number, its posts'
-    /// numbers, and how many refreshes of it came back too small to keep what they left out.
-    /// (Its tab by place and the number of tabs: closing one moves the others.)
+    /// numbers. (Its tab by place and the number of tabs: closing one moves the others.)
     live: Option<Live>,
 }
 
 /// The open tab's place and the number of tabs, its thread's board and number, its posts'
-/// numbers, and its shrunk refreshes.
-type Live = ((usize, usize), String, u64, Vec<u64>, u32);
+/// numbers.
+type Live = ((usize, usize), String, u64, Vec<u64>);
 
 impl Before {
     fn of(app: &App, gate: &Gate) -> Self {
@@ -1237,7 +1248,7 @@ impl Before {
             .thread
             .as_ref()
             .filter(|_| app.tab.copy.is_none())
-            .map(|t| ((app.active, app.tabs.len()), t.board.clone(), t.no, t.posts.iter().map(|p| p.no).collect(), t.shrinks));
+            .map(|t| ((app.active, app.tabs.len()), t.board.clone(), t.no, t.posts.iter().map(|p| p.no).collect()));
         Before { saved, in_saved_view: app.tab.view() == View::Saved, offline_dead, log: gate.log_len(), filters: app.filter_cfgs.clone(), recursive_hiding: app.hiding.recursive(), reading, live }
     }
 }
@@ -1340,8 +1351,9 @@ fn check_deleted(app: &App, before: &Before) {
     if t.deleted.iter().any(|no| !t.index.contains_key(no)) || t.deleted.contains(&t.no) {
         panic!("deleted posts {:?} aren't (reply) posts of the thread", t.deleted);
     }
-    let Some((tab, board, no, nos, shrinks)) = &before.live else { return };
-    if (app.active, app.tabs.len()) != *tab || app.tab.copy.is_some() || t.board != *board || t.no != *no || t.shrinks != *shrinks {
+    let Some((tab, board, no, nos)) = &before.live else { return };
+    // (An answer cut short is shown as it came.)
+    if (app.active, app.tabs.len()) != *tab || app.tab.copy.is_some() || t.board != *board || t.no != *no || crate::model::shrank(t.known, t.live_posts().len()) {
         return;
     }
     if let Some(lost) = nos.iter().find(|n| !t.index.contains_key(n)) {

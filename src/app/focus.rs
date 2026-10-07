@@ -2,14 +2,16 @@
 //! menu of everything that can be done with what's selected (`.`, right-click), and link
 //! hints (`f`) that label what's on screen to jump to it.
 
-use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use ratatui::layout::{Position, Rect};
+use std::time::Instant;
+
+use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent};
+use ratatui::layout::Position;
 use ratatui::widgets::ListState;
 
 use super::{App, Hit, Media, Part, Popup, RowKey, SiteRow, TabPopup, View, Viewer, list_move};
 use crate::download;
 use crate::keys::{Action, Scope};
-use crate::model::{Link, Target};
+use crate::model::{Attachment, Link, Target};
 use crate::ui::{INDENT, PAD};
 
 /// One row of the menu: `enter` (what it does here), or an action.
@@ -19,12 +21,11 @@ pub enum MenuItem {
     Act(Action, String),
 }
 
-/// The menu for what's selected: its title, rows, and where it was drawn.
+/// The menu for what's selected: its title and rows.
 pub struct Menu {
     pub title: String,
     pub items: Vec<MenuItem>,
     pub list: ListState,
-    pub area: Rect,
 }
 
 /// Labels on what's on screen; typing one picks it.
@@ -116,11 +117,17 @@ impl App {
         let part = self.focused()?;
         let p = self.selected_post()?;
         Some(match part {
-            Part::File(k) => ("file URL", p.files.get(*k)?.url.clone()),
+            Part::File(k) => p.files.get(*k)?.link().map(|(what, u)| (what, u.to_string()))?,
             Part::Link(Target::Url(u)) => ("link", u.clone()),
             Part::Link(Target::Quote(l)) => ("link", self.quote_url(l)?),
             Part::Replies | Part::Poster => return None,
         })
+    }
+
+    /// The file that has focus.
+    pub(super) fn focused_file(&self) -> Option<&Attachment> {
+        let &Part::File(k) = self.focused()? else { return None };
+        self.selected_post()?.files.get(k)
     }
 
     /// Where a quote link leads, as a web address.
@@ -142,10 +149,10 @@ impl App {
         let Some(&Part::File(k)) = self.focused() else { return false };
         let Some(t) = &self.tab.thread else { return false };
         let Some(p) = t.current() else { return false };
-        let Some(url) = p.files.get(k).map(|f| f.url.clone()) else { return false };
+        let Some(file) = p.files.get(k) else { return false };
         let dir = download::dir(self.download_dir.as_deref(), &self.current_site().cfg.name, &t.board, t.no);
-        let jobs = download::jobs(&[p], &dir).into_iter().filter(|(u, _)| *u == url).collect();
-        self.start_download(jobs, dir, "No file to save");
+        let (jobs, none) = (download::job(p, file, &dir), super::saving::nothing_to_save(file));
+        self.start_download(jobs, dir, none);
         true
     }
 
@@ -160,13 +167,13 @@ impl App {
 
     /// The part (or just the entry) of the thread drawn at a screen position.
     pub(super) fn thread_part_at(&self, col: u16, row: u16) -> Option<(usize, Option<Part>)> {
-        let Some(Hit::Thread { area }) = self.hit else { return None };
+        let Some(Hit::Thread { area, scroll }) = self.drawn()?.body else { return None };
         if !area.contains(Position::new(col, row)) {
             return None;
         }
         let t = self.tab.thread.as_ref()?;
         let l = t.layout.as_ref()?;
-        let i = t.scroll + (row - area.y) as usize;
+        let i = scroll + (row - area.y) as usize;
         let (e, _) = l.line(i)?;
         let in_block = i - l.starts.get(e)?;
         let x0 = area.x + INDENT * t.entries.get(e)?.depth as u16 + PAD;
@@ -183,7 +190,7 @@ impl App {
         if items.is_empty() {
             return;
         }
-        self.popup = Some(Popup::Menu(Menu { title, items, list: ListState::default().with_selected(Some(0)), area: Rect::default() }));
+        self.popup = Some(Popup::Menu(Menu { title, items, list: ListState::default().with_selected(Some(0)) }));
     }
 
     /// `enter` here, in a few words, when it does something.
@@ -266,10 +273,16 @@ impl App {
         }
         match focus {
             Some(Part::File(k)) => {
-                items.push(act(A::Download, "save this file"));
-                items.push(act(A::Copy, "copy the file's URL"));
-                items.push(act(A::Browser, "open the file in the browser"));
-                if p.files.get(*k).is_some_and(|f| f.is_image()) {
+                let f = p.files.get(*k);
+                if f.is_some_and(|f| f.url.is_some()) {
+                    items.push(act(A::Download, "save this file"));
+                }
+                if let Some((what, _)) = f.and_then(Attachment::link) {
+                    let what = if what == crate::model::THUMBNAIL_URL { "thumbnail" } else { "file" };
+                    items.push(act(A::Copy, &format!("copy the {what}'s URL")));
+                    items.push(act(A::Browser, &format!("open the {what} in the browser")));
+                }
+                if f.is_some_and(|f| f.is_image()) {
                     items.push(act(A::ImageSearch, "search for this image"));
                 }
             }
@@ -282,7 +295,7 @@ impl App {
         }
         if !p.files.is_empty() {
             items.push(act(A::View, "view the post's images"));
-            if !matches!(focus, Some(Part::File(_))) {
+            if !matches!(focus, Some(Part::File(_))) && p.files.iter().any(|f| f.url.is_some()) {
                 items.push(act(A::DownloadPost, if p.files.len() == 1 { "save the post's file" } else { "save the post's files" }));
             }
         }
@@ -333,7 +346,7 @@ impl App {
         if t.gallery_files().next().is_some() {
             items.push(act(A::Gallery, "all the thread's files"));
         }
-        if t.unhidden_posts().any(|(_, p)| !p.files.is_empty()) {
+        if t.unhidden_posts().any(|(_, p)| p.files.iter().any(|f| f.url.is_some())) {
             items.push(act(A::DownloadThread, "save all the thread's files…"));
         }
         if self.can_jump_back() {
@@ -557,13 +570,12 @@ impl App {
     }
 
     /// A click on a row runs it; anywhere else closes the menu.
-    pub(super) fn on_menu_click(&mut self, col: u16, row: u16) {
+    pub(super) fn on_menu_click(&mut self, ev: MouseEvent, _: Instant) {
         let Some(Popup::Menu(m)) = &self.popup else { return };
-        let i = m.list.offset() + row.saturating_sub(m.area.y) as usize;
-        if m.area.contains(Position::new(col, row)) && i < m.items.len() {
-            self.run_menu_item(i);
-        } else {
-            self.popup = None;
+        let n = m.items.len();
+        match self.popup_row(ev.column, ev.row).filter(|&i| i < n) {
+            Some(i) => self.run_menu_item(i),
+            None => self.popup = None,
         }
     }
 
@@ -572,12 +584,12 @@ impl App {
     /// `f`: a label on every part and post (or row) on screen.
     pub(super) fn open_hints(&mut self) {
         let mut at: Vec<(u16, u16, HintTo)> = Vec::new();
-        match self.hit {
-            Some(Hit::Thread { area }) if self.tab.gallery.is_none() => {
+        match self.drawn().and_then(|d| d.body) {
+            Some(Hit::Thread { area, scroll }) if self.tab.gallery.is_none() => {
                 let Some(t) = &self.tab.thread else { return };
                 let Some(l) = &t.layout else { return };
                 for row in 0..area.height {
-                    let i = t.scroll + row as usize;
+                    let i = scroll + row as usize;
                     let Some((e, _)) = l.line(i) else { break };
                     let (Some(&start), Some(entry)) = (l.starts.get(e), t.entries.get(e)) else { break };
                     let in_block = i - start;

@@ -24,14 +24,16 @@ fn finds_programs_on_path() {
 #[test]
 fn mouse_wheel_click_and_double_click() {
     let mut app = test_app();
-    app.hit = Some(Hit::List { area: Rect::new(1, 2, 60, 10), offset: 0, item_height: 1 });
+    let list = Some(Hit::List { area: Rect::new(1, 2, 60, 10), offset: 0, item_height: 1 });
+    app.begin_frame().body = list;
     let t0 = Instant::now();
     app.on_mouse(mouse(MouseEventKind::ScrollDown, 5, 5), t0);
     assert_eq!(app.site_list.state.selected(), Some(1));
     app.on_mouse(mouse(MouseEventKind::ScrollUp, 5, 5), t0);
     assert_eq!(app.site_list.state.selected(), Some(0));
 
-    // Row 3 is the second item (History).
+    // Row 3 is the second item (History), in the frame after the wheel.
+    app.begin_frame().body = list;
     let left = MouseEventKind::Down(MouseButton::Left);
     app.on_mouse(mouse(left, 5, 3), t0);
     assert_eq!(app.site_list.state.selected(), Some(1));
@@ -44,6 +46,7 @@ fn mouse_wheel_click_and_double_click() {
 
     // Clicks outside the list do nothing.
     app.tab.navigate(View::Sites);
+    app.begin_frame().body = list;
     app.on_mouse(mouse(left, 5, 30), t0);
     assert_eq!(app.site_list.state.selected(), Some(1));
 }
@@ -57,7 +60,7 @@ fn clicks_on_a_settings_popup_never_reach_the_rows_behind() {
     assert!(matches!(app.popup, Some(Popup::Settings(SettingsPopup::HiddenWords { .. }))));
     draw_at(&mut app, 100, 40);
     // A double click on the Hidden replies row, beside the popup: nothing changes.
-    let Some(Hit::Settings { area, offset }) = app.hit else { panic!("no settings rows") };
+    let Some(Hit::Settings { area, offset }) = app.drawn.body else { panic!("no settings rows") };
     let pos = settings::position("Hidden replies").unwrap();
     let row = setting_rows().iter().position(|r| *r == Ok(pos)).unwrap() - offset;
     let left = MouseEventKind::Down(MouseButton::Left);
@@ -80,11 +83,335 @@ fn mouse_click_selects_thread_post() {
     t.viewport = 10;
     app.tab.thread = Some(t);
     app.tab.navigate(View::Thread);
-    app.hit = Some(Hit::Thread { area: Rect::new(0, 1, 40, 10) });
+    app.begin_frame().body = Some(Hit::Thread { area: Rect::new(0, 1, 40, 10), scroll: 0 });
     app.on_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 3, 1 + 9), Instant::now());
     assert_eq!(app.tab.thread.as_ref().unwrap().selected, 2);
     app.on_mouse(mouse(MouseEventKind::ScrollDown, 3, 3), Instant::now());
     assert_eq!(app.tab.thread.as_ref().unwrap().scroll, 2);
+}
+
+/// The footer is drawn: what it says has been seen (an error waits for that).
+fn drawn(app: &mut App) {
+    app.footer.tick(app.clock.instant(), true);
+}
+
+/// The footer's message has gone.
+fn expired(app: &mut App) {
+    app.footer = Footer::default();
+}
+
+// ----- the mouse reaches only what's on top, as it was drawn -----
+
+/// A wheel notch while the key editor waits for a key is not a key: nothing is bound or
+/// refused, and the editor still waits for one.
+#[test]
+fn the_wheel_never_answers_the_key_editor() {
+    let mut app = test_app();
+    app.tab.navigate(View::Settings);
+    app.settings_list.state.select(Some(settings::position("Key bindings").unwrap()));
+    app.activate_setting();
+    // enter: waiting for the key to bind.
+    app.on_key(KeyEvent::from(KeyCode::Enter));
+    assert!(matches!(app.settings_popup(), Some(SettingsPopup::Keys { capture: Some(false), .. })));
+    app.on_mouse(mouse(MouseEventKind::ScrollDown, 5, 5), Instant::now());
+    assert!(app.status().is_none(), "the wheel was taken for a key: {:?}", app.status());
+    assert!(matches!(app.settings_popup(), Some(SettingsPopup::Keys { capture: Some(false), .. })), "the editor stopped waiting");
+}
+
+/// The wheel over a save question doesn't scroll the thread behind it.
+#[test]
+fn the_wheel_over_a_save_question_leaves_the_thread_alone() {
+    let mut app = thread_app();
+    app.set_thread(nos(&(1..=60).collect::<Vec<_>>()));
+    draw_at(&mut app, 80, 20);
+    app.popup = Some(Popup::Confirm(saving::Confirm { what: saving::Saving::Page, title: "Save the thread as a page?", lines: vec![] }));
+    let before = app.tab.thread.as_ref().unwrap().scroll;
+    app.on_mouse(mouse(MouseEventKind::ScrollDown, 5, 5), Instant::now());
+    assert_eq!(app.tab.thread.as_ref().unwrap().scroll, before, "the thread behind scrolled");
+    assert!(app.confirm().is_some());
+}
+
+/// Over a list, the notch that leaves a save question open over a thread mustn't answer it
+/// "no".
+#[test]
+fn the_wheel_never_answers_a_save_question() {
+    let mut app = test_app();
+    app.popup = Some(Popup::Confirm(saving::Confirm { what: saving::Saving::Page, title: "Save the thread as a page?", lines: vec![] }));
+    app.on_mouse(mouse(MouseEventKind::ScrollDown, 5, 5), Instant::now());
+    assert!(app.confirm().is_some(), "the wheel answered: {:?}", app.status());
+    assert_eq!(app.site_list.state.selected(), Some(0));
+}
+
+/// Over the filter maker the wheel moves its choices, not the thread behind it.
+#[test]
+fn the_wheel_moves_the_filter_choices_over_a_thread() {
+    let mut app = thread_app();
+    let mut posts = nos(&(1..=60).collect::<Vec<_>>());
+    posts[0].name = "Satoshi".into();
+    posts[0].subject = Some("Bitcoin".into());
+    app.set_thread(posts);
+    draw_at(&mut app, 80, 20);
+    app.open_add_filter();
+    assert!(app.filter_add().is_some_and(|a| a.candidates.len() > 1));
+    app.on_mouse(mouse(MouseEventKind::ScrollDown, 5, 5), Instant::now());
+    assert_eq!(app.tab.thread.as_ref().unwrap().scroll, 0, "the thread behind scrolled");
+    assert_eq!(app.filter_add().unwrap().list.selected(), Some(1));
+}
+
+/// The wheel over a right-click menu isn't a key: `u` still takes back the filter just added.
+#[test]
+fn the_wheel_over_a_menu_keeps_the_filter_undo() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = filter_app(dir.path());
+    app.tab.thread.as_mut().unwrap().selected = 1;
+    app.act(Action::Filter);
+    app.on_key(KeyEvent::from(KeyCode::Enter));
+    assert_ne!(config_text(&app), FILTER_CONFIG);
+    draw_at(&mut app, 80, 20);
+    let right = MouseEventKind::Down(MouseButton::Right);
+    app.on_mouse(mouse(right, 5, 3), Instant::now());
+    assert!(matches!(app.popup, Some(Popup::Menu(_))));
+    app.on_mouse(mouse(MouseEventKind::ScrollDown, 5, 3), Instant::now());
+    draw_at(&mut app, 80, 20);
+    app.on_mouse(mouse(right, 5, 3), Instant::now());
+    assert!(app.popup.is_none());
+    app.on_key(KeyEvent::from(KeyCode::Char('u')));
+    assert_eq!(config_text(&app), FILTER_CONFIG, "the wheel dropped the undo");
+}
+
+/// A double click on a post while a go-to is being typed doesn't submit the go-to.
+#[test]
+fn a_double_click_never_submits_a_goto() {
+    let mut app = thread_app();
+    app.set_thread(nos(&(1..=60).collect::<Vec<_>>()));
+    draw_at(&mut app, 80, 20);
+    app.act(Action::Goto);
+    for c in "zz/".chars() {
+        app.on_key(KeyEvent::from(KeyCode::Char(c)));
+    }
+    let left = MouseEventKind::Down(MouseButton::Left);
+    let t0 = Instant::now();
+    app.on_mouse(mouse(left, 5, 4), t0);
+    app.on_mouse(mouse(left, 5, 4), t0 + Duration::from_millis(100));
+    assert_eq!((app.tab.view(), app.goto_text()), (View::Thread, Some("zz/")), "the go-to was submitted: {:?}", app.status());
+}
+
+/// A thread that's still loading draws no rows: the list drawn before it can't be clicked.
+#[test]
+fn a_loading_thread_keeps_no_clickable_rows_from_the_last_view() {
+    let mut app = test_app();
+    draw_at(&mut app, 80, 20);
+    assert!(matches!(app.drawn.body, Some(Hit::List { .. })));
+    app.tab.navigate(View::Thread);
+    app.tab.fake_load(1, "Loading", Then::Thread { open: Opening::default() });
+    draw_at(&mut app, 80, 20);
+    assert!(app.drawn.body.is_none(), "stale {:?}", app.drawn.body);
+}
+
+/// Input handled before the next frame can change what's shown: a click then lands on
+/// nothing, not on the rows the last frame drew for another view.
+#[test]
+fn a_click_after_leaving_a_view_waits_for_the_next_frame() {
+    let mut app = local_app();
+    app.switch_site(0);
+    app.tab.navigate(View::Boards);
+    draw_at(&mut app, 80, 20);
+    let Some(Hit::List { area, .. }) = app.drawn.body else { panic!("no boards drawn") };
+    app.on_key(KeyEvent::from(KeyCode::Char('h')));
+    assert_eq!(app.tab.view(), View::Sites);
+    let before = app.site_list.state.selected();
+    // The second board's row; on the sites list it would be the second site.
+    app.on_mouse(mouse(MouseEventKind::Down(MouseButton::Left), area.x + 1, area.y + 1), Instant::now());
+    assert_eq!(app.site_list.state.selected(), before, "the click landed on the boards drawn before");
+}
+
+/// A wheel notch handled before the next frame moves what's under the pointer: a click then
+/// lands on nothing, and after the frame on the post drawn there.
+#[test]
+fn a_click_after_a_scroll_waits_for_the_next_frame() {
+    let mut app = thread_app();
+    app.set_thread(nos(&(1..=60).collect::<Vec<_>>()));
+    draw_at(&mut app, 80, 20);
+    let (col, row) = (5, 10);
+    let selected = |app: &App| app.tab.thread.as_ref().unwrap().selected;
+    for _ in 0..4 {
+        app.on_mouse(mouse(MouseEventKind::ScrollDown, col, row), Instant::now());
+    }
+    assert!(app.tab.thread.as_ref().unwrap().scroll >= 12);
+    let before = selected(&app);
+    app.on_mouse(mouse(MouseEventKind::Down(MouseButton::Left), col, row), Instant::now());
+    assert_eq!(selected(&app), before, "the click landed on the posts as they were drawn before");
+    draw_at(&mut app, 80, 20);
+    let shown = app.thread_part_at(col, row).unwrap().0;
+    assert_ne!(shown, before);
+    app.on_mouse(mouse(MouseEventKind::Down(MouseButton::Left), col, row), Instant::now());
+    assert_eq!(selected(&app), shown);
+}
+
+/// `f` right after a wheel notch would label the posts as they were drawn, over a frame
+/// showing others: it waits for the frame too.
+#[test]
+fn hints_after_a_scroll_wait_for_the_next_frame() {
+    let mut app = thread_app();
+    app.set_thread(nos(&(1..=60).collect::<Vec<_>>()));
+    draw_at(&mut app, 80, 20);
+    app.on_mouse(mouse(MouseEventKind::ScrollDown, 5, 5), Instant::now());
+    app.on_key(KeyEvent::from(KeyCode::Char('f')));
+    assert!(!matches!(app.popup, Some(Popup::Hints(_))), "labels on posts no longer drawn there");
+    draw_at(&mut app, 80, 20);
+    app.on_key(KeyEvent::from(KeyCode::Char('f')));
+    assert!(matches!(app.popup, Some(Popup::Hints(_))));
+}
+
+/// The quote peek covers the posts under it: a click on it reaches none of them.
+#[test]
+fn clicks_never_reach_the_posts_under_the_quote_peek() {
+    use crate::model::Target;
+    let mut app = local_app();
+    app.goto_str("a/x/1");
+    let html = r##"<a href="#p1" class="quotelink">&gt;&gt;1</a>"##;
+    let mut posts = nos(&(1..=60).collect::<Vec<_>>());
+    posts[1] = Post { no: 2, ..crate::markup::parse_html(html, crate::markup::Flavor::Vichan).into() };
+    app.handle(answer(app.tab.req().unwrap(), thread_arrived, arrived(posts)));
+    app.on_key(KeyEvent::from(KeyCode::Char('j')));
+    draw_at(&mut app, 80, 20);
+    let Some(Hit::Thread { area, .. }) = app.drawn.body else { panic!("no thread drawn") };
+    // The post drawn on a row near the top and one near the bottom.
+    let col = area.x + 5;
+    let drawn = |row| (row, app.thread_part_at(col, row).map(|(e, _)| e));
+    let (top, bottom) = (drawn(area.y + 1), drawn(area.bottom() - 2));
+    app.on_key(KeyEvent::from(KeyCode::Tab));
+    let focus = |app: &App| app.tab.thread.as_ref().unwrap().focus.clone();
+    assert!(matches!(focus(&app), Some(Part::Link(Target::Quote(_)))));
+    draw_at(&mut app, 80, 20);
+    // The peek covers the top or the bottom rows of the thread, as drawn the frame before.
+    let Some(Hit::Thread { area: after, .. }) = app.drawn.body else { panic!("no thread drawn") };
+    let (row, under) = if after.y > area.y { top } else { bottom };
+    assert!(under.is_some_and(|e| e != 1), "no post behind the peek");
+    app.on_mouse(mouse(MouseEventKind::Down(MouseButton::Left), col, row), Instant::now());
+    assert_eq!(app.tab.thread.as_ref().unwrap().selected, 1, "the click reached a post under the peek");
+    assert!(matches!(focus(&app), Some(Part::Link(Target::Quote(_)))));
+}
+
+/// A menu clicked before a frame has drawn it isn't closed by the click: the click waits for
+/// the frame, then picks the row there.
+#[test]
+fn a_menu_clicked_before_it_is_drawn_still_picks_a_row() {
+    let mut app = thread_app();
+    app.set_thread(nos(&(1..=60).collect::<Vec<_>>()));
+    draw_at(&mut app, 80, 20);
+    let right = MouseEventKind::Down(MouseButton::Right);
+    app.on_mouse(mouse(right, 5, 5), Instant::now());
+    draw_at(&mut app, 80, 20);
+    let Some(Hit::List { area, .. }) = app.drawn.popup else { panic!("no menu drawn") };
+    assert_ne!(area, Rect::default());
+    app.on_key(KeyEvent::from(KeyCode::Esc));
+    assert!(app.popup.is_none());
+    draw_at(&mut app, 80, 20);
+    // Right click then left click in one input batch, as a fast double tap does.
+    app.on_mouse(mouse(right, 5, 5), Instant::now());
+    let items = app.menu().unwrap().items.len();
+    app.on_mouse(mouse(MouseEventKind::Down(MouseButton::Left), area.x + 1, area.y + 1), Instant::now());
+    assert!(items > 1 && (app.popup.is_some() || app.status().is_some() || app.opened.is_some()), "the click closed the menu without picking a row");
+    draw_at(&mut app, 80, 20);
+    app.on_mouse(mouse(MouseEventKind::Down(MouseButton::Left), area.x + 1, area.y + 1), Instant::now());
+    assert!(app.menu().is_none() && (app.popup.is_some() || app.status().is_some() || app.opened.is_some() || app.tab.popup.is_some()), "the click picked no row");
+}
+
+/// Clicks on the same row in two tabs, with a tab chip clicked between, aren't a double click.
+#[test]
+fn a_click_in_another_tab_is_not_a_double_click() {
+    let mut app = test_app();
+    app.tabs.push(Tab::new(0, Instant::now()));
+    let list = Some(Hit::List { area: Rect::new(1, 2, 60, 10), offset: 0, item_height: 1 });
+    let frame = app.begin_frame();
+    frame.tabs = vec![(Rect::new(0, 0, 5, 1), 1)];
+    frame.body = list;
+    let left = MouseEventKind::Down(MouseButton::Left);
+    let t0 = Instant::now();
+    app.on_mouse(mouse(left, 5, 3), t0);
+    app.on_mouse(mouse(left, 1, 0), t0 + Duration::from_millis(100));
+    assert_eq!(app.active, 1);
+    app.begin_frame().body = list;
+    app.on_mouse(mouse(left, 5, 3), t0 + Duration::from_millis(200));
+    assert_eq!(app.tab.view(), View::Sites, "one click opened it");
+}
+
+/// Two clicks on one row with the list re-sorted between them are on two threads: not a
+/// double click.
+#[test]
+fn a_list_re_sorted_between_two_clicks_is_not_a_double_click() {
+    let mut app = local_app();
+    app.tab.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
+    let ops = |nos: &[u64]| nos.iter().map(|&no| Post { no, ..Default::default() }).collect::<Vec<_>>();
+    app.load_catalog(None);
+    app.handle(answer(app.tab.req().unwrap(), App::catalog_arrived, Ok(ops(&[1, 2, 3, 4]))));
+    app.tab.navigate(View::Catalog);
+    draw_at(&mut app, 80, 30);
+    let Some(hit) = app.drawn.body else { panic!("no catalog drawn") };
+    let at = (0..30).find(|&row| hit.row_at(5, row) == Some(2)).unwrap();
+    let t0 = Instant::now();
+    app.on_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 5, at), t0);
+    app.handle(Msg::Done(Box::new(move |app: &mut App| app.catalog_arrived(Ok(ops(&[4, 3, 2, 1]))))));
+    draw_at(&mut app, 80, 30);
+    app.on_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 5, at), t0 + Duration::from_millis(100));
+    assert_eq!(app.tab.view(), View::Catalog, "one click on each thread opened one");
+}
+
+/// A preview tall enough to reach the tab row covers the chips there: a click on its title
+/// closes it, and doesn't switch tabs under it.
+#[test]
+fn a_tall_preview_covers_the_tab_chips() {
+    let mut app = local_app();
+    app.tabs.push(Tab::new(0, Instant::now()));
+    app.tab.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
+    app.tab.navigate(View::Thread);
+    let mut posts: Vec<Post> = (1..=20).map(|no| Post { no, body: vec![Line::from(format!("post {no}"))], ..Default::default() }).collect();
+    posts.push(Post { no: 21, quotes: (1..=20).collect(), ..Default::default() });
+    app.set_thread(posts);
+    draw_at(&mut app, 80, 20);
+    let Some(&(chip, 1)) = app.drawn.tabs.last() else { panic!("no second chip") };
+    app.on_key(KeyEvent::from(KeyCode::Char('G')));
+    app.act(Action::Preview);
+    draw_at(&mut app, 80, 20);
+    app.on_mouse(mouse(MouseEventKind::Down(MouseButton::Left), chip.x, chip.y), Instant::now());
+    assert_eq!(app.active, 0, "the click went through the preview to a chip");
+    assert!(app.tab.popup.is_none());
+}
+
+/// A list that comes back from a refresh between a frame and a click, in one batch, may
+/// be in another order: the click waits for the frame that shows it.
+#[test]
+fn a_click_after_a_list_answer_waits_for_the_next_frame() {
+    let mut app = local_app();
+    app.tab.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
+    let ops = |nos: &[u64]| nos.iter().map(|&no| Post { no, ..Default::default() }).collect::<Vec<_>>();
+    app.load_catalog(None);
+    app.handle(answer(app.tab.req().unwrap(), App::catalog_arrived, Ok(ops(&[1, 2, 3, 4]))));
+    app.tab.navigate(View::Catalog);
+    draw_at(&mut app, 80, 30);
+    let Some(hit) = app.drawn.body else { panic!("no catalog drawn") };
+    let at = (0..30).find(|&row| hit.row_at(5, row) == Some(2)).unwrap();
+    let click = |app: &mut App| {
+        let ev = MouseEvent { kind: MouseEventKind::Down(MouseButton::Left), column: 5, row: at, modifiers: KeyModifiers::NONE };
+        app.handle(Msg::Input(Event::Mouse(ev)));
+    };
+    let selected = |app: &App| app.tab.catalog_list.state.selected();
+    app.load_catalog(None);
+    app.handle(answer(app.tab.req().unwrap(), App::catalog_arrived, Ok(ops(&[4, 3, 2, 1]))));
+    let before = selected(&app);
+    click(&mut app);
+    assert_eq!(selected(&app), before, "the click landed on the list as it was drawn before");
+    draw_at(&mut app, 80, 30);
+    click(&mut app);
+    assert_eq!(selected(&app), Some(2));
+    // So does what background work found (a watched refresh re-sorts Saved): the list
+    // comes back reversed between this frame and the click.
+    draw_at(&mut app, 80, 30);
+    app.handle(Msg::Done(Box::new(move |app: &mut App| app.catalog_arrived(Ok(ops(&[1, 2, 3, 4]))))));
+    app.tab.catalog_list.state.select(Some(0));
+    click(&mut app);
+    assert_eq!(selected(&app), Some(0), "the click landed on the list as it was drawn before");
 }
 
 #[test]
@@ -99,10 +426,9 @@ fn sleeps_until_the_next_thing_to_do() {
     app.tab.navigate(View::Sites);
     // A status message wakes the loop when it's due to disappear.
     app.info("hi");
-    app.status_since = Some(("hi".into(), now - Duration::from_millis(1700)));
+    app.footer.tick(now - Duration::from_millis(1700), true);
     assert_eq!(app.next_wake(now), Duration::from_millis(300));
-    app.status = None;
-    app.status_since = None;
+    expired(&mut app);
     // A watched thread that was never refreshed is due now.
     let key = ThreadKey { site: "4chan".into(), board: "g".into(), no: 1 };
     app.store.watch(key, String::new(), 1, 1);
@@ -114,11 +440,15 @@ fn sleeps_until_the_next_thing_to_do() {
     assert_eq!(app.next_wake(now), Duration::from_millis(100));
 }
 
-impl App {
-    /// Show a thread's posts as a load's answer does, opened plainly.
-    pub(super) fn set_thread(&mut self, posts: Vec<Post>) {
-        self.show_thread(posts, None, Opening::default());
-    }
+/// `refreshed`, with the site's answer for `key`: `posts` as it sent them.
+fn refresh(app: &mut App, key: ThreadKey, posts: Vec<Post>) {
+    let no = key.no;
+    app.refreshed(key, Thread::answer(no, posts));
+}
+
+/// A thread answer: `posts`, of the thread their first post starts.
+fn arrived(posts: Vec<Post>) -> anyhow::Result<Thread> {
+    Thread::answer(posts.first().map_or(0, |p| p.no), posts)
 }
 
 /// What load `id`'s job comes to once it has `found` something: `apply` it.
@@ -128,7 +458,7 @@ fn answer<T: Send + 'static>(id: u64, apply: fn(&mut App, T), found: T) -> Msg {
 
 /// A thread load's answer, for the thread the tab last asked for (as `load_thread`'s own
 /// closure is handed the key it asked for).
-fn thread_arrived(app: &mut App, res: Result<Vec<Post>>) {
+fn thread_arrived(app: &mut App, res: Result<Thread>) {
     let board = app.tab.board.as_ref().map(|b| b.uri.clone()).unwrap_or_default();
     let key = app.key(&board, app.tab.pending_thread.unwrap_or_default());
     app.thread_arrived(&key, res);
@@ -244,7 +574,7 @@ fn key_editor_rebinds_saves_and_refuses_clashes() {
     press(&mut app, KeyCode::Enter);
     press(&mut app, KeyCode::Char('v'));
     assert_eq!(app.keys.label(Action::Watch), "W, alt-w");
-    assert!(app.status.as_ref().is_some_and(|s| s.error && s.text.contains("'v'")), "{:?}", app.status);
+    assert!(app.footer.get().is_some_and(|s| s.error && s.text.contains("'v'")), "{:?}", app.footer.get());
     // x resets to the default, which removes the entry.
     press(&mut app, KeyCode::Char('x'));
     assert!(app.keys.is_default(Action::Watch));
@@ -268,11 +598,11 @@ fn copies_text_and_links() {
     app.tab.navigate(View::Thread);
     app.act(Action::Copy);
     assert_eq!(app.copied.as_deref(), Some(">>1\n>green\nsecret text"));
-    assert_eq!(app.status.as_ref().unwrap().text, "Copied 22 characters");
+    assert_eq!(app.footer.get().unwrap().text, "Copied 22 characters");
     app.act(Action::CopyLink);
     assert_eq!(app.copied.as_deref(), Some("https://boards.4chan.org/g/thread/1#p2"));
     // The viewer copies the file's URL, or the post's link.
-    app.tab.thread.as_mut().unwrap().posts[1].files = vec![Attachment { url: "https://i.4cdn.org/g/1.png".into(), ..Default::default() }];
+    app.tab.thread.as_mut().unwrap().posts[1].files = vec![Attachment::at("https://i.4cdn.org/g/1.png")];
     app.images = crate::images::Images::offline();
     app.act(Action::View);
     app.on_key(KeyEvent::from(KeyCode::Char('y')));
@@ -317,7 +647,7 @@ fn goto_opens_places_and_u_comes_back() {
     assert_eq!((app.tab.site, app.tab.view()), (1, View::Boards));
     // Errors are said, not acted on.
     app.goto_str("a/x/abc");
-    assert!(app.status.as_ref().unwrap().error);
+    assert!(app.footer.get().unwrap().error);
     assert_eq!(app.tab.view(), View::Boards);
     // A link to a site ck doesn't have: it asks the site what it runs, to add it. Also
     // without a scheme or a path (not a board of the current site called that).
@@ -352,7 +682,7 @@ fn a_post_on_another_site_moves_the_tab_once_found() {
     app.goto_str(&format!("http://{host}/b/post/99/"));
     assert_eq!(app.tab.site, 0);
     settle_until(&mut app, |a| a.tab.loading().is_none());
-    assert!(app.status.as_ref().unwrap().error);
+    assert!(app.footer.get().unwrap().error);
     assert_eq!((app.tab.site, app.tab.thread.as_ref().unwrap().no, app.tab.trail.len()), (0, 1, 0));
     // Found: the tab moves to its thread there, and `u` comes back to where it was asked.
     app.goto_str(&format!("http://{host}/b/post/77/"));
@@ -372,7 +702,7 @@ fn goto_input_completes_and_takes_pastes() {
     app.on_key(KeyEvent::from(KeyCode::Tab));
     // x and xy: completes the common part and lists both.
     assert_eq!(app.goto_text(), Some("a/x"));
-    assert!(app.status.as_ref().unwrap().text.contains("xy"));
+    assert!(app.footer.get().unwrap().text.contains("xy"));
     app.on_key(KeyEvent::from(KeyCode::Char('y')));
     app.on_key(KeyEvent::from(KeyCode::Enter));
     assert_eq!((app.goto_text(), app.tab.view(), app.tab.board.as_ref().unwrap().uri.as_str()), (None, View::Catalog, "xy"));
@@ -394,7 +724,7 @@ fn links_panel_lists_and_opens() {
     app.tab.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
     let html = r#"<a href="/x/res/1.html#1" class="quotelink">&gt;&gt;1</a> <a href="/xy/res/9.html#10">&gt;&gt;&gt;/xy/10</a> see https://example.com/a"#;
     let parsed = crate::markup::parse_html(html, crate::markup::Flavor::Vichan);
-    let reply = Post { no: 2, files: vec![Attachment { filename: "a.png".into(), url: "http://127.0.0.1:3/x/src/a.png".into(), ..Default::default() }], ..parsed.into() };
+    let reply = Post { no: 2, files: vec![Attachment { filename: "a.png".into(), ..Attachment::at("http://127.0.0.1:3/x/src/a.png") }], ..parsed.into() };
     app.tab.thread = Some(ThreadView::new("x".into(), 1, vec![Post { no: 1, ..Default::default() }, reply]));
     app.tab.thread.as_mut().unwrap().selected = 1;
     app.tab.navigate(View::Thread);
@@ -421,7 +751,7 @@ fn links_panel_lists_and_opens() {
     // A post without links says so.
     app.tab.thread = Some(ThreadView::new("x".into(), 1, vec![Post { no: 1, ..Default::default() }]));
     app.act(Action::Links);
-    assert!(!matches!(app.tab.popup, Some(crate::app::TabPopup::Links(_))) && app.status.as_ref().unwrap().text == "Post has no links");
+    assert!(!matches!(app.tab.popup, Some(crate::app::TabPopup::Links(_))) && app.footer.get().unwrap().text == "Post has no links");
 }
 
 #[test]
@@ -448,7 +778,7 @@ fn filters_and_hiding() {
     assert_eq!(app.selected_index(), Some(1));
     app.tab.catalog_list.state.select(Some(0));
     app.act(Action::Hide);
-    assert!(app.status.as_ref().unwrap().text.contains("filter \"spam\""));
+    assert!(app.footer.get().unwrap().text.contains("filter \"spam\""));
     app.tab.catalog_list.state.select(Some(2));
     app.act(Action::Hide);
     assert!(!app.store.hidden_on("a", "x").contains(&3));
@@ -477,18 +807,18 @@ fn hidden_posts_are_not_new_in_watched_threads() {
     app.store.watch(key.clone(), "One".into(), 2, 5);
     app.store.toggle_mine(&key, 5).unchecked();
     let start = vec![post(1, vec![], ""), post(5, vec![], "")];
-    app.refreshed(key.clone(), Ok(start.clone()));
+    refresh(&mut app, key.clone(), start.clone());
     // A hidden reply to yours, a reply to that (hidden with it), and one you can see.
     let mut posts = start;
     posts.extend([post(6, vec![5], "buy spam"), post(7, vec![6, 5], "agreed"), post(8, vec![5], "hello")]);
-    app.refreshed(key.clone(), Ok(posts.clone()));
+    refresh(&mut app, key.clone(), posts.clone());
     app.flush_notes(Instant::now());
     assert_eq!(app.notified, ["New reply to your post in /x/ One"]);
     assert_eq!(app.store.watched(&key).unwrap().status, Status::Live { unread: 1, replies: 1 });
     // A `notify` filter still tells about what it catches, hidden or not.
     app.notified.clear();
     posts.push(post(9, vec![], "rust spam"));
-    app.refreshed(key.clone(), Ok(posts));
+    refresh(&mut app, key.clone(), posts);
     app.flush_notes(Instant::now());
     assert_eq!(app.notified, ["A new post caught by \"rust\" in /x/ One"]);
     assert_eq!(app.store.watched(&key).unwrap().status.counts().0, 1);
@@ -503,20 +833,20 @@ fn notifies_about_new_posts_and_replies_to_yours() {
     app.store.watch(key(2), "Two".into(), 1, 20);
     app.store.toggle_mine(&key(1), 5).unchecked();
     // The first refresh of the session tells nothing.
-    app.refreshed(key(1), Ok(vec![post(1, vec![]), post(5, vec![]), post(6, vec![5])]));
+    refresh(&mut app, key(1), vec![post(1, vec![]), post(5, vec![]), post(6, vec![5])]);
     app.flush_notes(Instant::now());
     assert!(app.notified.is_empty());
     assert_eq!(app.store.watched(&key(1)).unwrap().status.counts().1, 1);
     // Then: a reply to your post, and another post.
-    app.refreshed(key(1), Ok(vec![post(1, vec![]), post(5, vec![]), post(6, vec![5]), post(7, vec![5]), post(8, vec![1])]));
+    refresh(&mut app, key(1), vec![post(1, vec![]), post(5, vec![]), post(6, vec![5]), post(7, vec![5]), post(8, vec![1])]);
     app.flush_notes(Instant::now());
     assert_eq!(app.notified, ["New reply to your post in /x/ One", "1 new post in /x/ One"]);
     assert_eq!(app.store.watched(&key(1)).unwrap().status.counts().1, 2);
     // Several threads at once make one notification.
     app.notified.clear();
-    app.refreshed(key(2), Ok(vec![post(20, vec![])]));
-    app.refreshed(key(1), Ok(vec![post(1, vec![]), post(9, vec![])]));
-    app.refreshed(key(2), Ok(vec![post(20, vec![]), post(21, vec![])]));
+    refresh(&mut app, key(2), vec![post(2, vec![]), post(20, vec![])]);
+    refresh(&mut app, key(1), vec![post(1, vec![]), post(5, vec![]), post(6, vec![5]), post(7, vec![5]), post(8, vec![1]), post(9, vec![])]);
+    refresh(&mut app, key(2), vec![post(2, vec![]), post(20, vec![]), post(21, vec![])]);
     // ...once nothing is still refreshing.
     app.refreshing.insert(key(3));
     app.flush_notes(Instant::now());
@@ -536,15 +866,15 @@ fn notify_filters_tell_about_what_they_catch_once() {
     let post = |no, id: &str| Post { no, id: Some(id.into()), ..Default::default() };
     app.store.watch(key(1), "One".into(), 1, 1);
     // The first refresh of the session tells nothing, though it catches one.
-    app.refreshed(key(1), Ok(vec![post(1, "x"), post(2, "Ab3d")]));
+    refresh(&mut app, key(1), vec![post(1, "x"), post(2, "Ab3d")]);
     app.flush_notes(Instant::now());
     assert!(app.notified.is_empty());
     // A new post it catches: told, once.
-    app.refreshed(key(1), Ok(vec![post(1, "x"), post(2, "Ab3d"), post(3, "Ab3d"), post(4, "zz")]));
+    refresh(&mut app, key(1), vec![post(1, "x"), post(2, "Ab3d"), post(3, "Ab3d"), post(4, "zz")]);
     app.flush_notes(Instant::now());
     assert_eq!(app.notified, ["A new post caught by \"that guy\" in /x/ One", "2 new posts in /x/ One"]);
     app.notified.clear();
-    app.refreshed(key(1), Ok(vec![post(1, "x"), post(2, "Ab3d"), post(3, "Ab3d"), post(4, "zz")]));
+    refresh(&mut app, key(1), vec![post(1, "x"), post(2, "Ab3d"), post(3, "Ab3d"), post(4, "zz")]);
     app.flush_notes(Instant::now());
     assert!(app.notified.is_empty());
     // A followed general's board: new threads it catches, after the first look.
@@ -731,7 +1061,7 @@ fn grid_moves_in_two_dimensions() {
     assert_eq!(app.tab.view(), View::Boards);
     // Clicks hit the right card.
     app.tab.navigate(View::Catalog);
-    app.hit = Some(Hit::Grid { area: Rect::new(2, 2, 66, 24), offset: 0, cols: 3, cell: (22, 12) });
+    app.begin_frame().body = Some(Hit::Grid { area: Rect::new(2, 2, 66, 24), offset: 0, cols: 3, cell: (22, 12) });
     app.on_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 2 + 22 + 5, 2 + 12 + 3), Instant::now());
     assert_eq!(at(&app), 4);
     // c cycles this board's layout.
@@ -744,7 +1074,7 @@ fn the_gallery_leaves_out_hidden_posts() {
     let mut app = local_app();
     app.images = crate::images::Images::offline();
     app.tab.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
-    let file = |name: &str| Attachment { filename: name.into(), url: format!("http://127.0.0.1:3/x/src/{name}"), ..Default::default() };
+    let file = |name: &str| Attachment { filename: name.into(), ..Attachment::at(format!("http://127.0.0.1:3/x/src/{name}")) };
     let post = |no, files: Vec<Attachment>| Post { no, files, ..Default::default() };
     app.tab.thread = Some(ThreadView::new("x".into(), 1, vec![post(1, vec![file("a.png")]), post(2, vec![file("hidden.png")]), post(3, vec![file("b.jpg")])]));
     app.tab.navigate(View::Thread);
@@ -825,7 +1155,7 @@ fn gallery_of_the_threads_files() {
     app.download_dir = Some(dir.path().display().to_string());
     app.images = crate::images::Images::offline();
     app.tab.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
-    let file = |name: &str| Attachment { filename: name.into(), url: format!("http://127.0.0.1:3/x/src/{name}"), ..Default::default() };
+    let file = |name: &str| Attachment { filename: name.into(), ..Attachment::at(format!("http://127.0.0.1:3/x/src/{name}")) };
     let post = |no, files: Vec<Attachment>| Post { no, files, ..Default::default() };
     app.tab.thread = Some(ThreadView::new("x".into(), 1, vec![post(1, vec![file("a.png")]), post(2, vec![]), post(3, vec![file("b.jpg"), file("c.gif")])]));
     app.tab.navigate(View::Thread);
@@ -888,7 +1218,7 @@ fn archive_search_and_back() {
     }
     assert_eq!(app.tab.req().unwrap(), req + 1);
     app.handle(answer(app.tab.req().unwrap(), |a, (page, r)| a.search_results(page, r), (2, Err(anyhow::anyhow!("You're searching too fast.")))));
-    assert!(app.status.as_ref().is_some_and(|s| s.error && s.text.contains("too fast")));
+    assert!(app.footer.get().is_some_and(|s| s.error && s.text.contains("too fast")));
     // Enter: the thread, on the archive, with the post selected.
     app.tab.search_list.state.select(Some(1));
     app.enter();
@@ -898,9 +1228,10 @@ fn archive_search_and_back() {
     app.back();
     assert_eq!((app.tab.view(), app.tab.site, app.tab.search.is_none()), (View::Catalog, 0, true));
     // Sites without an archive say so.
+    drawn(&mut app);
     app.sites[0].cfg.archive = None;
     app.act(Action::ArchiveSearch);
-    assert!(app.typing.is_none() && app.status.as_ref().unwrap().text.contains("no archive"));
+    assert!(app.typing.is_none() && app.footer.get().unwrap().text.contains("no archive"));
 }
 
 #[test]
@@ -944,10 +1275,58 @@ fn search_results_leave_out_hidden_posts() {
 }
 
 #[test]
+fn a_file_with_only_its_thumbnail_is_never_taken_for_the_file() {
+    let mut app = local_app();
+    app.images = crate::images::Images::offline();
+    let thumb = "https://i.example/1s.jpg";
+    let file = Attachment { filename: "clip.webm".into(), url: None, kind: FileKind::Video, thumb: Some(thumb.into()), ..Default::default() };
+    app.tab.thread = Some(ThreadView::new("x".into(), 1, vec![Post { no: 1, files: vec![file.clone()], ..Default::default() }]));
+    app.tab.navigate(View::Thread);
+    app.act(Action::View);
+    // Shown as the thumbnail it is; nothing to save; o, y and i act on the thumbnail and say so.
+    assert_eq!(app.viewer_source(&file), Some((thumb.into(), crate::images::Kind::Thumb)));
+    app.on_key(KeyEvent::from(KeyCode::Char('d')));
+    assert_eq!(app.status().unwrap().text, "Only the thumbnail is available; there's no file to save");
+    app.on_key(KeyEvent::from(KeyCode::Char('y')));
+    assert_eq!((app.copied.as_deref(), app.status().unwrap().text.as_str()), (Some(thumb), "Copied thumbnail URL: https://i.example/1s.jpg"));
+    app.on_key(KeyEvent::from(KeyCode::Char('i')));
+    assert_eq!(app.opened.as_deref(), Some(thumb));
+    assert!(app.status().unwrap().text.starts_with("Only the thumbnail is available"));
+    // The same file focused in the thread: `o` and `d` say so too.
+    app.on_key(KeyEvent::from(KeyCode::Esc));
+    app.act(Action::NextPart);
+    app.opened = None;
+    app.act(Action::Browser);
+    assert_eq!((app.opened.as_deref(), app.status().unwrap().text.as_str()), (Some(thumb), "Only the thumbnail is available; opened https://i.example/1s.jpg"));
+    app.act(Action::Download);
+    assert_eq!(app.status().unwrap().text, "Only the thumbnail is available; there's no file to save");
+    // The menu offers the thumbnail, and no saving.
+    app.on_key(KeyEvent::from(KeyCode::Char('.')));
+    let items = &app.menu().unwrap().items;
+    let label = |a: Action| items.iter().find_map(|i| if let MenuItem::Act(x, l) = i { (*x == a).then(|| l.to_string()) } else { None });
+    assert_eq!(label(Action::Copy).as_deref(), Some("copy the thumbnail's URL"));
+    assert!([Action::Download, Action::DownloadPost, Action::DownloadThread].iter().all(|&a| label(a).is_none()), "{items:?}");
+    app.popup = None;
+    // A spoilered file the archive didn't keep has neither: everything says so, and `o`
+    // and `y` don't fall back to the post.
+    let gone = Attachment { thumb: None, spoiler: true, ..file };
+    app.tab.thread.as_mut().unwrap().posts[0].files = vec![gone.clone()];
+    let neither = "Neither the file nor its thumbnail is available";
+    app.opened = None;
+    for a in [Action::Browser, Action::Copy, Action::Download] {
+        app.footer = Footer::default();
+        app.act(a);
+        assert_eq!(app.status().map(|s| s.text.as_str()), Some(neither), "{a:?}");
+    }
+    app.open_file(&gone);
+    assert_eq!((app.opened.as_deref(), app.status().map(|s| s.text.as_str())), (None, Some(neither)));
+}
+
+#[test]
 fn reverse_image_search() {
     let mut app = local_app();
     app.images = crate::images::Images::offline();
-    let file = |name: &str, thumb| Attachment { filename: name.into(), url: format!("https://i.example/{name}"), thumb, ..Default::default() };
+    let file = |name: &str, thumb| Attachment { filename: name.into(), thumb, ..Attachment::at(format!("https://i.example/{name}")) };
     let files = vec![file("a.png", None), file("b.webm", Some("https://i.example/bs.jpg".into())), file("c.pdf", None)];
     app.tab.thread = Some(ThreadView::new("x".into(), 1, vec![Post { no: 1, files, ..Default::default() }]));
     app.tab.navigate(View::Thread);
@@ -1031,7 +1410,7 @@ fn tabs_keep_their_own_place_and_responses() {
     // Tab 0's catalog arrives: it goes to tab 0, not here.
     app.handle(answer(first_req, App::catalog_arrived, Ok(vec![Post { no: 1, ..Default::default() }])));
     assert!(app.tab.catalog.is_empty());
-    app.handle(answer(app.tab.req().unwrap(), thread_arrived, Ok(vec![Post { no: 5, ..Default::default() }])));
+    app.handle(answer(app.tab.req().unwrap(), thread_arrived, arrived(vec![Post { no: 5, ..Default::default() }])));
     assert_eq!(app.tab.thread.as_ref().unwrap().no, 5);
     app.switch_tab(0);
     assert_eq!((app.tab.site, app.tab.view(), app.tab.catalog.len(), app.tab.loading().is_none()), (0, View::Catalog, 1, true));
@@ -1039,10 +1418,10 @@ fn tabs_keep_their_own_place_and_responses() {
     // A thread with no posts at all is an error, and what was shown stays.
     app.handle(answer(app.tab.req().unwrap(), App::catalog_arrived, Ok(vec![])));
     app.goto_str("a/x/1");
-    app.handle(answer(app.tab.req().unwrap(), thread_arrived, Ok(vec![Post { no: 1, ..Default::default() }])));
+    app.handle(answer(app.tab.req().unwrap(), thread_arrived, arrived(vec![Post { no: 1, ..Default::default() }])));
     app.act(Action::Reload);
-    app.handle(answer(app.tab.req().unwrap(), thread_arrived, Ok(vec![])));
-    assert!(app.tab.thread.as_ref().is_some_and(|t| t.posts.len() == 1) && app.status.as_ref().is_some_and(|s| s.error));
+    app.handle(answer(app.tab.req().unwrap(), thread_arrived, Thread::answer(1, vec![])));
+    assert!(app.tab.thread.as_ref().is_some_and(|t| t.posts.len() == 1) && app.footer.get().is_some_and(|s| s.error));
     // A post's thread found while the settings are open opens behind them.
     app.goto_str("a/x/1#77");
     app.act(Action::Settings);
@@ -1050,8 +1429,8 @@ fn tabs_keep_their_own_place_and_responses() {
     assert_eq!((app.tab.view(), app.tab.place_view(), app.tab.pending_thread.unwrap()), (View::Settings, View::Thread, 3));
     // Tab chips don't switch tabs under a settings popup (it isn't the tab's).
     app.tabs.push(Tab::new(0, Instant::now()));
-    app.tab_chips = vec![(Rect::new(0, 0, 5, 1), 1)];
     app.popup = Some(Popup::Settings(SettingsPopup::Folder { value: String::new() }));
+    app.begin_frame().tabs = vec![(Rect::new(0, 0, 5, 1), 1)];
     app.on_mouse(MouseEvent { kind: MouseEventKind::Down(MouseButton::Left), column: 1, row: 0, modifiers: KeyModifiers::NONE }, Instant::now());
     assert_eq!((app.active, app.tab.view()), (0, View::Settings));
     app.popup = None;
@@ -1060,7 +1439,7 @@ fn tabs_keep_their_own_place_and_responses() {
     // A response for a tab that's gone is dropped.
     let stale = app.tabs[1].req().unwrap();
     app.tabs.truncate(1);
-    app.handle(answer(stale, thread_arrived, Ok(vec![Post { no: 9, ..Default::default() }])));
+    app.handle(answer(stale, thread_arrived, arrived(vec![Post { no: 9, ..Default::default() }])));
     assert!(app.tab.thread.is_none());
 }
 
@@ -1139,7 +1518,7 @@ fn favorite_boards_on_the_home_screen() {
     assert!(app.favorites.is_empty());
     app.tab.navigate(View::Sites);
     app.on_key(KeyEvent::from(KeyCode::Char('3')));
-    assert!(app.status.as_ref().unwrap().text.contains("No favorites yet"));
+    assert!(app.footer.get().unwrap().text.contains("No favorites yet"));
 }
 
 #[test]
@@ -1226,7 +1605,7 @@ fn following_a_general() {
     let mut full = op(10, "/lmg/ - Local Models General #5");
     full.bumplimit = true;
     app.tab.navigate(View::Sites);
-    app.refreshed(key(10), Ok(vec![full, Post { no: 11, ..Default::default() }]));
+    refresh(&mut app, key(10), vec![full, Post { no: 11, ..Default::default() }]);
     assert!(app.store.watched(&key(10)).unwrap().at_limit);
     app.check_generals(now);
     app.check_generals(now);
@@ -1308,23 +1687,23 @@ fn status_messages_expire() {
     let mut app = test_app();
     let t0 = Instant::now();
     app.info("No unread posts");
-    app.expire_status(t0);
-    app.expire_status(t0 + Duration::from_millis(1500));
-    assert!(app.status.is_some());
-    app.expire_status(t0 + Duration::from_secs(2));
-    assert!(app.status.is_none());
+    app.footer.tick(t0, true);
+    app.footer.tick(t0 + Duration::from_millis(1500), true);
+    assert!(app.footer.get().is_some());
+    app.footer.tick(t0 + Duration::from_secs(2), true);
+    assert!(app.footer.get().is_none());
 
     // Errors stay longer, and a new message restarts the timer.
     app.error("Rate limited");
-    app.expire_status(t0);
-    app.expire_status(t0 + Duration::from_secs(4));
-    assert!(app.status.is_some());
+    app.footer.tick(t0, true);
+    app.footer.tick(t0 + Duration::from_secs(4), true);
+    assert!(app.footer.get().is_some());
     app.error("Thread was deleted or archived");
-    app.expire_status(t0 + Duration::from_secs(4));
-    app.expire_status(t0 + Duration::from_secs(8));
-    assert!(app.status.is_some());
-    app.expire_status(t0 + Duration::from_secs(9));
-    assert!(app.status.is_none());
+    app.footer.tick(t0 + Duration::from_secs(4), true);
+    app.footer.tick(t0 + Duration::from_secs(8), true);
+    assert!(app.footer.get().is_some());
+    app.footer.tick(t0 + Duration::from_secs(9), true);
+    assert!(app.footer.get().is_none());
 }
 
 #[test]
@@ -1355,9 +1734,9 @@ fn tab_focuses_parts_and_the_verbs_follow_it() {
     app.images = Images::offline();
     app.goto_str("a/x/1");
     let html = r##"<a href="#p1" class="quotelink">&gt;&gt;1</a> see https://example.com/a"##;
-    let file = |name: &str| Attachment { filename: name.into(), url: format!("http://127.0.0.1:3/x/src/{name}"), ..Default::default() };
+    let file = |name: &str| Attachment { filename: name.into(), ..Attachment::at(format!("http://127.0.0.1:3/x/src/{name}")) };
     let reply = Post { no: 2, files: vec![file("a.png"), file("b.webm")], ..crate::markup::parse_html(html, crate::markup::Flavor::Vichan).into() };
-    app.handle(answer(app.tab.req().unwrap(), thread_arrived, Ok(vec![Post { no: 1, ..Default::default() }, reply, Post { no: 3, ..Default::default() }])));
+    app.handle(answer(app.tab.req().unwrap(), thread_arrived, arrived(vec![Post { no: 1, ..Default::default() }, reply, Post { no: 3, ..Default::default() }])));
     let tab = |app: &mut App, shift: bool| app.on_key(if shift { KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT) } else { KeyEvent::from(KeyCode::Tab) });
     let focus = |app: &App| app.tab.thread.as_ref().unwrap().focus.clone();
     let selected = |app: &App| app.tab.thread.as_ref().unwrap().selected;
@@ -1405,27 +1784,27 @@ fn tab_focuses_parts_and_the_verbs_follow_it() {
     for _ in 0..10 {
         tab(&mut app, false);
     }
-    assert_eq!(app.status.as_ref().map(|s| s.text.as_str()), Some("No more images or links below"));
+    assert_eq!(app.footer.get().map(|s| s.text.as_str()), Some("No more images or links below"));
 }
 
 #[test]
 fn the_menu_runs_what_it_lists() {
     let mut app = local_app();
     app.goto_str("a/x/1");
-    app.handle(answer(app.tab.req().unwrap(), thread_arrived, Ok(vec![Post { no: 1, files: vec![Attachment { filename: "a.png".into(), url: "http://127.0.0.1:3/a.png".into(), ..Default::default() }], ..Default::default() }])));
+    app.handle(answer(app.tab.req().unwrap(), thread_arrived, arrived(vec![Post { no: 1, files: vec![Attachment { filename: "a.png".into(), ..Attachment::at("http://127.0.0.1:3/a.png") }], ..Default::default() }])));
     app.on_key(KeyEvent::from(KeyCode::Char('.')));
     let m = app.menu().unwrap();
     let has = |a: Action| m.items.iter().any(|i| matches!(i, MenuItem::Act(x, _) if *x == a));
     assert!(has(Action::View) && has(Action::Watch) && has(Action::Gallery) && !has(Action::Preview));
     // A row's own key runs it, and the menu closes.
     app.on_key(KeyEvent::from(KeyCode::Char('w')));
-    assert!(app.menu().is_none() && app.status.as_ref().is_some_and(|s| s.text.starts_with("Watching")));
+    assert!(app.menu().is_none() && app.footer.get().is_some_and(|s| s.text.starts_with("Watching")));
     // So does enter on a row.
     app.on_key(KeyEvent::from(KeyCode::Char('.')));
     let at = app.menu().unwrap().items.iter().position(|i| matches!(i, MenuItem::Act(Action::Watch, _))).unwrap();
     app.menu_mut().unwrap().list.select(Some(at));
     app.on_key(KeyEvent::from(KeyCode::Enter));
-    assert!(app.menu().is_none() && app.status.as_ref().is_some_and(|s| s.text.starts_with("Stopped watching")));
+    assert!(app.menu().is_none() && app.footer.get().is_some_and(|s| s.text.starts_with("Stopped watching")));
     // Esc just closes it.
     app.on_key(KeyEvent::from(KeyCode::Char('.')));
     app.on_key(KeyEvent::from(KeyCode::Esc));
@@ -1446,7 +1825,7 @@ fn watched_threads_are_saved_as_posts_arrive() {
     let file = |no: u64| dir.path().join(format!("threads/a/x/{no}.json"));
     // Not watched: not saved.
     app.goto_str("a/x/1");
-    app.handle(answer(app.tab.req().unwrap(), thread_arrived, Ok(nos(&[1, 2]))));
+    app.handle(answer(app.tab.req().unwrap(), thread_arrived, arrived(nos(&[1, 2]))));
     assert!(!file(1).exists());
     // Watching a loaded thread saves it at once; refreshes save the changes only.
     app.act(Action::Watch);
@@ -1460,7 +1839,7 @@ fn watched_threads_are_saved_as_posts_arrive() {
     assert_eq!(app.store.saved(&key(1)).unwrap().posts, 3);
     // A watched thread refreshed in the background, too.
     app.store.watch(key(7), "seven".into(), 1, 7);
-    app.refreshed(key(7), Ok(nos(&[7, 8])));
+    refresh(&mut app, key(7), nos(&[7, 8]));
     app.flush_writes();
     assert!(file(7).exists());
     // The index is written with the rest of the data.
@@ -1475,7 +1854,7 @@ fn a_search_of_saved_threads_is_stopped_only_by_its_own_tab() {
     let n = 50;
     for no in 1..=n {
         let key = ThreadKey { site: "a".into(), board: "x".into(), no };
-        app.store.keep_thread(&key, "t", "u", &nos(&[no]), 1000);
+        app.store.keep_thread(&key, "t", "u", &whole(&nos(&[no])), 1000);
     }
     app.flush_writes();
     // Tab 0 searches them; meanwhile tab 1 starts a search of its own and leaves it.
@@ -1499,7 +1878,7 @@ fn a_dead_thread_offers_its_saved_copy() {
     let key = ThreadKey { site: "a".into(), board: "x".into(), no: 1 };
     // A watched thread opens from its saved copy at once, and when it's gone, that's it.
     app.store.watch(key.clone(), "one".into(), 2, 2);
-    app.store.keep_thread(&key, "one", "u", &nos(&[1, 2]), 10_000 - 7200);
+    app.store.keep_thread(&key, "one", "u", &whole(&nos(&[1, 2])), 10_000 - 7200);
     app.goto_str("a/x/1");
     assert_eq!(app.tab.cached(), Some(tabs::Offline { saved: 10_000 - 7200, dead: false }));
     assert!(app.tab.loading().is_some() && app.tab.thread.as_ref().unwrap().posts.len() == 2);
@@ -1512,14 +1891,15 @@ fn a_dead_thread_offers_its_saved_copy() {
     app.goto_str("a/x/1");
     assert!(app.tab.thread.is_none());
     app.handle(answer(app.tab.req().unwrap(), thread_arrived, Err(gone())));
-    let text = &app.status.as_ref().unwrap().text;
+    let text = &app.footer.get().unwrap().text;
     assert!(text.contains("A saved copy from 2h ago: enter opens it"), "{text}");
     app.on_key(KeyEvent::from(KeyCode::Enter));
     assert_eq!(app.tab.saved(), Some(tabs::Offline { saved: 10_000 - 7200, dead: true }));
     assert_eq!(app.tab.thread.as_ref().unwrap().posts.len(), 2);
     // Read offline: r says so, and nothing is fetched, however long it stays open.
+    drawn(&mut app);
     app.act(Action::Reload);
-    assert!(app.status.as_ref().unwrap().text.contains("saved copy from 2h ago; the thread is gone"));
+    assert!(app.footer.get().unwrap().text.contains("saved copy from 2h ago; the thread is gone"));
     for _ in 0..3 {
         app.clock = Clock { fixed: Some(app.clock.now() + 600), instant: Some(app.clock.instant() + Duration::from_secs(600)) };
         app.poll();
@@ -1536,18 +1916,18 @@ fn a_thread_dying_on_screen_becomes_its_saved_copy() {
     let mut app = saving_app(dir.path(), 1000);
     let key = ThreadKey { site: "a".into(), board: "x".into(), no: 1 };
     app.goto_str("a/x/1");
-    app.handle(answer(app.tab.req().unwrap(), thread_arrived, Ok(nos(&[1, 2]))));
+    app.handle(answer(app.tab.req().unwrap(), thread_arrived, arrived(nos(&[1, 2]))));
     app.act(Action::Watch);
     app.refreshed(key, Err(gone()));
     assert_eq!(app.tab.saved(), Some(tabs::Offline { saved: 1000, dead: true }));
-    assert!(app.status.as_ref().unwrap().text.contains("this is its saved copy"));
+    assert!(app.footer.get().unwrap().text.contains("this is its saved copy"));
     assert_eq!(app.tab.thread.as_ref().unwrap().posts.len(), 2);
     // Without a copy, as before.
     let mut app = saving_app(dir.path(), 1000);
     app.goto_str("a/x/5");
     app.handle(answer(app.tab.req().unwrap(), thread_arrived, Err(gone())));
     assert!(app.tab.saved_offer.is_none() && app.tab.saved().is_none());
-    assert_eq!(app.status.as_ref().unwrap().text, "Thread was deleted or archived");
+    assert_eq!(app.footer.get().unwrap().text, "Thread was deleted or archived");
 }
 
 #[test]
@@ -1555,7 +1935,7 @@ fn a_saved_copy_of_a_live_thread_goes_live_with_r() {
     let dir = tempfile::tempdir().unwrap();
     let mut app = saving_app(dir.path(), 1000);
     let key = ThreadKey { site: "a".into(), board: "x".into(), no: 1 };
-    app.store.keep_thread(&key, "one", "u", &nos(&[1, 2]), 900);
+    app.store.keep_thread(&key, "one", "u", &whole(&nos(&[1, 2])), 900);
     app.tab.navigate(View::Saved);
     app.saved_list.state.select(Some(0));
     app.enter();
@@ -1564,7 +1944,7 @@ fn a_saved_copy_of_a_live_thread_goes_live_with_r() {
     app.act(Action::Reload);
     assert!(app.tab.saved().is_none() && app.tab.loading().is_some());
     // The copy stays up, and the live thread arrives in its place, keeping the selection.
-    app.handle(answer(app.tab.req().unwrap(), thread_arrived, Ok(nos(&[1, 2, 3]))));
+    app.handle(answer(app.tab.req().unwrap(), thread_arrived, arrived(nos(&[1, 2, 3]))));
     let t = app.tab.thread.as_ref().unwrap();
     assert_eq!((t.posts.len(), t.current().unwrap().no), (3, 2));
     // Back goes to the Saved view.
@@ -1578,7 +1958,7 @@ fn the_saved_view_lists_and_removes_after_asking() {
     let mut app = saving_app(dir.path(), 1000);
     let key = |no| ThreadKey { site: "a".into(), board: "x".into(), no };
     for (no, at) in [(1, 100), (2, 300), (3, 200)] {
-        app.store.keep_thread(&key(no), &format!("thread {no}"), "u", &nos(&[no]), at);
+        app.store.keep_thread(&key(no), &format!("thread {no}"), "u", &whole(&nos(&[no])), at);
     }
     app.tab.navigate(View::Sites);
     app.site_list.state.select(Some(2));
@@ -1595,7 +1975,7 @@ fn the_saved_view_lists_and_removes_after_asking() {
     app.saved_list.state.select(Some(1));
     app.act(Action::Remove);
     assert_eq!(app.store.saved.len(), 3);
-    assert!(app.status.as_ref().unwrap().text.contains("again to remove the saved copy of thread 3"));
+    assert!(app.footer.get().unwrap().text.contains("again to remove the saved copy of thread 3"));
     app.act(Action::Remove);
     app.flush_writes();
     assert!(app.store.saved(&key(3)).is_none() && !dir.path().join("threads/a/x/3.json").exists());
@@ -1615,7 +1995,7 @@ fn export_saves_a_copy() {
     let mut app = saving_app(&dir.path().join("data"), 1000);
     app.download_dir = Some(dir.path().join("dl").display().to_string());
     app.goto_str("a/x/1");
-    app.handle(answer(app.tab.req().unwrap(), thread_arrived, Ok(nos(&[1, 2]))));
+    app.handle(answer(app.tab.req().unwrap(), thread_arrived, arrived(nos(&[1, 2]))));
     // It asks first; enter saves.
     app.act(Action::Export);
     assert!(!dir.path().join("dl/thread.json").exists());
@@ -1623,7 +2003,7 @@ fn export_saves_a_copy() {
     assert!(dir.path().join("dl/thread.json").exists());
     let key = ThreadKey { site: "a".into(), board: "x".into(), no: 1 };
     assert_eq!(app.store.saved(&key).unwrap().posts, 2);
-    assert!(app.status.as_ref().unwrap().text.contains("(and in Saved)"));
+    assert!(app.footer.get().unwrap().text.contains("(and in Saved)"));
 }
 
 #[test]
@@ -1631,7 +2011,7 @@ fn a_saved_copy_is_remembered_in_the_session() {
     let dir = tempfile::tempdir().unwrap();
     let mut app = saving_app(dir.path(), 1000);
     let key = ThreadKey { site: "b".into(), board: "y".into(), no: 5 };
-    app.store.keep_thread(&key, "five", "u", &nos(&[5, 6]), 900);
+    app.store.keep_thread(&key, "five", "u", &whole(&nos(&[5, 6])), 900);
     app.open_saved(&key, Opening::default());
     app.tab.thread.as_mut().unwrap().selected = 1;
     let place = app.place();
@@ -1652,7 +2032,7 @@ fn watching_a_saved_copy_keeps_it_under_its_own_number() {
     let dir = tempfile::tempdir().unwrap();
     let mut app = saving_app(dir.path(), 1000);
     let key = |no| ThreadKey { site: "a".into(), board: "x".into(), no };
-    app.store.keep_thread(&key(5), "five", "u", &nos(&[9, 10]), 900);
+    app.store.keep_thread(&key(5), "five", "u", &whole(&nos(&[9, 10])), 900);
     app.open_saved(&key(5), Opening::default());
     assert_eq!(app.tab.thread.as_ref().unwrap().no, 9);
     app.act(Action::Watch);
@@ -1673,7 +2053,7 @@ fn filter_app(dir: &std::path::Path) -> App {
     app.config_path = Some(path);
     app.goto_str("a/x/1");
     let named = |no, name: &str| Post { no, name: name.into(), ..Default::default() };
-    app.handle(answer(app.tab.req().unwrap(), thread_arrived, Ok(vec![named(1, "Anonymous"), named(2, "Named !Trip"), named(3, "Anonymous"), named(4, "Named !Trip")])));
+    app.handle(answer(app.tab.req().unwrap(), thread_arrived, arrived(vec![named(1, "Anonymous"), named(2, "Named !Trip"), named(3, "Anonymous"), named(4, "Named !Trip")])));
     app
 }
 
@@ -1698,7 +2078,7 @@ fn x_filters_posts_like_the_selected_one() {
     // Applied at once: both posts by the name collapse.
     let t = app.tab.thread.as_ref().unwrap();
     assert!(t.marks.why_hidden(1).is_some() && t.marks.why_hidden(3).is_some() && t.marks.why_hidden(2).is_none());
-    assert!(app.status.as_ref().unwrap().text.contains("Hiding Named !Trip (2 here) · u undoes"));
+    assert!(app.footer.get().unwrap().text.contains("Hiding Named !Trip (2 here) · u undoes"));
     // u takes it back, from the file too.
     app.on_key(KeyEvent::from(KeyCode::Char('u')));
     assert_eq!(config_text(&app), FILTER_CONFIG);
@@ -1769,7 +2149,7 @@ fn the_filter_list_edits_turns_off_and_removes() {
     app.on_key(KeyEvent::from(KeyCode::Char('a')));
     app.paste("(Named");
     app.on_key(KeyEvent::from(KeyCode::Enter));
-    assert!(app.status.as_ref().unwrap().error && app.filter_cfgs.len() == 1);
+    assert!(app.footer.get().unwrap().error && app.filter_cfgs.len() == 1);
     app.on_key(KeyEvent::from(KeyCode::Home));
     for _ in 0..7 {
         app.on_key(KeyEvent::from(KeyCode::Backspace));
@@ -1790,13 +2170,14 @@ fn the_filter_list_edits_turns_off_and_removes() {
     assert_eq!(app.filter_cfgs[1].fields(), [crate::filter::Field::Name]);
     assert!(app.tab.thread.as_ref().unwrap().marks.why_hidden(1).is_some());
     // The last field can't go.
+    drawn(&mut app);
     app.on_key(KeyEvent::from(KeyCode::Up));
     app.on_key(KeyEvent::from(KeyCode::Down));
     if let Some(SettingsPopup::FilterEdit { row: r, .. }) = app.settings_popup_mut() {
         *r = 5;
     }
     app.on_key(KeyEvent::from(KeyCode::Enter));
-    assert_eq!(app.status.as_ref().unwrap().text, "A filter needs at least one field");
+    assert_eq!(app.footer.get().unwrap().text, "A filter needs at least one field");
     // Posts: OPs only (the named posts are replies), replies only, all again.
     if let Some(SettingsPopup::FilterEdit { row: r, .. }) = app.settings_popup_mut() {
         *r = crate::app::EDIT_ROWS.iter().position(|r| *r == crate::app::EditRow::Posts).unwrap();
@@ -1823,7 +2204,7 @@ fn the_filter_list_edits_turns_off_and_removes() {
     // A filter changed in the file meanwhile isn't overwritten.
     std::fs::write(app.config_path.as_ref().unwrap(), FILTER_CONFIG.replace("(?i)spam", "eggs")).unwrap();
     app.on_key(KeyEvent::from(KeyCode::Char(' ')));
-    assert!(app.status.as_ref().unwrap().text.contains("changed since ck read it"));
+    assert!(app.footer.get().unwrap().text.contains("changed since ck read it"));
     assert!(config_text(&app).contains("eggs") && !config_text(&app).contains("enabled"));
 }
 
@@ -1872,7 +2253,7 @@ fn c_shows_a_conversation_until_esc() {
     app.goto_str("a/x/1");
     let posts = [(1, vec![]), (2, vec![1]), (3, vec![2]), (4, vec![3]), (5, vec![2]), (6, vec![99])];
     let post = |&(no, ref quotes): &(u64, Vec<u64>)| Post { no, quotes: quotes.clone(), ..Default::default() };
-    app.handle(answer(app.tab.req().unwrap(), thread_arrived, Ok(posts.iter().map(post).collect())));
+    app.handle(answer(app.tab.req().unwrap(), thread_arrived, arrived(posts.iter().map(post).collect())));
     let t = app.tab.thread.as_mut().unwrap();
     t.scroll = 7;
     t.select(2);
@@ -1895,7 +2276,7 @@ fn c_shows_a_conversation_until_esc() {
     app.tab.thread.as_mut().unwrap().select(5);
     app.act(Action::Conversation);
     assert!(app.tab.thread.as_ref().unwrap().conversation.is_none());
-    assert!(app.status.as_ref().unwrap().text.contains("isn't part of a conversation"));
+    assert!(app.footer.get().unwrap().text.contains("isn't part of a conversation"));
     // Jumping to a post outside it leaves it.
     app.tab.thread.as_mut().unwrap().select(3);
     app.act(Action::Conversation);
@@ -1915,7 +2296,7 @@ fn i_shows_a_posters_posts_until_esc() {
     app.goto_str("a/x/1");
     let post = |no: u64, id: Option<&str>| Post { no, id: id.map(String::from), quotes: if no > 1 { vec![no - 1] } else { vec![] }, ..Default::default() };
     let posts = || vec![post(1, Some("aa")), post(2, Some("bb")), post(3, Some("aa")), post(4, None), post(5, Some("bb"))];
-    app.handle(answer(app.tab.req().unwrap(), thread_arrived, Ok(posts())));
+    app.handle(answer(app.tab.req().unwrap(), thread_arrived, arrived(posts())));
     let shown = |app: &App| app.tab.thread.as_ref().unwrap().entries.iter().map(|e| app.tab.thread.as_ref().unwrap().posts[e.post].no).collect::<Vec<_>>();
     let t = app.tab.thread.as_mut().unwrap();
     assert_eq!(t.id_count("aa"), 2);
@@ -1923,7 +2304,7 @@ fn i_shows_a_posters_posts_until_esc() {
     t.select(1);
     app.on_key(KeyEvent::from(KeyCode::Char('I')));
     assert_eq!(shown(&app), [2, 5]);
-    assert!(app.status.as_ref().unwrap().text.contains("2 posts by ID:bb"), "{:?}", app.status);
+    assert!(app.footer.get().unwrap().text.contains("2 posts by ID:bb"), "{:?}", app.footer.get());
     // A refresh keeps it, with the poster's new posts.
     let mut more = posts();
     more.push(post(6, Some("bb")));
@@ -1941,7 +2322,7 @@ fn i_shows_a_posters_posts_until_esc() {
     app.tab.thread.as_mut().unwrap().select(3);
     app.act(Action::Poster);
     assert!(app.tab.thread.as_ref().unwrap().conversation.is_none());
-    assert!(app.status.as_ref().unwrap().text.contains("has no poster ID"));
+    assert!(app.footer.get().unwrap().text.contains("has no poster ID"));
     // The ID is the post's first part: tab focuses it, enter shows the poster's posts, and
     // again (or I) goes back.
     app.tab.thread.as_mut().unwrap().select(0);
@@ -1969,7 +2350,7 @@ fn a_conversation_is_remembered_in_the_session() {
     app.store = Store::load(Some(dir.path().to_path_buf())).0;
     app.goto_str("a/x/1");
     let posts = || vec![Post { no: 1, ..Default::default() }, Post { no: 2, quotes: vec![1], ..Default::default() }, Post { no: 3, quotes: vec![2], ..Default::default() }, Post { no: 4, quotes: vec![1], ..Default::default() }];
-    app.handle(answer(app.tab.req().unwrap(), thread_arrived, Ok(posts())));
+    app.handle(answer(app.tab.req().unwrap(), thread_arrived, arrived(posts())));
     app.tab.thread.as_mut().unwrap().select(1);
     app.act(Action::Conversation);
     app.tab.thread.as_mut().unwrap().select(2);
@@ -1981,7 +2362,7 @@ fn a_conversation_is_remembered_in_the_session() {
     assert_eq!(old.conversation, None);
     let mut next = local_app();
     next.go_to_place(&place);
-    next.handle(answer(next.tab.req().unwrap(), thread_arrived, Ok(posts())));
+    next.handle(answer(next.tab.req().unwrap(), thread_arrived, arrived(posts())));
     let t = next.tab.thread.as_ref().unwrap();
     assert_eq!((t.conversation.as_ref().map(|c| c.anchor), t.current().unwrap().no, t.entries.len()), (Some(2), 3, 3));
 }
@@ -2007,9 +2388,9 @@ fn the_viewer_goes_through_the_whole_thread_and_zooms() {
     let mut app = local_app();
     app.images = crate::images::Images::offline();
     app.goto_str("a/x/1");
-    let file = |name: &str| Attachment { filename: name.into(), url: format!("http://127.0.0.1:9/{name}"), ..Default::default() };
+    let file = |name: &str| Attachment { filename: name.into(), ..Attachment::at(format!("http://127.0.0.1:9/{name}")) };
     let post = |no, files: Vec<Attachment>| Post { no, files, ..Default::default() };
-    app.handle(answer(app.tab.req().unwrap(), thread_arrived, Ok(vec![post(1, vec![file("a.png")]), post(2, vec![]), post(3, vec![file("b.png"), file("c.png")]), post(4, vec![file("d.png")])])));
+    app.handle(answer(app.tab.req().unwrap(), thread_arrived, arrived(vec![post(1, vec![file("a.png")]), post(2, vec![]), post(3, vec![file("b.png"), file("c.png")]), post(4, vec![file("d.png")])])));
     app.tab.thread.as_mut().unwrap().select(2);
     // v: every file of the thread, from the selected post's.
     app.act(Action::View);
@@ -2140,7 +2521,7 @@ fn threads_open_from_their_last_copy_then_refresh() {
         app.goto_str("c/g/30364");
         settle_until(&mut app, |a| a.tab.loading().is_none());
         assert_eq!(app.tab.cached().map(|c| c.dead), Some(dead), "{mode}");
-        assert!(app.status.as_ref().unwrap().error);
+        assert!(app.footer.get().unwrap().error);
     }
     // One request per open, whatever came from the copy.
     assert_eq!(site.asked().len(), 4);
@@ -2180,19 +2561,19 @@ fn saving_needs_a_target_or_asks_first() {
     app.download_dir = Some(dir.path().display().to_string());
     app.images = Images::offline();
     app.goto_str("a/x/1");
-    let file = |name: &str| Attachment { filename: name.into(), url: format!("http://127.0.0.1:3/x/src/{name}"), size: Some(1 << 20), ..Default::default() };
+    let file = |name: &str| Attachment { filename: name.into(), size: Some(1 << 20), ..Attachment::at(format!("http://127.0.0.1:3/x/src/{name}")) };
     let posts = vec![
         Post { no: 1, files: vec![file("a.png")], ..Default::default() },
         Post { no: 2, files: vec![file("b.png"), file("c.png")], ..Default::default() },
         Post { no: 3, ..Default::default() },
     ];
-    app.handle(answer(app.tab.req().unwrap(), thread_arrived, Ok(posts)));
+    app.handle(answer(app.tab.req().unwrap(), thread_arrived, arrived(posts)));
     let press = |app: &mut App, c: char| app.on_key(KeyEvent::from(KeyCode::Char(c)));
     let total = |app: &App| app.downloads.total;
     // d on a post with nothing focused saves nothing, and says how.
     press(&mut app, 'd');
     assert_eq!(total(&app), 0);
-    assert!(app.status.as_ref().unwrap().text.starts_with("tab to a file, then d saves it (the . menu saves"), "{:?}", app.status);
+    assert!(app.footer.get().unwrap().text.starts_with("tab to a file, then d saves it (the . menu saves"), "{:?}", app.footer.get());
     // D and E aren't keys any more.
     press(&mut app, 'D');
     press(&mut app, 'E');
@@ -2210,9 +2591,10 @@ fn saving_needs_a_target_or_asks_first() {
     // Anything but enter cancels.
     press(&mut app, 'j');
     assert!(app.confirm().is_none() && total(&app) == 1);
-    assert_eq!(app.status.as_ref().unwrap().text, "Not saved");
+    assert_eq!(app.footer.get().unwrap().text, "Not saved");
     // So does a click.
     run_menu_row(&mut app, "save all the thread's files…");
+    app.begin_frame();
     app.on_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 0, 0), Instant::now());
     assert!(app.confirm().is_none() && total(&app) == 1);
     run_menu_row(&mut app, "save all the thread's files…");
@@ -2242,8 +2624,8 @@ fn an_action_without_a_key_is_in_the_menu() {
     app.keys = KeyMap::new(&overrides).unwrap();
     app.download_dir = Some(dir.path().display().to_string());
     app.goto_str("a/x/1");
-    let file = Attachment { filename: "a.png".into(), url: "http://127.0.0.1:3/x/src/a.png".into(), ..Default::default() };
-    app.handle(answer(app.tab.req().unwrap(), thread_arrived, Ok(vec![Post { no: 1, files: vec![file], ..Default::default() }])));
+    let file = Attachment { filename: "a.png".into(), ..Attachment::at("http://127.0.0.1:3/x/src/a.png") };
+    app.handle(answer(app.tab.req().unwrap(), thread_arrived, arrived(vec![Post { no: 1, files: vec![file], ..Default::default() }])));
     app.on_key(KeyEvent::from(KeyCode::Tab));
     app.on_key(KeyEvent::from(KeyCode::Char('d')));
     assert_eq!(app.downloads.total, 0);
@@ -2279,11 +2661,11 @@ fn a_link_to_a_new_site_adds_it_then_goes_there() {
     }
     type_text(&mut app, "A");
     app.on_key(KeyEvent::from(KeyCode::Enter));
-    assert!(app.adding().is_some() && app.status.as_ref().unwrap().text == "A site is already called A");
+    assert!(app.adding().is_some() && app.footer.get().unwrap().text == "A site is already called A");
     app.on_key(KeyEvent::from(KeyCode::Backspace));
     type_text(&mut app, "my/chan");
     app.on_key(KeyEvent::from(KeyCode::Enter));
-    assert!(app.adding().is_some() && app.status.as_ref().unwrap().text.contains("can't have /"));
+    assert!(app.adding().is_some() && app.footer.get().unwrap().text.contains("can't have /"));
     for _ in 0..5 {
         app.on_key(KeyEvent::from(KeyCode::Backspace));
     }
@@ -2307,7 +2689,7 @@ fn a_link_to_a_new_site_adds_it_then_goes_there() {
     serve("blank.invalid", vec![]);
     app.goto_str("blank.invalid/b/");
     settle_until(&mut app, |a| a.adding().is_none());
-    assert!(app.status.as_ref().unwrap().text.starts_with("blank.invalid doesn't answer like"), "{:?}", app.status);
+    assert!(app.footer.get().unwrap().text.starts_with("blank.invalid doesn't answer like"), "{:?}", app.footer.get());
     assert_eq!(app.sites.len(), new + 1);
     crate::http::serve_test_host("newchan.invalid", None);
     crate::http::serve_test_host("blank.invalid", None);
@@ -2330,7 +2712,7 @@ fn settings_add_sites_and_vichan_boards_and_remove_them() {
     settle_until(&mut app, |a| matches!(a.adding(), Some(Adding::Site { .. })));
     app.on_key(KeyEvent::from(KeyCode::Enter));
     let i = app.sites.len() - 1;
-    assert_eq!(app.status.as_ref().unwrap().text, "Added vi2 (vichan): it's on the home screen");
+    assert_eq!(app.footer.get().unwrap().text, "Added vi2 (vichan): it's on the home screen");
     assert_eq!(app.tab.view(), View::Sites);
     // A link to a board it doesn't list adds the board; one it doesn't have is refused.
     app.popup = Some(Popup::Adding(Adding::Typing(String::new())));
@@ -2345,11 +2727,12 @@ fn settings_add_sites_and_vichan_boards_and_remove_them() {
     app.popup = Some(Popup::Adding(Adding::Typing("vi2.invalid/zz/".into())));
     app.on_key(KeyEvent::from(KeyCode::Enter));
     settle_until(&mut app, |a| a.adding().is_none());
-    assert!(app.status.as_ref().unwrap().text.contains("has no /zz/"));
+    assert!(app.footer.get().unwrap().text.contains("has no /zz/"));
     // One it has: nothing to do.
+    drawn(&mut app);
     app.popup = Some(Popup::Adding(Adding::Typing("vi2.invalid/b/".into())));
     app.on_key(KeyEvent::from(KeyCode::Enter));
-    assert!(app.adding().is_none() && app.status.as_ref().unwrap().text == "vi2 is already one of your sites");
+    assert!(app.adding().is_none() && app.footer.get().unwrap().text == "vi2 is already one of your sites");
     // esc while asking: the answer is dropped.
     app.popup = Some(Popup::Adding(Adding::Typing("vi2.invalid/b2/".into())));
     app.on_key(KeyEvent::from(KeyCode::Enter));
@@ -2363,8 +2746,14 @@ fn settings_add_sites_and_vichan_boards_and_remove_them() {
     app.settings_list.state.select(Some(mine));
     app.activate_setting();
     assert!(matches!(app.settings_popup(), Some(SettingsPopup::Sites(m)) if m.sites.len() == 1 && m.sites[0].name == "vi2"));
+    // Behind an error not yet seen the question isn't asked, so x twice removes nothing.
+    app.error("Couldn't save to the data directory: disk full");
     app.on_key(KeyEvent::from(KeyCode::Char('x')));
-    assert_eq!(app.status.as_ref().unwrap().text, "x again removes vi2 from your config");
+    app.on_key(KeyEvent::from(KeyCode::Char('x')));
+    assert!(matches!(app.settings_popup(), Some(SettingsPopup::Sites(m)) if m.sites.len() == 1));
+    drawn(&mut app);
+    app.on_key(KeyEvent::from(KeyCode::Char('x')));
+    assert_eq!(app.footer.get().unwrap().text, "x again removes vi2 from your config");
     app.on_key(KeyEvent::from(KeyCode::Char('x')));
     assert!(matches!(app.settings_popup(), Some(SettingsPopup::Sites(m)) if m.sites.is_empty()));
     assert!(!app.visible_sites().contains(&SiteRow::Site(i)));
@@ -2614,7 +3003,7 @@ fn no_images_are_asked_for_on_a_board_with_images_off() {
     assert!(app.images.queued_urls().is_empty());
     // The viewer says why instead of opening.
     app.on_key(KeyEvent::from(KeyCode::Enter));
-    assert!(app.tab.viewer().is_none() && app.status.as_ref().unwrap().text.starts_with("Images are off on /x/"));
+    assert!(app.tab.viewer().is_none() && app.footer.get().unwrap().text.starts_with("Images are off on /x/"));
     // The same thread on a board with images: asked for.
     app.tab.gallery = None;
     app.tab.board = Some(Board { uri: "xy".into(), title: String::new(), nsfw: Some(false) });
@@ -2674,9 +3063,9 @@ fn searching_inside_saved_threads() {
     let dir = tempfile::tempdir().unwrap();
     let mut app = saving_app(dir.path(), 1000);
     let key = |board: &str, no| ThreadKey { site: "a".into(), board: board.into(), no };
-    app.store.keep_thread(&key("x", 1), "one", "u", &posts_saying(&[(1, "about rust"), (2, "nothing here"), (3, "Rust again")]), 900);
-    app.store.keep_thread(&key("xy", 7), "seven", "u", &posts_saying(&[(7, "no match"), (8, "a crab: RUST")]), 950);
-    app.store.keep_thread(&key("x", 9), "nine", "u", &posts_saying(&[(9, "quiet")]), 980);
+    app.store.keep_thread(&key("x", 1), "one", "u", &whole(&posts_saying(&[(1, "about rust"), (2, "nothing here"), (3, "Rust again")])), 900);
+    app.store.keep_thread(&key("xy", 7), "seven", "u", &whole(&posts_saying(&[(7, "no match"), (8, "a crab: RUST")])), 950);
+    app.store.keep_thread(&key("x", 9), "nine", "u", &whole(&posts_saying(&[(9, "quiet")])), 980);
     app.flush_writes();
     app.tab.navigate(View::Saved);
     // From the Saved view's menu: `:` with "saved " typed.
@@ -2710,7 +3099,7 @@ fn searching_inside_saved_threads() {
     settle_until(&mut app, |a| a.tab.search.as_ref().unwrap().saved.as_ref().unwrap().finished);
     let s = app.tab.search.as_ref().unwrap();
     assert_eq!((s.hits.len(), s.saved.as_ref().unwrap().skipped), (0, 1));
-    assert_eq!(app.status.as_ref().unwrap().text, "No saved post matches \"quiet\"");
+    assert_eq!(app.footer.get().unwrap().text, "No saved post matches \"quiet\"");
     // Another search stops the one running: only its answers count.
     app.goto_str("saved rust");
     app.goto_str("saved crab");
@@ -2724,8 +3113,8 @@ fn searching_saved_threads_leaves_out_hidden_posts() {
     let dir = tempfile::tempdir().unwrap();
     let mut app = saving_app(dir.path(), 1000);
     let key = |board: &str, no| ThreadKey { site: "a".into(), board: board.into(), no };
-    app.store.keep_thread(&key("x", 1), "one", "u", &posts_saying(&[(1, "about rust"), (2, "nothing here"), (3, "Rust again")]), 900);
-    app.store.keep_thread(&key("xy", 7), "seven", "u", &posts_saying(&[(7, "no match"), (8, "a crab: RUST")]), 950);
+    app.store.keep_thread(&key("x", 1), "one", "u", &whole(&posts_saying(&[(1, "about rust"), (2, "nothing here"), (3, "Rust again")])), 900);
+    app.store.keep_thread(&key("xy", 7), "seven", "u", &whole(&posts_saying(&[(7, "no match"), (8, "a crab: RUST")])), 950);
     app.flush_writes();
     // A hidden word, and a post hidden by hand on its own board.
     app.hidden_words = vec!["crab".into()];
@@ -2739,7 +3128,7 @@ fn searching_saved_threads_leaves_out_hidden_posts() {
     app.goto_str("saved crab");
     settle_until(&mut app, |a| a.tab.search.as_ref().unwrap().saved.as_ref().unwrap().finished);
     assert!(shown(&app).is_empty());
-    assert_eq!(app.status.as_ref().unwrap().text, "1 result, all hidden (Z shows them)");
+    assert_eq!(app.footer.get().unwrap().text, "1 result, all hidden (Z shows them)");
 }
 
 #[test]
@@ -2749,7 +3138,7 @@ fn searching_saved_threads_with_none_saved() {
     app.goto_str("saved anything");
     settle_until(&mut app, |a| a.tab.search.as_ref().is_some_and(|s| s.saved.as_ref().unwrap().finished));
     assert!(app.tab.search.as_ref().unwrap().hits.is_empty());
-    assert!(app.status.as_ref().unwrap().text.starts_with("Nothing is saved yet"));
+    assert!(app.footer.get().unwrap().text.starts_with("Nothing is saved yet"));
     // `saved` alone is still the Saved view.
     app.goto_str("saved");
     assert_eq!(app.tab.view(), View::Saved);
@@ -2791,7 +3180,7 @@ fn updating_a_vichan_sites_boards() {
     app.activate_setting();
     app.on_key(KeyEvent::from(KeyCode::Char('r')));
     settle_until(&mut app, |a| matches!(a.adding(), Some(Adding::Boards { .. })));
-    let Some(Adding::Boards { update, drop: false, .. }) = app.adding() else { panic!("{:?}", app.status) };
+    let Some(Adding::Boards { update, drop: false, .. }) = app.adding() else { panic!("{:?}", app.footer.get()) };
     assert_eq!((update.added.len(), update.missing.len()), (1, 1));
     // d drops what the bar doesn't have; enter writes it, comments kept, and it's in use.
     app.on_key(KeyEvent::from(KeyCode::Char('d')));
@@ -2805,13 +3194,13 @@ fn updating_a_vichan_sites_boards() {
     // Again: nothing to change.
     app.refresh_board_list(0);
     settle_until(&mut app, |a| a.adding().is_none());
-    assert_eq!(app.status.as_ref().unwrap().text, "vb's board list is up to date");
+    assert_eq!(app.footer.get().unwrap().text, "vb's board list is up to date");
     // Pages without a bar: said, nothing changes.
     serve_text("vb.invalid", vec![("/", "<html></html>".into())]);
     crate::http::forget_host("vb.invalid");
     app.refresh_board_list(0);
     settle_until(&mut app, |a| a.adding().is_none());
-    assert!(app.status.as_ref().unwrap().text.contains("have no board list to read"));
+    assert!(app.footer.get().unwrap().text.contains("have no board list to read"));
     assert_eq!(app.sites[0].cfg.boards, saved.sites[0].boards);
     crate::http::serve_test_host("vb.invalid", None);
 }
@@ -2834,7 +3223,7 @@ fn hidden_words_hide_posts_everywhere() {
     app.on_key(KeyEvent::from(KeyCode::Char('a')));
     type_text(&mut app, "crypto");
     app.on_key(KeyEvent::from(KeyCode::Enter));
-    assert!(app.status.as_ref().unwrap().text.starts_with("Hiding posts with \"crypto\" (2 here)"), "{:?}", app.status);
+    assert!(app.footer.get().unwrap().text.starts_with("Hiding posts with \"crypto\" (2 here)"), "{:?}", app.footer.get());
     let hidden = |app: &App| app.tab.thread.as_ref().unwrap().marks.all_hidden();
     let label = Some(Hidden::ByFilter("hidden word: crypto".into()));
     assert_eq!(hidden(&app), [None, label.clone(), label.clone(), None]);
@@ -2985,9 +3374,9 @@ fn a_request_that_panics_ends_like_one_that_failed() {
     let mut app = local_app();
     app.tab.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
     let then = Then::Thread { open: Opening::default() };
-    app.spawn("Loading the thread".into(), then, |_, _, _| -> Result<Vec<Post>> { std::panic::panic_any("deliberate: index out of bounds") }, thread_arrived);
+    app.spawn("Loading the thread".into(), then, |_, _, _| -> Result<Thread> { std::panic::panic_any("deliberate: index out of bounds") }, thread_arrived);
     settle_until(&mut app, |a| a.tab.loading().is_none());
-    let status = app.status.as_ref().unwrap();
+    let status = app.footer.get().unwrap();
     assert!(status.error && status.text.contains("ck hit a bug: deliberate: index out of bounds"), "{}", status.text);
 }
 
@@ -3009,8 +3398,8 @@ fn new_posts_wait_for_notifying_by_the_app_clock() {
     let later = Instant::now() + Duration::from_secs(3600);
     app.clock = Clock { instant: Some(later), ..Default::default() };
     app.store.watch(key.clone(), "One".into(), 1, 1);
-    app.refreshed(key.clone(), Ok(vec![post(1)]));
-    app.refreshed(key, Ok(vec![post(1), post(2)]));
+    refresh(&mut app, key.clone(), vec![post(1)]);
+    refresh(&mut app, key, vec![post(1), post(2)]);
     assert_eq!(app.notes_since, Some(later));
 }
 
@@ -3019,12 +3408,12 @@ fn removing_a_saved_copy_asks_again_once_the_question_is_gone() {
     let dir = tempfile::tempdir().unwrap();
     let mut app = saving_app(dir.path(), 1000);
     let key = ThreadKey { site: "a".into(), board: "x".into(), no: 3 };
-    app.store.keep_thread(&key, "thread 3", "u", &nos(&[3]), 100);
+    app.store.keep_thread(&key, "thread 3", "u", &whole(&nos(&[3])), 100);
     app.tab.navigate(View::Saved);
     app.saved_list.state.select(Some(0));
     app.act(Action::Remove);
     // The question goes (it expired, or something else was said): x asks again.
-    app.status = None;
+    expired(&mut app);
     app.act(Action::Remove);
     assert!(app.store.saved(&key).is_some());
     app.act(Action::Remove);
@@ -3052,13 +3441,24 @@ fn a_failed_load_stays_on_screen_in_plain_words() {
     let failed = app.tab.failed.clone().unwrap();
     assert_eq!(failed, "Couldn't reach 127.0.0.1:5 (connection refused). r tries again");
     // Long after the footer's message has gone, it's still where the threads would be.
-    app.status = None;
+    expired(&mut app);
     let screen = draw_at(&mut app, 100, 30);
     let text: String = screen.content.iter().map(|c| c.symbol()).collect();
     assert!(text.contains("Couldn't reach 127.0.0.1:5 (connection refused)") && !text.contains("No threads"), "{text}");
     // Trying again clears it.
     app.act(Action::Reload);
     assert!(app.tab.failed.is_none());
+}
+
+#[test]
+fn trying_again_clears_the_failure_from_the_footer_too() {
+    let mut app = app_with("[[site]]\nname = \"a\"\nkind = \"vichan\"\nurl = \"http://127.0.0.1:5\"\nboards = [\"x\"]");
+    app.goto_str("a/x");
+    settle_until(&mut app, |a| a.tab.loading().is_none());
+    assert!(app.footer.get().is_some_and(|s| s.error), "{:?}", app.footer.get());
+    // Seen, then r while it's still up: the old failure doesn't outlive the retry.
+    app.act(Action::Reload);
+    assert_eq!(app.footer.get(), None);
 }
 
 /// The local app on /x/, in the thread view.
@@ -3113,10 +3513,10 @@ fn a_refresh_much_smaller_than_the_thread_is_shown_as_it_came() {
     // Half is still deletion; fewer is more likely a broken answer.
     app.set_thread(posts_upto(5));
     let t = app.tab.thread.as_ref().unwrap();
-    assert_eq!((t.posts.len(), t.deleted.len(), t.shrinks), (10, 5, 0));
+    assert_eq!((t.posts.len(), t.deleted.len(), t.known), (10, 5, 5));
     app.set_thread(posts_upto(2));
     let t = app.tab.thread.as_ref().unwrap();
-    assert_eq!((t.posts.len(), t.deleted.len(), t.shrinks), (2, 0, 1));
+    assert_eq!((t.posts.len(), t.deleted.len(), t.known), (2, 0, 5));
     // Another thread isn't a refresh of this one.
     app.set_thread(nos(&[20, 21]));
     app.set_thread(nos(&[30]));
@@ -3161,7 +3561,7 @@ fn replies_to_hidden_posts_hide_with_them() {
     app.tab.navigate(View::Thread);
     let quoting = |no, q: &[u64], text: &str| Post { no, quotes: q.to_vec(), body: vec![Line::from(text.to_string())], ..Default::default() };
     // 3 replies to 2, 4 to 3, 5 to the OP; 7 replies to 6, which a recursive filter hides.
-    app.show_thread(vec![
+    app.set_thread(vec![
         quoting(1, &[], "op"),
         quoting(2, &[1], "two"),
         quoting(3, &[2], "three"),
@@ -3169,7 +3569,7 @@ fn replies_to_hidden_posts_hide_with_them() {
         quoting(5, &[1], "five"),
         quoting(6, &[], "recurse"),
         quoting(7, &[6], "seven"),
-    ], None, Opening::default());
+    ]);
     let hidden = |app: &App| app.tab.thread.as_ref().unwrap().marks.all_hidden();
     let r = |no| Some(Hidden::Reply(no));
     let deep = Some(Hidden::ByFilter("deep".into()));
@@ -3190,7 +3590,7 @@ fn replies_to_hidden_posts_hide_with_them() {
     // H on a reply says where it comes from; unhiding the post it replies to shows it.
     app.tab.thread.as_mut().unwrap().selected = 3;
     app.act(Action::Hide);
-    assert!(app.status.as_ref().unwrap().text.contains("reply to No.3"), "{:?}", app.status);
+    assert!(app.footer.get().unwrap().text.contains("reply to No.3"), "{:?}", app.footer.get());
     app.tab.thread.as_mut().unwrap().selected = 1;
     app.act(Action::Hide);
     assert_eq!(hidden(&app), [None, None, None, None, None, deep, r(6)]);
@@ -3257,15 +3657,15 @@ fn quiet_threads_are_refreshed_less_often() {
     app.store.watch(key(1), "One".into(), 2, 2);
     let mut every = Vec::new();
     for _ in 0..9 {
-        app.refreshed(key(1), Ok(nos(&[1, 2])));
+        refresh(&mut app, key(1), nos(&[1, 2]));
         every.push(secs(app.watched_every(&key(1))));
     }
     assert_eq!(every, [60.0, 90.0, 135.0, 202.5, 303.75, 455.625, 600.0, 600.0, 600.0]);
-    app.refreshed(key(1), Ok(nos(&[1, 2, 3])));
+    refresh(&mut app, key(1), nos(&[1, 2, 3]));
     assert_eq!(app.watched_every(&key(1)), Duration::from_secs(60));
     // The next one waits for it, on the app's clock.
-    app.refreshed(key(1), Ok(nos(&[1, 2, 3])));
-    app.refreshed(key(1), Ok(nos(&[1, 2, 3])));
+    refresh(&mut app, key(1), nos(&[1, 2, 3]));
+    refresh(&mut app, key(1), nos(&[1, 2, 3]));
     app.watched_checked.insert(key(1), t0);
     at(&mut app, 134);
     app.background();
@@ -3284,19 +3684,19 @@ fn quiet_threads_are_refreshed_less_often() {
     // The open thread the same, from 10s up to 100s; opening it (or r) starts over.
     at(&mut app, 1000);
     app.goto_str("a/x/5");
-    app.handle(answer(app.tab.req().unwrap(), thread_arrived, Ok(nos(&[5, 6]))));
+    app.handle(answer(app.tab.req().unwrap(), thread_arrived, arrived(nos(&[5, 6]))));
     let mut every = Vec::new();
     for _ in 0..8 {
-        app.refreshed(key(5), Ok(nos(&[5, 6])));
+        refresh(&mut app, key(5), nos(&[5, 6]));
         every.push(secs(app.thread_every()));
     }
     assert_eq!(every, [15.0, 22.5, 33.75, 50.625, 75.9375, 100.0, 100.0, 100.0]);
     // A deleted post isn't news.
-    app.refreshed(key(5), Ok(nos(&[5])));
+    refresh(&mut app, key(5), nos(&[5]));
     assert_eq!(app.thread_every(), Duration::from_secs(100));
-    app.refreshed(key(5), Ok(nos(&[5, 7])));
+    refresh(&mut app, key(5), nos(&[5, 7]));
     assert_eq!(app.thread_every(), Duration::from_secs(10));
-    app.refreshed(key(5), Ok(nos(&[5, 7])));
+    refresh(&mut app, key(5), nos(&[5, 7]));
     app.tab.thread_checked = t0 + Duration::from_secs(1000);
     at(&mut app, 1014);
     app.background();
@@ -3376,7 +3776,7 @@ fn m_shows_posts_with_files_then_hides_images() {
     let mut posts = posts_saying(&[(1, "op"), (3, "three")]);
     posts.insert(1, Post { quotes: vec![3], ..with_file(2, None) });
     posts.push(with_file(4, None));
-    app.handle(answer(app.tab.req().unwrap(), thread_arrived, Ok(posts.clone())));
+    app.handle(answer(app.tab.req().unwrap(), thread_arrived, arrived(posts.clone())));
     let shown = |app: &App| {
         let t = app.tab.thread.as_ref().unwrap();
         t.entries.iter().map(|e| t.posts[e.post].no).collect::<Vec<_>>()
@@ -3388,7 +3788,7 @@ fn m_shows_posts_with_files_then_hides_images() {
     t.set_search("t".into());
     run_menu_row(&mut app, "only the posts with files");
     assert_eq!((media(&app), shown(&app)), (Media::Files, vec![1, 2, 4]));
-    assert_eq!(app.status.as_ref().unwrap().text, "3 posts with files; M again shows all, images hidden");
+    assert_eq!(app.footer.get().unwrap().text, "3 posts with files; M again shows all, images hidden");
     // The selected post had none: the next one that has is selected. Search finds what's
     // shown (not "three").
     let t = app.tab.thread.as_ref().unwrap();
@@ -3397,7 +3797,8 @@ fn m_shows_posts_with_files_then_hides_images() {
     // A refresh keeps it, with what it brings.
     posts.push(with_file(5, None));
     posts.push(posts_saying(&[(6, "six")]).remove(0));
-    app.refreshed(app.key("x", 1), Ok(posts.clone()));
+    let key = app.key("x", 1);
+    refresh(&mut app, key, posts.clone());
     assert_eq!(shown(&app), [1, 2, 4, 5]);
     // A quote to a post without files: everything again, there.
     let t = app.tab.thread.as_mut().unwrap();
@@ -3413,7 +3814,7 @@ fn m_shows_posts_with_files_then_hides_images() {
     app.tab.thread.as_mut().unwrap().select(1);
     app.act(Action::View);
     assert!(app.tab.viewer().is_none());
-    assert!(app.status.as_ref().unwrap().text.starts_with("Images are hidden in this thread (M shows them)"));
+    assert!(app.footer.get().unwrap().text.starts_with("Images are hidden in this thread (M shows them)"));
     app.act(Action::Media);
     assert!(media(&app) == Media::All && app.thread_images_on());
     // In a conversation, its posts whatever they have; leaving it, those with files.
@@ -3421,12 +3822,12 @@ fn m_shows_posts_with_files_then_hides_images() {
     app.act(Action::Conversation);
     app.act(Action::Media);
     assert_eq!(shown(&app), [2, 3]);
-    assert!(app.status.as_ref().unwrap().text.starts_with("Only posts with files, once you leave the conversation"));
+    assert!(app.footer.get().unwrap().text.starts_with("Only posts with files, once you leave the conversation"));
     app.on_key(KeyEvent::from(KeyCode::Esc));
     assert_eq!(shown(&app), [1, 2, 4, 5]);
     // Another thread starts with everything.
     app.goto_str("a/x/7");
-    app.handle(answer(app.tab.req().unwrap(), thread_arrived, Ok(nos(&[7, 8]))));
+    app.handle(answer(app.tab.req().unwrap(), thread_arrived, arrived(nos(&[7, 8]))));
     assert_eq!((media(&app), shown(&app)), (Media::All, vec![7, 8]));
 }
 
@@ -3485,20 +3886,37 @@ fn following_a_general_through_the_site() {
 fn the_menu_offers_no_gallery_when_only_hidden_posts_have_files() {
     let mut app = local_app();
     app.tab.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
-    let file = Attachment { filename: "hidden.png".into(), url: "http://127.0.0.1:3/x/src/hidden.png".into(), ..Default::default() };
+    let file = Attachment { filename: "hidden.png".into(), ..Attachment::at("http://127.0.0.1:3/x/src/hidden.png") };
     app.tab.thread = Some(ThreadView::new("x".into(), 1, vec![Post { no: 1, ..Default::default() }, Post { no: 2, files: vec![file], ..Default::default() }]));
     app.tab.navigate(View::Thread);
     app.rehide(|a| a.store.toggle_hidden("a", "x", 2));
     // The gallery has nothing to show, and says why; so the menu doesn't offer it.
     app.act(Action::Gallery);
-    assert_eq!(app.status.as_ref().map(|s| s.text.as_str()), Some("Only hidden posts have files (Z shows them)"));
-    app.status = None;
+    assert_eq!(app.footer.get().map(|s| s.text.as_str()), Some("Only hidden posts have files (Z shows them)"));
+    expired(&mut app);
     app.act(Action::DownloadThread);
-    assert_eq!(app.status.as_ref().map(|s| s.text.as_str()), Some("Only hidden posts have files (Z shows them)"));
+    assert_eq!(app.footer.get().map(|s| s.text.as_str()), Some("Only hidden posts have files (Z shows them)"));
     app.on_key(KeyEvent::from(KeyCode::Char('.')));
     let m = app.menu().unwrap();
     let has = |a: Action| m.items.iter().any(|i| matches!(i, MenuItem::Act(x, _) if *x == a));
     assert!(!has(Action::Gallery) && !has(Action::DownloadThread), "{:?}", m.items);
+}
+
+#[test]
+fn only_hidden_thumbnails_are_not_files_to_save() {
+    // A hidden post's file the archive kept only the thumbnail of: showing hidden posts
+    // brings it to the gallery, but there's still nothing to save.
+    let mut app = local_app();
+    app.tab.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
+    let file = Attachment { filename: "clip.webm".into(), url: None, kind: FileKind::Video, thumb: Some("http://127.0.0.1:3/x/thumb/1s.jpg".into()), ..Default::default() };
+    app.tab.thread = Some(ThreadView::new("x".into(), 1, vec![Post { no: 1, ..Default::default() }, Post { no: 2, files: vec![file], ..Default::default() }]));
+    app.tab.navigate(View::Thread);
+    app.rehide(|a| a.store.toggle_hidden("a", "x", 2));
+    app.act(Action::Gallery);
+    assert_eq!(app.status().map(|s| s.text.as_str()), Some("Only hidden posts have files (Z shows them)"));
+    app.footer = Footer::default();
+    app.act(Action::DownloadThread);
+    assert_eq!(app.status().map(|s| s.text.as_str()), Some("Thread has no files to save"));
 }
 
 #[test]
@@ -3507,8 +3925,8 @@ fn hiding_recounts_new_posts_in_watched_threads() {
     let key = ThreadKey { site: "a".into(), board: "x".into(), no: 1 };
     app.store.watch(key.clone(), "One".into(), 1, 1);
     let start = posts_saying(&[(1, "a thread")]);
-    app.refreshed(key.clone(), Ok(start));
-    app.refreshed(key.clone(), Ok(posts_saying(&[(1, "a thread"), (2, "buy crypto"), (3, "hello")])));
+    refresh(&mut app, key.clone(), start);
+    refresh(&mut app, key.clone(), posts_saying(&[(1, "a thread"), (2, "buy crypto"), (3, "hello")]));
     assert_eq!(app.store.watched(&key).unwrap().status.counts().0, 2);
     // A hidden word hides No.2: Watched's "new" leaves it out at once, not at the next refresh.
     app.hidden_words = vec!["crypto".into()];
@@ -3527,8 +3945,8 @@ fn hiding_recounts_nothing_in_a_dead_watched_thread() {
     let mut app = local_app();
     let key = ThreadKey { site: "a".into(), board: "x".into(), no: 1 };
     app.store.watch(key.clone(), "One".into(), 1, 1);
-    app.refreshed(key.clone(), Ok(posts_saying(&[(1, "a thread")])));
-    app.refreshed(key.clone(), Ok(posts_saying(&[(1, "a thread"), (2, "buy crypto"), (3, "hello")])));
+    refresh(&mut app, key.clone(), posts_saying(&[(1, "a thread")]));
+    refresh(&mut app, key.clone(), posts_saying(&[(1, "a thread"), (2, "buy crypto"), (3, "hello")]));
     assert_eq!(app.store.watched_new(), (2, 0));
     app.refreshed(key.clone(), Err(gone()));
     assert_eq!(app.store.watched(&key).unwrap().status, Status::Dead);
@@ -3566,7 +3984,7 @@ fn searching_saved_threads_leaves_out_replies_to_hidden_posts() {
     let mut posts = posts_saying(&[(1, "a thread"), (2, "buy crypto"), (3, "crypto, rust says"), (4, "rust, by that guy")]);
     posts[2].quotes = vec![2];
     posts[3].id = Some("Ab3d".into());
-    app.store.keep_thread(&key, "one", "u", &posts, 900);
+    app.store.keep_thread(&key, "one", "u", &whole(&posts), 900);
     let that_guy = crate::filter::FilterConfig::new("^Ab3d$".into(), &[crate::filter::Field::Id]);
     app.rehide(|a| a.hiding.set_filters(crate::filter::Filters::new(&[that_guy]).unwrap()));
     app.flush_writes();
@@ -3688,10 +4106,10 @@ fn gallery_files_keep_their_posts_when_the_live_thread_replaces_a_cached_copy() 
     let mut app = thread_app();
     app.download_dir = Some(dir.path().display().to_string());
     app.images = crate::images::Images::offline();
-    let file = |name: &str| Attachment { filename: name.into(), url: format!("http://127.0.0.1:3/x/src/{name}"), ..Default::default() };
+    let file = |name: &str| Attachment { filename: name.into(), ..Attachment::at(format!("http://127.0.0.1:3/x/src/{name}")) };
     let post = |no, files: Vec<Attachment>| Post { no, files, ..Default::default() };
     // The cached copy has No.2; the live thread, arriving with the gallery open, doesn't.
-    app.set_cached_thread(vec![post(1, vec![]), post(2, vec![]), post(3, vec![file("3.png")]), post(4, vec![file("4.png")])], 0);
+    app.set_cached_thread(arrived(vec![post(1, vec![]), post(2, vec![]), post(3, vec![file("3.png")]), post(4, vec![file("4.png")])]).unwrap(), 0);
     app.act(Action::Gallery);
     app.set_thread(vec![post(1, vec![]), post(3, vec![file("3.png")]), post(4, vec![file("4.png")]), post(5, vec![])]);
     // The first file is still 3.png, from No.3: its link, its save and esc go there.
@@ -3705,7 +4123,7 @@ fn gallery_files_keep_their_posts_when_the_live_thread_replaces_a_cached_copy() 
 #[test]
 fn a_thread_hint_picks_its_post_after_a_refresh_moves_it() {
     let mut app = thread_app();
-    app.set_cached_thread(nos(&[1, 2, 3, 4, 5]), 0);
+    app.set_cached_thread(arrived(nos(&[1, 2, 3, 4, 5])).unwrap(), 0);
     draw_at(&mut app, 100, 30);
     app.on_key(KeyEvent::from(KeyCode::Char('f')));
     let label = app.hints().unwrap().targets.iter().find(|x| matches!(x.to, HintTo::Thread(ref p, None) if p == &[4])).unwrap().label.clone();
@@ -3734,7 +4152,7 @@ fn a_catalog_hint_opens_its_thread_after_a_refresh_reorders_them() {
 #[test]
 fn u_skips_a_post_a_refresh_took_away() {
     let mut app = thread_app();
-    app.set_cached_thread(nos(&[1, 2, 3, 4, 5]), 0);
+    app.set_cached_thread(arrived(nos(&[1, 2, 3, 4, 5])).unwrap(), 0);
     let t = app.tab.thread.as_mut().unwrap();
     t.select(1);
     assert!(t.jump_to(3) && t.jump_to(5));
@@ -3744,7 +4162,7 @@ fn u_skips_a_post_a_refresh_took_away() {
     assert_eq!(app.tab.thread.as_ref().unwrap().current().unwrap().no, 2);
     // With only a dropped post to go back to, there's nowhere: the menu doesn't offer u.
     let mut app = thread_app();
-    app.set_cached_thread(nos(&[1, 2, 3]), 0);
+    app.set_cached_thread(arrived(nos(&[1, 2, 3])).unwrap(), 0);
     let t = app.tab.thread.as_mut().unwrap();
     t.select(1);
     assert!(t.jump_to(3) && app.can_jump_back());
@@ -3791,7 +4209,7 @@ fn closing_the_settings_keeps_the_load_they_were_opened_over() {
     app.back();
     assert_eq!(app.tab.view(), View::Thread);
     // The thread asked for before the settings opened still arrives.
-    app.handle(answer(req, thread_arrived, Ok(posts(&[1, 2]))));
+    app.handle(answer(req, thread_arrived, arrived(posts(&[1, 2]))));
     assert_eq!(app.tab.thread.as_ref().map(|t| t.no), Some(1));
 }
 
@@ -3799,7 +4217,7 @@ fn closing_the_settings_keeps_the_load_they_were_opened_over() {
 fn closing_the_settings_keeps_the_way_back_with_u() {
     let mut app = local_app();
     app.goto_str("a/x/1");
-    app.handle(answer(app.tab.req().unwrap(), thread_arrived, Ok(posts(&[1, 2]))));
+    app.handle(answer(app.tab.req().unwrap(), thread_arrived, arrived(posts(&[1, 2]))));
     app.goto_str("a/x/3");
     assert_eq!(app.tab.trail.len(), 1);
     app.tab.navigate(View::Settings);
@@ -3849,7 +4267,7 @@ fn leaving_a_restored_thread_before_it_loads_forgets_the_restore() {
     app.enter();
     assert_eq!(app.tab.view(), View::Thread);
     app.handle(answer(app.tab.req().unwrap(), thread_arrived, Err(gone())));
-    let status = app.status.as_ref().map(|s| s.text.clone()).unwrap_or_default();
+    let status = app.status().map(|s| s.text.clone()).unwrap_or_default();
     assert!(!status.contains("last time"), "{status}");
     assert_eq!(app.tab.view(), View::Thread);
 }
@@ -3877,7 +4295,7 @@ fn a_post_to_select_from_a_dropped_load_isnt_used_by_the_next_thread() {
     // While it loads the session doesn't remember No.12 as its selected post...
     assert_eq!(app.place().selected, None);
     // ...and it opens at the top, not at No.12.
-    app.handle(answer(app.tab.req().unwrap(), thread_arrived, Ok(posts(&[9, 10, 12]))));
+    app.handle(answer(app.tab.req().unwrap(), thread_arrived, arrived(posts(&[9, 10, 12]))));
     assert_eq!(app.tab.thread.as_ref().unwrap().selected, 0);
 }
 
@@ -3891,7 +4309,7 @@ fn a_thread_found_behind_the_settings_loads_once_they_close() {
     let req = app.tab.req().unwrap();
     app.back();
     assert_eq!(app.tab.view(), View::Thread);
-    app.handle(answer(req, thread_arrived, Ok(posts(&[3, 77]))));
+    app.handle(answer(req, thread_arrived, arrived(posts(&[3, 77]))));
     assert_eq!(app.tab.thread.as_ref().map(|t| t.no), Some(3));
 }
 
@@ -3903,8 +4321,8 @@ fn a_gallery_open_on_a_restored_thread_that_dies_isnt_over_the_next_thread() {
     let req = app.tab.req().unwrap();
     // Its last copy shows while it loads; `V` over it.
     let mut ps = posts(&[5, 6]);
-    ps[1].files = vec![crate::model::Attachment { filename: "old.png".into(), url: "http://x/old.png".into(), ..Default::default() }];
-    app.set_cached_thread(ps, 1);
+    ps[1].files = vec![crate::model::Attachment { filename: "old.png".into(), ..crate::model::Attachment::at("http://x/old.png") }];
+    app.set_cached_thread(Thread::answer(5, ps).unwrap(), 1);
     app.open_gallery();
     assert!(app.tab.gallery.is_some());
     // Last session's thread is gone: its catalog.
@@ -3926,7 +4344,7 @@ fn a_catalog_missing_after_moving_to_another_site_blames_nothing_there() {
     app.goto_str("b");
     assert_eq!((app.tab.site, app.tab.view()), (1, View::Boards));
     app.handle(answer(req, App::catalog_arrived, Err(gone())));
-    let status = app.status.as_ref().map(|s| s.text.clone()).unwrap_or_default();
+    let status = app.status().map(|s| s.text.clone()).unwrap_or_default();
     assert!(app.tab.failed.is_none(), "b's Boards shows a's catalog failure: {:?} / {status}", app.tab.failed);
 }
 
@@ -3983,12 +4401,12 @@ fn going_to_a_post_from_the_settings_closes_them() {
 fn replies_to_the_open_thread_while_the_settings_are_open_count_as_new() {
     let mut app = local_app();
     app.goto_str("a/x/1");
-    app.handle(answer(app.tab.req().unwrap(), thread_arrived, Ok(posts(&[1, 2]))));
+    app.handle(answer(app.tab.req().unwrap(), thread_arrived, arrived(posts(&[1, 2]))));
     let key = ThreadKey { site: "a".into(), board: "x".into(), no: 1 };
     app.store.watch(key.clone(), String::new(), 2, 2);
     app.tab.navigate(View::Settings);
     // Refreshed behind the settings, as a watched thread: No.3 isn't seen yet.
-    app.refreshed(key.clone(), Ok(posts(&[1, 2, 3])));
+    refresh(&mut app, key.clone(), posts(&[1, 2, 3]));
     assert_eq!(app.store.watched(&key).unwrap().status, Status::Live { unread: 1, replies: 0 });
     assert_eq!(app.tab.thread.as_ref().unwrap().posts.len(), 2);
 }
@@ -4022,4 +4440,422 @@ fn a_catalog_that_fails_to_load_keeps_the_thread_it_was_to_select() {
     app.act(Action::Reload);
     app.handle(answer(app.tab.req().unwrap(), App::catalog_arrived, Ok(posts(&[1, 123]))));
     assert_eq!(app.place().selected, Some(123));
+}
+
+/// A data directory and a config file ck can't write: both sit under a plain file.
+fn unwritable(app: &mut App, dir: &std::path::Path) {
+    let blocked = dir.join("blocked");
+    std::fs::write(&blocked, "a file, not a folder").unwrap();
+    app.store = Store::load(Some(blocked.join("data"))).0;
+    app.config_path = Some(blocked.join("config.toml"));
+    assert!(app.edit_config(|_| Ok(())).is_err(), "the config write has to fail for these tests to mean anything");
+}
+
+/// The footer's message: what it says, and whether it's an error.
+fn footer(app: &App) -> (String, bool) {
+    app.footer.get().map(|s| (s.text.clone(), s.error)).unwrap_or_default()
+}
+
+#[test]
+fn a_hide_that_cant_be_saved_says_so() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = local_app();
+    unwritable(&mut app, dir.path());
+    app.tab.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
+    app.tab.catalog_board = Some("x".into());
+    app.tab.catalog = nos(&[1, 2]);
+    app.remark();
+    app.tab.navigate(View::Catalog);
+    app.tab.catalog_list.state.select(Some(0));
+    app.act(Action::Hide);
+    let (text, error) = footer(&app);
+    assert!(app.store.save().is_err(), "the hide wasn't written");
+    assert!(error && text.contains("Couldn't save"), "the failed write isn't reported: {text:?} (error: {error})");
+}
+
+#[test]
+fn a_sort_or_layout_that_cant_be_saved_says_so() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = local_app();
+    unwritable(&mut app, dir.path());
+    app.goto_str("a/x");
+    app.act(Action::Sort);
+    let (text, error) = footer(&app);
+    assert!(app.store.save().is_err(), "the sort wasn't written");
+    assert!(error && text.contains("Couldn't save"), "sort: the failed write isn't reported: {text:?} (error: {error})");
+    app.act(Action::Compact);
+    let (text, error) = footer(&app);
+    assert!(error && text.contains("Couldn't save"), "layout: the failed write isn't reported: {text:?} (error: {error})");
+}
+
+#[test]
+fn board_images_that_cant_be_saved_say_so() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = local_app();
+    unwritable(&mut app, dir.path());
+    app.goto_str("a/x");
+    app.toggle_board_images();
+    let (text, error) = footer(&app);
+    assert!(app.store.save().is_err(), "the image setting wasn't written");
+    assert!(error && text.contains("Couldn't save"), "toggle: the failed write isn't reported: {text:?} (error: {error})");
+    app.reset_board_images("a/x");
+    let (text, error) = footer(&app);
+    assert!(error && text.contains("Couldn't save"), "reset: the failed write isn't reported: {text:?} (error: {error})");
+}
+
+#[test]
+fn a_default_layout_kept_nowhere_doesnt_claim_it_was_kept() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = local_app();
+    unwritable(&mut app, dir.path());
+    app.cycle_default_layout();
+    let (text, error) = footer(&app);
+    assert!(app.store.save().is_err(), "the layout wasn't kept in the data directory either");
+    assert!(error, "neither the config nor the data directory could be written, but it's an info: {text:?}");
+    assert!(!text.contains("kept in the data directory"), "the data directory couldn't be written either: {text:?}");
+}
+
+#[test]
+fn a_hidden_word_that_cant_be_saved_is_an_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = local_app();
+    unwritable(&mut app, dir.path());
+    app.add_hidden_word("spam");
+    let (text, error) = footer(&app);
+    assert!(error, "the config write failed, but it's an info (2s, not error-styled): {text:?}");
+    // Removing one says the same failure the same way.
+    app.remove_hidden_word("spam", true);
+    let (removed, _) = footer(&app);
+    assert!(removed.contains("couldn't save it") && text.contains("couldn't save it"), "two wordings for one failure: {text:?} / {removed:?}");
+}
+
+#[test]
+fn taking_back_what_couldnt_be_written_writes_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = local_app();
+    unwritable(&mut app, dir.path());
+    app.add_hidden_word("spam");
+    drawn(&mut app);
+    app.undo_filter();
+    assert_eq!(footer(&app), ("Posts with \"spam\" aren't hidden now".into(), false), "it was never written, so nothing failed to be");
+}
+
+#[test]
+fn an_error_behind_the_spinner_waits_to_be_seen() {
+    let mut app = test_app();
+    let t0 = Instant::now();
+    app.clock = Clock { instant: Some(t0), ..Default::default() };
+    app.tab.fake_load(1, "Loading", Then::Show);
+    app.error("Couldn't save to the data directory: disk full");
+    app.poll();
+    app.clock = Clock { instant: Some(t0 + Duration::from_secs(60)), ..Default::default() };
+    app.poll();
+    assert!(footer(&app).1, "it ran out while the spinner hid it");
+    // The load is answered: the spinner goes.
+    assert!(app.tab.answered(1));
+    app.poll();
+    app.clock = Clock { instant: Some(t0 + Duration::from_secs(65)), ..Default::default() };
+    app.poll();
+    assert_eq!(app.footer.get(), None, "5s once it's on screen");
+}
+
+#[test]
+fn a_board_added_and_opened_but_not_saved_still_says_so() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = local_app();
+    unwritable(&mut app, dir.path());
+    app.popup = Some(Popup::Adding(Adding::Board { site: 0, board: "zz".into(), open: Some("a/zz".into()) }));
+    app.on_key(KeyEvent::from(KeyCode::Enter));
+    let (text, error) = footer(&app);
+    assert!(error && text.contains("couldn't save it"), "opening the board replaced the config error: {text:?} (error: {error})");
+}
+
+#[test]
+fn an_unshown_error_isnt_replaced_by_the_next_info() {
+    let mut app = test_app();
+    app.error("Couldn't save watched threads: disk full");
+    app.info("Sorted by replies");
+    let (text, error) = footer(&app);
+    assert!(error && text.contains("disk full"), "an info replaced an error before it was drawn: {text:?}");
+}
+
+/// A request that couldn't connect, as the HTTP layer reports it.
+fn unreachable_request() -> anyhow::Error {
+    anyhow::Error::from(ureq::Error::ConnectionFailed).context("GET http://127.0.0.1:3/x/res/1.json")
+}
+
+#[test]
+fn a_thread_lookup_that_fails_is_said_in_plain_words() {
+    let plain = crate::http::plain(&unreachable_request());
+    assert_eq!(plain, "Couldn't reach 127.0.0.1:3");
+    // Finding which thread a post is in.
+    let mut app = local_app();
+    app.thread_found(0, Board { uri: "x".into(), title: String::new(), nsfw: None }, 5, None, Err(unreachable_request()));
+    assert_eq!(footer(&app).0, plain, "find_thread");
+}
+
+#[test]
+fn a_site_that_cant_be_asked_is_said_in_plain_words() {
+    let plain = crate::http::plain(&unreachable_request());
+    let mut app = local_app();
+    app.popup = Some(Popup::Adding(Adding::Looking { id: 7, host: "127.0.0.1".into(), open: None }));
+    app.detected(7, Err(unreachable_request()));
+    assert_eq!(footer(&app).0, plain, "adding a site");
+}
+
+#[test]
+fn an_archive_search_that_fails_is_said_in_plain_words() {
+    let plain = crate::http::plain(&unreachable_request());
+    let mut app = app_with(
+        "[[site]]\nname = \"chan\"\nkind = \"vichan\"\nurl = \"http://127.0.0.1:3\"\nboards = [\"g\"]\narchive = \"arch\"\n\
+         [[site]]\nname = \"arch\"\nkind = \"foolfuuka\"\nurl = \"http://localhost:3\"\nboards = [\"g\"]",
+    );
+    app.tab.board = Some(Board { uri: "g".into(), title: String::new(), nsfw: None });
+    app.tab.navigate(View::Catalog);
+    app.act(Action::ArchiveSearch);
+    type_text(&mut app, "borrow");
+    app.on_key(KeyEvent::from(KeyCode::Enter));
+    app.search_results(1, Err(unreachable_request()));
+    assert_eq!(footer(&app).0, plain, "archive search");
+}
+
+#[test]
+fn a_watched_thread_answered_without_posts_keeps_its_counts() {
+    let mut app = local_app();
+    let key = ThreadKey { site: "a".into(), board: "x".into(), no: 1 };
+    app.store.watch(key.clone(), "One".into(), 2, 2);
+    refresh(&mut app, key.clone(), nos(&[1, 2, 3, 4]));
+    let before = app.store.watched(&key).unwrap().status;
+    assert_eq!(before.counts(), (2, 0));
+    // A site in trouble answers with no posts: that's no answer, not a thread without any.
+    app.refreshed(key.clone(), Thread::answer(1, Vec::new()));
+    let w = app.store.watched(&key).unwrap();
+    assert_eq!((w.status, w.posts), (before, 4));
+}
+
+#[test]
+fn a_watched_thread_answered_without_posts_tells_nothing_twice() {
+    let mut app = local_app();
+    let key = ThreadKey { site: "a".into(), board: "x".into(), no: 1 };
+    app.store.watch(key.clone(), "One".into(), 2, 2);
+    refresh(&mut app, key.clone(), nos(&[1, 2, 3, 4]));
+    app.refreshed(key.clone(), Thread::answer(1, Vec::new()));
+    // The next good answer has nothing new: posts already told about aren't told again.
+    refresh(&mut app, key, nos(&[1, 2, 3, 4]));
+    app.flush_notes(Instant::now());
+    assert!(app.notified.is_empty(), "{:?}", app.notified);
+}
+
+#[test]
+fn a_watched_thread_answered_with_another_thread_is_left_as_it_was() {
+    let mut app = local_app();
+    let key = ThreadKey { site: "a".into(), board: "x".into(), no: 1 };
+    app.store.watch(key.clone(), "One".into(), 2, 2);
+    refresh(&mut app, key.clone(), nos(&[1, 2]));
+    // The site answers with thread 7: none of its posts are thread 1's.
+    app.refreshed(key.clone(), Thread::answer(1, nos(&[7, 8, 9])));
+    app.flush_notes(Instant::now());
+    let w = app.store.watched(&key).unwrap();
+    assert_eq!((w.status.counts(), w.posts), ((0, 0), 2));
+    assert!(app.notified.is_empty(), "{:?}", app.notified);
+}
+
+#[test]
+fn an_answer_with_another_thread_does_not_open_it() {
+    let mut app = local_app();
+    app.goto_str("a/x/5");
+    app.handle(answer(app.tab.req().unwrap(), thread_arrived, Thread::answer(5, nos(&[7, 8]))));
+    // Thread 5 was asked for; thread 7 isn't shown (or visited) as if it were.
+    assert_ne!(app.tab.thread.as_ref().map(|t| t.no), Some(7));
+    assert!(app.store.history.iter().all(|v| v.key.no != 7));
+}
+
+#[test]
+fn a_cut_short_answer_does_not_replace_a_watched_threads_saved_copy() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = saving_app(dir.path(), 1000);
+    let key = ThreadKey { site: "a".into(), board: "x".into(), no: 1 };
+    let all: Vec<u64> = (1..=10).collect();
+    app.store.watch(key.clone(), "One".into(), 10, 10);
+    refresh(&mut app, key.clone(), nos(&all));
+    app.flush_writes();
+    assert_eq!(app.store.saved(&key).unwrap().posts, 10);
+    // A refresh with fewer than half the posts is a broken answer when the thread is open;
+    // in the background it's the same answer, and the copy kept for when the thread dies
+    // shouldn't become it.
+    refresh(&mut app, key.clone(), nos(&[1, 11]));
+    app.flush_writes();
+    assert!(app.store.saved(&key).unwrap().posts >= 10, "{}", app.store.saved(&key).unwrap().posts);
+    app.refreshed(key.clone(), Err(gone()));
+    assert!(app.store.load_saved(&key).unwrap().posts.len() >= 10);
+}
+
+#[test]
+fn a_second_answer_just_as_short_is_taken() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = saving_app(dir.path(), 1000);
+    let key = ThreadKey { site: "a".into(), board: "x".into(), no: 1 };
+    app.store.watch(key.clone(), "One".into(), 10, 10);
+    refresh(&mut app, key.clone(), posts_upto(10));
+    app.flush_writes();
+    // Cut short: not counted (or kept), but what's known of the thread is now its length...
+    refresh(&mut app, key.clone(), nos(&[1, 11, 12]));
+    app.flush_writes();
+    let counted = |app: &App| (app.store.watched(&key).unwrap().status.counts(), app.store.saved(&key).unwrap().posts);
+    assert_eq!(counted(&app), ((0, 0), 10));
+    // ...so another answer just as small is taken: moderators did delete most of it.
+    refresh(&mut app, key.clone(), nos(&[1, 11, 12]));
+    app.flush_writes();
+    assert_eq!(counted(&app), ((2, 0), 3));
+    // And so is one with half the posts or more.
+    refresh(&mut app, key.clone(), nos(&[1, 13]));
+    app.flush_writes();
+    assert_eq!(counted(&app).1, 2);
+}
+
+#[test]
+fn a_cut_short_refresh_of_the_open_thread_changes_no_count_or_copy() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = saving_app(&dir.path().join("data"), 1000);
+    app.download_dir = Some(dir.path().join("dl").display().to_string());
+    let key = ThreadKey { site: "a".into(), board: "x".into(), no: 1 };
+    app.store.watch(key.clone(), "One".into(), 10, 10);
+    app.goto_str("a/x/1");
+    app.handle(answer(app.tab.req().unwrap(), thread_arrived, arrived(posts_upto(10))));
+    app.flush_writes();
+    refresh(&mut app, key.clone(), nos(&[1, 11]));
+    // Shown as it came, and said so; the watch list and the copy are as they were.
+    assert_eq!(app.tab.thread.as_ref().unwrap().posts.len(), 2);
+    assert_eq!(app.store.watched(&key).unwrap().posts, 10);
+    assert!(app.status().unwrap().text.contains("2 of the 10 posts"), "{:?}", app.status());
+    // What's shown isn't kept either: exported, watched again, or a post marked as yours.
+    app.act(Action::Export);
+    app.on_key(KeyEvent::from(KeyCode::Enter));
+    assert!(dir.path().join("dl/thread.json").exists() && !app.status().unwrap().text.contains("(and in Saved)"));
+    app.act(Action::Watch);
+    app.act(Action::Watch);
+    app.act(Action::Mine);
+    app.flush_writes();
+    assert_eq!((app.store.saved(&key).unwrap().posts, app.store.load_saved(&key).unwrap().posts.len()), (10, 10));
+}
+
+/// Thread /x/1 open with posts 1..=10 (unwatched), and its key.
+fn ten_open() -> (App, ThreadKey) {
+    let mut app = local_app();
+    app.goto_str("a/x/1");
+    app.handle(answer(app.tab.req().unwrap(), thread_arrived, arrived(posts_upto(10))));
+    let key = app.key("x", 1);
+    (app, key)
+}
+
+#[test]
+fn answers_cut_short_again_are_told_against_the_posts_last_known_whole() {
+    let (mut app, key) = ten_open();
+    refresh(&mut app, key.clone(), nos(&[1, 2, 3, 4]));
+    refresh(&mut app, key, nos(&[1]));
+    assert!(app.status().unwrap().text.contains("1 of the 10 posts"), "{:?}", app.status());
+    assert_eq!(app.tab.thread.as_ref().unwrap().known, 10);
+}
+
+#[test]
+fn watching_a_thread_shown_cut_short_counts_the_posts_known() {
+    let (mut app, key) = ten_open();
+    refresh(&mut app, key.clone(), nos(&[1, 11]));
+    app.act(Action::Watch);
+    assert_eq!(app.store.watched(&key).unwrap().posts, 10);
+}
+
+#[test]
+fn an_answer_cut_short_long_ago_is_not_the_bar_for_opening_it_again() {
+    let (mut app, key) = ten_open();
+    refresh(&mut app, key.clone(), nos(&[1, 11, 12]));
+    // Left, watched later (known with 10 posts), and opened again to a broken answer: it's
+    // judged against those 10, not the 3 of before.
+    app.goto_str("a/x/5");
+    app.handle(answer(app.tab.req().unwrap(), thread_arrived, arrived(nos(&[5]))));
+    app.store.watch(key.clone(), "One".into(), 10, 10);
+    app.goto_str("a/x/1");
+    app.handle(answer(app.tab.req().unwrap(), thread_arrived, arrived(nos(&[1, 13, 14, 15]))));
+    assert_eq!(app.store.watched(&key).unwrap().posts, 10);
+}
+
+#[test]
+fn a_mass_deletion_on_the_open_thread_is_taken_and_stays_taken() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = saving_app(dir.path(), 1000);
+    let key = ThreadKey { site: "a".into(), board: "x".into(), no: 1 };
+    app.store.watch(key.clone(), "One".into(), 10, 10);
+    app.goto_str("a/x/1");
+    app.handle(answer(app.tab.req().unwrap(), thread_arrived, arrived(posts_upto(10))));
+    // Moderators delete all but two posts: the first answer is doubted, the second taken.
+    refresh(&mut app, key.clone(), nos(&[1, 2]));
+    refresh(&mut app, key.clone(), nos(&[1, 2]));
+    app.flush_writes();
+    // Taken is taken: the thread is now known with two posts, and the same answer again
+    // isn't doubted (it brought nothing new, so it isn't a visit either).
+    app.footer = Footer::default();
+    refresh(&mut app, key.clone(), nos(&[1, 2]));
+    assert!(app.status().is_none(), "{:?}", app.status());
+    assert_eq!((app.tab.thread.as_ref().unwrap().known, app.store.watched(&key).unwrap().posts), (2, 2));
+    assert_eq!(app.store.saved(&key).unwrap().posts, 2);
+}
+
+#[test]
+fn a_thread_opened_again_shows_what_came_since_as_new() {
+    let mut app = local_app();
+    for (no, posts) in [(1, nos(&[1, 2])), (5, nos(&[5])), (1, nos(&[1, 2, 3]))] {
+        app.goto_str(&format!("a/x/{no}"));
+        app.handle(answer(app.tab.req().unwrap(), thread_arrived, Thread::answer(no, posts)));
+    }
+    // New since the last visit, which this one is (counted once it's shown).
+    assert_eq!(app.tab.thread.as_ref().map(|t| t.new_after), Some(2));
+    assert_eq!(app.store.last_seen(&app.key("x", 1)), 3);
+}
+
+/// A thread's answer is for the thread asked for: on a tab that's on another site by then
+/// (switched under the load), it isn't shown, counted or visited as that site's thread.
+#[test]
+fn a_thread_answered_after_its_tab_changed_site_isnt_taken_for_that_sites() {
+    let mut app = local_app();
+    let other = ThreadKey { site: "b".into(), board: "x".into(), no: 1 };
+    app.store.watch(other.clone(), String::new(), 1, 1);
+    app.goto_str("a/x/1");
+    let (req, asked) = (app.tab.req().unwrap(), app.key("x", 1));
+    app.switch_site(1);
+    let before = (app.store.watched(&other).unwrap().posts, app.store.last_seen(&other));
+    app.handle(Msg::answer(req, arrived(nos(&[1, 2, 3])), move |app, r| app.thread_arrived(&asked, r)));
+    assert!(app.tab.thread.is_none(), "a/x/1 shown as b/x/1");
+    assert_eq!((app.store.watched(&other).unwrap().posts, app.store.last_seen(&other)), before);
+}
+
+/// Moving to another thread shows the same view, but what the last frame drew is stale: no
+/// click lands on it before the next frame.
+#[test]
+fn a_click_after_moving_to_another_thread_waits_for_the_next_frame() {
+    let mut app = thread_app();
+    app.set_thread(nos(&(1..=60).collect::<Vec<_>>()));
+    draw_at(&mut app, 80, 20);
+    assert!(app.drawn().is_some_and(|d| d.body.is_some()));
+    // Another thread, as a link followed opens it (same view, same tab).
+    app.tab.navigate(View::Thread);
+    assert!(app.drawn().is_none(), "the last thread's posts as drawn are still clickable");
+    app.set_thread(nos(&(100..=160).collect::<Vec<_>>()));
+    draw_at(&mut app, 80, 20);
+    assert!(app.drawn().is_some_and(|d| d.body.is_some()));
+}
+
+/// Opening the settings over a view, or closing them, makes the last frame stale.
+#[test]
+fn a_click_after_the_settings_open_or_close_waits_for_the_next_frame() {
+    let mut app = local_app();
+    app.switch_site(0);
+    app.tab.navigate(View::Boards);
+    draw_at(&mut app, 80, 20);
+    assert!(app.drawn().is_some());
+    app.tab.navigate(View::Settings);
+    assert!(app.drawn().is_none(), "the boards drawn are clickable over the settings");
+    draw_at(&mut app, 80, 20);
+    assert!(app.drawn().is_some());
+    app.tab.close_settings();
+    assert!(app.drawn().is_none(), "the settings drawn are clickable over the boards");
 }

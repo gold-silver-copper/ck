@@ -6,10 +6,10 @@ use std::fmt::Write as _;
 use anyhow::Result;
 use serde_json::Value;
 
-use super::{Backend, Partial, as_u32, saturate};
+use super::{Backend, Partial, as_u32, saturate, site_error};
 use crate::http::{as_bool, as_str, as_u64, encode_segment as enc, get_json, items, is_not_found};
 use crate::markup;
-use crate::model::{Attachment, Board, Flag, Post};
+use crate::model::{Attachment, Board, FileKind, Flag, Post};
 
 /// Board list is paginated; don't hammer huge sites at startup.
 const MAX_BOARD_PAGES: u64 = 5;
@@ -24,8 +24,16 @@ impl Lynxchan {
         Self { base, boards }
     }
 
+    /// A wrapped answer is unwrapped; one whose status isn't "ok" is an error with its text.
     fn get(&self, path: &str) -> Result<Value> {
-        Ok(unwrap(get_json(&format!("{}{path}", self.base))?))
+        let url = format!("{}{path}", self.base);
+        let v = get_json(&url)?;
+        let text = || v.get("data").map(|d| as_str(d).unwrap_or_else(|| d.to_string())).unwrap_or_default();
+        match v.get("status").and_then(Value::as_str) {
+            None | Some("ok") => Ok(unwrap(v)),
+            Some("error") => Err(site_error(&url, &text())),
+            Some(status) => anyhow::bail!("{status}: {}", text()),
+        }
     }
 
     /// Thread OPs from `/{board}/catalog.json`.
@@ -73,9 +81,12 @@ impl Lynxchan {
             .filter_map(|f| {
                 let path = as_str(&f["path"])?;
                 let (thumb, spoiler) = thumb(&f["thumb"]);
+                let filename = as_str(&f["originalName"]).unwrap_or_else(|| path.rsplit('/').next().unwrap_or("").into());
+                let url = format!("{}{path}", self.base);
                 Some(Attachment {
-                    filename: as_str(&f["originalName"]).unwrap_or_else(|| path.rsplit('/').next().unwrap_or("").into()),
-                    url: format!("{}{path}", self.base),
+                    kind: FileKind::of(as_str(&f["mime"]).as_deref(), Some(&url), &filename),
+                    filename,
+                    url: Some(url),
                     thumb: thumb.map(|t| format!("{}{t}", self.base)),
                     spoiler,
                     width: as_u32(&f["width"]),
@@ -86,17 +97,10 @@ impl Lynxchan {
             })
             .collect();
         // Some catalogs (endchan) only give the OP's thumbnail, not its files.
-        if files.is_empty()
-            && let Some(path) = as_str(&v["thumb"])
-        {
+        if files.is_empty() && as_str(&v["thumb"]).is_some() {
             let (thumb, spoiler) = thumb(&v["thumb"]);
-            files.push(Attachment {
-                filename: "catalog thumbnail (open the thread for the file)".into(),
-                url: format!("{}{path}", self.base),
-                thumb: thumb.map(|t| format!("{}{t}", self.base)),
-                spoiler,
-                ..Default::default()
-            });
+            let thumb = thumb.map(|t| format!("{}{t}", self.base));
+            files.push(Attachment { filename: String::new(), url: None, kind: FileKind::Other, thumb, spoiler, width: None, height: None, size: None, md5: None });
         }
         Post {
             no: as_u64(&v[no_key]).unwrap_or(0),
@@ -192,7 +196,7 @@ impl Backend for Lynxchan {
         }
     }
 
-    fn thread(&self, board: &str, no: u64) -> Result<Vec<Post>> {
+    fn thread_unchecked(&self, board: &str, no: u64) -> Result<Vec<Post>> {
         Ok(self.parse_thread(&self.get(&format!("/{}/res/{no}.json", enc(board)))?))
     }
 
@@ -300,8 +304,34 @@ mod tests {
         let cat = fixture("kohlchan_catalog.json");
         let p = kohl.post(find(&cat, 28870642), "threadId");
         assert_eq!(p.files.len(), 4);
-        assert!(p.files[0].url.ends_with(".jpg") || p.files[0].url.contains("/.media/"));
+        assert!(p.files[0].url.as_ref().is_some_and(|u| u.ends_with(".jpg") || u.contains("/.media/")));
         let p = kohl.post(find(&cat, 28874644), "threadId");
         assert!(p.files[0].spoiler && p.files[0].thumb.is_none());
+    }
+
+    #[test]
+    fn catalog_thumbnail_is_not_a_file() {
+        // endchan's catalog gives only a thumbnail: no download saves it as the thread's
+        // file, and a filename filter doesn't match the placeholder name ck gives it.
+        let end = Lynxchan::new("https://endchan.net".into(), None);
+        let p = end.post(find(&fixture("lynxchan_catalog.json"), 867082), "threadId");
+        let thumb = "https://endchan.net/.media/t_53781bea8476800b093c909d2f0902d2-imagejpeg";
+        let jobs = crate::download::jobs(&[&p], std::path::Path::new("/d"));
+        assert!(jobs.iter().all(|(url, _)| url != thumb), "the catalog thumbnail is downloaded as a file: {jobs:?}");
+        let f = crate::filter::tests::filters("[[filter]]\npattern = \"(?i)thumbnail\"\nfield = \"filename\"\n").unwrap();
+        assert!(f.check("endchan", "b", &p, true).hidden.is_none(), "a filename filter matched ck's placeholder text");
+    }
+
+    #[test]
+    fn file_kind_comes_from_the_mime() {
+        // LynxChan says what each file is; a path without an extension is still a video.
+        let end = Lynxchan::new("https://endchan.net".into(), None);
+        let v = serde_json::json!({"threadId": 1, "files": [
+            {"path": "/.media/7cb1d1b2e5fffe9cfe1adbfe0a72ff3c", "mime": "video/mp4", "originalName": "clip", "thumb": "/.media/t_7cb1d1b2e5fffe9cfe1adbfe0a72ff3c"},
+            {"path": "/.media/9cbd28a1c035034c6379843b6ee0ddbf", "mime": "image/jpeg", "originalName": "pic", "thumb": "/.media/t_9cbd28a1c035034c6379843b6ee0ddbf"},
+        ]});
+        let p = end.post(&v, "threadId");
+        assert!(p.files[0].is_video(), "mime video/mp4 ignored");
+        assert!(p.files[1].is_image(), "mime image/jpeg ignored");
     }
 }

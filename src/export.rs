@@ -31,13 +31,11 @@ pub fn save(posts: &[Post], about: &About, theme: &Theme, dir: &Path) -> Result<
 /// Each file of a post with the name it has (or would have) after `d`/`D`, and whether
 /// it's been downloaded into `dir`.
 fn files<'a>(p: &'a Post, dir: &Path) -> Vec<(&'a crate::model::Attachment, String, bool)> {
-    let jobs = download::jobs(&[p], dir);
-    p.files
-        .iter()
-        .zip(jobs)
-        .map(|(f, (_, path))| {
+    download::paths(p, dir)
+        .into_iter()
+        .map(|(f, path)| {
             let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-            (f, name, path.exists())
+            (f, name, f.url.is_some() && path.exists())
         })
         .collect()
 }
@@ -51,7 +49,7 @@ pub fn data(posts: &[Post], about: &About, dir: &Path) -> serde_json::Value {
                 .into_iter()
                 .map(|(f, name, saved)| {
                     json!({
-                        "filename": f.filename, "url": f.url, "thumb": f.thumb, "spoiler": f.spoiler,
+                        "filename": f.filename, "url": f.url, "kind": f.kind, "thumb": f.thumb, "spoiler": f.spoiler,
                         "width": f.width, "height": f.height, "size": f.size, "md5": f.md5,
                         "saved_as": saved.then_some(name),
                     })
@@ -173,11 +171,14 @@ pre {{ background: {code_bg}; color: {code}; padding: 8px; overflow-x: auto; whi
             for (f, name, saved) in &files {
                 // A saved file's name is a relative address: `#`, `%` and spaces mean something there.
                 let local = crate::http::encode_segment(name);
-                let href = if *saved { local.clone() } else { f.url.clone() };
-                let img = if *saved && f.is_image() { Some(local) } else { f.thumb.clone() };
-                let _ = write!(out, r#"<a href="{}">"#, attr(&href));
+                let href = if *saved { Some(local.as_str()) } else { f.url.as_deref().or(f.thumb.as_deref()) };
+                let img = if *saved && f.is_image() { Some(local.as_str()) } else { f.thumb.as_deref() };
+                match href {
+                    Some(h) => _ = write!(out, r#"<a href="{}">"#, attr(h)),
+                    None => out.push_str("<a>"),
+                }
                 if let Some(src) = img {
-                    let _ = write!(out, r#"<img src="{}" alt="{}" loading="lazy">"#, attr(&src), attr(&f.filename));
+                    let _ = write!(out, r#"<img src="{}" alt="{}" loading="lazy">"#, attr(src), attr(&f.filename));
                 }
                 let _ = write!(out, r#"</a><div class="file">{}</div>"#, text(&f.filename));
             }
@@ -274,7 +275,7 @@ mod tests {
         };
         let mut op = post(1, "Hello <b>world</b> &amp; <s>secret</s><br><span class=\"quote\">&gt;green</span>");
         op.subject = Some("A <thread>".into());
-        op.files = vec![Attachment { filename: "cat.png".into(), url: "https://i.example/1.png".into(), thumb: Some("https://i.example/1s.jpg".into()), ..Default::default() }];
+        op.files = vec![Attachment { filename: "cat.png".into(), thumb: Some("https://i.example/1s.jpg".into()), ..Attachment::at("https://i.example/1.png") }];
         vec![op, post(2, "<a href=\"#p1\" class=\"quotelink\">&gt;&gt;1</a> see https://example.com/x<br><pre>fn main() {<br>}</pre>")]
     }
 
@@ -314,13 +315,30 @@ mod tests {
     fn saved_file_names_are_addresses() {
         let dir = tempfile::tempdir().unwrap();
         let mut p = Post { no: 1, ..Default::default() };
-        p.files = vec![Attachment { filename: "a#b 100%.png".into(), url: "https://i.example/1.png".into(), ..Default::default() }];
+        p.files = vec![Attachment { filename: "a#b 100%.png".into(), ..Attachment::at("https://i.example/1.png") }];
         std::fs::write(dir.path().join("1_a#b 100%.png"), b"x").unwrap();
         let about = About { site: "4chan", board: "g", thread: 1, url: "https://x/", saved: 0 };
         let html = html(&[p], &about, &crate::theme::theme(), dir.path());
         assert!(html.contains(r#"<a href="1_a%23b%20100%25.png"><img src="1_a%23b%20100%25.png""#), "{html}");
         // The name shown is the file's own.
         assert!(html.contains(r#"<div class="file">a#b 100%.png</div>"#), "{html}");
+    }
+
+    #[test]
+    fn files_the_site_lacks_link_to_what_there_is() {
+        // Only the thumbnail kept: it's the link, even when a file by that name is in the
+        // folder (an older ck saved thumbnails so). Neither kept: no link to this page itself.
+        let dir = tempfile::tempdir().unwrap();
+        let thumb = Attachment { filename: "clip.webm".into(), url: None, thumb: Some("https://i.example/1s.jpg".into()), ..Default::default() };
+        let gone = Attachment { filename: "gone.webm".into(), url: None, spoiler: true, ..Default::default() };
+        std::fs::write(dir.path().join("1_clip.webm"), b"x").unwrap();
+        let p = Post { no: 1, files: vec![thumb, gone], ..Default::default() };
+        let about = About { site: "4chan", board: "g", thread: 1, url: "https://x/", saved: 0 };
+        let html = html(std::slice::from_ref(&p), &about, &crate::theme::theme(), dir.path());
+        assert!(html.contains(r#"<a href="https://i.example/1s.jpg"><img src="https://i.example/1s.jpg""#), "{html}");
+        assert!(html.contains(r#"<a></a><div class="file">gone.webm</div>"#) && !html.contains(r#"href="""#), "{html}");
+        let data = data(&[p], &about, dir.path());
+        assert_eq!(data["posts"][0]["files"][0]["saved_as"], serde_json::Value::Null);
     }
 
     #[test]

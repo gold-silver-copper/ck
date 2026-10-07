@@ -135,7 +135,7 @@ pub fn files_from_page(html: &str, board: &str, host: &str) -> (Option<Option<St
         let (h, _) = rest.split_once('/').unwrap_or((rest, ""));
         (bare(h) != bare(host)).then(|| if prefix.starts_with("//") { format!("https:{prefix}") } else { prefix.clone() })
     });
-    let image = |e: &str| matches!(e, "jpg" | "jpeg" | "png" | "gif" | "webp");
+    let image = |e: &str| crate::model::FileKind::from_ext(e) == crate::model::FileKind::Image;
     let pairs: Vec<(&str, &str)> = thumbs
         .iter()
         .filter_map(|(_, stem, thumb)| Some((files.iter().find(|(_, s, _)| s == stem).map(|(.., e)| e.as_str()).filter(|e| image(e))?, thumb.as_str())))

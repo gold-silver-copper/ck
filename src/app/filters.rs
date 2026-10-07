@@ -39,10 +39,11 @@ pub struct Candidate {
     pub label: String,
 }
 
-/// What `u` right after takes back: a filter added (at its place), or a hidden word.
+/// What `u` right after takes back: a filter added (at its place), or a hidden word; and
+/// whether it was written to the config (so taking it back is written too).
 pub enum Undo {
-    Filter(usize, FilterConfig),
-    Word(String),
+    Filter(usize, FilterConfig, bool),
+    Word(String, bool),
 }
 
 /// `X`: a filter like the selected post, being made.
@@ -403,12 +404,9 @@ impl App {
             (0, t) => format!(" ({t} here)"),
             (p, t) => format!(" ({p} posts, {t} threads here)"),
         };
-        let note = match saved {
-            Ok(()) => "u undoes; Settings › Filters lists them".to_string(),
-            Err(e) => format!("u undoes; not saved: {e:#}"),
-        };
-        self.info(format!("{verb} {}{here} · {note}", f.label()));
-        self.filter_undo = Some(Undo::Filter(self.filter_cfgs.len() - 1, f));
+        let done = format!("{verb} {}{here}", f.label());
+        let written = self.say_saved(&done, saved.map(|()| format!("{done} · u undoes; Settings › Filters lists them")));
+        self.filter_undo = Some(Undo::Filter(self.filter_cfgs.len() - 1, f, written));
     }
 
     /// Hide posts with `word`, everywhere; `u` right after takes it back.
@@ -432,27 +430,21 @@ impl App {
             (0, t) => format!(" ({t} here)"),
             (p, t) => format!(" ({p} posts, {t} threads here)"),
         };
-        let note = match saved {
-            Ok(()) => "u undoes; Settings › Filters › Hidden words lists them".to_string(),
-            Err(e) => format!("u undoes; not saved: {e:#}"),
-        };
-        self.info(format!("Hiding posts with \"{word}\"{here} · {note}"));
-        self.filter_undo = Some(Undo::Word(word));
+        let done = format!("Hiding posts with \"{word}\"{here}");
+        let written = self.say_saved(&done, saved.map(|()| format!("{done} · u undoes; Settings › Filters › Hidden words lists them")));
+        self.filter_undo = Some(Undo::Word(word, written));
     }
 
-    /// Stop hiding posts with a word.
-    pub(super) fn remove_hidden_word(&mut self, word: &str) {
+    /// Stop hiding posts with a word, and `write` the config.
+    pub(super) fn remove_hidden_word(&mut self, word: &str, write: bool) {
         let before = self.hidden_words.len();
         self.hidden_words.retain(|w| w != word);
         if self.hidden_words.len() == before {
             return;
         }
-        let saved = self.write_hidden_words();
+        let saved = if write { self.write_hidden_words() } else { Ok(()) };
         self.apply_filters();
-        match saved {
-            Ok(()) => self.info(format!("Posts with \"{word}\" aren't hidden now")),
-            Err(e) => self.error_unsaved(&format!("Posts with \"{word}\" aren't hidden"), &e),
-        }
+        self.say_saved(&format!("Posts with \"{word}\" aren't hidden"), saved.map(|()| format!("Posts with \"{word}\" aren't hidden now")));
     }
 
     fn write_hidden_words(&self) -> anyhow::Result<()> {
@@ -466,21 +458,19 @@ impl App {
 
     /// `u` right after adding a filter or a hidden word: take it back.
     pub fn undo_filter(&mut self) {
-        let (i, f) = match self.filter_undo.take() {
-            Some(Undo::Filter(i, f)) => (i, f),
-            Some(Undo::Word(w)) => return self.remove_hidden_word(&w),
+        let (i, f, written) = match self.filter_undo.take() {
+            Some(Undo::Filter(i, f, written)) => (i, f, written),
+            Some(Undo::Word(w, written)) => return self.remove_hidden_word(&w, written),
             None => return,
         };
         if self.filter_cfgs.get(i) != Some(&f) {
             return;
         }
-        let saved = self.write_filters(FilterEdit::Remove(i, &f));
+        let saved = if written { self.write_filters(FilterEdit::Remove(i, &f)) } else { Ok(()) };
         self.filter_cfgs.remove(i);
         self.apply_filters();
-        match saved {
-            Ok(()) => self.info(format!("Took the filter {} back", f.label())),
-            Err(e) => self.error_unsaved(&format!("Took the filter {} back", f.label()), &e),
-        }
+        let done = format!("Took the filter {} back", f.label());
+        self.say_saved(&done, saved.map(|()| done.clone()));
     }
 
     /// Write a change to the config's filters. Without a config file to write (or when the
@@ -494,7 +484,7 @@ impl App {
     pub(super) fn apply_filters(&mut self) {
         match Filters::from_config(&self.filter_cfgs, &self.hidden_words) {
             Ok(f) => self.rehide(|a| a.hiding.set_filters(f)),
-            Err(e) => self.error(format!("{e:#}")),
+            Err(e) => self.error(e),
         }
     }
 
@@ -539,7 +529,8 @@ impl App {
                     let saved = self.write_filters(FilterEdit::Remove(i, &f));
                     self.filter_cfgs.remove(i);
                     self.apply_filters();
-                    self.say_saved(&format!("Removed the filter {}", f.label()), saved);
+                    let done = format!("Removed the filter {}", f.label());
+                    self.say_saved(&done, saved.map(|()| done.clone()));
                 }
                 Some(self.filter_list(sel.unwrap_or(0)))
             }
@@ -552,7 +543,7 @@ impl App {
                         *f = new;
                     }
                     self.apply_filters();
-                    self.say_saved(&what, saved);
+                    self.say_saved(&what, saved.map(|()| what.clone()));
                 }
                 Some(SettingsPopup::Filters { list, counts })
             }
@@ -561,13 +552,6 @@ impl App {
                 list.select(list_move(code, cur, self.filter_cfgs.len()).or(sel).filter(|_| !self.filter_cfgs.is_empty()));
                 Some(SettingsPopup::Filters { list, counts })
             }
-        }
-    }
-
-    fn say_saved(&mut self, what: &str, saved: anyhow::Result<()>) {
-        match saved {
-            Ok(()) => self.info(what),
-            Err(e) => self.error_unsaved(what, &e),
         }
     }
 
@@ -675,7 +659,8 @@ impl App {
             }
         };
         self.apply_filters();
-        self.say_saved(&format!("Saved the filter {}", new.label()), saved);
+        let done = format!("Saved the filter {}", new.label());
+        self.say_saved(&done, saved.map(|()| done.clone()));
         index
     }
 }

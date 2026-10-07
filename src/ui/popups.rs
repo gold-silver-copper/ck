@@ -156,7 +156,7 @@ pub(super) fn draw_menu(f: &mut Frame, app: &mut App) {
     let sel = m.list.selected().unwrap_or(0);
     let off = scroll_to(m.list.offset(), sel, rows);
     *m.list.offset_mut() = off;
-    m.area = inner;
+    app.drawn.popup = Some(Hit::List { area: inner, offset: off, item_height: 1 });
     list_rows(f, Rect { height: rows as u16, ..inner }, off, m.items.len(), Some(sel), |k| {
         let key = keys.get(k).cloned().unwrap_or_default();
         Line::from(vec![Span::styled(format!("{}  ", pad(&key, key_w)), bold(t.primary)), Span::styled(m.items.get(k).map(label).unwrap_or_default(), Style::new().fg(t.text))])
@@ -181,7 +181,7 @@ pub(super) fn draw_hints(f: &mut Frame, app: &App) {
     }
 }
 
-pub(super) fn draw_preview(f: &mut Frame, app: &App) {
+pub(super) fn draw_preview(f: &mut Frame, app: &mut App) {
     let (Some(TabPopup::Preview(p)), Some(t)) = (&app.tab.popup, &app.tab.thread) else { return };
     let w = f.area().width.saturating_sub(8).clamp(20, 110);
     let width = w.saturating_sub(4) as usize;
@@ -202,6 +202,7 @@ pub(super) fn draw_preview(f: &mut Frame, app: &App) {
     for (row, line) in lines.into_iter().skip(scroll).take(inner.height as usize).enumerate() {
         put(f, inner.x, inner.y + row as u16, inner.width, line);
     }
+    cover_tabs(&mut app.drawn.tabs, inner);
 }
 
 /// The selected post's links: quotes leading elsewhere, web links, files.
@@ -214,13 +215,14 @@ pub(super) fn draw_links(f: &mut Frame, app: &mut App) {
     let sel = p.list.selected().unwrap_or(0);
     let off = scroll_to(p.list.offset(), sel, rows);
     *p.list.offset_mut() = off;
-    p.area = inner;
+    app.drawn.popup = Some(Hit::List { area: inner, offset: off, item_height: 1 });
+    cover_tabs(&mut app.drawn.tabs, inner);
     list_rows(f, Rect { height: rows as u16, ..inner }, off, p.items.len(), Some(sel), |k| {
         let Some(item) = p.items.get(k) else { return Line::default() };
         let (kind, text, extra) = match item {
             LinkItem::Quote(_, label) => ("quote", label.clone(), String::new()),
             LinkItem::Url(u) => ("web", u.clone(), String::new()),
-            LinkItem::File(file) => ("file", file.filename.clone(), format!("  {}", file.url)),
+            LinkItem::File(f) => (if f.url.is_some() { "file" } else { "thumb" }, f.filename.clone(), f.link().map(|(_, u)| format!("  {u}")).unwrap_or_default()),
         };
         let room = (inner.width as usize).saturating_sub(9);
         let text = truncate(&text, room);
@@ -228,7 +230,7 @@ pub(super) fn draw_links(f: &mut Frame, app: &mut App) {
         Line::from(vec![
             chip(pad(kind, 5), t.text_dim, t.surface_high),
             Span::raw("  "),
-            Span::styled(text, Style::new().fg(if kind == "file" { t.text } else { t.quotelink })),
+            Span::styled(text, Style::new().fg(if matches!(kind, "file" | "thumb") { t.text } else { t.quotelink })),
             Span::styled(extra, dim()),
         ])
     });
@@ -244,7 +246,7 @@ pub(super) fn draw_image_search(f: &mut Frame, app: &mut App) {
     let sel = p.list.selected().unwrap_or(0);
     let off = scroll_to(p.list.offset(), sel, rows);
     *p.list.offset_mut() = off;
-    p.area = inner;
+    app.drawn.popup = Some(Hit::List { area: inner, offset: off, item_height: 1 });
     // File headers are never selected, so never painted.
     list_rows(f, Rect { height: rows as u16, ..inner }, off, p.rows.len(), Some(sel), |k| match p.rows.get(k) {
         Some(Err(file)) => Line::styled(truncate(file, inner.width as usize), bold(t.primary)),

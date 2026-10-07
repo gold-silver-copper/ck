@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use ratatui::crossterm::event::{
-    self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+    self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent,
 };
 use ratatui::layout::Rect;
 use ratatui::text::Line;
@@ -21,7 +21,7 @@ use crate::filter::{Filters, Hidden};
 use crate::http;
 use crate::images::Images;
 use crate::keys::{Action, KeyMap, Scope};
-use crate::model::{Attachment, Board, Link, Post, max_no};
+use crate::model::{Attachment, Board, FileKind, Link, Post, Thread, max_no, shrank};
 use crate::store::{Store, ThreadKey};
 use crate::theme::{self, ThemeDef, ThemeSetting};
 
@@ -40,6 +40,9 @@ macro_rules! take_popup {
 
 mod filters;
 mod focus;
+mod footer;
+use footer::Footer;
+pub use footer::{Problem, Status};
 mod gallery;
 mod input;
 mod generals;
@@ -49,6 +52,7 @@ mod goto;
 mod hiding;
 pub use hiding::{Changed, Hiding, Marks, ancestry, with_ancestry};
 pub use goto::start_error;
+pub use loading::Whole;
 mod home;
 mod links;
 mod saved;
@@ -101,6 +105,9 @@ pub enum View {
 const BOARDS_MAX_AGE: i64 = 24 * 3600;
 
 /// Background changes to the data directory are written at most this often.
+/// What opening, copying or saving a file says when the site has neither it nor its thumbnail.
+const NEITHER: &str = "Neither the file nor its thumbnail is available";
+
 const SAVE_EVERY: Duration = Duration::from_secs(2);
 
 /// Watched-thread refreshes running at once.
@@ -203,25 +210,44 @@ impl Clock {
 pub enum Hit {
     /// A list: its area, first visible item, and rows per item.
     List { area: Rect, offset: usize, item_height: u16 },
-    Thread { area: Rect },
+    /// The thread: its area, and the line drawn at its top.
+    Thread { area: Rect, scroll: usize },
     /// The catalog grid: its area, first visible item, columns, and cell size.
     Grid { area: Rect, offset: usize, cols: usize, cell: (u16, u16) },
     /// The settings screen, laid out as `settings::rows()` from `offset`.
     Settings { area: Rect, offset: usize },
 }
 
-/// A message in the footer, for a moment (errors a little longer).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Status {
-    pub text: String,
-    pub error: bool,
+impl Hit {
+    /// The list row or grid cell drawn at a screen position (a thread's posts aren't rows:
+    /// see `thread_part_at`).
+    pub(super) fn row_at(self, col: u16, row: u16) -> Option<usize> {
+        let pos = ratatui::layout::Position::new(col, row);
+        match self {
+            Hit::List { area, offset, item_height } if area.contains(pos) => {
+                Some(offset + ((row - area.y) / item_height.max(1)) as usize)
+            }
+            Hit::Settings { area, offset } if area.contains(pos) => settings::rows().get(offset + (row - area.y) as usize)?.ok(),
+            Hit::Grid { area, offset, cols, cell } if area.contains(pos) => {
+                let c = ((col - area.x) / cell.0) as usize;
+                (c < cols).then(|| offset + ((row - area.y) / cell.1) as usize * cols + c)
+            }
+            _ => None,
+        }
+    }
 }
 
-impl Status {
-    /// How long it replaces the key hints.
-    fn ttl(&self) -> Duration {
-        Duration::from_secs(if self.error { 5 } else { 2 })
-    }
+/// What the last frame drew where, for the mouse. Only `ui::draw` makes one, whole, through
+/// `App::begin_frame`, stamped with what that frame showed; a click resolves against
+/// nothing else, and nothing once the stamp is stale.
+#[derive(Debug, Default)]
+pub struct Drawn {
+    /// The list, grid or thread; the rows of the popup on top (menu, links, image search);
+    /// each tab's chip; and what the frame showed (`None` once that may have changed).
+    pub body: Option<Hit>,
+    pub popup: Option<Hit>,
+    pub tabs: Vec<(Rect, usize)>,
+    shown: Option<input::Shown>,
 }
 
 /// New posts in a watched thread, for a notification.
@@ -396,6 +422,9 @@ pub struct App {
     /// The newest post seen in each watched thread by a refresh this session; notifications
     /// are for posts past it.
     notified_max: HashMap<ThreadKey, u64>,
+    /// The last answer for each thread that came back cut short (by posts): the next is
+    /// judged against it (`accept`).
+    short: HashMap<ThreadKey, usize>,
     /// The same for followed generals' boards (site, board): the newest thread seen there,
     /// for `notify` filters.
     board_notified_max: HashMap<(String, String), u64>,
@@ -427,9 +456,7 @@ pub struct App {
     pub hidden_words: Vec<String>,
     /// The filter just added (and where): `u` as the next key takes it back.
     pub filter_undo: Option<filters::Undo>,
-    pub status: Option<Status>,
-    /// The status message as last seen by `expire_status`, and when it appeared.
-    status_since: Option<(String, Instant)>,
+    footer: Footer,
     pub images: Images,
     /// Reverse image search engines (`R`), and the panel choosing one.
     pub image_search: Vec<crate::config::ImageSearch>,
@@ -463,10 +490,8 @@ pub struct App {
     pub clock: Clock,
     pub downloads: Downloads,
     pub(crate) download_dir: Option<String>,
-    /// Set by the UI every frame.
-    pub hit: Option<Hit>,
-    /// Where each tab's chip was drawn, for clicks.
-    pub tab_chips: Vec<(Rect, usize)>,
+    /// Where the last frame drew what can be clicked.
+    pub drawn: Drawn,
     /// Last left click: when, and the list index or thread post it hit.
     last_click: Option<(Instant, usize)>,
     pub tick: usize,
@@ -554,6 +579,7 @@ impl App {
             pages_asked: HashMap::new(),
             pages_asking: HashSet::new(),
             notified_max: HashMap::new(),
+            short: HashMap::new(),
             board_notified_max: HashMap::new(),
             generals_checked: HashMap::new(),
             generals_searching: HashSet::new(),
@@ -573,8 +599,7 @@ impl App {
                 .filter(|_| !cfg!(test) && cfg.page_cache_mb > 0)
                 .map(|d| crate::pages::Pages::new(d, cfg.page_cache_mb.saturating_mul(1024 * 1024))),
             filter_undo: None,
-            status: None,
-            status_since: None,
+            footer: Footer::default(),
             popup: None,
             images: Images::new(picker, {
                 let tx = tx.clone();
@@ -601,8 +626,7 @@ impl App {
             clock: Clock::default(),
             downloads: Downloads::default(),
             download_dir: cfg.download_dir.clone(),
-            hit: None,
-            tab_chips: Vec::new(),
+            drawn: Drawn::default(),
             last_click: None,
             tick: 0,
             quit: false,
@@ -701,9 +725,23 @@ impl App {
         self.store.watched(&ThreadKey { site: site.cfg.name.clone(), board: self.board_of(p), no: p.no }).is_some()
     }
 
-    /// What's on screen, broadly: when it changes, the screen is painted whole.
-    pub fn screen(&self) -> (View, usize, bool, bool) {
-        (self.tab.view(), self.active, self.tab.viewer().is_some(), self.tab.gallery.is_some())
+    /// What's on screen, broadly: when it changes, the screen is painted whole (and the
+    /// last frame's hits are stale). The tab's moves tell one thread from the next.
+    pub fn screen(&self) -> (View, usize, bool, bool, u32) {
+        (self.tab.view(), self.active, self.tab.viewer().is_some(), self.tab.gallery.is_some(), self.tab.moves())
+    }
+
+    /// A new frame's `Drawn`, stamped with what it shows: the only place one is made.
+    pub(crate) fn begin_frame(&mut self) -> &mut Drawn {
+        self.drawn = Drawn { shown: Some(self.shown()), ..Drawn::default() };
+        &mut self.drawn
+    }
+
+    /// What the last frame drew, while it still shows this tab and view (a popup closed since
+    /// doesn't move what was under it: the menu's `hints` reads it).
+    pub(super) fn drawn(&self) -> Option<&Drawn> {
+        let (screen, tabs, _) = self.drawn.shown?;
+        ((screen, tabs) == (self.screen(), self.tabs.len())).then_some(&self.drawn)
     }
 
     /// Keep the current list's selection on a row that exists.
@@ -807,7 +845,7 @@ impl App {
         if self.save_pending && self.clock.instant().saturating_duration_since(self.saved_at) >= SAVE_EVERY {
             self.save_now();
         }
-        self.expire_status(self.clock.instant());
+        self.footer.tick(self.clock.instant(), self.status_on_screen());
     }
 
     /// Send waiting notifications together: once no refresh is running, or 3s after the
@@ -852,11 +890,11 @@ impl App {
         }
         for m in &messages {
             if let Err(e) = crate::notify::send(&method, "ck", m) {
-                self.error(format!("Couldn't notify: {e:#}"));
+                self.error(e.context("Couldn't notify"));
             }
         }
         if let Some(m) = messages.first() {
-            self.status.get_or_insert_with(|| Status { text: m.clone(), error: false });
+            self.footer.offer(m.clone());
         }
         self.notified.extend(messages);
         let len = self.notified.len();
@@ -887,8 +925,8 @@ impl App {
         if let Some(t) = self.images.next_frame() {
             after(t, Duration::ZERO);
         }
-        if let (Some(s), Some((_, since))) = (&self.status, &self.status_since) {
-            after(*since, s.ttl());
+        if let Some(t) = self.footer.due() {
+            after(t, Duration::ZERO);
         }
         if self.tab.view() == View::Thread && self.tab.thread.is_some() && self.tab.loading().is_none() && self.tab.saved().is_none() {
             after(self.tab.thread_checked, self.thread_every());
@@ -954,32 +992,30 @@ impl App {
 
     fn handle(&mut self, msg: Msg) {
         match msg {
-            Msg::Wake => {}
+            // A loaded image is drawn in the space it already had.
+            Msg::Wake => return,
             Msg::Input(ev) => {
                 let acted = !matches!(ev, Event::Key(k) if k.kind != KeyEventKind::Press);
                 crate::input_log::note(|| format!("handle  {ev:?}{}", if acted { "" } else { "  (not a press: ignored)" }));
                 match ev {
-                    Event::Key(key) if key.kind == KeyEventKind::Press => self.on_key(key),
-                    Event::Mouse(m) => self.on_mouse(m, self.clock.instant()),
+                    Event::Key(key) if acted => self.on_key(key),
+                    Event::Mouse(m) => return self.on_mouse(m, self.clock.instant()),
                     Event::Paste(text) => self.paste(&text),
                     _ => {}
                 }
             }
             Msg::Done(apply) => apply(self),
-            Msg::ForRequest { id, keep_if_stale, apply } => {
-                // A response to another request: another tab's is handled there, the rest
-                // are stale.
-                if Some(id) != self.tab.req() {
-                    if let Some(i) = self.tab_of(id) {
-                        return self.handle_in_tab(i, Box::new(move |app| app.land(apply)));
-                    }
-                    if !keep_if_stale {
-                        return;
-                    }
-                }
-                self.land(apply);
-            }
+            // A response to another request: another tab's is handled there, the rest are
+            // stale. It lands on the place, under the settings if they're open.
+            Msg::ForRequest { id, keep_if_stale, apply } => match self.tab_of(id) {
+                Some(i) => self.handle_in_tab(i, Box::new(move |app| app.land(apply))),
+                None if keep_if_stale || Some(id) == self.tab.req() => self.land(apply),
+                None => {}
+            },
         }
+        // Anything else may have moved what the last frame drew (a key, a list re-sorted in
+        // the background): a click does nothing until the next frame.
+        self.forget_frame();
     }
 
     /// Apply what a request found: it lands on the place, under the settings if they're open,
@@ -992,44 +1028,43 @@ impl App {
         }
     }
 
-    /// Status messages replace the footer's key hints only briefly: info for 2 seconds,
-    /// errors for 5. A new or changed message restarts the timer.
-    fn expire_status(&mut self, now: Instant) {
-        let Some(status) = &self.status else {
-            self.status_since = None;
-            return;
-        };
-        match &self.status_since {
-            Some((seen, since)) if *seen == status.text => {
-                if now.duration_since(*since) >= status.ttl() {
-                    self.status = None;
-                    self.status_since = None;
-                }
-            }
-            _ => self.status_since = Some((status.text.clone(), now)),
-        }
+    /// The footer's message, if it has one.
+    pub fn status(&self) -> Option<&Status> {
+        self.footer.get()
     }
 
-    /// Say something in the footer for a moment.
+    /// Whether the next draw shows the footer's message: not behind the spinner or a prompt
+    /// (ui's draw_footer and draw_viewer).
+    pub(crate) fn status_on_screen(&self) -> bool {
+        self.tab.viewer().is_some() || matches!((&self.typing, self.tab.loading()), (Some(Typing::Goto(_)), _) | (None, None))
+    }
+
+    /// Say something in the footer for a moment (unless an error is waiting to be seen).
     pub fn info(&mut self, text: impl Into<String>) {
-        self.status = Some(Status { text: text.into(), error: false });
+        self.footer.say(Status { text: text.into(), error: false });
     }
 
     /// The tab's load failed: say so, and keep saying it where what it loads would be.
-    fn load_failed(&mut self, why: &str) {
-        let retry = format!("{why}. {} tries again", self.keys.key(Action::Reload));
+    fn load_failed(&mut self, why: impl Into<Problem>) {
+        let why = why.into().0;
+        self.tab.failed = Some(format!("{why}. {} tries again", self.keys.key(Action::Reload)));
         self.error(why);
-        self.tab.failed = Some(retry);
     }
 
     /// Say something went wrong (shown a little longer).
-    pub fn error(&mut self, e: impl std::fmt::Display) {
-        self.status = Some(Status { text: format!("{e:#}"), error: true });
+    pub fn error(&mut self, e: impl Into<Problem>) {
+        self.footer.say(Status { text: e.into().0, error: true });
     }
 
-    /// A change that holds until ck quits, because writing it to the config failed.
-    fn error_unsaved(&mut self, done: &str, e: &anyhow::Error) {
-        self.error(format!("{done} for now; couldn't save it: {e:#}"));
+    /// What was saved to the config, or `done` until ck quits because it couldn't be; whether
+    /// it was saved.
+    pub(super) fn say_saved(&mut self, done: &str, saved: Result<String>) -> bool {
+        let ok = saved.is_ok();
+        match saved {
+            Ok(text) => self.info(text),
+            Err(e) => self.error(format!("{done} for now; couldn't save it: {}", http::plain(&e))),
+        }
+        ok
     }
 
     /// A thread of the current site.
@@ -1055,7 +1090,7 @@ impl App {
         self.save_pending = false;
         self.saved_at = self.clock.instant();
         if let Err(e) = self.store.save() {
-            self.error(format!("Couldn't save watched threads: {e:#}"));
+            self.error(e.context("Couldn't save to the data directory"));
         }
     }
 
@@ -1172,7 +1207,7 @@ impl App {
                 self.store.settings.compact_catalog = None;
                 self.store.settings.catalog_layout = Some(self.default_layout);
                 self.save_now();
-                self.info(format!("Default catalog layout: {name} (kept in the data directory: {e:#})"));
+                self.info(format!("Default catalog layout: {name} (kept in the data directory: {})", http::plain(&e)));
             }
         }
     }
@@ -1214,7 +1249,7 @@ impl App {
             (View::Thread, _) => {
                 let Some(t) = &self.tab.thread else { return };
                 let posts = t.live_posts();
-                (t.board.clone(), t.no, thread_subject(&posts), posts.len(), max_no(&posts))
+                (t.board.clone(), t.no, thread_subject(&posts), t.known, max_no(&posts))
             }
             (View::Catalog, Some(b)) => {
                 let Some(op) = self.selected_post() else { return };
@@ -1304,28 +1339,24 @@ impl App {
         self.tab.thread.as_ref().is_none_or(|t| t.media != Media::NoImages && self.images_on(self.tab.site, &t.board))
     }
 
-    /// Keep a copy of a thread's posts in the data directory (a watched thread's, or with
-    /// `always`, any). Unchanged posts aren't written again.
-    fn keep_copy(&mut self, key: &ThreadKey, posts: &[Post], always: bool) {
-        if !always && self.store.watched(key).is_none() {
-            return;
-        }
+    /// Keep a copy of a thread's posts in the data directory. Unchanged posts aren't written
+    /// again.
+    fn keep_copy(&mut self, key: &ThreadKey, t: &Whole) {
         let url = self.thread_link(key, None).unwrap_or_default();
-        if self.store.keep_thread(key, &thread_subject(posts), &url, posts, self.clock.now()) {
+        if self.store.keep_thread(key, &thread_subject(t.posts()), &url, t, self.clock.now()) {
             self.save();
         }
     }
 
     /// A thread just watched: if it's the one open (and loaded), it's saved at once. A saved
-    /// copy open is kept as it is (a copy saved under another number, when the site answered
-    /// with another thread, is kept under this one too).
+    /// copy open is kept as it is.
     fn keep_open_thread(&mut self, key: &ThreadKey) {
         if self.tab.view() != View::Thread || (self.tab.saved().is_some() && self.store.saved(key).is_some()) {
             return;
         }
-        let Some(t) = self.tab.thread.as_ref().filter(|t| self.key(&t.board, t.no) == *key) else { return };
-        let posts = t.live_posts().into_owned();
-        self.keep_copy(key, &posts, false);
+        if let Some(w) = self.tab.thread.as_ref().filter(|t| self.key(&t.board, t.no) == *key).and_then(|t| self.shown_whole(key, t)) {
+            self.keep_copy(key, &w);
+        }
         if self.tab.saved().is_some_and(|o| o.dead) {
             self.store.saved_dead(key);
         }
@@ -1339,7 +1370,7 @@ impl App {
         let Some(no) = t.current().map(|p| p.no) else { return };
         if self.store.watched(&key).is_none() {
             let posts = t.live_posts();
-            let (subject, len, max_no) = (thread_subject(&posts), posts.len(), max_no(&posts));
+            let (subject, len, max_no) = (thread_subject(&posts), t.known, max_no(&posts));
             self.store.watch(key.clone(), subject, len, max_no);
             self.keep_open_thread(&key);
         }
@@ -1470,6 +1501,7 @@ impl App {
             Ok(None) => {
                 self.error(format!("Post {post} isn't in this thread, and this site can't say which thread it's in"));
             }
+            Err(e) if http::is_not_found(&e) => self.error(format!("Post {post} isn't on /{}/ (deleted, or never there)", board.uri)),
             Err(e) => self.error(e),
         }
     }
@@ -1517,22 +1549,27 @@ impl App {
         }
     }
 
-    /// Open a file externally: videos in mpv when it's installed, everything else in the default opener.
+    /// Open a file externally: videos in mpv when it's installed, everything else in the
+    /// default opener; a file the site or archive didn't keep, as its thumbnail.
     pub fn open_file(&mut self, f: &Attachment) {
-        if f.is_video() && on_path("mpv") && !crate::sandboxed() {
-            let mut cmd = std::process::Command::new("mpv");
-            cmd.arg(&f.url)
-                .stdin(std::process::Stdio::null())
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null());
-            #[cfg(unix)]
-            std::os::unix::process::CommandExt::process_group(&mut cmd, 0);
-            match cmd.spawn() {
-                Ok(_) => self.info(format!("Playing {} in mpv", f.filename)),
-                Err(e) => self.error(format!("Couldn't start mpv: {e}")),
-            }
-        } else {
-            self.open_url(&f.url);
+        let url = match (f.url.as_deref(), f.kind) {
+            (Some(u), FileKind::Video) if on_path("mpv") && !crate::sandboxed() => u,
+            (Some(u), _) => return self.open_url(u),
+            (None, _) => return match &f.thumb {
+                Some(t) => self.open_link(crate::model::THUMBNAIL_URL, t),
+                None => self.info(NEITHER),
+            },
+        };
+        let mut cmd = std::process::Command::new("mpv");
+        cmd.arg(url)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null());
+        #[cfg(unix)]
+        std::os::unix::process::CommandExt::process_group(&mut cmd, 0);
+        match cmd.spawn() {
+            Ok(_) => self.info(format!("Playing {} in mpv", f.filename)),
+            Err(e) => self.error(anyhow::Error::from(e).context("Couldn't start mpv")),
         }
     }
 
@@ -1569,7 +1606,7 @@ impl App {
                 // Asked first: a copy can't be fetched again once the thread is gone. The
                 // second press counts only while the question is still showing.
                 let ask = format!("Press {} again to remove the saved copy of thread {}", self.keys.key(Action::Remove), key.no);
-                let asked = self.status.as_ref().is_some_and(|s| s.text == ask);
+                let asked = self.footer.get().is_some_and(|s| s.text == ask);
                 if self.saved_confirm.take().as_ref() != Some(&key) || !asked {
                     self.info(ask);
                     self.saved_confirm = Some(key);
@@ -1747,7 +1784,13 @@ impl App {
     fn copy(&mut self, link: bool) {
         let what = if let Some(v) = self.tab.viewer() {
             let post_link = v.link.clone().or_else(|| self.viewer_post_link()).or_else(|| self.gallery_link(v.index));
-            if link { post_link.map(|l| ("link", l)) } else { v.files.get(v.index).map(|f| ("file URL", f.url.clone())) }
+            if link {
+                post_link.map(|l| ("link", l))
+            } else {
+                let Some(f) = v.files.get(v.index) else { return };
+                let Some((what, u)) = f.link() else { return self.info(NEITHER) };
+                Some((what, u.to_string()))
+            }
         } else if link {
             self.selected_link().map(|l| ("link", l))
         } else {
@@ -1774,7 +1817,7 @@ impl App {
         match crate::clipboard::copy(&text) {
             Ok(()) if what == "text" => self.info(format!("Copied {} characters", text.chars().count())),
             Ok(()) => self.info(format!("Copied {what}: {text}")),
-            Err(e) => self.error(format!("Couldn't copy: {e:#}")),
+            Err(e) => self.error(e.context("Couldn't copy")),
         }
         self.copied = Some(text);
     }
@@ -1806,6 +1849,15 @@ impl App {
         }
     }
 
+    /// Open what [`Attachment::link`] or a focused part gave: a thumbnail standing in for
+    /// its file says so.
+    pub fn open_link(&mut self, what: &str, url: &str) {
+        self.open_url(url);
+        if what == crate::model::THUMBNAIL_URL && self.status().is_none_or(|s| !s.error) {
+            self.info(format!("Only the thumbnail is available; opened {url}"));
+        }
+    }
+
     pub fn open_url(&mut self, url: &str) {
         self.opened = Some(url.to_string());
         if crate::sandboxed() {
@@ -1813,7 +1865,7 @@ impl App {
         }
         match open::that_detached(url) {
             Ok(()) => self.info(format!("Opened {url}")),
-            Err(e) => self.error(format!("Couldn't open {url}: {e}")),
+            Err(e) => self.error(anyhow::Error::from(e).context(format!("Couldn't open {url}"))),
         }
     }
 }

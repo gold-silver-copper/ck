@@ -10,7 +10,7 @@ pub(super) fn draw_settings(f: &mut Frame, app: &mut App, area: Rect) {
     let at = rows.iter().position(|r| *r == Ok(selected)).unwrap_or(0);
     let total = rows.len() + 2;
     let offset = if at + 1 == rows.len() { total } else { at + 2 }.saturating_sub(area.height as usize);
-    app.hit = Some(Hit::Settings { area, offset });
+    app.drawn.body = Some(Hit::Settings { area, offset });
     let items: Vec<_> = settings().collect();
     for (row, r) in rows.into_iter().enumerate().skip(offset) {
         let y = area.y + (row - offset) as u16;

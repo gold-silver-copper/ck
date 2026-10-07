@@ -289,6 +289,7 @@ pub fn scan(dir: &Path) -> Vec<SavedMeta> {
 mod tests {
     use super::*;
     use crate::markup::{Flavor, parse_html};
+    use crate::model::FileKind;
 
     fn same(a: &Post, b: &Post) {
         assert_eq!(a.body, b.body, "post {}", a.no);
@@ -313,6 +314,43 @@ mod tests {
         assert!(!json.contains("\"id\"") && !json.contains("flag") && !json.contains("trip"), "{json}");
         let old: SavedPost = serde_json::from_str(r#"{"no": 5, "name": "Anonymous ## mod", "time": 1}"#).unwrap();
         assert_eq!((old.no, old.id, old.flag, old.capcode), (5, None, None, None));
+    }
+
+    #[test]
+    fn old_files_load_with_their_kind_and_no_thumbnail_as_file() {
+        // Saved before `kind`; the webm, png and `what?.webm` are FoolFuuka files the archive
+        // had only the thumbnail of, which ck stored as their url.
+        let thumb = "https://desu.example/g/thumb/1s.jpg";
+        let small = "https://end.example/.media/9cbd-imagejpeg.jpg";
+        let json = format!(
+            r#"{{"no": 1, "files": [
+                {{"filename": "clip.webm", "url": "{thumb}", "thumb": "{thumb}", "spoiler": false}},
+                {{"filename": "pic.png", "url": "{thumb}", "thumb": "{thumb}", "spoiler": false}},
+                {{"filename": "what?.webm", "url": "{thumb}", "thumb": "{thumb}", "spoiler": false}},
+                {{"filename": "cat.png", "url": "https://desu.example/g/image/2.png", "thumb": null, "spoiler": false}},
+                {{"filename": "small.jpg", "url": "{small}", "thumb": "{small}", "spoiler": false}},
+                {{"filename": "small", "url": "{small}", "thumb": "{small}", "spoiler": false}},
+                {{"filename": "hid.webm", "url": "https://desu.example/g/thumb/1790897522450s.jpg", "thumb": null, "spoiler": true}},
+                {{"filename": "hid.png", "url": "https://desu.example/g/image/1790897522450.png", "thumb": null, "spoiler": true}}
+            ]}}"#
+        );
+        let p: Post = serde_json::from_str::<SavedPost>(&json).unwrap().into();
+        let got: Vec<_> = p.files.iter().take(3).map(|f| (f.url.as_deref(), f.kind, f.thumb.as_deref())).collect();
+        assert_eq!(got, [(None, FileKind::Video, Some(thumb)), (None, FileKind::Image, Some(thumb)), (None, FileKind::Video, Some(thumb))]);
+        let png = &p.files[3];
+        assert_eq!((png.url.as_deref(), png.kind), (Some("https://desu.example/g/image/2.png"), FileKind::Image));
+        // LynxChan gives a small image as its own thumbnail: that's still the file.
+        assert!(p.files[4..6].iter().all(|f| f.url.as_deref() == Some(small) && f.is_image()), "{:?}", &p.files[4..6]);
+        // A spoilered file had no thumbnail of its own, so a stand-in is told by its name,
+        // `<tim>s.jpg`; the spoilered file the archive kept is still the file.
+        let hid: Vec<_> = p.files[6..].iter().map(|f| (f.url.as_deref(), f.kind)).collect();
+        assert_eq!(hid, [(None, FileKind::Video), (Some("https://desu.example/g/image/1790897522450.png"), FileKind::Image)]);
+        // Written back, they keep what they are, and no file is `""`, which older versions
+        // of ck read (they refuse a copy with `null` there).
+        assert_eq!(round_trip(&p).files, p.files);
+        assert!(serde_json::to_string(&SavedPost::from(&p)).unwrap().contains(r#""url":"""#));
+        // An entry without a name isn't a file: the copy is set aside, as before.
+        assert!(serde_json::from_str::<SavedPost>(r#"{"no": 1, "files": [{}]}"#).is_err());
     }
 
     #[test]

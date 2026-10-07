@@ -516,7 +516,7 @@ impl App {
             KeyCode::Char('a') => Some(SettingsPopup::HiddenWords { list, typing: Some(String::new()) }),
             KeyCode::Char('x') | KeyCode::Delete => {
                 if let Some(w) = self.hidden_words.get(cur).cloned() {
-                    self.remove_hidden_word(&w);
+                    self.remove_hidden_word(&w, true);
                 }
                 list.select(Some(cur.min(self.hidden_words.len().saturating_sub(1))));
                 Some(SettingsPopup::HiddenWords { list, typing: None })
@@ -669,16 +669,7 @@ impl App {
     /// `save_config` with an edit that can refuse; whether it was saved. If it wasn't, `done`
     /// is what holds for now ("Changed", "Added").
     pub(super) fn save_config_or(&mut self, done: &str, what: &str, f: impl FnOnce(&mut toml_edit::DocumentMut) -> anyhow::Result<()>) -> bool {
-        match self.edit_config(f) {
-            Ok(path) => {
-                self.info(format!("Saved {what} in {path}"));
-                true
-            }
-            Err(e) => {
-                self.error_unsaved(&format!("{done} {what}"), &e);
-                false
-            }
-        }
+        self.say_saved(&format!("{done} {what}"), self.edit_config(f).map(|p| format!("Saved {what} in {p}")))
     }
 
     /// Edit the config file, keeping its comments (an edit that refuses changes nothing);

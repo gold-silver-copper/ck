@@ -34,7 +34,7 @@ pub(super) fn draw_gallery(f: &mut Frame, app: &mut App, area: Rect) {
             put(f, x + PAD, y + THUMB.height, card_w - PAD - 1, label);
         }
     }
-    app.hit = Some(Hit::Grid { area, offset: top * cols, cols, cell: (cell_w, cell_h) });
+    app.drawn.body = Some(Hit::Grid { area, offset: top * cols, cols, cell: (cell_w, cell_h) });
 }
 
 pub(super) fn draw_viewer(f: &mut Frame, app: &mut App) {
@@ -67,7 +67,7 @@ pub(super) fn draw_viewer(f: &mut Frame, app: &mut App) {
     put(f, top.x, top.y, top.width, line);
     fill(f, bottom, t.bar);
     let mut hints = vec![Span::raw(" ")];
-    if let Some(s) = &app.status {
+    if let Some(s) = app.status() {
         hints.extend(status_spans(s, t));
     } else {
         let save = app.keys.key(Action::Download);
@@ -88,8 +88,10 @@ pub(super) fn draw_viewer(f: &mut Frame, app: &mut App) {
     let source = app.viewer_source(file);
     let mut inner = area;
     let thumb_only = source.as_ref().is_some_and(|(_, k)| *k == Kind::Thumb);
-    if !file.is_image() || thumb_only {
+    if file.image().is_none() || thumb_only {
         let hint = match file.ext().to_uppercase() {
+            _ if file.url.is_none() && file.thumb.is_none() => "Neither the file nor its thumbnail is available here.".to_string(),
+            _ if file.url.is_none() => "Only the thumbnail is available here. Press i to open it externally.".to_string(),
             _ if file.is_image() => format!("Not downloaded: showing the saved thumbnail ({} downloads it).", app.keys.key(Action::Download)),
             e if e.is_empty() => "Showing the thumbnail. Press i to open the file externally.".to_string(),
             e => format!("{e} files can't be shown here; showing the thumbnail. Press i to open it externally."),

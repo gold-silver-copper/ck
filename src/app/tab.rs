@@ -52,6 +52,9 @@ pub struct Tab {
     view: View,
     /// The settings are open over the place.
     settings: bool,
+    /// How many times the tab has moved: a move to a place that shows as the same view (a
+    /// thread to another) still makes what the last frame drew stale.
+    moves: u32,
     /// The tab's last load, whose answers are its own. It outlives its label: a cached
     /// answer's note comes after the answer. `None` once dropped by navigating away.
     load: Option<Load>,
@@ -144,9 +147,15 @@ impl Tab {
         }
         self.settings = false;
         self.view = to;
+        self.moves = self.moves.wrapping_add(1);
         self.load = None;
         self.gallery = None;
         self.failed = None;
+    }
+
+    /// How many times the tab has moved (see `navigate`), to tell one place from the next.
+    pub fn moves(&self) -> u32 {
+        self.moves
     }
 
     /// Close the settings: whether they were open.
@@ -223,6 +232,7 @@ impl Tab {
         Self {
             view: View::Sites,
             settings: false,
+            moves: 0,
             load: None,
             board_list: FilteredList::top(),
             catalog_list: FilteredList::default(),
