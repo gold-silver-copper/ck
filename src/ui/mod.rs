@@ -11,7 +11,6 @@ use ratatui::widgets::{Clear, ListState};
 use std::rc::Rc;
 
 use ratatui_image::Image;
-use unicode_width::UnicodeWidthStr;
 
 use crate::app::{
     App, Clock, Hit, LineCache, LinkItem, Part, Popup, Reveal, TabPopup, Spot, SettingsPopup, SiteRow, Sort, Status, ThreadLayout, ThreadCopy, ThreadView, Typing, View, key_rows,
@@ -224,8 +223,8 @@ fn draw_tab_row(f: &mut Frame, app: &mut App, area: Rect) {
         let label = app.tab_label(i);
         // A watched thread's new posts, kept whatever the label is cut to.
         let unread = app.tab_unread(i).map_or(String::new(), |n| format!(" ({n})"));
-        let text = format!(" {} {}{unread} ", i + 1, truncate(&label, each.saturating_sub(5 + unread.width())));
-        let w = (text.width() as u16).min(area.right().saturating_sub(x));
+        let text = format!(" {} {}{unread} ", i + 1, truncate(&label, each.saturating_sub(5 + markup::columns(&unread))));
+        let w = cells(markup::columns(&text)).min(area.right().saturating_sub(x));
         if w == 0 {
             break;
         }
@@ -248,12 +247,11 @@ fn draw_app_bar(f: &mut Frame, app: &App, area: Rect) {
     let (crumbs, mut meta) = location(app);
     let mut spans = vec![Span::styled(" ck ", bold(t.on_primary).bg(t.primary)), Span::raw(" ")];
     let n = crumbs.len();
-    let before: usize = 5 + crumbs.iter().take(n.saturating_sub(1)).map(|c| c.width() + 5).sum::<usize>();
+    let before: usize = 5 + crumbs.iter().take(n.saturating_sub(1)).map(|c| markup::columns(c) + 5).sum::<usize>();
     // The facts on the right give way (the counts first, then the chips) before the last
     // crumb is cut to less than a few letters: where you are matters more.
-    let wanted = before + crumbs.last().map_or(0, |c| c.width().min(12));
-    let meta_width = |meta: &[Span]| meta.iter().map(|s| s.width()).sum::<usize>();
-    while !meta.is_empty() && usize::from(area.width).saturating_sub(meta_width(&meta) + 2) < wanted {
+    let wanted = before + crumbs.last().map_or(0, |c| markup::columns(c).min(12));
+    while !meta.is_empty() && usize::from(area.width).saturating_sub(markup::spans_columns(&meta) + 2) < wanted {
         // The counts are the last span but the trailing space.
         let counts = meta.len().saturating_sub(2);
         if meta.get(counts).is_some_and(|s| !s.content.trim().is_empty()) {
@@ -262,7 +260,7 @@ fn draw_app_bar(f: &mut Frame, app: &App, area: Rect) {
             meta.remove(0);
         }
     }
-    let meta_w = cells(meta_width(&meta));
+    let meta_w = cells(markup::spans_columns(&meta));
     let left_w = area.width.saturating_sub(meta_w + 2);
     // The last crumb (the most specific) gives way, with an ellipsis, when space is short.
     for (i, c) in crumbs.into_iter().enumerate() {
@@ -370,7 +368,7 @@ fn location(app: &App) -> (Vec<String>, Vec<Span<'static>>) {
             }
         }
         View::Watched => {
-            let unread = app.store.all_watched().iter().fold(0usize, |n, w| n.saturating_add(w.unread));
+            let (unread, _) = app.store.watched_new();
             meta.push(plural(app.store.all_watched().len(), "thread"));
             if unread > 0 {
                 meta.push(format!("{unread} new"));
@@ -498,7 +496,7 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
     if !app.refreshing.is_empty() {
         right.extend([chip(format!("↻ {}", app.refreshing.len()), t.text, t.surface_high), Span::raw(" ")]);
     }
-    let right_w = cells(right.iter().map(|s| s.width()).sum::<usize>());
+    let right_w = cells(markup::spans_columns(&right));
     let line = if line.spans.is_empty() { fit_hints(footer_hints(app), usize::from(area.width.saturating_sub(right_w))) } else { line };
     put(f, area.x, area.y, area.width.saturating_sub(right_w), line);
     put(f, area.right().saturating_sub(right_w), area.y, right_w, Line::from(right));
@@ -794,8 +792,7 @@ fn draw_rows(
 
 /// Left and right parts of a line, the right one pushed to `width`.
 fn spread(mut left: Vec<Span<'static>>, right: Vec<Span<'static>>, width: usize) -> Line<'static> {
-    let lw: usize = left.iter().map(|s| markup::columns(&s.content)).sum();
-    let rw: usize = right.iter().map(|s| markup::columns(&s.content)).sum();
+    let (lw, rw) = (markup::spans_columns(&left), markup::spans_columns(&right));
     if lw + rw + 2 <= width {
         left.push(Span::raw(" ".repeat(width - lw - rw)));
         left.extend(right);
@@ -829,18 +826,20 @@ pub(crate) fn truncate(s: &str, width: usize) -> String {
     if markup::columns(s) <= width {
         return s.to_string();
     }
-    let mut out = String::new();
-    let mut w = 0;
-    for g in unicode_segmentation::UnicodeSegmentation::graphemes(s, true) {
-        let gw = markup::columns(g);
-        if w + gw > width.saturating_sub(1) {
-            out.push('…');
-            return out;
-        }
-        out.push_str(g);
-        w += gw;
+    if width == 0 {
+        return String::new();
     }
-    out
+    format!("{}…", markup::split_at_columns(s, width.saturating_sub(1)).0)
+}
+
+/// `s` padded with spaces to `width` cells (as drawn); never cut.
+pub(crate) fn pad(s: &str, width: usize) -> String {
+    format!("{s}{}", " ".repeat(width.saturating_sub(markup::columns(s))))
+}
+
+/// `s` in a column `width` cells wide: cut to leave one blank cell, then padded.
+pub(crate) fn col(s: &str, width: usize) -> String {
+    pad(&truncate(s, width.saturating_sub(1)), width)
 }
 
 /// Local date and time with the relative time; UTC when the clock is fixed (tests).

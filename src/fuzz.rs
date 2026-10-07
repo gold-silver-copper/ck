@@ -148,9 +148,10 @@ fn markup_once(seed: u64) {
             let wrapped = markup::wrap(line, width);
             for w in &wrapped {
                 // `wrap` treats widths under 2 as 2, so a wide character always fits.
-                // Only a grapheme wider than the whole width may stick out, alone.
-                let drawn = markup::line_columns(w);
-                let alone = unicode_segmentation::UnicodeSegmentation::graphemes(text(w).trim_start_matches('↪'), true).count() == 1;
+                // Only a grapheme wider than the whole width may stick out, alone but for what
+                // takes no cell (a zero-width space, a control character).
+                let drawn = markup::spans_columns(&w.spans);
+                let alone = unicode_segmentation::UnicodeSegmentation::graphemes(text(w).trim_start_matches('↪'), true).filter(|g| markup::columns(g) > 0).count() == 1;
                 assert!(drawn <= width.max(2) || alone, "a {drawn}-wide line at width {width}: {:?} ({})", text(w), ctx());
             }
             if line.style != markup::CODE_LINE {
@@ -161,6 +162,7 @@ fn markup_once(seed: u64) {
         }
         // What's drawn is measured alike whole or a character at a time (as a terminal
         // without grapheme clustering does), so nothing lands in the wrong cell.
+        #[allow(clippy::disallowed_methods, reason = "checks unicode-width's own measure, as a terminal does")]
         for w in markup::wrap(line, 40) {
             for s in &w.spans {
                 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
@@ -643,13 +645,13 @@ fn data_dir_once(seed: u64) {
         store.visit(&key, "subject", 10, 109, START + i as i64);
         store.toggle_hidden(&key.site, "g", 200 + i).unchecked();
         store.opened(&key.site, "g", key.no, 9, START);
-        // A saved copy, some of them of dead threads.
+        // A saved copy, some of them of dead threads (dead in Watched too).
         let html = format!("<span class=\"quote\">&gt;{i}</span><br><a href=\"#p{}\" class=\"quotelink\">&gt;&gt;{}</a> <s>spoiler</s>", key.no, key.no);
         let parsed = crate::markup::parse_html(&html, crate::markup::Flavor::Fourchan);
         let posts: Vec<crate::model::Post> = (0..3).map(|k| crate::model::Post { no: key.no + k, body: parsed.lines.clone(), anchors: parsed.anchors.clone(), ..Default::default() }).collect();
         store.keep_thread(&key, &format!("thread {i}"), "u", &posts, START + i as i64);
         if rng.chance(50) {
-            store.saved_dead(&key);
+            store.mark_dead(&key);
         }
     }
     store.recent_boards = vec!["4chan/g".into(), "lainchan/λ".into(), "x".into()];

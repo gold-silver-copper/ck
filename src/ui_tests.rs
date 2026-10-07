@@ -5,7 +5,7 @@ use ratatui::buffer::Buffer;
 use crate::app::{App, Clock, Part, Popup, Preview, SettingsPopup, ThreadView, View, Viewer};
 use crate::images::Images;
 use crate::model::{Board, Post};
-use crate::store::{ThreadKey, Visit};
+use crate::store::{Status, ThreadKey, Visit};
 use crate::test_fixtures::*;
 use crate::theme::theme;
 
@@ -17,8 +17,8 @@ fn app(images: bool) -> App {
     app.store.watch(key("g", 1000), "Snapshot thread".into(), 5, 1002);
     app.store.watch(key("g", 900), "Old thread".into(), 300, 1199);
     app.store.watch(ThreadKey { site: "lainchan".into(), board: "λ".into(), no: 42 }, "Programming Employment".into(), 92, 77);
-    app.store.watched_vec()[0].unread = 2;
-    app.store.watched_vec()[1].dead = true;
+    app.store.watched_vec()[0].status = Status::Live { unread: 2, replies: 0 };
+    app.store.watched_vec()[1].status = Status::Dead;
     app.store.history = vec![
         Visit { key: key("g", 1000), subject: "Snapshot thread".into(), last_seen: 1004, opened: NOW - 120 },
         Visit { key: key("b", 5), subject: "Random thread".into(), last_seen: 9, opened: NOW - 30 * HOUR },
@@ -452,7 +452,8 @@ fn poster_ids_and_flags() {
     render(&mut a);
     a.on_key(KeyEvent::from(KeyCode::Char('f')));
     render(&mut a);
-    let label = a.hints().unwrap().targets.iter().find(|t| matches!(t.to, HintTo::Thread(1, Some(Part::Poster)))).unwrap().label.clone();
+    let second = a.tab.thread.as_ref().unwrap().entries[1].path.clone();
+    let label = a.hints().unwrap().targets.iter().find(|t| matches!(t.to, HintTo::Thread(ref p, Some(Part::Poster)) if *p == second)).unwrap().label.clone();
     type_text(&mut a, &label);
     let (text, _) = render(&mut a);
     let t = a.tab.thread.as_ref().unwrap();
@@ -539,11 +540,11 @@ fn a_tab_counts_its_watched_threads_new_posts() {
     let (text, _) = render(&mut a);
     assert!(text.lines().nth(1).unwrap().contains("2 Snapshot thread (2)"), "{text}");
     // Read (or not watched): no count.
-    a.store.watched_vec()[0].unread = 0;
+    a.store.watched_vec()[0].status = Status::READ;
     let (text, _) = render(&mut a);
     assert!(!text.lines().nth(1).unwrap().contains('('), "{text}");
     // A narrow tab keeps the count and cuts the subject.
-    a.store.watched_vec()[0].unread = 12;
+    a.store.watched_vec()[0].status = Status::Live { unread: 12, replies: 0 };
     let (text, _) = render_at(&mut a, 30, 20);
     assert!(text.lines().nth(1).unwrap().contains("(12)"), "{text}");
 }
@@ -965,7 +966,7 @@ fn filtered_catalog_and_thread() {
 fn your_posts_and_replies() {
     let mut a = thread_app(false);
     a.rehide(|a| a.store.toggle_mine(&ThreadKey { site: "4chan".into(), board: "g".into(), no: 1000 }, 1001));
-    a.store.watched_vec()[0].replies = 1;
+    a.store.watched_vec()[0].status = Status::Live { unread: 2, replies: 1 };
     insta::assert_snapshot!(snapshot(&mut a));
     a.tab.view = View::Watched;
     insta::assert_snapshot!("watched_with_replies", snapshot(&mut a));
@@ -1295,7 +1296,7 @@ fn link_hints() {
     insta::assert_snapshot!("link_hints_thread", snapshot(&mut a));
     // A label picks its target: here, post 1001's quote of the OP, which jumps there.
     let h = a.hints().unwrap();
-    let label = h.targets.iter().find(|x| matches!(&x.to, crate::app::HintTo::Thread(1, Some(_)))).unwrap().label.clone();
+    let label = h.targets.iter().find(|x| matches!(&x.to, crate::app::HintTo::Thread(p, Some(_)) if p == &[1001])).unwrap().label.clone();
     type_text(&mut a, &label);
     assert!(a.hints().is_none());
     assert_eq!(a.tab.thread.as_ref().unwrap().selected, 0);
@@ -1688,7 +1689,7 @@ fn huge_counts_from_the_data_files_dont_overflow() {
         let key = ThreadKey { site: "4chan".into(), board: "g".into(), no };
         a.store.watch(key.clone(), "t".into(), 1, 1);
         let w = a.store.watched_mut(&key).unwrap();
-        (w.unread, w.replies) = (usize::MAX, usize::MAX);
+        w.status = Status::Live { unread: usize::MAX, replies: usize::MAX };
     }
     render(&mut a);
     a.tab.view = View::Watched;
@@ -1764,4 +1765,171 @@ fn no_gallery_hint_when_only_hidden_posts_have_files() {
     a.rehide(|a| a.store.toggle_hidden("4chan", "g", 1003));
     let text = render(&mut a).0;
     assert!(!text.lines().last().unwrap().contains("gallery"), "{text}");
+}
+
+/// A dead watched thread's last counts (unread posts, replies to you) aren't new anywhere:
+/// not on the Sites screen's Watched row, the Watched view's bar, its own row, nor the
+/// terminal title. One live thread with 2 new is all there is. The dead one comes from a
+/// watched.json written when a dead thread could keep its counts: they're dropped on load.
+#[test]
+fn a_dead_watched_threads_counts_show_nowhere() {
+    let mut a = app(false);
+    let old = r#"{"site":"4chan","board":"g","no":900,"subject":"Old thread","posts":300,"last_seen":1199,"unread":3,"dead":true,"replies":2}"#;
+    a.store.watched_vec()[1] = serde_json::from_str(old).unwrap();
+    let line = |text: &str, has: &str| text.lines().find(|l| l.contains(has)).unwrap_or_default().to_string();
+    a.tab.view = View::Sites;
+    let sites = render(&mut a).0;
+    let row = line(&sites, "Watched");
+    assert!(row.contains("2 new") && !row.contains("5 new"), "Sites row: {row:?}");
+    a.tab.view = View::Watched;
+    let watched = render(&mut a).0;
+    let bar = watched.lines().next().unwrap_or_default().to_string();
+    assert!(bar.contains("2 new") && !bar.contains("5 new"), "Watched bar: {bar:?}");
+    let old = line(&watched, "Old thread");
+    assert!(old.contains("archived/deleted") && !old.contains("repl"), "dead row: {old:?}");
+    // The title agrees: 2 new, and no reply to you.
+    assert_eq!(a.terminal_title().as_deref(), Some("ck: (2) Watched"));
+}
+
+// ----- text measured as it's drawn: one grapheme at a time (markup::columns) -----
+
+/// Text unicode-width measures at half its drawn cells: it counts "لا" as one cell, and
+/// ratatui draws it in two.
+fn lam_alef(n: usize) -> String {
+    "لا".repeat(n)
+}
+
+/// The cell `needle` starts at on row `y`, as drawn.
+fn cell_of(buf: &Buffer, y: u16, needle: &str) -> Option<u16> {
+    let row: Vec<&str> = (0..buf.area.width).map(|x| buf[(x, y)].symbol()).collect();
+    (0..row.len()).find(|&x| row.get(x..).is_some_and(|rest| rest.concat().starts_with(needle))).map(|x| x as u16)
+}
+
+#[test]
+fn narrow_catalog_keeps_its_counts_under_an_arabic_subject() {
+    // Subjects that fit as unicode-width measures them, but not as they're drawn.
+    for n in 12..=22 {
+        for compact in [false, true] {
+            let mut a = catalog_app(false);
+            if compact {
+                a.default_layout = crate::config::CatalogLayout::Compact;
+            }
+            a.tab.catalog[1].subject = Some(lam_alef(n));
+            let text = narrow(&mut a);
+            let row = text.lines().find(|l| l.contains("لا")).unwrap();
+            // The subject gives way to the counts, as an ASCII one does.
+            assert!(row.contains("312"), "{n} compact={compact}\n{text}");
+        }
+    }
+}
+
+#[test]
+fn a_tab_chip_keeps_its_unread_count_under_an_arabic_subject() {
+    let mut a = thread_app(false);
+    a.tab.thread.as_mut().unwrap().posts[0].subject = Some(lam_alef(30));
+    a.tabs.push(crate::app::Tab::new(0, std::time::Instant::now()));
+    assert_eq!(a.tab_unread(0), Some(2));
+    let (text, _) = render(&mut a);
+    // "kept whatever the label is cut to"
+    let chips = text.lines().nth(1).unwrap();
+    assert!(chips.contains("(2)"), "{text}");
+}
+
+#[test]
+fn site_columns_line_up_under_a_japanese_site_name() {
+    let mut a = app(false);
+    a.sites[1].cfg.name = "ふたば".into();
+    let (text, buf) = render(&mut a);
+    let rows: Vec<u16> = (0..buf.area.height).filter(|&y| cell_of(&buf, y, "https://").is_some()).collect();
+    let urls: Vec<_> = rows.iter().map(|&y| cell_of(&buf, y, "https://")).collect();
+    // The url column starts at the same cell on every site's row.
+    assert!(urls.windows(2).all(|w| w.first() == w.get(1)), "{urls:?}\n{text}");
+}
+
+#[test]
+fn the_menu_is_wide_enough_for_an_arabic_file_name() {
+    use ratatui::crossterm::event::{KeyCode, KeyEvent};
+    let mut a = thread_app(false);
+    let name = format!("{}.png", lam_alef(25));
+    let t = a.tab.thread.as_mut().unwrap();
+    t.posts[0].files[0].filename = name.clone();
+    t.focus = Some(Part::File(0));
+    render(&mut a);
+    a.on_key(KeyEvent::from(KeyCode::Char('.')));
+    assert!(a.menu().is_some_and(|m| m.items.iter().any(|i| matches!(i, crate::app::MenuItem::Enter(l) if l.contains(&name)))));
+    let text = render(&mut a).0;
+    // The panel is as wide as the label drawn in it.
+    assert!(text.contains(&name), "{text}");
+}
+
+#[test]
+fn wrapped_paths_fit_their_width_as_drawn() {
+    // "❤️" (a heart and an emoji-style selector) is drawn in two cells; each char alone is one.
+    let path = format!("/saves/{}/thread.html", "❤\u{fe0f}".repeat(12));
+    for line in crate::ui::wrap_path(&path, 10) {
+        assert!(crate::markup::columns(&line) <= 10, "{line:?} is {} cells", crate::markup::columns(&line));
+    }
+    // Every line draws something, even one too wide; a slash keeps the mark that goes with it.
+    assert_eq!(crate::ui::wrap_path("\u{200b}❤\u{fe0f}ab", 1), ["\u{200b}❤\u{fe0f}", "a", "b"]);
+    assert_eq!(crate::ui::wrap_path("abc/\u{301}de", 5), ["abc/\u{301}d", "e"]);
+}
+
+#[test]
+fn ui_pads_columns_by_cells() {
+    // std pads a `{:N}` placeholder by chars, and a char isn't a cell: "ふたば" is three chars
+    // in six. Any width (`{:16}`, `{:>16}`, `{x:w$}`) counts; the `0` flag pads numbers only.
+    fn width_spec(line: &str) -> bool {
+        line.split('{').skip(1).filter_map(|p| p.split_once('}')).filter_map(|(inner, _)| inner.split_once(':')).any(|(arg, spec)| {
+            let arg_ok = arg.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '.');
+            let mut rest = spec;
+            let mut it = rest.chars();
+            if let (Some(_), Some('<' | '^' | '>')) = (it.next(), it.next()) {
+                rest = it.as_str();
+            } else {
+                rest = rest.trim_start_matches(['<', '^', '>']);
+            }
+            let rest = rest.trim_start_matches(['+', '-']).trim_start_matches('#');
+            let named = rest.split_once('$').is_some_and(|(n, _)| !n.is_empty() && n.chars().all(|c| c.is_alphanumeric() || c == '_'));
+            arg_ok && !rest.starts_with('0') && (rest.starts_with(|c: char| c.is_ascii_digit()) || rest.starts_with('*') || named)
+        })
+    }
+    assert!(width_spec(r#"format!("{:<16}", x)"#) && width_spec(r#"format!("{s:16}")"#) && width_spec(r#"format!("{s:>w$}")"#));
+    assert!(!width_spec(r#"format!("{:02x}{:.1}{x:?}{}", a, b)"#) && !width_spec("Rect { x: 0, y: 1 }") && !width_spec("Vec::<u8>::new()"));
+    // All of src but the test files, which pad expected output on purpose, and the input log,
+    // which pads a number in a file.
+    let mut dirs = vec![std::path::PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/src"))];
+    let mut checked = 0;
+    while let Some(dir) = dirs.pop() {
+        for entry in std::fs::read_dir(&dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                dirs.push(path);
+                continue;
+            }
+            let name = path.file_name().unwrap().to_string_lossy();
+            if !name.ends_with(".rs") || ["tests.rs", "ui_tests.rs", "fuzz.rs", "e2e.rs", "bench.rs", "input_log.rs"].contains(&&*name) {
+                continue;
+            }
+            let src = std::fs::read_to_string(&path).unwrap();
+            // A source file's own test module sits at its end (other `#[cfg(test)]` items are
+            // checked like the rest).
+            let lines: Vec<&str> = src.lines().collect();
+            let module = |i: usize| lines.iter().skip(i + 1).find(|l| !l.starts_with("#[")).is_some_and(|l| l.starts_with("mod ") && l.ends_with('{'));
+            let tests = (0..lines.len()).find(|&i| lines.get(i) == Some(&"#[cfg(test)]") && module(i)).unwrap_or(lines.len());
+            for (n, line) in lines.iter().take(tests).enumerate() {
+                assert!(!width_spec(line), "{}:{}: pad by cells with ui::pad / ui::col, not a {{:N}} width:\n{line}", path.display(), n + 1);
+            }
+            checked += 1;
+        }
+    }
+    assert!(checked > 20, "only {checked} files checked");
+    use crate::markup;
+    use crate::ui::{col, pad};
+    assert_eq!(markup::columns(&pad("ふたば", 16)), 16);
+    assert_eq!(pad("a long name", 4), "a long name");
+    let cut = col("ふたばちゃんねるの画像掲示板", 16);
+    assert!(cut.trim_end().ends_with('…') && markup::columns(&cut) == 16, "{cut:?}");
+    assert_eq!(col("Watched", 16), format!("{:<16}", "Watched"));
+    // A column with no room is blank, not an ellipsis sticking out of it.
+    assert_eq!((col("Watched", 1), col("Watched", 0)), (" ".to_string(), String::new()));
 }

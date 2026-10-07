@@ -125,6 +125,23 @@ pub enum SiteRow {
     HiddenSites,
 }
 
+/// What a list row shows, wherever it's moved to: hint labels keep this, so a label opens
+/// what it was put on after the list changes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RowKey {
+    /// A home screen row other than a recent board: those move only by the user's own keys.
+    Site(SiteRow),
+    /// A recent board on the home screen, by its key (`site/board`).
+    Recent(String),
+    Board(String),
+    /// A catalog thread.
+    Thread(u64),
+    /// A watched, history or saved thread.
+    Listed(ThreadKey),
+    /// A search hit: its thread (the saved copy's, or the archive's) and post.
+    Hit(ThreadKey, u64),
+}
+
 pub struct Site {
     pub cfg: SiteConfig,
     pub backend: Arc<dyn Backend>,
@@ -700,6 +717,29 @@ impl App {
         .map(|(len, p)| (p, len))
     }
 
+    /// What each row of the list `view` shows is (none in a thread).
+    pub(super) fn row_keys(&self, view: View) -> Vec<RowKey> {
+        match view {
+            View::Sites => self.visible_sites().into_iter().map(|r| if let SiteRow::Recent(i) = r { RowKey::Recent(self.store.recent_boards.get(i).cloned().unwrap_or_default()) } else { RowKey::Site(r) }).collect(),
+            View::Boards => self.visible_boards().into_iter().filter_map(|i| self.boards().get(i)).map(|b| RowKey::Board(b.uri.clone())).collect(),
+            View::Catalog => self.visible_catalog().into_iter().filter_map(|i| self.tab.catalog.get(i)).map(|p| RowKey::Thread(p.no)).collect(),
+            View::Watched => self.visible_watched().into_iter().filter_map(|i| self.store.all_watched().get(i)).map(|w| RowKey::Listed(w.key.clone())).collect(),
+            View::History => self.visible_history().into_iter().filter_map(|i| self.store.history.get(i)).map(|h| RowKey::Listed(h.key.clone())).collect(),
+            View::Saved => self.visible_saved().into_iter().filter_map(|i| self.store.saved.get(i)).map(|s| RowKey::Listed(s.key.clone())).collect(),
+            View::Search => {
+                let (Some(s), site) = (&self.tab.search, &self.current_site().cfg.name) else { return Vec::new() };
+                self.visible_hits().into_iter().filter_map(|k| Some(RowKey::Hit(s.thread_of(k, site)?, s.hits.get(k)?.1.no))).collect()
+            }
+            // Settings rows get no labels (they're `Hit::Settings`), nor do posts.
+            View::Settings | View::Thread => Vec::new(),
+        }
+    }
+
+    /// Where the row showing `key` is now in `view`'s list.
+    pub(super) fn row_of(&self, view: View, key: &RowKey) -> Option<usize> {
+        self.row_keys(view).iter().position(|k| k == key)
+    }
+
     /// To send what background work finds back to this thread.
     fn later(&self) -> Later {
         Later(self.tx.clone())
@@ -843,7 +883,7 @@ impl App {
         }
         // At capacity, a finished refresh wakes the loop anyway (and due ones mustn't spin it).
         if self.refreshing.len() < MAX_REFRESHING {
-            for w in self.store.all_watched().iter().filter(|w| !w.dead && !self.refreshing.contains(&w.key)) {
+            for w in self.store.all_watched().iter().filter(|w| !w.status.is_dead() && !self.refreshing.contains(&w.key)) {
                 match self.watched_checked.get(&w.key) {
                     Some(&t) => after(t, self.watched_every(&w.key)),
                     None => after(now, Duration::ZERO),

@@ -26,8 +26,8 @@ pub(super) fn draw_settings(f: &mut Frame, app: &mut App, area: Rect) {
                 let value = (item.value)(app);
                 let hint_w = (area.width as usize).saturating_sub(PAD as usize + 1 + 18 + 34);
                 let line = Line::from(vec![
-                    Span::styled(format!("{label:<18}"), Style::new().fg(t.text)),
-                    Span::styled(format!("{:<34}", truncate(&value, 32)), bold(t.text)),
+                    Span::styled(pad(label, 18), Style::new().fg(t.text)),
+                    Span::styled(pad(&truncate(&value, 32), 34), bold(t.text)),
                     Span::styled(if hint_w >= 16 { truncate(hint, hint_w) } else { String::new() }, dim()),
                 ]);
                 put(f, area.x + PAD, y, area.width.saturating_sub(PAD + 1), line);
@@ -67,7 +67,7 @@ fn draw_themes(f: &mut Frame, app: &App, list: &ListState, names: &[String]) {
     let inner = panel(f, 52, cells(names.len()).saturating_add(3), "Theme", "enter keep · esc cancel");
     list_rows(f, inner, 0, names.len(), list.selected().or(Some(0)), |k| {
         let Some(name) = names.get(k) else { return Line::default() };
-        let mut spans = vec![Span::styled(format!("{name:<22}"), Style::new().fg(t.text))];
+        let mut spans = vec![Span::styled(pad(name, 22), Style::new().fg(t.text))];
         // A row of colored cells: the theme at a glance.
         if let Ok(th) = theme::resolve(name, &app.themes) {
             let colors = [th.background, th.surface, th.selection, th.primary, th.primary_container, th.greentext, th.quotelink, th.heading, th.new];
@@ -91,8 +91,8 @@ fn draw_colors(f: &mut Frame, app: &App, list: &ListState, editing: Option<&str>
         let c = t.get(role).unwrap_or(Color::Reset);
         Line::from(vec![
             Span::styled("    ", Style::new().bg(c)),
-            Span::styled(format!("  {role:<22}"), Style::new().fg(t.text)),
-            Span::styled(format!("{:<10}", theme::color_string(c)), bold(t.text)),
+            Span::styled(format!("  {}", pad(role, 22)), Style::new().fg(t.text)),
+            Span::styled(pad(&theme::color_string(c), 10), bold(t.text)),
             Span::styled(desc, dim()),
         ])
     });
@@ -131,13 +131,13 @@ fn draw_keys(f: &mut Frame, app: &App, list: &ListState, capture: Option<bool>) 
         let scopes = scopes.iter().map(|s| s.label()).collect::<Vec<_>>().join(", ");
         let label = app.keys.label(action);
         let mut spans = match label.as_str() {
-            "" => vec![Span::styled(format!("  {:<16}", "menu"), dim())],
-            _ => vec![Span::styled(format!("  {:<16}", truncate(&label, 15)), key_style)],
+            "" => vec![Span::styled(format!("  {}", pad("menu", 16)), dim())],
+            _ => vec![Span::styled(format!("  {}", col(&label, 16)), key_style)],
         };
         // Narrow: just the key and what it does.
         if inner.width >= 80 {
-            spans.push(Span::styled(format!("{name:<17}"), dim()));
-            spans.push(Span::styled(format!("{:<37}", truncate(desc, 36)), Style::new().fg(t.text)));
+            spans.push(Span::styled(pad(name, 17), dim()));
+            spans.push(Span::styled(col(desc, 37), Style::new().fg(t.text)));
             spans.push(Span::styled(truncate(&scopes, (inner.width as usize).saturating_sub(72)), dim()));
         } else {
             spans.push(Span::styled(truncate(desc, (inner.width as usize).saturating_sub(18)), Style::new().fg(t.text)));
@@ -229,8 +229,8 @@ fn draw_my_sites(f: &mut Frame, m: &crate::app::MySites) {
     list_panel(f, (100, "Your sites", hint), m.sites.len(), (m.list.selected().unwrap_or(0), true), (empty, note), (1, 0), |k, width| {
         let Some(s) = m.sites.get(k) else { return Line::default() };
         let left = vec![
-            Span::styled(format!("{:<18}", truncate(&s.name, 17)), bold(t.text)),
-            Span::styled(format!("{:<11}", s.kind.as_str()), Style::new().fg(t.text)),
+            Span::styled(col(&s.name, 18), bold(t.text)),
+            Span::styled(pad(s.kind.as_str(), 11), Style::new().fg(t.text)),
             Span::styled(truncate(s.url.as_deref().unwrap_or(""), (width as usize).saturating_sub(52)), dim()),
         ];
         let tag = if m.armed == Some(k) { "x again removes it".to_string() } else { crate::app::site_origin(s).to_string() };
@@ -251,17 +251,18 @@ fn draw_filter_list(f: &mut Frame, app: &App, list: &ratatui::widgets::ListState
         let fields = c.fields().iter().map(|f| f.as_str()).collect::<Vec<_>>().join("+");
         let count = counts.get(k).map_or(String::new(), |&n| counts_text(n));
         // Narrow: the label and fields share what the count leaves.
-        let (label_w, fields_w) = if wide { (22, 18) } else { ((width as usize).saturating_sub(count.width() + 15) * 3 / 5, (width as usize).saturating_sub(count.width() + 15) * 2 / 5) };
+        let room = (width as usize).saturating_sub(markup::columns(&count) + 15);
+        let (label_w, fields_w) = if wide { (22, 18) } else { (room * 3 / 5, room * 2 / 5) };
         let mut left = vec![
-            if c.enabled { chip(format!("{:<9}", c.action.as_str()), t.on_primary_container, t.primary_container) } else { chip(format!("{:<9}", "off"), t.text_dim, t.surface_high) },
+            if c.enabled { chip(pad(c.action.as_str(), 9), t.on_primary_container, t.primary_container) } else { chip(pad("off", 9), t.text_dim, t.surface_high) },
             Span::raw("  "),
-            Span::styled(format!("{:<label_w$}", truncate(c.label(), label_w.saturating_sub(1))), if c.enabled { bold(t.text) } else { dim() }),
-            Span::styled(format!("{:<fields_w$}", truncate(&fields, fields_w.saturating_sub(1))), style),
+            Span::styled(col(c.label(), label_w), if c.enabled { bold(t.text) } else { dim() }),
+            Span::styled(col(&fields, fields_w), style),
         ];
         if wide {
-            left.push(Span::styled(format!("{:<20}", truncate(&filter_scope(c), 19)), style));
+            left.push(Span::styled(col(&filter_scope(c), 20), style));
             // The pattern gets what's left, beside the count.
-            let used: usize = left.iter().map(|s| s.width()).sum::<usize>() + count.width() + 2;
+            let used = markup::spans_columns(&left) + markup::columns(&count) + 2;
             left.push(Span::styled(truncate(&c.pattern, (width as usize).saturating_sub(used)), dim()));
         }
         let right = vec![Span::styled(count, dim())];
@@ -320,7 +321,7 @@ fn draw_filter_edit(f: &mut Frame, app: &App, index: Option<usize>, draft: &crat
                 },
             ),
         };
-        let mut spans = vec![Span::styled(format!("{name:<13}"), dim())];
+        let mut spans = vec![Span::styled(pad(&name, 13), dim())];
         match typing.filter(|_| k == row) {
             Some(text) => spans.extend([Span::styled(text.to_string(), bold(t.text)), Span::styled("▏", Style::new().fg(t.primary))]),
             None => spans.push(Span::styled(truncate(&value, (inner.width as usize).saturating_sub(14)), Style::new().fg(t.text))),

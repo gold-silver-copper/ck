@@ -9,8 +9,8 @@ use crate::keys::{Action, Scope};
 use crate::model::Attachment;
 
 pub struct Gallery {
-    /// Each file with the index of its post.
-    pub files: Vec<(usize, Attachment)>,
+    /// Each file with its post's number.
+    pub files: Vec<(u64, Attachment)>,
     pub state: ListState,
     /// Columns as last drawn.
     pub cols: usize,
@@ -20,13 +20,19 @@ impl App {
     pub fn open_gallery(&mut self) {
         let Some(t) = &self.tab.thread else { return };
         // In a conversation, its files; not hidden posts' (unless shown).
-        let files: Vec<(usize, Attachment)> = t.gallery_files().map(|(i, f)| (i, f.clone())).collect();
+        // Starting at the selected post's first file, or the next one after it.
+        let (mut files, mut start) = (Vec::new(), None);
+        for (i, p) in t.shown_posts() {
+            if i >= t.selected && !p.files.is_empty() {
+                start = start.or(Some(files.len()));
+            }
+            files.extend(p.files.iter().map(|f| (p.no, f.clone())));
+        }
         if files.is_empty() {
             let msg = self.no_files(if t.conversation.is_some() { "The conversation has no files" } else { "Thread has no files" }, true);
             return self.info(msg);
         }
-        // Start at the selected post's first file, or the next one after it.
-        let state = ListState::default().with_selected(Some(files.iter().position(|(i, _)| *i >= t.selected).unwrap_or(0)));
+        let state = ListState::default().with_selected(Some(start.unwrap_or(0)));
         self.tab.gallery = Some(Gallery { files, state, cols: 1 });
     }
 
@@ -92,9 +98,9 @@ impl App {
     /// Back to the thread, with the selected file's post selected.
     pub fn close_gallery(&mut self) {
         let Some(g) = self.tab.gallery.take() else { return };
-        let post = g.state.selected().and_then(|k| g.files.get(k)).map(|(i, _)| *i);
-        if let (Some(i), Some(t)) = (post, &mut self.tab.thread) {
-            t.select(i);
+        let post = g.state.selected().and_then(|k| g.files.get(k)).map(|&(no, _)| no);
+        if let (Some(no), Some(t)) = (post, &mut self.tab.thread) {
+            t.select_post(no);
         }
     }
 
@@ -109,7 +115,7 @@ impl App {
             return;
         }
         let files = g.files.iter().map(|(_, f)| f.clone()).collect();
-        let posts = g.files.iter().map(|(i, _)| self.tab.thread.as_ref().and_then(|t| t.posts.get(*i)).map_or(0, |p| p.no)).collect();
+        let posts = g.files.iter().map(|&(no, _)| no).collect();
         self.tab.popup = Some(TabPopup::Viewer(Viewer { posts, ..Viewer::new(files, k, None) }));
     }
 
@@ -143,14 +149,13 @@ impl App {
     /// The link to the post a gallery file is from.
     pub fn gallery_link(&self, k: usize) -> Option<String> {
         let (g, t, b) = (self.tab.gallery.as_ref()?, self.tab.thread.as_ref()?, self.tab.board.as_ref()?);
-        let post = t.posts.get(g.files.get(k)?.0)?.no;
-        self.thread_link(&self.key(&b.uri, t.no), Some(post))
+        self.thread_link(&self.key(&b.uri, t.no), Some(g.files.get(k)?.0))
     }
 
     fn download_file(&mut self, k: usize) {
         let (Some(g), Some(t)) = (&self.tab.gallery, &self.tab.thread) else { return };
         // A refresh may have taken the post away since the gallery opened.
-        let Some(((_, file), p)) = g.files.get(k).and_then(|f| Some((f, t.posts.get(f.0)?))) else { return };
+        let Some(((_, file), p)) = g.files.get(k).and_then(|f| Some((f, t.posts.get(*t.index.get(&f.0)?)?))) else { return };
         let dir = download::dir(self.download_dir.as_deref(), &self.current_site().cfg.name, &t.board, t.no);
         let jobs: Vec<_> = download::jobs(&[p], &dir).into_iter().filter(|(url, _)| *url == file.url).collect();
         self.start_download(jobs, dir, "No file to save");

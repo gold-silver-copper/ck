@@ -1,3 +1,5 @@
+// Tests may lay out fixtures by hand (see clippy.toml).
+#![cfg_attr(test, allow(clippy::disallowed_methods))]
 use std::time::Duration;
 
 use anyhow::Result;
@@ -253,6 +255,7 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
         app.show_title();
         ck::input_log::note(|| "frame".into());
         if let Some(path) = &dump {
+            #[allow(clippy::disallowed_methods)] // a debug dump, rewritten each frame
             let _ = std::fs::write(path, frame_text(frame.buffer));
         }
         let timeout = app.next_wake(Instant::now());
@@ -297,6 +300,7 @@ fn resend_uncovered_images(last: &ratatui::buffer::Buffer, buf: &mut ratatui::bu
 
 /// A frame's text, row by row (a wide character once, as a terminal shows it, measured as
 /// ratatui places it).
+#[allow(clippy::disallowed_methods, reason = "one cell's symbol, laid out by the buffer's own measure")]
 fn frame_text(buf: &ratatui::buffer::Buffer) -> String {
     use ratatui::buffer::CellWidth;
     let mut out = String::new();

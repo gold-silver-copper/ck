@@ -61,6 +61,7 @@ assigning_clones = "warn"
 format_push_string = "warn"
 ignore_without_reason = "warn"
 needless_pass_by_value = "warn"
+disallowed_methods = "deny"
 
 [profile.release]
 lto = "thin"

@@ -3,7 +3,7 @@
 
 use crate::http::lock;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::SystemTime;
 
@@ -41,7 +41,9 @@ impl DiskCache {
     pub fn get(&self, url: &str) -> Option<Vec<u8>> {
         let path = self.path(url);
         let bytes = fs::read(&path).ok()?;
-        if let Ok(f) = fs::File::options().write(true).open(&path) {
+        #[allow(clippy::disallowed_methods)] // opened to touch its time, never written
+        let touched = fs::File::options().write(true).open(&path);
+        if let Ok(f) = touched {
             let _ = f.set_modified(SystemTime::now());
         }
         Some(bytes)
@@ -58,42 +60,15 @@ impl DiskCache {
 
     /// Store bytes (through a temp file renamed into place), then trim to the budget.
     pub fn put(&self, url: &str, bytes: &[u8]) -> anyhow::Result<()> {
-        crate::store::write_atomic(&self.path(url), bytes)?;
+        crate::atomic::write(&self.path(url), bytes)?;
         let mut used = lock(&self.used);
         let total = match *used {
             Some(n) => n + bytes.len() as u64,
-            None => entries(&self.dir).iter().map(|e| e.1).sum(),
+            None => crate::atomic::total(&self.dir, 0),
         };
-        *used = Some(if total > self.budget { evict(&self.dir, self.budget * 9 / 10) } else { total });
+        *used = Some(if total > self.budget { crate::atomic::trim(&self.dir, 0, self.budget * 9 / 10) } else { total });
         Ok(())
     }
-}
-
-/// Files in the cache: (path, size, modified).
-fn entries(dir: &Path) -> Vec<(PathBuf, u64, SystemTime)> {
-    let Ok(rd) = fs::read_dir(dir) else { return Vec::new() };
-    rd.flatten()
-        .filter_map(|e| {
-            let meta = e.metadata().ok()?;
-            meta.is_file().then(|| (e.path(), meta.len(), meta.modified().unwrap_or(SystemTime::UNIX_EPOCH)))
-        })
-        .collect()
-}
-
-/// Delete the least recently used files until at most `target` bytes remain; returns the total.
-fn evict(dir: &Path, target: u64) -> u64 {
-    let mut files = entries(dir);
-    files.sort_by_key(|e| e.2);
-    let mut total: u64 = files.iter().map(|e| e.1).sum();
-    for (path, size, _) in files {
-        if total <= target {
-            break;
-        }
-        if fs::remove_file(&path).is_ok() {
-            total -= size;
-        }
-    }
-    total
 }
 
 /// 128-bit FNV-1a: stable across Rust versions, unlike `DefaultHasher`.
@@ -124,7 +99,7 @@ mod tests {
         c.remove("u");
         assert!(c.get("u").is_none());
         // No temp files left behind.
-        assert_eq!(entries(&dir.path().join("thumbs")).len(), 0);
+        assert_eq!(fs::read_dir(dir.path().join("thumbs")).unwrap().count(), 0);
     }
 
     #[test]
@@ -143,12 +118,29 @@ mod tests {
         c.put("d", &[0; 80]).unwrap();
         assert!(!c.contains("b"));
         assert!(c.contains("a") && c.contains("d"));
-        assert!(entries(dir.path()).iter().map(|e| e.1).sum::<u64>() <= 225);
+        assert!(crate::atomic::total(dir.path(), 0) <= 225);
     }
 
     #[test]
     fn stable_names() {
         assert_eq!(fnv1a128(b""), 0x6c62272e07bb014262b821756295c58d);
         assert_ne!(fnv1a128(b"https://x/1s.jpg"), fnv1a128(b"https://x/2s.jpg"));
+    }
+
+    #[test]
+    fn eviction_spares_another_writers_temp_file() {
+        // Another image worker is midway through a put: its temp file is beside the
+        // entries, under the name ck gives one now or gave one before. Trimming must leave it be.
+        for tag in [String::new(), format!(".ck-{}-0", std::process::id())] {
+            let dir = tempfile::tempdir().unwrap();
+            let c = DiskCache::new(dir.path().to_path_buf(), 250);
+            let tmp = dir.path().join(format!("{:032x}{tag}.tmp", fnv1a128(b"busy")));
+            fs::write(&tmp, [0; 200]).unwrap();
+            let f = fs::File::options().write(true).open(&tmp).unwrap();
+            f.set_modified(SystemTime::now() - Duration::from_secs(3600)).unwrap();
+            c.put("a", &[0; 80]).unwrap();
+            assert!(tmp.exists(), "an in-flight temp file was evicted");
+            assert!(c.contains("a"));
+        }
     }
 }

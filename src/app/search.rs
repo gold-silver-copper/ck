@@ -64,6 +64,15 @@ impl Search {
     pub fn for_tests(board: &str, query: &str, page: SearchPage) -> Self {
         Self { saved: None, board: board.into(), query: query.into(), hits: page.hits, marks: Marks::default(), total: page.total, pages: 1, back: (0, View::Catalog) }
     }
+
+    /// The thread hit `k` is in: its saved copy, or the archive's thread on `site`.
+    pub(super) fn thread_of(&self, k: usize, site: &str) -> Option<ThreadKey> {
+        let (no, p) = self.hits.get(k)?;
+        match &self.saved {
+            Some(saved) => saved.keys.get(k).cloned(),
+            None => Some(ThreadKey { site: site.to_string(), board: p.board.clone().unwrap_or_else(|| self.board.clone()), no: *no }),
+        }
+    }
 }
 
 /// What a search of the saved threads found in one copy (`None`: nothing, or it couldn't
@@ -274,9 +283,7 @@ impl App {
             let (no, query) = (post.no, s.query.clone());
             self.open_saved(&key);
             if let Some(t) = self.tab.thread.as_mut().filter(|_| self.tab.view == View::Thread) {
-                if let Some(&i) = t.index.get(&no) {
-                    t.select(i);
-                }
+                t.select_post(no);
                 t.set_search(query);
                 self.tab.return_to = Some(View::Search);
             }

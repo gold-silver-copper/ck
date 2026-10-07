@@ -296,7 +296,7 @@ impl App {
         let th = t.thread.as_ref().filter(|_| t.view == View::Thread)?;
         let site = self.sites.get(t.site)?.cfg.name.clone();
         let w = self.store.watched(&ThreadKey { site, board: th.board.clone(), no: th.no })?;
-        (w.unread > 0 && !w.dead).then_some(w.unread)
+        Some(w.status.counts().0).filter(|&n| n > 0)
     }
 
     /// The terminal's title: "ck: (3) /g/ Subject" in a thread, with the new posts below the
@@ -308,7 +308,7 @@ impl App {
         }
         let (new, yours) = match self.tab.thread.as_ref().filter(|_| self.tab.view == View::Thread) {
             Some(th) => th.new_below(),
-            None => self.store.all_watched().iter().filter(|w| !w.dead).fold((0, 0), |(n, y): (usize, usize), w| (n.saturating_add(w.unread), y.saturating_add(w.replies))),
+            None => self.store.watched_new(),
         };
         let new = if new > 0 { format!("({new}) ") } else { String::new() };
         let yours = if yours > 0 { "(You) " } else { "" };

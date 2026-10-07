@@ -8,6 +8,7 @@ use ratatui::text::Line;
 
 use super::*;
 use crate::keys::ACTIONS;
+use crate::store::Status;
 use crate::test_fixtures::*;
 
 fn mouse(kind: MouseEventKind, column: u16, row: u16) -> MouseEvent {
@@ -466,15 +467,14 @@ fn hidden_posts_are_not_new_in_watched_threads() {
     app.refreshed(key.clone(), Ok(posts.clone()));
     app.flush_notes(Instant::now());
     assert_eq!(app.notified, ["New reply to your post in /x/ One"]);
-    let w = app.store.watched(&key).unwrap();
-    assert_eq!((w.unread, w.replies), (1, 1));
+    assert_eq!(app.store.watched(&key).unwrap().status, Status::Live { unread: 1, replies: 1 });
     // A `notify` filter still tells about what it catches, hidden or not.
     app.notified.clear();
     posts.push(post(9, vec![], "rust spam"));
     app.refreshed(key.clone(), Ok(posts));
     app.flush_notes(Instant::now());
     assert_eq!(app.notified, ["A new post caught by \"rust\" in /x/ One"]);
-    assert_eq!(app.store.watched(&key).unwrap().unread, 1);
+    assert_eq!(app.store.watched(&key).unwrap().status.counts().0, 1);
 }
 
 #[test]
@@ -489,12 +489,12 @@ fn notifies_about_new_posts_and_replies_to_yours() {
     app.refreshed(key(1), Ok(vec![post(1, vec![]), post(5, vec![]), post(6, vec![5])]));
     app.flush_notes(Instant::now());
     assert!(app.notified.is_empty());
-    assert_eq!(app.store.watched(&key(1)).unwrap().replies, 1);
+    assert_eq!(app.store.watched(&key(1)).unwrap().status.counts().1, 1);
     // Then: a reply to your post, and another post.
     app.refreshed(key(1), Ok(vec![post(1, vec![]), post(5, vec![]), post(6, vec![5]), post(7, vec![5]), post(8, vec![1])]));
     app.flush_notes(Instant::now());
     assert_eq!(app.notified, ["New reply to your post in /x/ One", "1 new post in /x/ One"]);
-    assert_eq!(app.store.watched(&key(1)).unwrap().replies, 2);
+    assert_eq!(app.store.watched(&key(1)).unwrap().status.counts().1, 2);
     // Several threads at once make one notification.
     app.notified.clear();
     app.refreshed(key(2), Ok(vec![post(20, vec![])]));
@@ -1225,7 +1225,7 @@ fn following_a_general() {
     assert_eq!(app.store.watched(&key(10)).unwrap().general, None);
     assert!(app.notified.last().unwrap().starts_with("New /lmg/ thread on /x/"));
     // When the followed thread dies, it's replaced in Watched.
-    app.store.watched_mut(&key(13)).unwrap().dead = true;
+    app.store.watched_mut(&key(13)).unwrap().status = Status::Dead;
     app.check_generals(now + Duration::from_secs(1200));
     app.general_catalog(&key(13), Ok(vec![op(20, "/lmg/ - Local Models General #7")]));
     assert!(app.store.watched(&key(13)).is_none());
@@ -1487,7 +1487,7 @@ fn a_dead_thread_offers_its_saved_copy() {
     assert_eq!(app.tab.cached(), Some(tabs::Offline { saved: 10_000 - 7200, dead: false }));
     assert!(app.tab.loading.is_some() && app.tab.thread.as_ref().unwrap().posts.len() == 2);
     app.handle(answer(app.tab.req.unwrap(), App::thread_arrived, Err(gone())));
-    assert!(app.store.watched(&key).unwrap().dead && app.store.saved(&key).unwrap().dead);
+    assert!(app.store.watched(&key).unwrap().status.is_dead() && app.store.saved(&key).unwrap().dead);
     assert_eq!((app.tab.cached(), app.tab.saved().map(|o| o.dead)), (None, Some(true)));
     // An exported copy of a thread that isn't watched: offered when the thread is gone.
     app.rehide(|a| a.store.unwatch(&key));
@@ -3198,11 +3198,10 @@ fn the_terminal_title_says_where_and_whats_new() {
     assert_eq!(title(&app), "ck: Sites");
     app.store.watch(key(1), "One".into(), 2, 5);
     app.store.watch(key(9), "Gone".into(), 2, 5);
-    app.store.watched_mut(&key(1)).unwrap().unread = 3;
+    app.store.watched_mut(&key(1)).unwrap().status = Status::Live { unread: 3, replies: 0 };
     assert_eq!(title(&app), "ck: (3) Sites");
-    app.store.watched_mut(&key(1)).unwrap().replies = 1;
-    let gone = app.store.watched_mut(&key(9)).unwrap();
-    (gone.unread, gone.dead) = (4, true);
+    app.store.watched_mut(&key(1)).unwrap().status = Status::Live { unread: 3, replies: 1 };
+    app.store.watched_mut(&key(9)).unwrap().status = Status::Dead;
     assert_eq!(title(&app), "ck: (3) (You) Sites");
     // In a thread: its new posts below the screen. The subject is the site's text: nothing
     // in it reaches the terminal as an escape.
@@ -3492,15 +3491,34 @@ fn hiding_recounts_new_posts_in_watched_threads() {
     let start = posts_saying(&[(1, "a thread")]);
     app.refreshed(key.clone(), Ok(start));
     app.refreshed(key.clone(), Ok(posts_saying(&[(1, "a thread"), (2, "buy crypto"), (3, "hello")])));
-    assert_eq!(app.store.watched(&key).unwrap().unread, 2);
+    assert_eq!(app.store.watched(&key).unwrap().status.counts().0, 2);
     // A hidden word hides No.2: Watched's "new" leaves it out at once, not at the next refresh.
     app.hidden_words = vec!["crypto".into()];
     app.apply_filters();
-    assert_eq!(app.store.watched(&key).unwrap().unread, 1);
+    assert_eq!(app.store.watched(&key).unwrap().status.counts().0, 1);
     // And counts it again when the word goes.
     app.hidden_words.clear();
     app.apply_filters();
-    assert_eq!(app.store.watched(&key).unwrap().unread, 2);
+    assert_eq!(app.store.watched(&key).unwrap().status.counts().0, 2);
+}
+
+/// Hiding's recount and a 404 are one count: once the thread is gone, nothing that
+/// changes what's hidden brings its last new posts back, in it or in the totals.
+#[test]
+fn hiding_recounts_nothing_in_a_dead_watched_thread() {
+    let mut app = local_app();
+    let key = ThreadKey { site: "a".into(), board: "x".into(), no: 1 };
+    app.store.watch(key.clone(), "One".into(), 1, 1);
+    app.refreshed(key.clone(), Ok(posts_saying(&[(1, "a thread")])));
+    app.refreshed(key.clone(), Ok(posts_saying(&[(1, "a thread"), (2, "buy crypto"), (3, "hello")])));
+    assert_eq!(app.store.watched_new(), (2, 0));
+    app.refreshed(key.clone(), Err(gone()));
+    assert_eq!(app.store.watched(&key).unwrap().status, Status::Dead);
+    for words in [vec!["crypto".to_string()], Vec::new()] {
+        app.hidden_words = words;
+        app.apply_filters();
+        assert_eq!((app.store.watched(&key).unwrap().status, app.store.watched_new()), (Status::Dead, (0, 0)));
+    }
 }
 
 #[test]
@@ -3618,4 +3636,126 @@ fn a_tab_searching_the_archive_keeps_its_catalog_and_thread_hidden() {
     app.switch_tab(0);
     app.close_search();
     assert_eq!(hidden(&app), (true, true), "No.2 shown once the search closed");
+}
+
+/// A watched thread that 404s has nothing new any more: its unread posts and replies to
+/// you go with it, whichever load found it gone (a background refresh, opening it, or
+/// restoring last session's place).
+#[test]
+fn a_watched_thread_that_404s_keeps_no_counts() {
+    let mut app = local_app();
+    let key = |no| ThreadKey { site: "a".into(), board: "x".into(), no };
+    app.store.watch(key(1), "One".into(), 2, 5);
+    app.store.watched_mut(&key(1)).unwrap().status = Status::Live { unread: 3, replies: 2 };
+    app.refreshed(key(1), Err(gone()));
+    assert_eq!(app.store.watched(&key(1)).unwrap().status, Status::Dead, "refresh 404");
+    // Opened and found gone.
+    app.store.watch(key(2), "Two".into(), 2, 5);
+    app.store.watched_mut(&key(2)).unwrap().status = Status::Live { unread: 4, replies: 1 };
+    app.goto_str("a/x/2");
+    app.handle(answer(app.tab.req.unwrap(), App::thread_arrived, Err(gone())));
+    assert_eq!(app.store.watched(&key(2)).unwrap().status, Status::Dead, "open 404");
+    // Last session's thread, found gone on restoring it.
+    app.store.watch(key(3), "Three".into(), 2, 5);
+    app.store.watched_mut(&key(3)).unwrap().status = Status::Live { unread: 5, replies: 1 };
+    app.goto_str("a/x/3");
+    app.tab.restoring = true;
+    app.handle(answer(app.tab.req.unwrap(), App::thread_arrived, Err(gone())));
+    assert_eq!((app.store.watched(&key(3)).unwrap().status, app.tab.view), (Status::Dead, View::Catalog), "restore 404");
+}
+
+#[test]
+fn gallery_files_keep_their_posts_when_the_live_thread_replaces_a_cached_copy() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = thread_app();
+    app.download_dir = Some(dir.path().display().to_string());
+    app.images = crate::images::Images::offline();
+    let file = |name: &str| Attachment { filename: name.into(), url: format!("http://127.0.0.1:3/x/src/{name}"), ..Default::default() };
+    let post = |no, files: Vec<Attachment>| Post { no, files, ..Default::default() };
+    // The cached copy has No.2; the live thread, arriving with the gallery open, doesn't.
+    app.set_cached_thread(vec![post(1, vec![]), post(2, vec![]), post(3, vec![file("3.png")]), post(4, vec![file("4.png")])], 0);
+    app.act(Action::Gallery);
+    app.set_thread(vec![post(1, vec![]), post(3, vec![file("3.png")]), post(4, vec![file("4.png")]), post(5, vec![])]);
+    // The first file is still 3.png, from No.3: its link, its save and esc go there.
+    assert_eq!(app.gallery_link(0).as_deref(), Some("http://127.0.0.1:3/x/res/1.html#3"));
+    app.on_key(KeyEvent::from(KeyCode::Char('d')));
+    assert_eq!(app.downloads.total, 1);
+    app.close_gallery();
+    assert_eq!(app.tab.thread.as_ref().unwrap().current().unwrap().no, 3);
+}
+
+#[test]
+fn a_thread_hint_picks_its_post_after_a_refresh_moves_it() {
+    let mut app = thread_app();
+    app.set_cached_thread(nos(&[1, 2, 3, 4, 5]), 0);
+    draw_at(&mut app, 100, 30);
+    app.on_key(KeyEvent::from(KeyCode::Char('f')));
+    let label = app.hints().unwrap().targets.iter().find(|x| matches!(x.to, HintTo::Thread(ref p, None) if p == &[4])).unwrap().label.clone();
+    // The label went up on No.4; the live thread, without No.2, arrives before it's typed.
+    app.set_thread(nos(&[1, 3, 4, 5]));
+    type_text(&mut app, &label);
+    assert_eq!(app.tab.thread.as_ref().unwrap().current().unwrap().no, 4);
+}
+
+#[test]
+fn a_catalog_hint_opens_its_thread_after_a_refresh_reorders_them() {
+    let mut app = local_app();
+    app.tab.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
+    app.tab.catalog_board = Some("x".into());
+    app.tab.view = View::Catalog;
+    app.show_catalog(nos(&[1, 2, 3]));
+    draw_at(&mut app, 100, 30);
+    app.on_key(KeyEvent::from(KeyCode::Char('f')));
+    let label = app.hints().unwrap().targets.iter().find(|x| matches!(x.to, HintTo::Row(RowKey::Thread(2)))).unwrap().label.clone();
+    // The label went up on No.2; a refresh bumps No.3 to the top before it's typed.
+    app.show_catalog(nos(&[3, 1, 2]));
+    type_text(&mut app, &label);
+    assert_eq!((app.tab.view, app.tab.pending_thread), (View::Thread, Some(2)));
+}
+
+#[test]
+fn u_skips_a_post_a_refresh_took_away() {
+    let mut app = thread_app();
+    app.set_cached_thread(nos(&[1, 2, 3, 4, 5]), 0);
+    let t = app.tab.thread.as_mut().unwrap();
+    t.select(1);
+    assert!(t.jump_to(3) && t.jump_to(5));
+    // The live thread, without No.3, arrives: u goes back past it, to No.2.
+    app.set_thread(nos(&[1, 2, 4, 5]));
+    app.act(Action::JumpBack);
+    assert_eq!(app.tab.thread.as_ref().unwrap().current().unwrap().no, 2);
+    // With only a dropped post to go back to, there's nowhere: the menu doesn't offer u.
+    let mut app = thread_app();
+    app.set_cached_thread(nos(&[1, 2, 3]), 0);
+    let t = app.tab.thread.as_mut().unwrap();
+    t.select(1);
+    assert!(t.jump_to(3) && app.can_jump_back());
+    app.set_thread(nos(&[1, 3]));
+    assert!(!app.can_jump_back());
+}
+
+#[test]
+fn a_recent_board_label_opens_its_board_after_another_comes_first() {
+    let mut app = local_app();
+    app.store.recent_boards = vec!["a/x".into(), "b/y".into()];
+    app.tab.view = View::Sites;
+    draw_at(&mut app, 100, 30);
+    app.on_key(KeyEvent::from(KeyCode::Char('f')));
+    let label = app.hints().unwrap().targets.iter().find(|x| matches!(x.to, HintTo::Row(RowKey::Recent(ref b)) if b == "a/x")).unwrap().label.clone();
+    // The label went up on a/x; a catalog asked for before arrives, and its board goes first.
+    app.store.board_opened("a", "xy");
+    type_text(&mut app, &label);
+    assert_eq!((app.tab.view, app.tab.board.as_ref().unwrap().uri.as_str()), (View::Catalog, "x"));
+}
+
+#[test]
+fn search_hits_with_the_same_numbers_in_two_saved_copies_are_told_apart() {
+    let mut app = local_app();
+    let key = |board: &str| ThreadKey { site: "a".into(), board: board.into(), no: 100 };
+    let op = Post { no: 100, ..Default::default() };
+    let mut s = Search::for_tests("", "q", crate::backend::SearchPage { hits: vec![(100, op.clone()), (100, op)], total: None });
+    s.saved = Some(SavedSearch::for_tests(vec![key("x"), key("xy")], 2, 2, true));
+    app.tab.search = Some(s);
+    let rows = app.row_keys(View::Search);
+    assert_eq!(rows.iter().map(|k| app.row_of(View::Search, k)).collect::<Vec<_>>(), [Some(0), Some(1)]);
 }

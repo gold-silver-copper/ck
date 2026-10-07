@@ -112,10 +112,8 @@ impl App {
             ("saved", Some(board), Some(no)) => {
                 self.tab.pending_conversation = p.conversation;
                 self.open_saved(&crate::store::ThreadKey { site: p.site.clone(), board: board.uri, no });
-                if let Some(t) = &mut self.tab.thread
-                    && let Some(&i) = p.selected.and_then(|s| t.index.get(&s))
-                {
-                    t.select(i);
+                if let (Some(t), Some(no)) = (&mut self.tab.thread, p.selected) {
+                    t.select_post(no);
                 }
             }
             ("saved", ..) => self.tab.view = View::Saved,

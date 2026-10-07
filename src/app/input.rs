@@ -532,13 +532,7 @@ impl App {
                     self.info(msg);
                 }
             }
-            Action::Spoiler => {
-                let i = t.selected;
-                if !t.revealed.remove(&i) {
-                    t.revealed.insert(i);
-                }
-                t.layout = None;
-            }
+            Action::Spoiler => t.toggle_spoiler(),
             Action::AllSpoilers => {
                 t.reveal_all = !t.reveal_all;
                 t.revealed.clear();
@@ -553,19 +547,16 @@ impl App {
                 None => self.info("No replies to this post"),
             },
             Action::JumpBack => {
-                if let Some(i) = t.jumps.pop() {
-                    t.select(i);
-                } else if let Some((site, board, no, post)) = self.tab.trail.pop() {
+                if !t.jump_back()
+                    && let Some((site, board, no, post)) = self.tab.trail.pop()
+                {
                     // Back to the thread we came from by a cross-thread link.
                     self.switch_site(site);
                     self.open_thread_at(board, no, Some(post));
                 }
             }
             Action::Unread => match (0..t.posts.len()).find(|&i| t.is_new(i)) {
-                Some(i) => {
-                    t.jumps.push(t.selected);
-                    t.select(i);
-                }
+                Some(i) => t.jump(i),
                 None => self.info("No unread posts"),
             },
             Action::OpenFile => match t.current().and_then(|p| p.files.first()).cloned() {
@@ -635,11 +626,8 @@ impl App {
             KeyCode::Enter => {
                 let first = p.posts.first().copied();
                 self.tab.popup = None;
-                if let Some(t) = &mut self.tab.thread
-                    && let Some(i) = first.and_then(|no| t.index.get(&no).copied())
-                {
-                    t.jumps.push(t.selected);
-                    t.select(i);
+                if let (Some(t), Some(no)) = (&mut self.tab.thread, first) {
+                    t.jump_to(no);
                 }
             }
             _ => self.tab.popup = None,
@@ -676,10 +664,9 @@ impl App {
                     g.state.select(Some(v.index));
                 } else if let Some(&no) = v.posts.get(v.index)
                     && let Some(t) = &mut self.tab.thread
-                    && let Some(&i) = t.index.get(&no)
-                    && i != t.selected
+                    && t.current().is_none_or(|p| p.no != no)
                 {
-                    t.select(i);
+                    t.select_post(no);
                 }
                 self.tab.popup = None;
             }

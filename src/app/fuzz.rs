@@ -932,7 +932,7 @@ fn replay(seed: u64, acts: &[Act]) -> Result<(), (String, String)> {
                 let hid = a.store.hidden_count();
                 let m = a.tab.catalog_marks.hidden_count();
                 eprintln!("TRACE {step} {act}: tab {} view {:?} site {} board {:?} cat_board {} cat {} hidden-marks {m} store {hid:?} filters {}", a.active, a.tab.view, a.current_site().cfg.name, a.tab.board.as_ref().map(|b| &b.uri), a.tab.catalog_board.as_deref().unwrap_or_default(), a.tab.catalog.len(), a.filter_cfgs.len());
-                let w: Vec<String> = a.store.all_watched().iter().map(|w| format!("{}/{}/{} dead={} seen={}", w.key.site, w.key.board, w.key.no, w.dead, w.last_seen)).collect();
+                let w: Vec<String> = a.store.all_watched().iter().map(|w| format!("{}/{}/{} dead={} seen={}", w.key.site, w.key.board, w.key.no, w.status.is_dead(), w.last_seen)).collect();
                 let sv: Vec<String> = a.store.saved.iter().map(|m| format!("{}/{}/{}", m.key.site, m.key.board, m.key.no)).collect();
                 eprintln!("TRACE   watched {w:?} saved {sv:?} status {:?}", a.status.as_ref().map(|s| &s.text));
                 if let Some(t) = &a.tab.thread {
@@ -1146,8 +1146,8 @@ fn check_thread(t: &ThreadView) -> Result<(), String> {
     if t.entries.get(t.entry()).is_none_or(|e| e.post != t.selected) {
         return Err(format!("entry {} of {} doesn't hold the selected post {}", t.entry(), t.entries.len(), t.selected));
     }
-    if t.entries.iter().any(|e| e.post >= n) || t.matches.iter().any(|&m| m >= n) || t.revealed.iter().any(|&m| m >= n) {
-        return Err(format!("an entry, match or revealed post past the {n} posts"));
+    if t.entries.iter().any(|e| e.post >= n) || t.matches.iter().any(|&m| m >= n) {
+        return Err(format!("an entry or match past the {n} posts"));
     }
     // A conversation shows just its posts, all of them, its own post among them; without
     // one, every post is there, or (`M`) the OP and every post with files.
@@ -1218,7 +1218,7 @@ type Live = ((usize, usize), String, u64, Vec<u64>, u32);
 
 impl Before {
     fn of(app: &App, gate: &Gate) -> Self {
-        let watched_alive = |k: &ThreadKey| app.store.watched(k).is_some_and(|w| !w.dead);
+        let watched_alive = |k: &ThreadKey| app.store.watched(k).is_some_and(|w| !w.status.is_dead());
         let saved = app.store.saved.iter().map(|m| (m.key.clone(), m.dead && app.store.watched(&m.key).is_none())).collect();
         let offline_dead = match (app.tab.saved(), &app.tab.thread) {
             (Some(o), Some(t)) if o.dead && app.tab.view == View::Thread => {
@@ -1391,7 +1391,7 @@ fn check_saved(app: &App, before: &Before, calls: &[String], removed: &mut HashS
         }
     }
     for w in app.store.all_watched() {
-        if w.dead && w.last_seen > 0 && !removed.contains(&w.key) {
+        if w.status.is_dead() && w.last_seen > 0 && !removed.contains(&w.key) {
             assert!(app.store.saved(&w.key).is_some(), "watched thread {:?} died with no saved copy", w.key);
         }
     }

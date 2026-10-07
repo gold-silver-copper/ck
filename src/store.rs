@@ -23,7 +23,7 @@ pub struct ThreadKey {
     pub no: u64,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Watched {
     #[serde(flatten)]
     pub key: ThreadKey,
@@ -31,16 +31,12 @@ pub struct Watched {
     pub posts: usize,
     /// Highest post number seen while the thread was open; 0 until first known.
     pub last_seen: u64,
-    pub unread: usize,
-    /// The thread 404'd: archived or deleted. It's no longer refreshed.
-    #[serde(default)]
-    pub dead: bool,
+    /// Live with what's new since it was read, or 404'd (archived or deleted) with nothing new.
+    #[serde(flatten)]
+    pub status: Status,
     /// Posts marked as yours (`m`); replies to them are counted and notified.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     mine: Vec<u64>,
-    /// Unread replies to your posts.
-    #[serde(default, skip_serializing_if = "is_zero")]
-    pub replies: usize,
     /// Followed as a general: when the thread dies or hits the bump limit, the next thread
     /// whose subject matches this is watched instead.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -55,9 +51,80 @@ pub struct Watched {
 }
 
 impl Watched {
+    /// Newly watched: live, with nothing new yet.
+    pub fn new(key: ThreadKey, subject: String, posts: usize, last_seen: u64) -> Self {
+        Watched { key, subject, posts, last_seen, status: Status::READ, mine: Vec::new(), general: None, at_limit: false, fresh: Vec::new() }
+    }
+
     /// The posts marked as yours (`Store::toggle_mine`).
     pub fn mine(&self) -> &[u64] {
         &self.mine
+    }
+
+    /// Live, with what a refresh found new: `fresh` (`with_ancestry`), counted as
+    /// `(unread, replies)`.
+    pub fn refreshed(&mut self, (unread, replies): (usize, usize), fresh: Vec<Post>) {
+        self.status = Status::Live { unread, replies };
+        self.fresh = fresh;
+    }
+
+    /// Its new posts counted again, as what's hidden changed (`App::rehide`). A dead thread
+    /// stays dead, with nothing new.
+    pub fn recount(&mut self, (unread, replies): (usize, usize)) {
+        if !self.status.is_dead() {
+            self.status = Status::Live { unread, replies };
+        }
+    }
+}
+
+/// A watched thread: refreshed, with what's new in it, or 404'd and no longer refreshed.
+/// Anything counted as new belongs in Live, so a dead thread can't keep or show it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(from = "StatusFile", into = "StatusFile")]
+pub enum Status {
+    Live { unread: usize, replies: usize },
+    Dead,
+}
+
+impl Status {
+    /// Live with nothing new: newly watched, or just read. It revives a dead thread, so it's
+    /// set only on a thread known to be there.
+    pub const READ: Status = Status::Live { unread: 0, replies: 0 };
+
+    /// (unread posts, unread replies to you); a dead thread has none.
+    pub fn counts(self) -> (usize, usize) {
+        match self {
+            Status::Live { unread, replies } => (unread, replies),
+            Status::Dead => (0, 0),
+        }
+    }
+
+    pub fn is_dead(self) -> bool {
+        self == Status::Dead
+    }
+}
+
+/// Status as watched.json has always kept it, in flat fields. Dead with counts (as older
+/// files can have) loads as Dead.
+#[derive(Serialize, Deserialize)]
+struct StatusFile {
+    unread: usize,
+    #[serde(default)]
+    dead: bool,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    replies: usize,
+}
+
+impl From<StatusFile> for Status {
+    fn from(f: StatusFile) -> Self {
+        if f.dead { Status::Dead } else { Status::Live { unread: f.unread, replies: f.replies } }
+    }
+}
+
+impl From<Status> for StatusFile {
+    fn from(s: Status) -> Self {
+        let (unread, replies) = s.counts();
+        StatusFile { unread, dead: s.is_dead(), replies }
     }
 }
 
@@ -272,7 +339,7 @@ impl Store {
         for (name, bytes) in self.files()? {
             let h = hash(&bytes);
             if self.written.borrow().get(name) != Some(&h) {
-                write_atomic(&dir.join(name), &bytes)?;
+                crate::atomic::write(&dir.join(name), &bytes)?;
                 self.written.borrow_mut().insert(name, h);
             }
         }
@@ -293,7 +360,7 @@ impl Store {
     pub fn save_boards(&self, site: &str, boards: &[Board], now: i64) -> Result<()> {
         let Some(path) = self.boards_path(site) else { return Ok(()) };
         let saved = SavedBoards { fetched: now, boards: boards.to_vec() };
-        write_atomic(&path, &serde_json::to_vec(&saved)?)
+        crate::atomic::write(&path, &serde_json::to_vec(&saved)?)
     }
 
     /// A board's catalog was loaded: remember its threads, and return the ones that weren't
@@ -347,7 +414,7 @@ impl Store {
 
     pub fn save_session(&self, session: &Session) -> Result<()> {
         let Some(dir) = &self.dir else { return Ok(()) };
-        write_atomic(&dir.join("session.json"), &serde_json::to_vec_pretty(session)?)
+        crate::atomic::write(&dir.join("session.json"), &serde_json::to_vec_pretty(session)?)
     }
 
     /// What's hidden by hand on a board.
@@ -401,13 +468,29 @@ impl Store {
         self.watched.iter_mut().find(|w| &w.key == key)
     }
 
+    /// All watched threads' unread posts and replies to you (dead ones have none).
+    pub fn watched_new(&self) -> (usize, usize) {
+        self.watched.iter().map(|w| w.status.counts()).fold((0, 0), |(n, y), (u, r)| (n.saturating_add(u), y.saturating_add(r)))
+    }
+
+    /// The thread 404'd. If it's watched, it's now dead with nothing new (nor anything for
+    /// `App::rehide` to count again); its saved copy is marked dead. Returns whether it's
+    /// watched (so Watched is to be saved).
+    pub fn mark_dead(&mut self, key: &ThreadKey) -> bool {
+        self.saved_dead(key);
+        let Some(w) = self.watched_mut(key) else { return false };
+        w.status = Status::Dead;
+        w.fresh.clear();
+        true
+    }
+
     /// Watch a thread, unless it's watched already; whether it wasn't. Nothing hiding reads
     /// changes (none of its posts are yours yet), so it's no `Changed`.
     pub fn watch(&mut self, key: ThreadKey, subject: String, posts: usize, last_seen: u64) -> bool {
         if self.watched(&key).is_some() {
             return false;
         }
-        self.watched.push(Watched { key, subject, posts, last_seen, ..Default::default() });
+        self.watched.push(Watched::new(key, subject, posts, last_seen));
         true
     }
 
@@ -445,10 +528,8 @@ impl Store {
             w.subject = subject.to_string();
             w.posts = posts;
             w.last_seen = w.last_seen.max(max_no);
-            w.unread = 0;
-            w.replies = 0;
+            w.status = Status::READ;
             w.fresh.clear();
-            w.dead = false;
         }
     }
 }
@@ -627,9 +708,8 @@ fn load_file<T: DeserializeOwned + Default>(path: &Path, warnings: &mut Vec<Stri
         Ok(v) => v,
         Err(e) => {
             // Keep the broken file for the user instead of overwriting it on the next save.
-            let aside = path.with_extension("json.corrupt");
-            warnings.push(match std::fs::rename(path, &aside) {
-                Ok(()) => format!("{} was corrupt ({e}); moved it to {}", path.display(), aside.display()),
+            warnings.push(match crate::atomic::set_aside(path) {
+                Ok(aside) => format!("{} was corrupt ({e}); moved it to {}", path.display(), aside.display()),
                 Err(r) => format!("{} was corrupt ({e}), and couldn't be moved aside ({r}): it will be overwritten", path.display()),
             });
             T::default()
@@ -643,42 +723,6 @@ fn hash(bytes: &[u8]) -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
     bytes.hash(&mut h);
     h.finish()
-}
-
-/// Write a file whole or not at all: to `<path>.tmp`, then renamed into place (its folder
-/// is created if needed). A symlink is written through, to the file it points to, and an
-/// existing file keeps its permissions.
-pub fn write_atomic(path: &Path, data: &[u8]) -> Result<()> {
-    use std::io::Write as _;
-    let target = link_target(path);
-    let path = target.as_path();
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
-    }
-    let mut tmp = path.as_os_str().to_owned();
-    tmp.push(".tmp");
-    let mode = std::fs::metadata(path).ok().map(|m| m.permissions());
-    let written = (|| {
-        let mut file = std::fs::File::create(&tmp)?;
-        // Before the content goes in, so a private file is never readable by others.
-        if let Some(mode) = mode {
-            file.set_permissions(mode)?;
-        }
-        file.write_all(data)
-    })();
-    written.with_context(|| format!("writing {}", path.display()))?;
-    std::fs::rename(&tmp, path).with_context(|| format!("writing {}", path.display()))
-}
-
-/// Where a write to `path` should go: the file a symlink points to (even one that isn't
-/// there yet), or `path` itself.
-fn link_target(path: &Path) -> PathBuf {
-    if !std::fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink()) {
-        return path.to_path_buf();
-    }
-    std::fs::canonicalize(path)
-        .or_else(|_| std::fs::read_link(path).map(|to| path.parent().map_or_else(|| to.clone(), |dir| dir.join(&to))))
-        .unwrap_or_else(|_| path.to_path_buf())
 }
 
 #[cfg(test)]
@@ -697,7 +741,8 @@ mod tests {
         assert!(s.watch(key(1), "one".into(), 5, 105));
         s.visit(&key(2), "two", 3, 203, 1000);
         s.save().unwrap();
-        assert!(!dir.path().join("watched.json.tmp").exists());
+        // No temp file is left behind.
+        assert!(std::fs::read_dir(dir.path()).unwrap().all(|e| e.unwrap().path().extension().is_none_or(|x| x != "tmp")));
 
         let (s2, _) = Store::load(Some(dir.path().to_path_buf()));
         assert_eq!(s2.watched[0].key, key(1));
@@ -856,12 +901,28 @@ mod tests {
     fn toggle_and_visit_clear_unread() {
         let mut s = Store::default();
         s.watch(key(1), "x".into(), 10, 110);
-        s.watched_mut(&key(1)).unwrap().unread = 4;
+        s.watched_mut(&key(1)).unwrap().status = Status::Live { unread: 4, replies: 1 };
         s.visit(&key(1), "x", 14, 114, 0);
-        assert_eq!((s.watched[0].unread, s.watched[0].last_seen, s.watched[0].posts), (0, 114, 14));
+        assert_eq!((s.watched[0].status, s.watched[0].last_seen, s.watched[0].posts), (Status::READ, 114, 14));
         assert!(!s.watch(key(1), String::new(), 0, 0));
         s.unwatch(&key(1)).unchecked();
         assert!(s.watched.is_empty());
+    }
+
+    #[test]
+    fn watched_status_keeps_its_file_format() {
+        let json = |w: &Watched| serde_json::to_string(w).unwrap();
+        let head = r#"{"site":"4chan","board":"g","no":1,"subject":"s","posts":2,"last_seen":3,"#;
+        // A dead thread with counts, as older files have it: dead, with nothing new.
+        let old: Watched = serde_json::from_str(&format!(r#"{head}"unread":3,"dead":true,"replies":2}}"#)).unwrap();
+        assert_eq!(old.status, Status::Dead);
+        assert_eq!(json(&old), format!(r#"{head}"unread":0,"dead":true}}"#));
+        // A live one is written as it always was.
+        let live = format!(r#"{head}"unread":3,"dead":false,"replies":2}}"#);
+        let w: Watched = serde_json::from_str(&live).unwrap();
+        assert_eq!((w.status, json(&w)), (Status::Live { unread: 3, replies: 2 }, live));
+        // `unread` is still required.
+        assert!(serde_json::from_str::<Watched>(&format!(r#"{head}"dead":true}}"#)).is_err());
     }
 
     fn posts(nos: &[u64]) -> Vec<Post> {

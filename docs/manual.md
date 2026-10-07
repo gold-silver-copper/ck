@@ -55,7 +55,7 @@ ones for where you are.
 | `:`  | go to a URL or a site/board/thread, see [Going to a URL](#going-to-a-url) [`goto`] |
 | `,`  | settings: theme, colors, keys, and more [`settings`] |
 | `.`, right-click | what you can do with what's selected, with each one's key [`menu`] |
-| `f`  | label what's on screen (posts, images, links, rows); type a label to open it [`hints`] |
+| `f`  | label what's on screen (posts, images, links, rows); type a label to open it (what it was put on, even if a refresh has moved it; if it's gone, ck says so) [`hints`] |
 | `]` / `[` | next / previous tab [`next_tab`, `prev_tab`] |
 | ctrl-w | close the tab [`close_tab`] |
 | `?`  | help [`help`] |
@@ -227,6 +227,9 @@ off. They're kept in the config as `favorites = ["4chan/g", "lainchan/λ"]`.
 Under them, marked ↺, are the last five boards you opened (that aren't favorites); `x`
 forgets one. The list is kept in the data directory (`recent_boards.json`).
 
+A site's name longer than its column is cut with "…" (`tab` after `:` still completes it
+in full).
+
 `x` on a site hides it from the home screen (`hidden_sites = [...]` in the config). The
 last row says how many are hidden; `enter` on it shows them (marked "hidden"), and `x` on
 one brings it back.
@@ -300,7 +303,7 @@ only "hidden" (with `p` or focused), saving all the thread's files leaves theirs
 hidden threads aren't counted as new in the catalog's header. Hiding, `Z` and filter
 changes apply to every tab at once, and Watched's counts of new posts and replies to you
 (and the tabs and terminal title) follow at once for the threads refreshed since ck
-started. What you hide is remembered per board in
+started (one that 404'd stays at nothing new). What you hide is remembered per board in
 the data directory.
 
 `recursive_hiding = true` (or Settings › Hidden replies) hides the replies too: in a
@@ -396,8 +399,9 @@ number.
 `w` watches the open thread, or the selected one in a catalog. The "Watched" entry at the
 top of the Sites view lists watched threads from all sites with their post counts and how
 many posts are new (posts you've hidden, or your filters and hidden words hide, aren't
-counted, nor notified about); threads that 404 stay listed as "archived/deleted". "History" lists the
-last 100 threads you opened. `x` removes an entry from either list.
+counted, nor notified about); threads that 404 stay listed as "archived/deleted", with
+nothing new (the totals on the Watched entry, its view and the title leave them out).
+"History" lists the last 100 threads you opened. `x` removes an entry from either list.
 
 The open thread refreshes in the background every 10 seconds and watched threads every
 60 seconds (change with `refresh_thread_secs` / `refresh_watched_secs`; those are also the
@@ -435,6 +439,9 @@ also lets the first request after a restart ask whether anything changed, so an 
 thread costs a "not modified" reply instead of the whole thread. When the refresh fails, the
 copy stays up, still marked (and "dead" if the thread is gone). Watched threads open from
 their saved copy the same way. A start that restores your tabs fills them in at once, too.
+The budget counts the pages only, not a page still being written; temp files left by a
+crash (`*.tmp` and `*.part`, older than a day) are removed when the cache is trimmed, here
+and in the thumbnail cache.
 
 ### Saved threads
 
@@ -531,6 +538,14 @@ instantly next time; they're refreshed quietly in the background once a day, and
 the Boards view refreshes them now. Lists that come in several pages (LynxChan and
 jschan board lists, FoolFuuka catalogs) show each page as it arrives.
 
+These files, the config file, saved threads, exports and downloads land whole or not at
+all: each write goes to a temp file of its own beside the file (`<name>.ck-<pid>-<n>.tmp`)
+and is renamed into place, so two writes at once (or two ck's) never mix, and a failed
+write removes its temp. A write to a symlinked state, config or saved-thread file goes to
+the file it points to. Temps of that name that a crash or kill left (older than a day) are
+removed the first time in a run that ck writes into that folder; a `<name>.tmp` left by an
+older ck is not, and can be deleted by hand.
+
 ## Searching archives
 
 `A` in a catalog searches the board's posts on a FoolFuuka archive: the site itself if
@@ -617,7 +632,8 @@ Files go into `~/Downloads/ck/{site}/{board}/{thread}/` (your system's Downloads
 Files are named `{post}_{original name}` with unsafe characters replaced; files that
 already exist are skipped, so saving all the thread's files again later only fetches
 what's new. Progress shows at the right of the footer. Downloads go through the same rate
-limiter as images.
+limiter as images. A file lands whole or not at all, like ck's state files: a download that
+fails leaves nothing behind, and a download never writes through a symlink at its name.
 
 ### Saving a thread
 

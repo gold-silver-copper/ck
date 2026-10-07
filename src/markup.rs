@@ -383,7 +383,7 @@ impl Builder {
             self.newline();
         }
         // Drop trailing blank lines.
-        while self.lines.last().is_some_and(|l| l.width() == 0) {
+        while self.lines.last().is_some_and(|l| spans_columns(&l.spans) == 0) {
             self.lines.pop();
         }
         // Bare URLs: found per line, after <wbr> and the like have been joined up. The links
@@ -533,6 +533,7 @@ pub fn for_terminal(s: &str) -> std::borrow::Cow<'_, str> {
 /// out. Measured whole, some text is narrower than that (unicode-width counts Arabic "لا"
 /// as one cell, but it's two graphemes, drawn in two), and a line measured so runs past
 /// the edge and is cut off.
+#[allow(clippy::disallowed_methods, reason = "the owner: the one place text is measured")]
 pub fn columns(s: &str) -> usize {
     if s.is_ascii() {
         return s.bytes().filter(|b| !b.is_ascii_control()).count();
@@ -545,9 +546,19 @@ pub fn columns(s: &str) -> usize {
     s.graphemes(true).filter(|g| !g.contains(char::is_control)).map(|g| usize::from(g.cell_width())).sum()
 }
 
-/// The cells a line takes, as `columns` measures them.
-pub fn line_columns(line: &Line) -> usize {
-    line.spans.iter().map(|s| columns(&s.content)).sum()
+/// The cells spans take, as `columns` measures them (a line's: `spans_columns(&line.spans)`).
+pub fn spans_columns(spans: &[Span]) -> usize {
+    spans.iter().map(|s| columns(&s.content)).sum()
+}
+
+/// `s` split after its longest run of whole graphemes that fits in `width` cells.
+pub fn split_at_columns(s: &str, width: usize) -> (&str, &str) {
+    let mut used = 0usize;
+    let end = s.grapheme_indices(true).find_map(|(i, g)| {
+        used = used.saturating_add(columns(g));
+        (used > width).then_some(i)
+    });
+    end.and_then(|i| s.split_at_checked(i)).unwrap_or((s, ""))
 }
 
 /// `line` with each byte range in `ranges` restyled by `f` (given the range's index), its
@@ -622,7 +633,7 @@ pub fn is_spoiler(style: Style) -> bool {
 
 /// Spoilered text as it's shown until revealed: a shade in each cell it would take.
 pub fn masked(text: &str) -> String {
-    text.chars().map(|c| "░".repeat(unicode_width::UnicodeWidthChar::width(c).unwrap_or(0))).collect()
+    text.graphemes(true).map(|g| "░".repeat(columns(g))).collect()
 }
 
 /// Show spoilered text in a line (still marked by its background).
@@ -994,13 +1005,25 @@ mod tests {
             for l in &wrapped {
                 let mut buf = Buffer::empty(Rect::new(0, 0, 50, 1));
                 let (x, _) = buf.set_line(0, 0, l, u16::try_from(width).unwrap());
-                assert_eq!(usize::from(x), line_columns(l), "{:?}", text(l));
-                assert!(line_columns(l) <= width);
+                assert_eq!(usize::from(x), spans_columns(&l.spans), "{:?}", text(l));
+                assert!(spans_columns(&l.spans) <= width);
             }
         }
     }
 
     #[test]
+    fn text_is_cut_and_masked_by_cells() {
+        // A heart with its emoji selector is one grapheme, drawn in two cells.
+        assert_eq!(split_at_columns("❤\u{fe0f}x", 1), ("", "❤\u{fe0f}x"));
+        assert_eq!(split_at_columns("❤\u{fe0f}x", 2), ("❤\u{fe0f}", "x"));
+        assert_eq!(split_at_columns("لالا", 3), ("لال", "ا"));
+        assert_eq!(split_at_columns("abc", 9), ("abc", ""));
+        assert_eq!(columns(&masked("❤\u{fe0f}")), 2);
+        assert_eq!(masked("لا"), "░░");
+    }
+
+    #[test]
+    #[allow(clippy::disallowed_methods, reason = "checks unicode-width's own measure, as a terminal does")]
     fn text_every_terminal_measures_alike() {
         use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
         for (raw, safe) in [

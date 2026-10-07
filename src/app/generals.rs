@@ -81,7 +81,7 @@ impl App {
             .store
             .all_watched()
             .iter()
-            .filter(|w| w.general.is_some() && (w.dead || w.at_limit))
+            .filter(|w| w.general.is_some() && (w.status.is_dead() || w.at_limit))
             .filter(|w| !self.generals_searching.contains(&w.key))
             .filter(|w| self.generals_checked.get(&w.key).is_none_or(|t| now.duration_since(*t) >= RECHECK))
             .map(|w| w.key.clone())
@@ -122,7 +122,7 @@ impl App {
         self.notify_new_threads(key, &catalog);
         let Some(w) = self.store.watched(key) else { return };
         let Some(pattern) = w.general.clone() else { return };
-        let dead = w.dead;
+        let dead = w.status.is_dead();
         // Not one that's hidden, whether hidden ones are shown or not.
         let marks = self.catalog_marks_for(&key.site, &catalog, |_| key.board.clone());
         let next = catalog

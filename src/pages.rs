@@ -63,33 +63,8 @@ impl Pages {
             return;
         }
         let Ok(bytes) = serde_json::to_vec(&Page { version: VERSION, fetched, copies: copies.to_vec() }) else { return };
-        if crate::store::write_atomic(&self.path(site, board, thread), &bytes).is_ok() {
-            self.prune();
-        }
-    }
-
-    /// Past the budget, remove the least recently written pages.
-    fn prune(&self) {
-        let mut files: Vec<(std::time::SystemTime, u64, PathBuf)> = Vec::new();
-        let dirs = |p: &std::path::Path| std::fs::read_dir(p).into_iter().flatten().flatten().map(|e| e.path()).collect::<Vec<_>>();
-        for site in dirs(&self.dir) {
-            for board in dirs(&site) {
-                for file in dirs(&board) {
-                    if let Some(m) = file.metadata().ok().filter(|m| m.is_file()) {
-                        files.push((m.modified().unwrap_or(std::time::UNIX_EPOCH), m.len(), file));
-                    }
-                }
-            }
-        }
-        let mut total: u64 = files.iter().map(|f| f.1).sum();
-        files.sort();
-        for (_, len, file) in files {
-            if total <= self.budget {
-                break;
-            }
-            if std::fs::remove_file(&file).is_ok() {
-                total = total.saturating_sub(len);
-            }
+        if crate::atomic::write(&self.path(site, board, thread), &bytes).is_ok() {
+            crate::atomic::trim(&self.dir, 2, self.budget); // <site>/<board>/<page>
         }
     }
 }
@@ -127,5 +102,26 @@ mod tests {
         std::fs::write(pages.path("4chan", "g", Some(9)), "{").unwrap();
         assert!(pages.read("4chan", "g", Some(9)).is_none());
         assert!(!pages.path("4chan", "g", Some(9)).exists());
+    }
+
+    #[test]
+    fn pruning_spares_another_writers_temp_file() {
+        // Another request thread is midway through writing a page: its temp file sits
+        // beside the pages, under the name ck gives one now or gave one before. Pruning
+        // must neither count it nor remove it.
+        for tag in [String::new(), format!(".ck-{}-0", std::process::id())] {
+            let dir = tempfile::tempdir().unwrap();
+            let pages = Pages::new(dir.path().to_path_buf(), 1_000);
+            let mut tmp = pages.path("4chan", "g", Some(7)).into_os_string();
+            tmp.push(format!("{tag}.tmp"));
+            let tmp = PathBuf::from(tmp);
+            std::fs::create_dir_all(tmp.parent().unwrap()).unwrap();
+            std::fs::write(&tmp, "x".repeat(900)).unwrap();
+            let f = std::fs::File::options().write(true).open(&tmp).unwrap();
+            f.set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(3600)).unwrap();
+            pages.write("4chan", "g", Some(1), &[copy("u1", 1)], 100);
+            assert!(tmp.exists(), "an in-flight temp file was pruned");
+            assert!(pages.read("4chan", "g", Some(1)).is_some());
+        }
     }
 }

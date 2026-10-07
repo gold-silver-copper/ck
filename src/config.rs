@@ -320,7 +320,7 @@ pub fn try_edit_at(path: &Path, f: impl FnOnce(&mut DocumentMut) -> Result<()>) 
     // Don't write something ck itself couldn't read back.
     let out = doc.to_string();
     toml::from_str::<Config>(&out).with_context(|| format!("the edited {} wouldn't load", path.display()))?;
-    crate::store::write_atomic(path, out.as_bytes())
+    crate::atomic::write(path, out.as_bytes())
 }
 
 /// Make `theme = name` the active theme. A ck 0.2 `[theme]` table is kept as
@@ -705,7 +705,14 @@ mod tests {
         assert!(std::fs::symlink_metadata(&link).unwrap().file_type().is_symlink());
         assert!(std::fs::read_to_string(&real).unwrap().contains("compact_catalog = true"));
         assert_eq!(std::fs::metadata(&real).unwrap().permissions().mode() & 0o777, 0o600);
-        assert!(!dir.path().join("dotfiles/ck.toml.tmp").exists() && !dir.path().join("config.toml.tmp").exists());
+        // No temp file is left beside either.
+        let names = |d: &Path| {
+            let mut names: Vec<_> = std::fs::read_dir(d).unwrap().map(|e| e.unwrap().file_name().into_string().unwrap()).collect();
+            names.sort();
+            names
+        };
+        assert_eq!(names(&dir.path().join("dotfiles")), ["ck.toml"]);
+        assert_eq!(names(dir.path()), ["config.toml", "dotfiles"]);
     }
 
     #[test]

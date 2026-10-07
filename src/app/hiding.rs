@@ -259,10 +259,14 @@ impl App {
             self.switch_tab(i);
             self.rehide_tab();
         }
-        let counts: Vec<_> = self.store.all_watched().iter().filter(|w| !w.fresh.is_empty()).map(|w| (w.key.clone(), self.unread_counter(&w.key, &w.fresh)(w.last_seen))).collect();
-        for (key, (unread, replies)) in counts {
+        // The one recount of what a refresh found new (dead threads have nothing new).
+        let counts: Vec<_> = (self.store.all_watched().iter())
+            .filter(|w| !w.status.is_dead() && !w.fresh.is_empty())
+            .map(|w| (w.key.clone(), self.unread_counter(&w.key, &w.fresh)(w.last_seen)))
+            .collect();
+        for (key, counts) in counts {
             if let Some(w) = self.store.watched_mut(&key) {
-                (w.unread, w.replies) = (unread, replies);
+                w.recount(counts);
             }
         }
         t

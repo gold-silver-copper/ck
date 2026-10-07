@@ -105,7 +105,7 @@ pub(super) fn draw_thread(f: &mut Frame, app: &mut App, area: Rect) {
             fill(f, Rect::new(code_x, y, area.right().saturating_sub(code_x + 1), 1), th.code_bg);
         }
         put(f, x + PAD, y, width.saturating_sub(PAD + 2), Line::from(line.spans.clone()));
-        let end = x.saturating_add(PAD).saturating_add(cells(markup::line_columns(line)));
+        let end = x.saturating_add(PAD).saturating_add(cells(markup::spans_columns(&line.spans)));
         if row == 0 {
             ends.0 = end;
         }
@@ -119,7 +119,7 @@ pub(super) fn draw_thread(f: &mut Frame, app: &mut App, area: Rect) {
     // the text never reaches, so no text is covered.
     if let Some((_, above, below)) = t.tall() {
         let mark = |f: &mut Frame, y: u16, end: u16, text: &str, arrow: &str| {
-            let w = cells(text.width()).saturating_add(2);
+            let w = cells(markup::columns(text)).saturating_add(2);
             let x = area.right().saturating_sub(w + 1);
             let (x, w, text) = if x > end { (x, w, format!(" {text} ")) } else { (area.right().saturating_sub(1), 1, arrow.to_string()) };
             put(f, x, y, w, Line::from(Span::styled(text, Style::new().fg(th.text_dim).bg(th.surface_high))));
@@ -238,7 +238,7 @@ fn estimate(t: &ThreadView, estimates: &mut HashMap<(u64, u16, bool), usize>, e:
         n += rows(markup::columns(s));
     }
     if !p.body.is_empty() {
-        n += 1 + p.body.iter().map(|l| rows(markup::line_columns(l))).sum::<usize>();
+        n += 1 + p.body.iter().map(|l| rows(markup::spans_columns(&l.spans))).sum::<usize>();
     }
     if t.backlinks.get(entry.post).is_some_and(|b| !b.is_empty()) {
         n += 2;
