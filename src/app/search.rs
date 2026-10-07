@@ -5,7 +5,7 @@ use ratatui::crossterm::event::{KeyCode, KeyEvent};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use super::{App, FilteredList, Marks, View};
+use super::{App, FilteredList, Marks, ThreadView, View};
 use crate::store::ThreadKey;
 use crate::backend::SearchPage;
 use crate::config::SiteKind;
@@ -33,8 +33,8 @@ pub struct SavedSearch {
     /// The saved copy each hit is in (beside `hits`).
     pub keys: Vec<ThreadKey>,
     /// Each copy's hits, in turn: how many, and the posts that decide whether they're hidden
-    /// (`with_ancestry`).
-    pub copies: Vec<(Vec<Post>, usize)>,
+    /// (`with_ancestry`), ready to mark.
+    pub copies: Vec<(ThreadView, usize)>,
     /// Copies read so far, of how many; and those that couldn't be read.
     pub done: usize,
     pub of: usize,
@@ -181,7 +181,7 @@ impl App {
         match found {
             SavedFound::Copy(key, hits, context) => {
                 saved.done += 1;
-                saved.copies.push((context, hits.len()));
+                saved.copies.push((ThreadView::new(key.board.clone(), key.no, context), hits.len()));
                 for p in hits {
                     saved.keys.push(key.clone());
                     s.hits.push((key.no, p));

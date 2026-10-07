@@ -3524,21 +3524,26 @@ fn searching_saved_threads_leaves_out_replies_to_hidden_posts() {
     let mut app = saving_app(dir.path(), 1000);
     app.rehide(|a| a.hiding.set_recursive(true));
     let key = ThreadKey { site: "a".into(), board: "x".into(), no: 1 };
-    let mut posts = posts_saying(&[(1, "a thread"), (2, "buy crypto"), (3, "crypto, rust says")]);
+    let mut posts = posts_saying(&[(1, "a thread"), (2, "buy crypto"), (3, "crypto, rust says"), (4, "rust, by that guy")]);
     posts[2].quotes = vec![2];
+    posts[3].id = Some("Ab3d".into());
     app.store.keep_thread(&key, "one", "u", &posts, 900);
+    let that_guy = crate::filter::FilterConfig::new("^Ab3d$".into(), &[crate::filter::Field::Id]);
+    app.rehide(|a| a.hiding.set_filters(crate::filter::Filters::new(&[that_guy]).unwrap()));
     app.flush_writes();
     app.rehide(|a| a.store.toggle_hidden("a", "x", 2));
     // In the thread, No.3 is hidden as a reply to No.2.
     app.tab.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
     app.set_thread(posts);
     assert!(matches!(app.tab.thread.as_ref().unwrap().marks.why_hidden(2), Some(&Hidden::Reply(2))));
-    // So the search of the saved threads leaves it out too.
+    // So the search of the saved threads leaves it out too, and No.4, which a filter on its
+    // poster's ID hides.
     app.goto_str("saved rust");
     settle_until(&mut app, |a| a.tab.search.as_ref().unwrap().saved.as_ref().unwrap().finished);
     let s = app.tab.search.as_ref().unwrap();
-    assert_eq!(s.hits.len(), 1);
-    assert!(app.visible_hits().is_empty(), "No.3 shown though it's hidden in its thread");
+    assert_eq!(s.hits.len(), 2);
+    let shown: Vec<u64> = app.visible_hits().iter().map(|&k| s.hits[k].1.no).collect();
+    assert!(shown.is_empty(), "{shown:?} shown though hidden in their thread");
 }
 
 #[test]

@@ -47,7 +47,7 @@ mod loading;
 mod thread_view;
 mod goto;
 mod hiding;
-pub use hiding::{Changed, Hiding, Marks, with_ancestry};
+pub use hiding::{Changed, Hiding, Marks, ancestry, with_ancestry};
 pub use goto::start_error;
 mod home;
 mod links;

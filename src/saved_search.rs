@@ -27,6 +27,11 @@ struct PostText {
     files: Vec<Attachment>,
     board: Option<String>,
     quotes: Vec<u64>,
+    // For filters on them.
+    id: Option<String>,
+    flag: Option<crate::model::Flag>,
+    trip: Option<String>,
+    capcode: Option<String>,
 }
 
 fn is_spoiler(r: &Run) -> bool {
@@ -58,12 +63,14 @@ pub fn matching(bytes: &[u8], needle: &str) -> anyhow::Result<(Vec<Post>, Vec<Po
     }
     let post = |p: PostText| {
         let body = p.body.into_iter().map(|l| ratatui::text::Line::from(l.runs.into_iter().map(ratatui::text::Span::from).collect::<Vec<_>>())).collect();
-        Post { no: p.no, name: p.name, subject: p.subject, time: p.time, body, files: p.files, board: p.board, quotes: p.quotes, ..Default::default() }
+        let (files, board, quotes) = (p.files, p.board, p.quotes);
+        Post { no: p.no, name: p.name, subject: p.subject, time: p.time, body, files, board, quotes, id: p.id, flag: p.flag, trip: p.trip, capcode: p.capcode, ..Default::default() }
     };
-    let mut posts: Vec<Post> = copy.posts.into_iter().map(post).collect();
-    let context = crate::app::with_ancestry(&posts, |p| found.contains(&p.no));
-    posts.retain(|p| found.contains(&p.no));
-    Ok((posts, context))
+    // Only the posts it takes are made into posts, not the whole thread.
+    let taken = crate::app::ancestry(&copy.posts, |p| (p.no, &p.quotes), |p| found.contains(&p.no));
+    let context: Vec<Post> = copy.posts.into_iter().zip(taken).filter(|(_, t)| *t).map(|(p, _)| post(p)).collect();
+    let hits = context.iter().filter(|p| found.contains(&p.no)).cloned().collect();
+    Ok((hits, context))
 }
 
 #[cfg(test)]

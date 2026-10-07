@@ -138,22 +138,28 @@ impl Hiding {
     }
 }
 
-/// The OP, the posts `keep` picks, and the posts they quote, on up: all that decides
-/// whether those are hidden. Nothing when `keep` picks none.
-pub fn with_ancestry(posts: &[Post], keep: impl Fn(&Post) -> bool) -> Vec<Post> {
-    let index: HashMap<u64, usize> = posts.iter().enumerate().map(|(i, p)| (p.no, i)).collect();
+/// Which of `posts` are the OP, the ones `keep` picks, and the posts they quote, on up: all
+/// that decides whether those are hidden. `links`: a post's number and what it quotes.
+pub fn ancestry<P>(posts: &[P], links: impl Fn(&P) -> (u64, &[u64]), keep: impl Fn(&P) -> bool) -> Vec<bool> {
+    let mut taken = vec![false; posts.len()];
     let mut stack: Vec<usize> = posts.iter().enumerate().filter(|(_, p)| keep(p)).map(|(i, _)| i).collect();
     if stack.is_empty() {
-        return Vec::new();
+        return taken;
     }
+    let index: HashMap<u64, usize> = posts.iter().enumerate().map(|(i, p)| (links(p).0, i)).collect();
     stack.push(0);
-    let mut taken = vec![false; posts.len()];
     while let Some(i) = stack.pop() {
         if taken.get_mut(i).is_none_or(|t| std::mem::replace(t, true)) {
             continue;
         }
-        stack.extend(posts.get(i).into_iter().flat_map(|p| &p.quotes).filter_map(|q| index.get(q).copied()));
+        stack.extend(posts.get(i).into_iter().flat_map(|p| links(p).1).filter_map(|q| index.get(q).copied()));
     }
+    taken
+}
+
+/// The posts `ancestry` takes. Nothing when `keep` picks none.
+pub fn with_ancestry(posts: &[Post], keep: impl Fn(&Post) -> bool) -> Vec<Post> {
+    let taken = ancestry(posts, |p| (p.no, &p.quotes), keep);
     posts.iter().zip(taken).filter(|(_, t)| *t).map(|(p, _)| p.clone()).collect()
 }
 
@@ -198,26 +204,24 @@ impl App {
     pub(super) fn mark_hits(&mut self) {
         let Some(mut s) = self.tab.search.take() else { return };
         let from = s.marks.marks.len();
-        let marks = |site: &str, board: &str, thread: u64, posts: Vec<Post>| {
-            let t = ThreadView::new(board.to_string(), thread, posts);
-            let marks = self.spread_marks(site, &t, |_, p| p.no == thread);
-            move |no: u64| t.index.get(&no).and_then(|&i| marks.get(i)).cloned().unwrap_or_default()
-        };
+        let marks = |site: &str, t: &ThreadView| self.spread_marks(site, t, |_, p| p.no == t.no);
+        let mark = |t: &ThreadView, marks: &[Mark], no: u64| t.index.get(&no).and_then(|&i| marks.get(i)).cloned().unwrap_or_default();
         let mut found = Vec::new();
         match &s.saved {
             None => {
                 let site = &self.current_site().cfg.name;
                 for (thread, p) in s.hits.iter().skip(from) {
-                    found.push(marks(site, p.board.as_deref().unwrap_or(&s.board), *thread, vec![p.clone()])(p.no));
+                    let t = ThreadView::new(p.board.clone().unwrap_or_else(|| s.board.clone()), *thread, vec![p.clone()]);
+                    found.push(mark(&t, &marks(site, &t), p.no));
                 }
             }
             Some(saved) => {
                 let mut first = 0;
-                for (posts, n) in &saved.copies {
+                for (t, n) in &saved.copies {
                     let end = first + n;
                     if let Some(key) = saved.keys.get(first).filter(|_| end > from) {
-                        let mark = marks(&key.site, &key.board, key.no, posts.clone());
-                        found.extend(s.hits.iter().take(end).skip(from.max(first)).map(|(_, p)| mark(p.no)));
+                        let marks = marks(&key.site, t);
+                        found.extend(s.hits.iter().take(end).skip(from.max(first)).map(|(_, p)| mark(t, &marks, p.no)));
                     }
                     first = end;
                 }
