@@ -515,13 +515,22 @@ pub fn download_to(url: &str, path: &std::path::Path) -> Result<()> {
     throttle(url, Priority::Low)?;
     let mut resp = AGENT.get(url).call().with_context(|| format!("GET {url}"))?;
     check_status(resp.status().as_u16(), url)?;
+    let body = resp.body_mut().with_config().limit(1 << 30).reader();
+    write_through_temp(path, body).with_context(|| format!("downloading {url}"))
+}
+
+/// Write what `body` reads into `path` through a temp file beside it, renamed into place.
+/// Each write has a temp file of its own, so two downloads of one file at once (saving a
+/// file and then the whole thread, say) don't write into one, or remove the other's.
+fn write_through_temp(path: &std::path::Path, mut body: impl std::io::Read) -> Result<()> {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let mut tmp = path.as_os_str().to_owned();
-    tmp.push(".part");
+    tmp.push(format!(".{}-{n}.part", std::process::id()));
     let tmp = std::path::PathBuf::from(tmp);
     let result = (|| -> Result<()> {
         let mut file = std::fs::File::create(&tmp).with_context(|| format!("creating {}", tmp.display()))?;
-        let mut body = resp.body_mut().with_config().limit(1 << 30).reader();
-        std::io::copy(&mut body, &mut file).with_context(|| format!("downloading {url}"))?;
+        std::io::copy(&mut body, &mut file)?;
         std::fs::rename(&tmp, path).with_context(|| format!("renaming to {}", path.display()))
     })();
     if result.is_err() {
@@ -742,6 +751,26 @@ mod tests {
         })
         .unwrap();
         assert_eq!(v["n"].as_u64(), Some(3));
+    }
+
+    #[test]
+    fn overlapping_downloads_of_a_file_both_land() {
+        /// Reads `data`, but first lets another download of the same file run start to end.
+        struct Overlapped<'a>(&'a std::path::Path, Option<&'static [u8]>, &'static [u8]);
+        impl std::io::Read for Overlapped<'_> {
+            fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+                if let Some(other) = self.1.take() {
+                    write_through_temp(self.0, other).unwrap();
+                }
+                std::io::Read::read(&mut self.2, buf)
+            }
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("1.png");
+        write_through_temp(&path, Overlapped(&path, Some(b"first"), b"second")).unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"second");
+        // No temp file is left behind.
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
     }
 
     #[test]
