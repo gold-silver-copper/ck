@@ -227,6 +227,8 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
     // Debugging: each frame as ck means it to look, to compare with what's on screen.
     let dump = std::env::var_os("CK_FRAME_DUMP").map(std::path::PathBuf::from);
     let mut screen = None;
+    // The last frame drawn, to see what it had over images.
+    let mut last: Option<ratatui::buffer::Buffer> = None;
     while !app.quit {
         // Another screen: paint it whole, so nothing of the last one can stay behind (an
         // image, or text a terminal placed differently than measured). Not with `clear()`:
@@ -237,10 +239,17 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
             if screen.is_some() {
                 let size = terminal.size()?;
                 terminal.resize(ratatui::layout::Rect::new(0, 0, size.width, size.height))?;
+                last = None;
             }
             screen = now;
         }
-        let frame = terminal.draw(|f| ck::draw(f, app))?;
+        let frame = terminal.draw(|f| {
+            ck::draw(f, app);
+            if let Some(last) = &last {
+                resend_uncovered_images(last, f.buffer_mut());
+            }
+        })?;
+        last = Some(frame.buffer.clone());
         app.show_title();
         ck::input_log::note(|| "frame".into());
         if let Some(path) = &dump {
@@ -253,6 +262,37 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// An image drawn as one escape sequence (sixel, iTerm2) is sent in its first cell, and the
+/// rest of its cells are left to the terminal ("skip" cells, which ratatui never writes);
+/// it's sent again only when that first cell changes. So text drawn over part of one (a
+/// popup) and then taken away would stay on the image. When a cell of an image held
+/// something else in the last frame, the image's first cell is changed (its color, which
+/// the image doesn't use) so the image is sent again over it.
+fn resend_uncovered_images(last: &ratatui::buffer::Buffer, buf: &mut ratatui::buffer::Buffer) {
+    use ratatui::buffer::{Buffer, CellDiffOption};
+    use ratatui::style::Color;
+    if last.area != buf.area {
+        return;
+    }
+    let area = buf.area;
+    let skip = |b: &Buffer, x: u16, y: u16| b.cell((x, y)).is_some_and(|c| c.diff_option == CellDiffOption::Skip);
+    for y in area.top()..area.bottom() {
+        for x in area.left()..area.right() {
+            // An image's first cell, unchanged (else it's sent anyway).
+            let first = buf.cell((x, y)).filter(|c| c.diff_option != CellDiffOption::Skip && c.symbol().starts_with('\x1b'));
+            if first.is_none() || first != last.cell((x, y)) {
+                continue;
+            }
+            let right = (x + 1..area.right()).take_while(|&x| skip(buf, x, y)).count() as u16;
+            let down = (y + 1..area.bottom()).take_while(|&y| skip(buf, x, y)).count() as u16;
+            let uncovered = (y..=y + down).any(|y| (x..=x + right).any(|x| skip(buf, x, y) && !skip(last, x, y)));
+            if uncovered && let Some(c) = buf.cell_mut((x, y)) {
+                c.fg = if c.fg == Color::Reset { Color::Black } else { Color::Reset };
+            }
+        }
+    }
 }
 
 /// A frame's text, row by row (a wide character once, as a terminal shows it, measured as
@@ -278,6 +318,45 @@ fn frame_text(buf: &ratatui::buffer::Buffer) -> String {
 mod tests {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use ratatui::buffer::Buffer;
+    use ratatui::layout::Rect;
+    use ratatui::widgets::{Clear, Widget};
+
+    #[test]
+    fn an_image_a_closed_popup_covered_is_sent_again() {
+        let area = Rect::new(0, 0, 20, 10);
+        let image = |buf: &mut Buffer| {
+            let mut picker = ratatui_image::picker::Picker::halfblocks();
+            picker.set_protocol_type(ratatui_image::picker::ProtocolType::Sixel);
+            let ratatui_image::FontSize { width: w, height: h } = picker.font_size();
+            let img = image::DynamicImage::new_rgb8(6 * u32::from(w), 4 * u32::from(h));
+            let p = picker.new_protocol(img, ratatui::layout::Size::new(6, 4), ratatui_image::Resize::Fit(None)).unwrap();
+            ratatui_image::Image::new(&p).render(Rect::new(2, 2, 6, 4), buf);
+        };
+        // A popup over the lower right of the image, not its first cell.
+        let mut before = Buffer::empty(area);
+        image(&mut before);
+        let popup = Rect::new(5, 4, 10, 3);
+        Clear.render(popup, &mut before);
+        before.set_string(5, 4, "a popup", ratatui::style::Style::new());
+        // Closed: ratatui alone writes nothing over the image, and doesn't send it again,
+        // so the popup's text would stay on it.
+        let mut after = Buffer::empty(area);
+        image(&mut after);
+        let on_image = |b: &Buffer, a: &Buffer| -> Vec<(u16, u16)> {
+            b.diff(a).iter().map(|&(x, y, _)| (x, y)).filter(|&(x, y)| (2..8).contains(&x) && (2..6).contains(&y)).collect()
+        };
+        assert_eq!(on_image(&before, &after), []);
+        super::resend_uncovered_images(&before, &mut after);
+        assert_eq!(on_image(&before, &after), [(2, 2)]);
+        // An image nothing covered isn't sent again.
+        let mut again = Buffer::empty(area);
+        image(&mut again);
+        let mut unchanged = again.clone();
+        super::resend_uncovered_images(&again, &mut unchanged);
+        assert_eq!(again, unchanged);
+    }
 
     #[test]
     fn only_a_main_thread_panic_restores_the_terminal() {
