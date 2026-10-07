@@ -75,7 +75,7 @@ pub use thread_view::{CONVERSATION_MAX, conversation_of};
 pub use sites::{Adding, MySites, origin as site_origin};
 #[cfg(test)]
 pub use sites::BoardsUpdate;
-pub use tabs::{MAX_TABS, Offline, Tab, TabPopup, ThreadCopy};
+pub use tabs::{MAX_TABS, Offline, Tab, TabPopup, ThreadCopy, Trail};
 pub use settings::{SettingsPopup, key_rows, rows as setting_rows, settings, tilde};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1432,9 +1432,15 @@ impl App {
 
     /// Remember the thread shown, on `board`, and its selected post, for `u` to come back to.
     fn leave_trail(&mut self, board: Board) {
-        if let Some(t) = &self.tab.thread {
-            self.tab.trail.push((self.tab.site, board, t.no, t.current().map_or(t.no, |p| p.no)));
+        if let Some(here) = self.trail_here(board) {
+            self.tab.trail.push(here);
         }
+    }
+
+    /// The thread shown, on `board`, and its selected post, as `u` comes back to it.
+    fn trail_here(&self, board: Board) -> Option<Trail> {
+        let t = self.tab.thread.as_ref()?;
+        Some((self.tab.site, board, t.no, t.current().map_or(t.no, |p| p.no)))
     }
 
     /// Go where a quote link leads: a thread (remembered for `u`), a board, or a post whose
@@ -1461,18 +1467,22 @@ impl App {
                 // Ask the engine which thread the post is in (only some can).
                 let uri = target.uri.clone();
                 let label = format!("Looking up post {post}");
-                self.spawn(label, move |b, _, _| b.find_thread(&uri, post), move |app, r| app.thread_found(target, post, r));
+                let (site, trail) = (self.tab.site, self.trail_here(board).filter(|_| self.tab.view == View::Thread));
+                self.spawn(label, move |b, _, _| b.find_thread(&uri, post), move |app, r| app.thread_found(site, target, post, trail, r));
             }
         }
     }
 
-    /// The engine said which thread on `board` the quoted `post` is in: open it there.
-    fn thread_found(&mut self, board: Board, post: u64, res: Result<Option<u64>>) {
+    /// The engine said which thread on `site`'s `board` the quoted `post` is in: open it
+    /// there (only now moving to that site), leaving `trail`, where the lookup was asked
+    /// from, for `u`.
+    fn thread_found(&mut self, site: usize, board: Board, post: u64, trail: Option<Trail>, res: Result<Option<u64>>) {
         self.tab.loading = None;
         match res {
             Ok(Some(no)) => {
-                self.leave_trail(self.tab.board.clone().unwrap_or_else(|| board.clone()));
+                self.tab.trail.extend(trail);
                 let in_settings = self.tab.view == View::Settings;
+                self.switch_site(site);
                 self.open_thread_at(board, no, Some(post));
                 // Found while the settings were open: the thread is behind them.
                 if in_settings {

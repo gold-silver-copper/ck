@@ -268,6 +268,40 @@ fn goto_opens_places_and_u_comes_back() {
 }
 
 #[test]
+fn a_post_on_another_site_moves_the_tab_once_found() {
+    let host = "lookup.invalid";
+    crate::http::serve_test_host(
+        host,
+        Some(Arc::new(|url: &str, _: Option<&str>| {
+            let (status, body) = if url.contains("num=77") { (200, r#"{"thread_num":"3"}"#) } else { (404, "") };
+            http::Raw { status, last_modified: None, body: body.into() }
+        })),
+    );
+    let mut app = app_with(&format!(
+        "[[site]]\nname = \"a\"\nkind = \"vichan\"\nurl = \"http://127.0.0.1:3\"\nboards = [\"x\"]\n\
+         [[site]]\nname = \"f\"\nkind = \"foolfuuka\"\nurl = \"http://{host}\"\nboards = [\"b\"]"
+    ));
+    app.tab.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
+    app.tab.thread = Some(ThreadView::new("x".into(), 1, vec![Post { no: 1, ..Default::default() }, Post { no: 2, ..Default::default() }]));
+    app.tab.thread.as_mut().unwrap().selected = 1;
+    app.tab.view = View::Thread;
+    // Not found: the thread shown stays on its own site, and nothing is left for `u`.
+    app.goto_str(&format!("http://{host}/b/post/99/"));
+    assert_eq!(app.tab.site, 0);
+    settle_until(&mut app, |a| a.tab.loading.is_none());
+    assert!(app.status.as_ref().unwrap().error);
+    assert_eq!((app.tab.site, app.tab.thread.as_ref().unwrap().no, app.tab.trail.len()), (0, 1, 0));
+    // Found: the tab moves to its thread there, and `u` comes back to where it was asked.
+    app.goto_str(&format!("http://{host}/b/post/77/"));
+    assert_eq!(app.tab.site, 0);
+    settle_until(&mut app, |a| a.tab.pending_thread == Some(3));
+    assert_eq!((app.tab.site, app.tab.board.as_ref().unwrap().uri.as_str(), app.tab.pending_post), (1, "b", Some(77)));
+    let trail: Vec<_> = app.tab.trail.iter().map(|(site, b, no, post)| (*site, b.uri.as_str(), *no, *post)).collect();
+    assert_eq!(trail, [(0, "x", 1, 2)]);
+    crate::http::serve_test_host(host, None);
+}
+
+#[test]
 fn goto_input_completes_and_takes_pastes() {
     let mut app = local_app();
     app.act(Action::Goto);
@@ -944,7 +978,7 @@ fn tabs_keep_their_own_place_and_responses() {
     // A post's thread found while the settings are open opens behind them.
     app.goto_str("a/x/1#77");
     app.act(Action::Settings);
-    app.handle(answer(app.tab.req.unwrap(), |a, (b, post, r)| a.thread_found(b, post, r), (Board { uri: "x".into(), title: String::new(), nsfw: None }, 77, Ok(Some(3)))));
+    app.handle(answer(app.tab.req.unwrap(), |a, (b, post, r)| a.thread_found(0, b, post, None, r), (Board { uri: "x".into(), title: String::new(), nsfw: None }, 77, Ok(Some(3)))));
     assert_eq!((app.tab.view, app.tab.settings_back, app.tab.pending_thread.unwrap()), (View::Settings, Some(View::Thread), 3));
     // Tab chips don't switch tabs under a settings popup (it isn't the tab's).
     app.tabs.push(Tab::new(0, Instant::now()));
