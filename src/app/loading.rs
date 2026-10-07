@@ -135,10 +135,13 @@ impl App {
         }
     }
 
-    /// The catalog's pages loaded so far; more are coming.
+    /// The catalog's pages loaded so far; more are coming. The selected thread, if it isn't
+    /// among them yet, is selected once it comes (not the one the selection is moved to).
     pub(super) fn catalog_partial(&mut self, posts: Vec<Post>) {
         self.tab.catalog_cached = None;
+        let keep = self.tab.pending_catalog.or_else(|| self.selected_catalog_no());
         self.show_catalog(posts);
+        self.tab.pending_catalog = keep.filter(|&no| self.catalog_row(no).is_none());
     }
 
     pub(super) fn catalog_arrived(&mut self, res: Result<Vec<Post>>) {
@@ -162,6 +165,8 @@ impl App {
             }
             Err(e) => self.load_failed(&http::plain(&e)),
         }
+        // A thread to select that never came isn't waited for by the next load.
+        self.tab.pending_catalog = None;
     }
 
     /// The last copy kept of the thread being fetched, fetched at `fetched`: shown only
@@ -294,9 +299,15 @@ impl App {
         self.visible_catalog().iter().position(|&k| self.tab.catalog.get(k).is_some_and(|p| p.no == no))
     }
 
-    /// Show catalog threads, keeping the selected thread selected (by number).
+    /// The selected catalog thread's number, when the catalog is shown.
+    fn selected_catalog_no(&self) -> Option<u64> {
+        self.selected_index().filter(|_| self.tab.view == View::Catalog).and_then(|i| self.tab.catalog.get(i)).map(|p| p.no)
+    }
+
+    /// Show catalog threads, keeping the selected thread selected (by number), or the one
+    /// waiting to be.
     pub(super) fn show_catalog(&mut self, posts: Vec<Post>) {
-        let selected = self.selected_index().filter(|_| self.tab.view == View::Catalog).and_then(|i| self.tab.catalog.get(i)).map(|p| p.no);
+        let selected = self.tab.pending_catalog.or_else(|| self.selected_catalog_no());
         self.tab.catalog = posts;
         self.remark_catalog();
         if let Some(i) = selected.and_then(|no| self.catalog_row(no)) {

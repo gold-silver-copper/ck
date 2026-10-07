@@ -1683,6 +1683,7 @@ impl App {
         self.tab.catalog.clear();
         self.tab.catalog_cached = None;
         self.tab.catalog_list = FilteredList::top();
+        self.tab.pending_catalog = None;
         self.tab.view = View::Catalog;
         self.load_catalog();
     }

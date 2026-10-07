@@ -157,6 +157,30 @@ fn partial_pages_show_while_loading_continues() {
 }
 
 #[test]
+fn partial_catalog_pages_keep_the_selected_thread() {
+    let mut app = test_app();
+    let upto = |n: u64| (1..=n).map(|no| Post { no, ..Default::default() }).collect::<Vec<_>>();
+    app.tab.view = View::Catalog;
+    app.tab.catalog = upto(30);
+    app.tab.catalog_list.state.select(Some(24));
+    // A refresh's first page has 10 threads, the next 20: thread 25 isn't there yet, and
+    // the one the selection is moved to isn't kept instead.
+    app.tab.req = Some(8);
+    app.tab.loading = Some("Loading /a/".into());
+    app.handle(answer(8, App::catalog_partial, upto(10)));
+    app.handle(answer(8, App::catalog_partial, upto(20)));
+    app.handle(answer(8, App::catalog_arrived, Ok(upto(30))));
+    assert_eq!(app.tab.catalog_list.state.selected(), Some(24));
+    // Once it's there, moving on from it is kept.
+    app.tab.req = Some(9);
+    app.handle(answer(9, App::catalog_partial, upto(28)));
+    assert_eq!(app.tab.catalog_list.state.selected(), Some(24));
+    app.tab.catalog_list.state.select(Some(2));
+    app.handle(answer(9, App::catalog_arrived, Ok(upto(30))));
+    assert_eq!(app.tab.catalog_list.state.selected(), Some(2));
+}
+
+#[test]
 fn overboard_threads_open_on_their_board_and_back_returns() {
     // A local site that refuses connections: nothing leaves the machine.
     let mut app = app_with("[[site]]\nname = \"t\"\nkind = \"vichan\"\nurl = \"http://127.0.0.1:9\"\nboards = [\"ob\"]");
