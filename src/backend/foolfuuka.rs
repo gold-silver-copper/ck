@@ -279,5 +279,11 @@ mod tests {
         // Backlinks to the archive's own pages are quote links, not web links.
         assert!(posts.iter().flat_map(|p| &p.urls).all(|u| !u.contains("desuarchive.org/g/thread/109959723")));
         assert_eq!(crate::http::as_u64(&fixture("foolfuuka_post.json")["thread_num"]), Some(109959723));
+        // Lines are `<br />\n`: the newline doesn't start the next line with a space, and
+        // a blank line is empty.
+        let p = posts.iter().find(|p| p.no == 109959765).unwrap();
+        let lines: Vec<String> = p.body.iter().map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect()).collect();
+        assert_eq!(lines[1..4], ["yeah it depends on how much tabs you keep open. ", "", "But beyond that, most of us have 16:9 screens or wider. for some productivity tasks, it is useful to have menus on the side."]);
+        assert_eq!(lines.last().unwrap(), "I use both");
     }
 }

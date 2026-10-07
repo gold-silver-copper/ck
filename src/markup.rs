@@ -93,7 +93,13 @@ pub fn parse_html(html: &str, flavor: Flavor) -> Parsed {
             } else {
                 let text = text.replace('\r', "");
                 let newlines = matches!(flavor, Flavor::Lynxchan | Flavor::Jschan);
-                let text = if newlines { text } else { text.replace('\n', " ") };
+                // Elsewhere a newline is a space, but none at the start of a line, where a
+                // browser shows nothing (FoolFuuka writes `<br />\n`).
+                let text = match (newlines, b.cur.is_empty()) {
+                    (true, _) => text,
+                    (false, true) => text.trim_start_matches('\n').replace('\n', " "),
+                    (false, false) => text.replace('\n', " "),
+                };
                 let href = stack.iter().rev().find_map(|o| o.href.as_deref());
                 for (i, part) in text.split('\n').enumerate() {
                     if i > 0 {
