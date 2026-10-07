@@ -16,6 +16,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 
 use super::*;
+use ratatui::crossterm::event::MouseEventKind;
 use crate::backend::{Partial, SearchPage, ThreadPages};
 use crate::fuzz::{self, Rng};
 use crate::markup;
@@ -698,25 +699,30 @@ impl World {
     fn apply(&mut self, act: &Act) {
         let (w, h) = self.size;
         let app = &mut self.app;
+        // Input goes through `handle`, as the terminal's does, so a click after a key in one
+        // batch finds the frame stale as it would.
+        let input = |app: &mut App, ev| app.handle(Msg::Input(ev));
         match act {
-            Act::Key(k) => app.on_key(*k),
+            Act::Key(k) => input(app, Event::Key(*k)),
             Act::Mouse(kind, x, y, double) => {
                 let ev = MouseEvent { kind: *kind, column: x % w, row: y % h, modifiers: KeyModifiers::NONE };
-                let now = app.clock.instant();
-                app.on_mouse(ev, now);
+                input(app, Event::Mouse(ev));
                 if *double {
-                    app.on_mouse(ev, now);
+                    input(app, Event::Mouse(ev));
                 }
             }
-            Act::Paste(t) => app.paste(t),
+            Act::Paste(t) => input(app, Event::Paste(t.clone())),
             Act::Goto(t) => {
-                app.on_key(KeyEvent::from(KeyCode::Char(':')));
+                input(app, Event::Key(KeyEvent::from(KeyCode::Char(':'))));
                 if app.goto_text().is_some() {
-                    app.paste(t);
-                    app.on_key(KeyEvent::from(KeyCode::Enter));
+                    input(app, Event::Paste(t.clone()));
+                    input(app, Event::Key(KeyEvent::from(KeyCode::Enter)));
                 }
             }
-            Act::Resize(nw, nh) => self.size = (*nw, *nh),
+            Act::Resize(nw, nh) => {
+                self.size = (*nw, *nh);
+                input(app, Event::Resize(*nw, *nh));
+            }
             Act::Answer(k) => {
                 let waiting = self.gate.waiting();
                 if let Some((ticket, _)) = waiting.get(k % waiting.len().max(1)) {

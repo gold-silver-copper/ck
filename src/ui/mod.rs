@@ -145,13 +145,12 @@ fn empty(f: &mut Frame, area: Rect, msg: &str) {
 // ----- the frame -----
 
 pub fn draw(f: &mut Frame, app: &mut App) {
+    app.begin_frame();
     let t = theme();
     let all = f.area();
     // A saved copy is read offline: its images only come from disk.
     app.images.offline = app.tab.view == View::Thread && app.tab.saved().is_some();
     f.buffer_mut().set_style(all, Style::new().fg(t.text).bg(t.background));
-    // Only chips drawn this frame can be clicked: none under the viewer.
-    app.tab_chips.clear();
     if app.tab.viewer().is_some() {
         draw_viewer(f, app);
     } else {
@@ -235,7 +234,7 @@ fn draw_tab_row(f: &mut Frame, app: &mut App, area: Rect) {
         };
         let r = Rect::new(x, area.y, w, 1);
         put(f, x, area.y, w, Line::styled(text, style));
-        app.tab_chips.push((r, i));
+        app.drawn.tabs.push((r, i));
         x += w + 1;
     }
 }
@@ -798,6 +797,13 @@ fn spread(mut left: Vec<Span<'static>>, right: Vec<Span<'static>>, width: usize)
         left.extend(right);
     }
     Line::from(left)
+}
+
+/// The tab chips under a panel that stays open over them (a tall preview reaches the tab
+/// row) can't be clicked.
+fn cover_tabs(tabs: &mut Vec<(Rect, usize)>, inner: Rect) {
+    let over = inner.outer(Margin::new(2, 2));
+    tabs.retain(|(r, _)| !r.intersects(over));
 }
 
 /// A raised panel centered in the frame, with a title bar; returns the area inside.

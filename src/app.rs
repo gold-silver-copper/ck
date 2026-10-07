@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use ratatui::crossterm::event::{
-    self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+    self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent,
 };
 use ratatui::layout::Rect;
 use ratatui::text::Line;
@@ -208,11 +208,44 @@ impl Clock {
 pub enum Hit {
     /// A list: its area, first visible item, and rows per item.
     List { area: Rect, offset: usize, item_height: u16 },
-    Thread { area: Rect },
+    /// The thread: its area, and the line drawn at its top.
+    Thread { area: Rect, scroll: usize },
     /// The catalog grid: its area, first visible item, columns, and cell size.
     Grid { area: Rect, offset: usize, cols: usize, cell: (u16, u16) },
     /// The settings screen, laid out as `settings::rows()` from `offset`.
     Settings { area: Rect, offset: usize },
+}
+
+impl Hit {
+    /// The list row or grid cell drawn at a screen position (a thread's posts aren't rows:
+    /// see `thread_part_at`).
+    pub(super) fn row_at(self, col: u16, row: u16) -> Option<usize> {
+        let pos = ratatui::layout::Position::new(col, row);
+        match self {
+            Hit::List { area, offset, item_height } if area.contains(pos) => {
+                Some(offset + ((row - area.y) / item_height.max(1)) as usize)
+            }
+            Hit::Settings { area, offset } if area.contains(pos) => settings::rows().get(offset + (row - area.y) as usize)?.ok(),
+            Hit::Grid { area, offset, cols, cell } if area.contains(pos) => {
+                let c = ((col - area.x) / cell.0) as usize;
+                (c < cols).then(|| offset + ((row - area.y) / cell.1) as usize * cols + c)
+            }
+            _ => None,
+        }
+    }
+}
+
+/// What the last frame drew where, for the mouse. Only `ui::draw` makes one, whole, through
+/// `App::begin_frame`, stamped with what that frame showed; a click resolves against
+/// nothing else, and nothing once the stamp is stale.
+#[derive(Debug, Default)]
+pub struct Drawn {
+    /// The list, grid or thread; the rows of the popup on top (menu, links, image search);
+    /// each tab's chip; and what the frame showed (`None` once that may have changed).
+    pub body: Option<Hit>,
+    pub popup: Option<Hit>,
+    pub tabs: Vec<(Rect, usize)>,
+    shown: Option<input::Shown>,
 }
 
 /// New posts in a watched thread, for a notification.
@@ -445,10 +478,8 @@ pub struct App {
     pub clock: Clock,
     pub downloads: Downloads,
     pub(crate) download_dir: Option<String>,
-    /// Set by the UI every frame.
-    pub hit: Option<Hit>,
-    /// Where each tab's chip was drawn, for clicks.
-    pub tab_chips: Vec<(Rect, usize)>,
+    /// Where the last frame drew what can be clicked.
+    pub drawn: Drawn,
     /// Last left click: when, and the list index or thread post it hit.
     last_click: Option<(Instant, usize)>,
     pub tick: usize,
@@ -583,8 +614,7 @@ impl App {
             clock: Clock::default(),
             downloads: Downloads::default(),
             download_dir: cfg.download_dir.clone(),
-            hit: None,
-            tab_chips: Vec::new(),
+            drawn: Drawn::default(),
             last_click: None,
             tick: 0,
             quit: false,
@@ -686,6 +716,19 @@ impl App {
     /// What's on screen, broadly: when it changes, the screen is painted whole.
     pub fn screen(&self) -> (View, usize, bool, bool) {
         (self.tab.view, self.active, self.tab.viewer().is_some(), self.tab.gallery.is_some())
+    }
+
+    /// A new frame's `Drawn`, stamped with what it shows: the only place one is made.
+    pub(crate) fn begin_frame(&mut self) -> &mut Drawn {
+        self.drawn = Drawn { shown: Some(self.shown()), ..Drawn::default() };
+        &mut self.drawn
+    }
+
+    /// What the last frame drew, while it still shows this tab and view (a popup closed since
+    /// doesn't move what was under it: the menu's `hints` reads it).
+    pub(super) fn drawn(&self) -> Option<&Drawn> {
+        let (screen, tabs, _) = self.drawn.shown?;
+        ((screen, tabs) == (self.screen(), self.tabs.len())).then_some(&self.drawn)
     }
 
     /// Keep the current list's selection on a row that exists.
@@ -936,32 +979,30 @@ impl App {
 
     fn handle(&mut self, msg: Msg) {
         match msg {
-            Msg::Wake => {}
+            // A loaded image is drawn in the space it already had.
+            Msg::Wake => return,
             Msg::Input(ev) => {
                 let acted = !matches!(ev, Event::Key(k) if k.kind != KeyEventKind::Press);
                 crate::input_log::note(|| format!("handle  {ev:?}{}", if acted { "" } else { "  (not a press: ignored)" }));
                 match ev {
-                    Event::Key(key) if key.kind == KeyEventKind::Press => self.on_key(key),
-                    Event::Mouse(m) => self.on_mouse(m, self.clock.instant()),
+                    Event::Key(key) if acted => self.on_key(key),
+                    Event::Mouse(m) => return self.on_mouse(m, self.clock.instant()),
                     Event::Paste(text) => self.paste(&text),
                     _ => {}
                 }
             }
             Msg::Done(apply) => apply(self),
-            Msg::ForRequest { id, keep_if_stale, apply } => {
-                // A response to another request: another tab's is handled there, the rest
-                // are stale.
-                if Some(id) != self.tab.req {
-                    if let Some(i) = self.tab_of(id) {
-                        return self.handle_in_tab(i, apply);
-                    }
-                    if !keep_if_stale {
-                        return;
-                    }
-                }
-                apply(self);
-            }
+            // A response to another request: another tab's is handled there, the rest are
+            // stale.
+            Msg::ForRequest { id, keep_if_stale, apply } => match self.tab_of(id) {
+                Some(i) => self.handle_in_tab(i, apply),
+                None if keep_if_stale || Some(id) == self.tab.req => apply(self),
+                None => {}
+            },
         }
+        // Anything else may have moved what the last frame drew (a key, a list re-sorted in
+        // the background): a click does nothing until the next frame.
+        self.forget_frame();
     }
 
     /// The footer's message, if it has one.

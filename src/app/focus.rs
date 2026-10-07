@@ -2,8 +2,10 @@
 //! menu of everything that can be done with what's selected (`.`, right-click), and link
 //! hints (`f`) that label what's on screen to jump to it.
 
-use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use ratatui::layout::{Position, Rect};
+use std::time::Instant;
+
+use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent};
+use ratatui::layout::Position;
 use ratatui::widgets::ListState;
 
 use super::{App, Hit, Media, Part, Popup, RowKey, SiteRow, TabPopup, View, Viewer, list_move};
@@ -19,12 +21,11 @@ pub enum MenuItem {
     Act(Action, String),
 }
 
-/// The menu for what's selected: its title, rows, and where it was drawn.
+/// The menu for what's selected: its title and rows.
 pub struct Menu {
     pub title: String,
     pub items: Vec<MenuItem>,
     pub list: ListState,
-    pub area: Rect,
 }
 
 /// Labels on what's on screen; typing one picks it.
@@ -166,13 +167,13 @@ impl App {
 
     /// The part (or just the entry) of the thread drawn at a screen position.
     pub(super) fn thread_part_at(&self, col: u16, row: u16) -> Option<(usize, Option<Part>)> {
-        let Some(Hit::Thread { area }) = self.hit else { return None };
+        let Some(Hit::Thread { area, scroll }) = self.drawn()?.body else { return None };
         if !area.contains(Position::new(col, row)) {
             return None;
         }
         let t = self.tab.thread.as_ref()?;
         let l = t.layout.as_ref()?;
-        let i = t.scroll + (row - area.y) as usize;
+        let i = scroll + (row - area.y) as usize;
         let (e, _) = l.line(i)?;
         let in_block = i - l.starts.get(e)?;
         let x0 = area.x + INDENT * t.entries.get(e)?.depth as u16 + PAD;
@@ -189,7 +190,7 @@ impl App {
         if items.is_empty() {
             return;
         }
-        self.popup = Some(Popup::Menu(Menu { title, items, list: ListState::default().with_selected(Some(0)), area: Rect::default() }));
+        self.popup = Some(Popup::Menu(Menu { title, items, list: ListState::default().with_selected(Some(0)) }));
     }
 
     /// `enter` here, in a few words, when it does something.
@@ -569,13 +570,12 @@ impl App {
     }
 
     /// A click on a row runs it; anywhere else closes the menu.
-    pub(super) fn on_menu_click(&mut self, col: u16, row: u16) {
+    pub(super) fn on_menu_click(&mut self, ev: MouseEvent, _: Instant) {
         let Some(Popup::Menu(m)) = &self.popup else { return };
-        let i = m.list.offset() + row.saturating_sub(m.area.y) as usize;
-        if m.area.contains(Position::new(col, row)) && i < m.items.len() {
-            self.run_menu_item(i);
-        } else {
-            self.popup = None;
+        let n = m.items.len();
+        match self.popup_row(ev.column, ev.row).filter(|&i| i < n) {
+            Some(i) => self.run_menu_item(i),
+            None => self.popup = None,
         }
     }
 
@@ -584,12 +584,12 @@ impl App {
     /// `f`: a label on every part and post (or row) on screen.
     pub(super) fn open_hints(&mut self) {
         let mut at: Vec<(u16, u16, HintTo)> = Vec::new();
-        match self.hit {
-            Some(Hit::Thread { area }) if self.tab.gallery.is_none() => {
+        match self.drawn().and_then(|d| d.body) {
+            Some(Hit::Thread { area, scroll }) if self.tab.gallery.is_none() => {
                 let Some(t) = &self.tab.thread else { return };
                 let Some(l) = &t.layout else { return };
                 for row in 0..area.height {
-                    let i = t.scroll + row as usize;
+                    let i = scroll + row as usize;
                     let Some((e, _)) = l.line(i) else { break };
                     let (Some(&start), Some(entry)) = (l.starts.get(e), t.entries.get(e)) else { break };
                     let in_block = i - start;

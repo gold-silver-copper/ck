@@ -10,7 +10,7 @@ pub(super) fn draw_sites(f: &mut Frame, app: &mut App, area: Rect) {
     let width = area.width.saturating_sub(PAD + 1) as usize;
     let rows = app.visible_sites();
     let mut state = app.site_list.state;
-    app.hit = draw_rows(f, area, rows.len(), &mut state, (1, 0), None, &|_| false, &mut |k| {
+    app.drawn.body = draw_rows(f, area, rows.len(), &mut state, (1, 0), None, &|_| false, &mut |k| {
         let Some(&row) = rows.get(k) else { return Vec::new() };
         match row {
             SiteRow::Watched => {
@@ -85,7 +85,7 @@ pub(super) fn draw_sites(f: &mut Frame, app: &mut App, area: Rect) {
         }
     });
     app.site_list.state = state;
-    if app.hit.is_none() {
+    if app.drawn.body.is_none() {
         empty(f, area, "No sites match");
     }
 }
@@ -105,7 +105,7 @@ pub(super) fn draw_watched(f: &mut Frame, app: &mut App, area: Rect) {
     let width = area.width.saturating_sub(PAD + 1) as usize;
     let rows = app.visible_watched();
     let mut state = app.watched_list.state;
-    app.hit = draw_rows(f, area, rows.len(), &mut state, (1, 0), None, &|_| false, &mut |k| {
+    app.drawn.body = draw_rows(f, area, rows.len(), &mut state, (1, 0), None, &|_| false, &mut |k| {
         let Some(w) = rows.get(k).and_then(|&i| app.store.all_watched().get(i)) else { return Vec::new() };
         let mut right = Vec::new();
         if app.refreshing.contains(&w.key) {
@@ -136,7 +136,7 @@ pub(super) fn draw_watched(f: &mut Frame, app: &mut App, area: Rect) {
         vec![spread(thread_row(&w.key, &w.subject), right, width)]
     });
     app.watched_list.state = state;
-    if app.hit.is_none() {
+    if app.drawn.body.is_none() {
         let msg = format!("No watched threads. Press {} in a catalog or thread to watch one.", app.keys.key(Action::Watch));
         empty(f, area, &msg);
     }
@@ -146,12 +146,12 @@ pub(super) fn draw_history(f: &mut Frame, app: &mut App, area: Rect) {
     let width = area.width.saturating_sub(PAD + 1) as usize;
     let rows = app.visible_history();
     let mut state = app.history_list.state;
-    app.hit = draw_rows(f, area, rows.len(), &mut state, (1, 0), None, &|_| false, &mut |k| {
+    app.drawn.body = draw_rows(f, area, rows.len(), &mut state, (1, 0), None, &|_| false, &mut |k| {
         let Some(v) = rows.get(k).and_then(|&i| app.store.history.get(i)) else { return Vec::new() };
         vec![spread(thread_row(&v.key, &v.subject), vec![Span::styled(ago(v.opened, app.clock), dim())], width)]
     });
     app.history_list.state = state;
-    if app.hit.is_none() {
+    if app.drawn.body.is_none() {
         empty(f, area, "No history yet");
     }
 }
@@ -161,7 +161,7 @@ pub(super) fn draw_saved(f: &mut Frame, app: &mut App, area: Rect) {
     let width = area.width.saturating_sub(PAD + 1) as usize;
     let rows = app.visible_saved();
     let mut state = app.saved_list.state;
-    app.hit = draw_rows(f, area, rows.len(), &mut state, (1, 0), None, &|_| false, &mut |k| {
+    app.drawn.body = draw_rows(f, area, rows.len(), &mut state, (1, 0), None, &|_| false, &mut |k| {
         let Some(m) = rows.get(k).and_then(|&i| app.store.saved.get(i)) else { return Vec::new() };
         let mut right = Vec::new();
         if m.dead {
@@ -175,7 +175,7 @@ pub(super) fn draw_saved(f: &mut Frame, app: &mut App, area: Rect) {
         vec![spread(left, right, width)]
     });
     app.saved_list.state = state;
-    if app.hit.is_none() {
+    if app.drawn.body.is_none() {
         let msg = format!(
             "No saved threads. Watched threads are saved as they refresh ({} watches one), and so is one you save as a page ({}).",
             app.keys.how(Action::Watch),
@@ -190,7 +190,7 @@ pub(super) fn draw_boards(f: &mut Frame, app: &mut App, area: Rect) {
     let width = app.boards().iter().map(|b| markup::columns(&b.uri)).max().unwrap_or(1) + 4;
     let rows = app.visible_boards();
     let mut state = app.tab.board_list.state;
-    app.hit = draw_rows(f, area, rows.len(), &mut state, (1, 0), None, &|_| false, &mut |k| {
+    app.drawn.body = draw_rows(f, area, rows.len(), &mut state, (1, 0), None, &|_| false, &mut |k| {
         let Some(b) = rows.get(k).and_then(|&i| app.boards().get(i)) else { return Vec::new() };
         let mut spans = vec![
             Span::styled(pad(&format!("/{}/", b.uri), width), bold(t.primary)),
@@ -202,7 +202,7 @@ pub(super) fn draw_boards(f: &mut Frame, app: &mut App, area: Rect) {
         vec![Line::from(spans)]
     });
     app.tab.board_list.state = state;
-    if app.hit.is_none() && app.tab.loading.is_none() {
+    if app.drawn.body.is_none() && app.tab.loading.is_none() {
         empty(f, area, app.tab.failed.as_deref().unwrap_or("No boards"));
     }
 }
@@ -314,9 +314,9 @@ pub(super) fn draw_catalog(f: &mut Frame, app: &mut App, area: Rect) {
     };
     let highlighted = |k: usize| visible.get(k).is_some_and(|&i| app.tab.catalog_marks.highlight(i).is_some());
     let mut state = app.tab.catalog_list.state;
-    app.hit = draw_rows(f, area, visible.len(), &mut state, (height, gap), card, &highlighted, &mut build);
+    app.drawn.body = draw_rows(f, area, visible.len(), &mut state, (height, gap), card, &highlighted, &mut build);
     app.tab.catalog_list.state = state;
-    if app.hit.is_none() {
+    if app.drawn.body.is_none() {
         if app.tab.loading.is_none() {
             empty(f, area, app.tab.failed.as_deref().unwrap_or("No threads"));
         }
@@ -414,7 +414,7 @@ pub(super) fn draw_search(f: &mut Frame, app: &mut App, area: Rect) {
             put(f, area.x, area.y + shown, area.width, Line::styled(hint, dim()).centered());
         }
     }
-    app.hit = hit;
+    app.drawn.body = hit;
 }
 
 /// A line of `text` around the first place `needle` (lowercase) is, with it highlighted; the
@@ -449,7 +449,6 @@ fn draw_grid(f: &mut Frame, app: &mut App, area: Rect) {
     let t = theme();
     let visible = app.visible_catalog();
     if visible.is_empty() {
-        app.hit = None;
         if app.tab.loading.is_none() {
             empty(f, area, app.tab.failed.as_deref().unwrap_or("No threads"));
         }
@@ -520,7 +519,7 @@ fn draw_grid(f: &mut Frame, app: &mut App, area: Rect) {
             }
         }
     }
-    app.hit = Some(Hit::Grid { area, offset: top * cols, cols, cell: (cell_w, cell_h) });
+    app.drawn.body = Some(Hit::Grid { area, offset: top * cols, cols, cell: (cell_w, cell_h) });
 }
 
 /// `text` wrapped to `width`, cut to `rows` lines with "…" if there's more.
