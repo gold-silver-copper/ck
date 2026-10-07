@@ -350,6 +350,9 @@ fn cache_once(seed: u64) {
                                 known.remove(&oldest.unwrap_or_default());
                             }
                             known.insert(url.clone(), (version, format!("v{version}"), clock.get()));
+                        } else {
+                            // An undated body replaces the copy: none is kept.
+                            known.remove(&url);
                         }
                     }
                     (Reply::NotModified, Ok((body, None))) => {

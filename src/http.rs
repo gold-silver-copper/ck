@@ -388,6 +388,10 @@ impl Cache {
                     self.make_room(url);
                     let entry = Entry { last_modified: raw.last_modified, body: body.clone(), checked: Some(now) };
                     self.entries.insert(url.to_string(), entry);
+                } else {
+                    // Without a date the new body can't be revalidated, and the old one's date
+                    // could get a 304 that brings the old body back.
+                    self.entries.remove(url);
                 }
                 Ok(body)
             }
@@ -693,6 +697,24 @@ mod tests {
         let (v, _) = cached_get(&cache, "u", clock, |_, _| Ok(raw(200, Some("LM2"), r#"{"n":2}"#))).unwrap();
         assert_eq!(v["n"].as_u64(), Some(2));
         assert_eq!(*seen.borrow(), [None, Some("LM1".to_string())]);
+    }
+
+    #[test]
+    fn a_new_body_without_a_date_drops_the_old_copy() {
+        let cache = Mutex::new(Cache::new(4));
+        let t0 = Instant::now();
+        cached_get(&cache, "u", || t0, |_, _| Ok(raw(200, Some("LM1"), r#"{"n":1}"#))).unwrap();
+        let t1 = t0 + Duration::from_secs(11);
+        let (v, _) = cached_get(&cache, "u", || t1, |_, _| Ok(raw(200, None, r#"{"n":2}"#))).unwrap();
+        assert_eq!(v["n"].as_u64(), Some(2));
+        // Asking If-Modified-Since LM1 could be answered 304, and that would bring back n=1.
+        let t2 = t1 + Duration::from_secs(11);
+        let (v, _) = cached_get(&cache, "u", || t2, |_, since| {
+            assert_eq!(since, None);
+            Ok(raw(200, None, r#"{"n":3}"#))
+        })
+        .unwrap();
+        assert_eq!(v["n"].as_u64(), Some(3));
     }
 
     #[test]
