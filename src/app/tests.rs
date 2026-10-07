@@ -2859,7 +2859,7 @@ fn replies_to_hidden_posts_hide_with_them() {
     app.tab.view = View::Thread;
     assert_eq!(hidden(&app), [None, Some(Hidden::ByHand), r(2), r(3), None, deep.clone(), r(6)]);
     let screen: String = draw_at(&mut app, 100, 40).content.iter().map(|c| c.symbol()).collect();
-    assert!(screen.contains("No.3  hidden: a reply to hidden No.2"), "{screen}");
+    assert!(screen.contains("No.3  hidden") && !screen.contains("reply to hidden"), "{screen}");
     // H on a reply says where it comes from; unhiding the post it replies to shows it.
     app.tab.thread.as_mut().unwrap().selected = 3;
     app.act(Action::Hide);

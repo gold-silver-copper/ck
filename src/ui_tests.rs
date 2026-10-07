@@ -1382,7 +1382,8 @@ fn a_hidden_words_label() {
     a.remark_thread();
     a.tab.thread.as_mut().unwrap().show_hidden = true;
     let text = render(&mut a).0;
-    assert!(text.contains("hidden word: implying") && !text.contains("hidden: hidden word"), "{text}");
+    // Just "hidden": the label doesn't repeat the word it hides.
+    assert!(text.contains(" hidden ") && !text.contains("hidden word"), "{text}");
 }
 
 #[test]

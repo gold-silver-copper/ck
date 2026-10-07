@@ -229,8 +229,8 @@ pub(super) fn draw_catalog(f: &mut Frame, app: &mut App, area: Rect) {
         if app.catalog_watching(p) {
             head.push(Span::styled(WATCHING, bold(t.primary)));
         }
-        if let Some(label) = &mark.hidden {
-            head.extend([chip(hidden_label(label), t.text_dim, t.surface_high), Span::raw(" ")]);
+        if mark.hidden.is_some() {
+            head.extend([chip("hidden", t.text_dim, t.surface_high), Span::raw(" ")]);
         }
         if let Some(label) = &mark.highlight {
             head.extend([chip(label.clone(), t.on_primary_container, t.primary_container), Span::raw(" ")]);
@@ -347,16 +347,6 @@ pub(super) fn draw_catalog(f: &mut Frame, app: &mut App, area: Rect) {
 /// Before a catalog thread you watch.
 const WATCHING: &str = "◉ ";
 
-/// A hidden item's chip: by which filter, or by hand.
-pub(super) fn hidden_label(why: &Hidden) -> String {
-    match why {
-        Hidden::ByHand => "hidden".into(),
-        // "hidden word: crypto" says it already.
-        Hidden::ByFilter(f) if f.starts_with("hidden word: ") => f.clone(),
-        Hidden::ByFilter(f) => format!("hidden: {f}"),
-        Hidden::Reply(no) => format!("hidden: replies to No.{no}"),
-    }
-}
 
 /// Archive search results: each post with its thread, as cards.
 pub(super) fn draw_search(f: &mut Frame, app: &mut App, area: Rect) {
@@ -497,8 +487,8 @@ fn draw_grid(f: &mut Frame, app: &mut App, area: Rect) {
         if app.tab.catalog_new.contains(&p.no) {
             head.extend([chip("new", t.background, t.new), Span::raw(" ")]);
         }
-        if let Some(label) = &mark.hidden {
-            head.extend([chip(hidden_label(label), t.text_dim, t.surface_high), Span::raw(" ")]);
+        if mark.hidden.is_some() {
+            head.extend([chip("hidden", t.text_dim, t.surface_high), Span::raw(" ")]);
         }
         let (title, rest) = match &p.subject {
             Some(s) => (s.clone(), p.plain_text().to_string()),

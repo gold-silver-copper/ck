@@ -322,12 +322,13 @@ the viewer's own commands apply.
 
 `H` hides the selected catalog thread or thread post; `Z` shows hidden ones again
 (dimmed and marked) so they can be unhidden with another `H`. Hidden posts collapse to
-one line, so replies to them still make sense. What you hide is remembered per board in
+one line, so replies to them still make sense. They're marked just "hidden", not why
+(that would show what a filter or hidden word hides); `H` on one says why. What you hide is remembered per board in
 the data directory.
 
 `recursive_hiding = true` (or Settings › Hidden replies) hides the replies too: in a
 thread, posts that quote a hidden post, and the posts that quote those, on down, collapse
-to "hidden: a reply to hidden No.123". `recursive = true` on a `[[filter]]` does that for
+too. `recursive = true` on a `[[filter]]` does that for
 what the filter hides (also in Settings › Filters, as "Replies"). Unhiding the post they
 reply to shows them again; `H` on one of them says which post that is. The OP never
 counts (everyone quotes it), and catalogs aren't affected.

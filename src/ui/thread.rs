@@ -259,13 +259,9 @@ fn lay_out(t: &ThreadView, cache: &mut LineCache, e: usize, width: u16, thumbs: 
     };
     let i = entry.post;
     if t.is_collapsed(i) {
-        // A hidden post is one line, so replies to it still make sense.
-        let why = match t.marks.get(i).and_then(|m| m.hidden.as_ref()) {
-            Some(Hidden::ByFilter(l)) => format!("hidden by the filter \"{l}\""),
-            Some(Hidden::Reply(no)) => format!("hidden: a reply to hidden No.{no}"),
-            _ => "hidden".to_string(),
-        };
-        let block = vec![Line::styled(format!("No.{}  {why}", p.no), Style::new().fg(theme().text_dim)), Line::raw("")];
+        // A hidden post is one line, so replies to it still make sense. Not why: that would
+        // show what was hidden (H on it says).
+        let block = vec![Line::styled(format!("No.{}  hidden", p.no), Style::new().fg(theme().text_dim)), Line::raw("")];
         return (block.into(), Rc::from([]), false);
     }
     let text_width = text_width_of(width, entry.depth);
@@ -493,8 +489,8 @@ pub(super) fn post_lines(p: &Post, ctx: &PostCtx, width: usize) -> (Vec<Line<'st
         head.extend([chip("you", t.on_primary, t.primary), Span::raw(" ")]);
     }
     if let Some(m) = ctx.mark {
-        if let Some(label) = &m.hidden {
-            head.extend([chip(hidden_label(label), t.text_dim, t.surface_high), Span::raw(" ")]);
+        if m.hidden.is_some() {
+            head.extend([chip("hidden", t.text_dim, t.surface_high), Span::raw(" ")]);
         }
         if let Some(label) = &m.highlight {
             head.extend([chip(label.clone(), t.on_primary_container, t.primary_container), Span::raw(" ")]);
