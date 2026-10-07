@@ -1205,6 +1205,27 @@ fn focused_quote_peeks_at_its_post() {
 }
 
 #[test]
+fn a_quote_of_a_hidden_post_peeks_at_nothing() {
+    use crate::model::Target;
+    use ratatui::crossterm::event::{KeyCode, KeyEvent};
+    let mut a = thread_app(false);
+    with_filters(&mut a);
+    a.remark_thread();
+    a.tab.thread.as_mut().unwrap().select(3);
+    render(&mut a);
+    // tab to No.1003's quote of No.1001, which a filter hides.
+    for _ in 0..4 {
+        if matches!(a.focused(), Some(Part::Link(Target::Quote(_)))) {
+            break;
+        }
+        a.on_key(KeyEvent::from(KeyCode::Tab));
+    }
+    assert!(matches!(a.focused(), Some(Part::Link(Target::Quote(l))) if l.post == Some(1001)), "{:?}", a.focused());
+    let text = render(&mut a).0;
+    assert!(text.matches("No.1001  hidden").count() == 2 && !text.contains("implying"), "{text}");
+}
+
+#[test]
 fn focused_file() {
     use ratatui::crossterm::event::{KeyCode, KeyEvent};
     let mut a = thread_app(false);

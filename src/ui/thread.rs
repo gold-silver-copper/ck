@@ -603,7 +603,12 @@ pub(super) fn draw_peek(f: &mut Frame, app: &App, area: Rect) {
     let Some(p) = t.posts.get(i) else { return };
     let th = theme();
     let width = area.width.saturating_sub(6);
-    let mut lines = post_lines(p, &post_ctx(t, i, app.clock), width as usize).0;
+    // A hidden post peeks as it shows in the thread: one line, not what it says.
+    let mut lines = if t.is_collapsed(i) {
+        vec![Line::styled(format!("No.{}  hidden", p.no), Style::new().fg(theme().text_dim))]
+    } else {
+        post_lines(p, &post_ctx(t, i, app.clock), width as usize).0
+    };
     let h = (cells(lines.len()).saturating_add(2)).min(area.height / 2).max(3);
     lines.truncate(h.saturating_sub(2) as usize);
     // Where the quote is on screen decides where the peek goes.
