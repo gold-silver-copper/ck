@@ -151,7 +151,7 @@ impl App {
         self.notified.push(msg.clone());
         match sent {
             Ok(()) => self.info(msg),
-            Err(e) => self.error(format!("{msg} (couldn't notify: {e:#})")),
+            Err(e) => self.error(format!("{msg} (couldn't notify: {})", crate::http::plain(&e))),
         }
     }
 

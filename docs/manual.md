@@ -320,14 +320,17 @@ its flag, its image's MD5, its file's name, and an OP's subject; never the site'
 anonymous name), whether to hide or highlight
 (`a`), where (`s`: this board, this site, or everywhere) and a label (`e`). `enter` adds
 it: it's written to the config as a `[[filter]]`, applies at once, and the footer says
-what it caught; `u` as the next key takes it back.
+what it caught; `u` as the next key takes it back (also when it couldn't be written).
 
 Settings › Filters lists every filter with what it catches in the open catalog and thread.
 `enter` edits one (pattern, label, action, the fields it looks at, sites and boards, OPs
 or replies only, and its options; a pattern that isn't a valid regex says why and isn't
 saved), `space` turns it off or on
 (`enabled = false`), `a` adds one and `x` removes one. Each change is written at once;
-the rest of the config, comments included, stays as it was. In the config:
+the rest of the config, comments included, stays as it was. A change that can't be written
+holds only until ck quits, and the footer says so as an error. No message replaces an
+error before it has been on screen (a second error joins it), and loading something new
+clears one that has. In the config:
 
 ```toml
 [[filter]]

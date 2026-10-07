@@ -328,7 +328,7 @@ impl App {
         match config::sites_in(&path) {
             Ok(sites) => Some(MySites { list: ListState::default().with_selected(Some(0)), sites, armed: None }),
             Err(e) => {
-                self.error(format!("{e:#}"));
+                self.error(e);
                 None
             }
         }
@@ -374,8 +374,10 @@ impl App {
                 self.my_sites()
             }
             KeyCode::Char('x') | KeyCode::Delete if let Some(s) = m.sites.get(cur) => {
-                m.armed = Some(cur);
-                self.info(format!("x again removes {} from your config", s.name));
+                // Armed only once the question is showing (an unseen error keeps it off).
+                let ask = format!("x again removes {} from your config", s.name);
+                self.info(ask.clone());
+                m.armed = self.status().is_some_and(|s| s.text == ask).then_some(cur);
                 Some(m)
             }
             _ => Some(m),
@@ -389,7 +391,7 @@ impl App {
         match self.edit_config(|d| config::remove_site(d, i, old)) {
             Ok(_) => true,
             Err(e) => {
-                self.error(format!("Couldn't remove {what}: {e:#}"));
+                self.error(e.context(format!("Couldn't remove {what}")));
                 false
             }
         }

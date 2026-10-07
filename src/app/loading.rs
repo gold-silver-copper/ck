@@ -30,7 +30,7 @@ impl App {
         let tx = self.tx.clone();
         self.tab.loading = Some(label);
         self.tab.failed = None;
-        self.status = None;
+        self.footer.clear_seen();
         std::thread::spawn(move || {
             let res = crate::guard::result(|| job(&*backend, id, &tx));
             let cached = http::take_cached_age();
@@ -47,7 +47,7 @@ impl App {
         if complete && s.cfg.boards.is_none() {
             let name = s.cfg.name.clone();
             if let Err(e) = self.store.save_boards(&name, &boards, self.clock.now()) {
-                self.error(format!("Couldn't save the board list: {e:#}"));
+                self.error(e.context("Couldn't save the board list"));
             }
         }
         if let Some(s) = self.sites.get_mut(site) {
@@ -103,9 +103,7 @@ impl App {
 
     /// The request was answered from the cache without hitting the network.
     fn up_to_date(&mut self, age: Duration) {
-        if self.status.is_none() {
-            self.info(format!("Up to date (checked {}s ago)", age.as_secs()));
-        }
+        self.footer.offer(format!("Up to date (checked {}s ago)", age.as_secs()));
     }
 
     /// A site's board list arrived for request `id`; it's shown even if the tab has moved on.
@@ -116,8 +114,8 @@ impl App {
         }
         match res {
             Ok(b) => self.set_boards(site, b, true),
-            Err(e) if !stale => self.load_failed(&http::plain(&e)),
-            Err(e) => self.error(http::plain(&e)),
+            Err(e) if !stale => self.load_failed(e),
+            Err(e) => self.error(e),
         }
     }
 
@@ -161,9 +159,9 @@ impl App {
             }
             Err(e) if http::is_not_found(&e) => {
                 let board = self.tab.board.as_ref().map_or_else(String::new, |b| b.uri.clone());
-                self.load_failed(&format!("There's no /{board}/ on {}", self.current_site().cfg.name));
+                self.load_failed(format!("There's no /{board}/ on {}", self.current_site().cfg.name));
             }
-            Err(e) => self.load_failed(&http::plain(&e)),
+            Err(e) => self.load_failed(e),
         }
         // A thread to select that never came isn't waited for by the next load.
         self.tab.pending_catalog = None;
@@ -197,7 +195,7 @@ impl App {
                     self.thread_gone(&key);
                 }
             }
-            Err(e) => self.load_failed(&http::plain(&e)),
+            Err(e) => self.load_failed(e),
         }
     }
 

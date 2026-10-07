@@ -87,6 +87,16 @@ fn mouse_click_selects_thread_post() {
     assert_eq!(app.tab.thread.as_ref().unwrap().scroll, 2);
 }
 
+/// The footer is drawn: what it says has been seen (an error waits for that).
+fn drawn(app: &mut App) {
+    app.footer.tick(app.clock.instant(), true);
+}
+
+/// The footer's message has gone.
+fn expired(app: &mut App) {
+    app.footer = Footer::default();
+}
+
 #[test]
 fn sleeps_until_the_next_thing_to_do() {
     let mut app = test_app();
@@ -99,10 +109,9 @@ fn sleeps_until_the_next_thing_to_do() {
     app.tab.loading = None;
     // A status message wakes the loop when it's due to disappear.
     app.info("hi");
-    app.status_since = Some(("hi".into(), now - Duration::from_millis(1700)));
+    app.footer.tick(now - Duration::from_millis(1700), true);
     assert_eq!(app.next_wake(now), Duration::from_millis(300));
-    app.status = None;
-    app.status_since = None;
+    expired(&mut app);
     // A watched thread that was never refreshed is due now.
     let key = ThreadKey { site: "4chan".into(), board: "g".into(), no: 1 };
     app.store.watch(key, String::new(), 1, 1);
@@ -227,7 +236,7 @@ fn key_editor_rebinds_saves_and_refuses_clashes() {
     press(&mut app, KeyCode::Enter);
     press(&mut app, KeyCode::Char('v'));
     assert_eq!(app.keys.label(Action::Watch), "W, alt-w");
-    assert!(app.status.as_ref().is_some_and(|s| s.error && s.text.contains("'v'")), "{:?}", app.status);
+    assert!(app.footer.get().is_some_and(|s| s.error && s.text.contains("'v'")), "{:?}", app.footer.get());
     // x resets to the default, which removes the entry.
     press(&mut app, KeyCode::Char('x'));
     assert!(app.keys.is_default(Action::Watch));
@@ -251,7 +260,7 @@ fn copies_text_and_links() {
     app.tab.view = View::Thread;
     app.act(Action::Copy);
     assert_eq!(app.copied.as_deref(), Some(">>1\n>green\nsecret text"));
-    assert_eq!(app.status.as_ref().unwrap().text, "Copied 22 characters");
+    assert_eq!(app.footer.get().unwrap().text, "Copied 22 characters");
     app.act(Action::CopyLink);
     assert_eq!(app.copied.as_deref(), Some("https://boards.4chan.org/g/thread/1#p2"));
     // The viewer copies the file's URL, or the post's link.
@@ -300,7 +309,7 @@ fn goto_opens_places_and_u_comes_back() {
     assert_eq!((app.tab.site, app.tab.view), (1, View::Boards));
     // Errors are said, not acted on.
     app.goto_str("a/x/abc");
-    assert!(app.status.as_ref().unwrap().error);
+    assert!(app.footer.get().unwrap().error);
     assert_eq!(app.tab.view, View::Boards);
     // A link to a site ck doesn't have: it asks the site what it runs, to add it. Also
     // without a scheme or a path (not a board of the current site called that).
@@ -335,7 +344,7 @@ fn a_post_on_another_site_moves_the_tab_once_found() {
     app.goto_str(&format!("http://{host}/b/post/99/"));
     assert_eq!(app.tab.site, 0);
     settle_until(&mut app, |a| a.tab.loading.is_none());
-    assert!(app.status.as_ref().unwrap().error);
+    assert!(app.footer.get().unwrap().error);
     assert_eq!((app.tab.site, app.tab.thread.as_ref().unwrap().no, app.tab.trail.len()), (0, 1, 0));
     // Found: the tab moves to its thread there, and `u` comes back to where it was asked.
     app.goto_str(&format!("http://{host}/b/post/77/"));
@@ -355,7 +364,7 @@ fn goto_input_completes_and_takes_pastes() {
     app.on_key(KeyEvent::from(KeyCode::Tab));
     // x and xy: completes the common part and lists both.
     assert_eq!(app.goto_text(), Some("a/x"));
-    assert!(app.status.as_ref().unwrap().text.contains("xy"));
+    assert!(app.footer.get().unwrap().text.contains("xy"));
     app.on_key(KeyEvent::from(KeyCode::Char('y')));
     app.on_key(KeyEvent::from(KeyCode::Enter));
     assert_eq!((app.goto_text(), app.tab.view, app.tab.board.as_ref().unwrap().uri.as_str()), (None, View::Catalog, "xy"));
@@ -404,7 +413,7 @@ fn links_panel_lists_and_opens() {
     // A post without links says so.
     app.tab.thread = Some(ThreadView::new("x".into(), 1, vec![Post { no: 1, ..Default::default() }]));
     app.act(Action::Links);
-    assert!(!matches!(app.tab.popup, Some(crate::app::TabPopup::Links(_))) && app.status.as_ref().unwrap().text == "Post has no links");
+    assert!(!matches!(app.tab.popup, Some(crate::app::TabPopup::Links(_))) && app.footer.get().unwrap().text == "Post has no links");
 }
 
 #[test]
@@ -431,7 +440,7 @@ fn filters_and_hiding() {
     assert_eq!(app.selected_index(), Some(1));
     app.tab.catalog_list.state.select(Some(0));
     app.act(Action::Hide);
-    assert!(app.status.as_ref().unwrap().text.contains("filter \"spam\""));
+    assert!(app.footer.get().unwrap().text.contains("filter \"spam\""));
     app.tab.catalog_list.state.select(Some(2));
     app.act(Action::Hide);
     assert!(!app.store.hidden_on("a", "x").contains(&3));
@@ -871,7 +880,7 @@ fn archive_search_and_back() {
     }
     assert_eq!(app.tab.req.unwrap(), req + 1);
     app.handle(answer(app.tab.req.unwrap(), |a, (page, r)| a.search_results(page, r), (2, Err(anyhow::anyhow!("You're searching too fast.")))));
-    assert!(app.status.as_ref().is_some_and(|s| s.error && s.text.contains("too fast")));
+    assert!(app.footer.get().is_some_and(|s| s.error && s.text.contains("too fast")));
     // Enter: the thread, on the archive, with the post selected.
     app.tab.search_list.state.select(Some(1));
     app.enter();
@@ -881,9 +890,10 @@ fn archive_search_and_back() {
     app.back();
     assert_eq!((app.tab.view, app.tab.site, app.tab.search.is_none()), (View::Catalog, 0, true));
     // Sites without an archive say so.
+    drawn(&mut app);
     app.sites[0].cfg.archive = None;
     app.act(Action::ArchiveSearch);
-    assert!(app.typing.is_none() && app.status.as_ref().unwrap().text.contains("no archive"));
+    assert!(app.typing.is_none() && app.footer.get().unwrap().text.contains("no archive"));
 }
 
 #[test]
@@ -1025,7 +1035,7 @@ fn tabs_keep_their_own_place_and_responses() {
     app.handle(answer(app.tab.req.unwrap(), App::thread_arrived, Ok(vec![Post { no: 1, ..Default::default() }])));
     app.act(Action::Reload);
     app.handle(answer(app.tab.req.unwrap(), App::thread_arrived, Ok(vec![])));
-    assert!(app.tab.thread.as_ref().is_some_and(|t| t.posts.len() == 1) && app.status.as_ref().is_some_and(|s| s.error));
+    assert!(app.tab.thread.as_ref().is_some_and(|t| t.posts.len() == 1) && app.footer.get().is_some_and(|s| s.error));
     // A post's thread found while the settings are open opens behind them.
     app.goto_str("a/x/1#77");
     app.act(Action::Settings);
@@ -1122,7 +1132,7 @@ fn favorite_boards_on_the_home_screen() {
     assert!(app.favorites.is_empty());
     app.tab.view = View::Sites;
     app.on_key(KeyEvent::from(KeyCode::Char('3')));
-    assert!(app.status.as_ref().unwrap().text.contains("No favorites yet"));
+    assert!(app.footer.get().unwrap().text.contains("No favorites yet"));
 }
 
 #[test]
@@ -1291,23 +1301,23 @@ fn status_messages_expire() {
     let mut app = test_app();
     let t0 = Instant::now();
     app.info("No unread posts");
-    app.expire_status(t0);
-    app.expire_status(t0 + Duration::from_millis(1500));
-    assert!(app.status.is_some());
-    app.expire_status(t0 + Duration::from_secs(2));
-    assert!(app.status.is_none());
+    app.footer.tick(t0, true);
+    app.footer.tick(t0 + Duration::from_millis(1500), true);
+    assert!(app.footer.get().is_some());
+    app.footer.tick(t0 + Duration::from_secs(2), true);
+    assert!(app.footer.get().is_none());
 
     // Errors stay longer, and a new message restarts the timer.
     app.error("Rate limited");
-    app.expire_status(t0);
-    app.expire_status(t0 + Duration::from_secs(4));
-    assert!(app.status.is_some());
+    app.footer.tick(t0, true);
+    app.footer.tick(t0 + Duration::from_secs(4), true);
+    assert!(app.footer.get().is_some());
     app.error("Thread was deleted or archived");
-    app.expire_status(t0 + Duration::from_secs(4));
-    app.expire_status(t0 + Duration::from_secs(8));
-    assert!(app.status.is_some());
-    app.expire_status(t0 + Duration::from_secs(9));
-    assert!(app.status.is_none());
+    app.footer.tick(t0 + Duration::from_secs(4), true);
+    app.footer.tick(t0 + Duration::from_secs(8), true);
+    assert!(app.footer.get().is_some());
+    app.footer.tick(t0 + Duration::from_secs(9), true);
+    assert!(app.footer.get().is_none());
 }
 
 #[test]
@@ -1388,7 +1398,7 @@ fn tab_focuses_parts_and_the_verbs_follow_it() {
     for _ in 0..10 {
         tab(&mut app, false);
     }
-    assert_eq!(app.status.as_ref().map(|s| s.text.as_str()), Some("No more images or links below"));
+    assert_eq!(app.footer.get().map(|s| s.text.as_str()), Some("No more images or links below"));
 }
 
 #[test]
@@ -1402,13 +1412,13 @@ fn the_menu_runs_what_it_lists() {
     assert!(has(Action::View) && has(Action::Watch) && has(Action::Gallery) && !has(Action::Preview));
     // A row's own key runs it, and the menu closes.
     app.on_key(KeyEvent::from(KeyCode::Char('w')));
-    assert!(app.menu().is_none() && app.status.as_ref().is_some_and(|s| s.text.starts_with("Watching")));
+    assert!(app.menu().is_none() && app.footer.get().is_some_and(|s| s.text.starts_with("Watching")));
     // So does enter on a row.
     app.on_key(KeyEvent::from(KeyCode::Char('.')));
     let at = app.menu().unwrap().items.iter().position(|i| matches!(i, MenuItem::Act(Action::Watch, _))).unwrap();
     app.menu_mut().unwrap().list.select(Some(at));
     app.on_key(KeyEvent::from(KeyCode::Enter));
-    assert!(app.menu().is_none() && app.status.as_ref().is_some_and(|s| s.text.starts_with("Stopped watching")));
+    assert!(app.menu().is_none() && app.footer.get().is_some_and(|s| s.text.starts_with("Stopped watching")));
     // Esc just closes it.
     app.on_key(KeyEvent::from(KeyCode::Char('.')));
     app.on_key(KeyEvent::from(KeyCode::Esc));
@@ -1495,14 +1505,15 @@ fn a_dead_thread_offers_its_saved_copy() {
     app.goto_str("a/x/1");
     assert!(app.tab.thread.is_none());
     app.handle(answer(app.tab.req.unwrap(), App::thread_arrived, Err(gone())));
-    let text = &app.status.as_ref().unwrap().text;
+    let text = &app.footer.get().unwrap().text;
     assert!(text.contains("A saved copy from 2h ago: enter opens it"), "{text}");
     app.on_key(KeyEvent::from(KeyCode::Enter));
     assert_eq!(app.tab.saved(), Some(tabs::Offline { saved: 10_000 - 7200, dead: true }));
     assert_eq!(app.tab.thread.as_ref().unwrap().posts.len(), 2);
     // Read offline: r says so, and nothing is fetched, however long it stays open.
+    drawn(&mut app);
     app.act(Action::Reload);
-    assert!(app.status.as_ref().unwrap().text.contains("saved copy from 2h ago; the thread is gone"));
+    assert!(app.footer.get().unwrap().text.contains("saved copy from 2h ago; the thread is gone"));
     for _ in 0..3 {
         app.clock = Clock { fixed: Some(app.clock.now() + 600), instant: Some(app.clock.instant() + Duration::from_secs(600)) };
         app.poll();
@@ -1523,14 +1534,14 @@ fn a_thread_dying_on_screen_becomes_its_saved_copy() {
     app.act(Action::Watch);
     app.refreshed(key, Err(gone()));
     assert_eq!(app.tab.saved(), Some(tabs::Offline { saved: 1000, dead: true }));
-    assert!(app.status.as_ref().unwrap().text.contains("this is its saved copy"));
+    assert!(app.footer.get().unwrap().text.contains("this is its saved copy"));
     assert_eq!(app.tab.thread.as_ref().unwrap().posts.len(), 2);
     // Without a copy, as before.
     let mut app = saving_app(dir.path(), 1000);
     app.goto_str("a/x/5");
     app.handle(answer(app.tab.req.unwrap(), App::thread_arrived, Err(gone())));
     assert!(app.tab.saved_offer.is_none() && app.tab.saved().is_none());
-    assert_eq!(app.status.as_ref().unwrap().text, "Thread was deleted or archived");
+    assert_eq!(app.footer.get().unwrap().text, "Thread was deleted or archived");
 }
 
 #[test]
@@ -1578,7 +1589,7 @@ fn the_saved_view_lists_and_removes_after_asking() {
     app.saved_list.state.select(Some(1));
     app.act(Action::Remove);
     assert_eq!(app.store.saved.len(), 3);
-    assert!(app.status.as_ref().unwrap().text.contains("again to remove the saved copy of thread 3"));
+    assert!(app.footer.get().unwrap().text.contains("again to remove the saved copy of thread 3"));
     app.act(Action::Remove);
     app.flush_writes();
     assert!(app.store.saved(&key(3)).is_none() && !dir.path().join("threads/a/x/3.json").exists());
@@ -1606,7 +1617,7 @@ fn export_saves_a_copy() {
     assert!(dir.path().join("dl/thread.json").exists());
     let key = ThreadKey { site: "a".into(), board: "x".into(), no: 1 };
     assert_eq!(app.store.saved(&key).unwrap().posts, 2);
-    assert!(app.status.as_ref().unwrap().text.contains("(and in Saved)"));
+    assert!(app.footer.get().unwrap().text.contains("(and in Saved)"));
 }
 
 #[test]
@@ -1681,7 +1692,7 @@ fn x_filters_posts_like_the_selected_one() {
     // Applied at once: both posts by the name collapse.
     let t = app.tab.thread.as_ref().unwrap();
     assert!(t.marks.why_hidden(1).is_some() && t.marks.why_hidden(3).is_some() && t.marks.why_hidden(2).is_none());
-    assert!(app.status.as_ref().unwrap().text.contains("Hiding Named !Trip (2 here) · u undoes"));
+    assert!(app.footer.get().unwrap().text.contains("Hiding Named !Trip (2 here) · u undoes"));
     // u takes it back, from the file too.
     app.on_key(KeyEvent::from(KeyCode::Char('u')));
     assert_eq!(config_text(&app), FILTER_CONFIG);
@@ -1752,7 +1763,7 @@ fn the_filter_list_edits_turns_off_and_removes() {
     app.on_key(KeyEvent::from(KeyCode::Char('a')));
     app.paste("(Named");
     app.on_key(KeyEvent::from(KeyCode::Enter));
-    assert!(app.status.as_ref().unwrap().error && app.filter_cfgs.len() == 1);
+    assert!(app.footer.get().unwrap().error && app.filter_cfgs.len() == 1);
     app.on_key(KeyEvent::from(KeyCode::Home));
     for _ in 0..7 {
         app.on_key(KeyEvent::from(KeyCode::Backspace));
@@ -1773,13 +1784,14 @@ fn the_filter_list_edits_turns_off_and_removes() {
     assert_eq!(app.filter_cfgs[1].fields(), [crate::filter::Field::Name]);
     assert!(app.tab.thread.as_ref().unwrap().marks.why_hidden(1).is_some());
     // The last field can't go.
+    drawn(&mut app);
     app.on_key(KeyEvent::from(KeyCode::Up));
     app.on_key(KeyEvent::from(KeyCode::Down));
     if let Some(SettingsPopup::FilterEdit { row: r, .. }) = app.settings_popup_mut() {
         *r = 5;
     }
     app.on_key(KeyEvent::from(KeyCode::Enter));
-    assert_eq!(app.status.as_ref().unwrap().text, "A filter needs at least one field");
+    assert_eq!(app.footer.get().unwrap().text, "A filter needs at least one field");
     // Posts: OPs only (the named posts are replies), replies only, all again.
     if let Some(SettingsPopup::FilterEdit { row: r, .. }) = app.settings_popup_mut() {
         *r = crate::app::EDIT_ROWS.iter().position(|r| *r == crate::app::EditRow::Posts).unwrap();
@@ -1806,7 +1818,7 @@ fn the_filter_list_edits_turns_off_and_removes() {
     // A filter changed in the file meanwhile isn't overwritten.
     std::fs::write(app.config_path.as_ref().unwrap(), FILTER_CONFIG.replace("(?i)spam", "eggs")).unwrap();
     app.on_key(KeyEvent::from(KeyCode::Char(' ')));
-    assert!(app.status.as_ref().unwrap().text.contains("changed since ck read it"));
+    assert!(app.footer.get().unwrap().text.contains("changed since ck read it"));
     assert!(config_text(&app).contains("eggs") && !config_text(&app).contains("enabled"));
 }
 
@@ -1878,7 +1890,7 @@ fn c_shows_a_conversation_until_esc() {
     app.tab.thread.as_mut().unwrap().select(5);
     app.act(Action::Conversation);
     assert!(app.tab.thread.as_ref().unwrap().conversation.is_none());
-    assert!(app.status.as_ref().unwrap().text.contains("isn't part of a conversation"));
+    assert!(app.footer.get().unwrap().text.contains("isn't part of a conversation"));
     // Jumping to a post outside it leaves it.
     app.tab.thread.as_mut().unwrap().select(3);
     app.act(Action::Conversation);
@@ -1906,7 +1918,7 @@ fn i_shows_a_posters_posts_until_esc() {
     t.select(1);
     app.on_key(KeyEvent::from(KeyCode::Char('I')));
     assert_eq!(shown(&app), [2, 5]);
-    assert!(app.status.as_ref().unwrap().text.contains("2 posts by ID:bb"), "{:?}", app.status);
+    assert!(app.footer.get().unwrap().text.contains("2 posts by ID:bb"), "{:?}", app.footer.get());
     // A refresh keeps it, with the poster's new posts.
     let mut more = posts();
     more.push(post(6, Some("bb")));
@@ -1924,7 +1936,7 @@ fn i_shows_a_posters_posts_until_esc() {
     app.tab.thread.as_mut().unwrap().select(3);
     app.act(Action::Poster);
     assert!(app.tab.thread.as_ref().unwrap().conversation.is_none());
-    assert!(app.status.as_ref().unwrap().text.contains("has no poster ID"));
+    assert!(app.footer.get().unwrap().text.contains("has no poster ID"));
     // The ID is the post's first part: tab focuses it, enter shows the poster's posts, and
     // again (or I) goes back.
     app.tab.thread.as_mut().unwrap().select(0);
@@ -2123,7 +2135,7 @@ fn threads_open_from_their_last_copy_then_refresh() {
         app.goto_str("c/g/30364");
         settle_until(&mut app, |a| a.tab.loading.is_none());
         assert_eq!(app.tab.cached().map(|c| c.dead), Some(dead), "{mode}");
-        assert!(app.status.as_ref().unwrap().error);
+        assert!(app.footer.get().unwrap().error);
     }
     // One request per open, whatever came from the copy.
     assert_eq!(site.asked().len(), 4);
@@ -2175,7 +2187,7 @@ fn saving_needs_a_target_or_asks_first() {
     // d on a post with nothing focused saves nothing, and says how.
     press(&mut app, 'd');
     assert_eq!(total(&app), 0);
-    assert!(app.status.as_ref().unwrap().text.starts_with("tab to a file, then d saves it (the . menu saves"), "{:?}", app.status);
+    assert!(app.footer.get().unwrap().text.starts_with("tab to a file, then d saves it (the . menu saves"), "{:?}", app.footer.get());
     // D and E aren't keys any more.
     press(&mut app, 'D');
     press(&mut app, 'E');
@@ -2193,7 +2205,7 @@ fn saving_needs_a_target_or_asks_first() {
     // Anything but enter cancels.
     press(&mut app, 'j');
     assert!(app.confirm().is_none() && total(&app) == 1);
-    assert_eq!(app.status.as_ref().unwrap().text, "Not saved");
+    assert_eq!(app.footer.get().unwrap().text, "Not saved");
     // So does a click.
     run_menu_row(&mut app, "save all the thread's files…");
     app.on_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 0, 0), Instant::now());
@@ -2262,11 +2274,11 @@ fn a_link_to_a_new_site_adds_it_then_goes_there() {
     }
     type_text(&mut app, "A");
     app.on_key(KeyEvent::from(KeyCode::Enter));
-    assert!(app.adding().is_some() && app.status.as_ref().unwrap().text == "A site is already called A");
+    assert!(app.adding().is_some() && app.footer.get().unwrap().text == "A site is already called A");
     app.on_key(KeyEvent::from(KeyCode::Backspace));
     type_text(&mut app, "my/chan");
     app.on_key(KeyEvent::from(KeyCode::Enter));
-    assert!(app.adding().is_some() && app.status.as_ref().unwrap().text.contains("can't have /"));
+    assert!(app.adding().is_some() && app.footer.get().unwrap().text.contains("can't have /"));
     for _ in 0..5 {
         app.on_key(KeyEvent::from(KeyCode::Backspace));
     }
@@ -2290,7 +2302,7 @@ fn a_link_to_a_new_site_adds_it_then_goes_there() {
     serve("blank.invalid", vec![]);
     app.goto_str("blank.invalid/b/");
     settle_until(&mut app, |a| a.adding().is_none());
-    assert!(app.status.as_ref().unwrap().text.starts_with("blank.invalid doesn't answer like"), "{:?}", app.status);
+    assert!(app.footer.get().unwrap().text.starts_with("blank.invalid doesn't answer like"), "{:?}", app.footer.get());
     assert_eq!(app.sites.len(), new + 1);
     crate::http::serve_test_host("newchan.invalid", None);
     crate::http::serve_test_host("blank.invalid", None);
@@ -2313,7 +2325,7 @@ fn settings_add_sites_and_vichan_boards_and_remove_them() {
     settle_until(&mut app, |a| matches!(a.adding(), Some(Adding::Site { .. })));
     app.on_key(KeyEvent::from(KeyCode::Enter));
     let i = app.sites.len() - 1;
-    assert_eq!(app.status.as_ref().unwrap().text, "Added vi2 (vichan): it's on the home screen");
+    assert_eq!(app.footer.get().unwrap().text, "Added vi2 (vichan): it's on the home screen");
     assert_eq!(app.tab.view, View::Sites);
     // A link to a board it doesn't list adds the board; one it doesn't have is refused.
     app.popup = Some(Popup::Adding(Adding::Typing(String::new())));
@@ -2328,11 +2340,12 @@ fn settings_add_sites_and_vichan_boards_and_remove_them() {
     app.popup = Some(Popup::Adding(Adding::Typing("vi2.invalid/zz/".into())));
     app.on_key(KeyEvent::from(KeyCode::Enter));
     settle_until(&mut app, |a| a.adding().is_none());
-    assert!(app.status.as_ref().unwrap().text.contains("has no /zz/"));
+    assert!(app.footer.get().unwrap().text.contains("has no /zz/"));
     // One it has: nothing to do.
+    drawn(&mut app);
     app.popup = Some(Popup::Adding(Adding::Typing("vi2.invalid/b/".into())));
     app.on_key(KeyEvent::from(KeyCode::Enter));
-    assert!(app.adding().is_none() && app.status.as_ref().unwrap().text == "vi2 is already one of your sites");
+    assert!(app.adding().is_none() && app.footer.get().unwrap().text == "vi2 is already one of your sites");
     // esc while asking: the answer is dropped.
     app.popup = Some(Popup::Adding(Adding::Typing("vi2.invalid/b2/".into())));
     app.on_key(KeyEvent::from(KeyCode::Enter));
@@ -2346,8 +2359,14 @@ fn settings_add_sites_and_vichan_boards_and_remove_them() {
     app.settings_list.state.select(Some(mine));
     app.activate_setting();
     assert!(matches!(app.settings_popup(), Some(SettingsPopup::Sites(m)) if m.sites.len() == 1 && m.sites[0].name == "vi2"));
+    // Behind an error not yet seen the question isn't asked, so x twice removes nothing.
+    app.error("Couldn't save to the data directory: disk full");
     app.on_key(KeyEvent::from(KeyCode::Char('x')));
-    assert_eq!(app.status.as_ref().unwrap().text, "x again removes vi2 from your config");
+    app.on_key(KeyEvent::from(KeyCode::Char('x')));
+    assert!(matches!(app.settings_popup(), Some(SettingsPopup::Sites(m)) if m.sites.len() == 1));
+    drawn(&mut app);
+    app.on_key(KeyEvent::from(KeyCode::Char('x')));
+    assert_eq!(app.footer.get().unwrap().text, "x again removes vi2 from your config");
     app.on_key(KeyEvent::from(KeyCode::Char('x')));
     assert!(matches!(app.settings_popup(), Some(SettingsPopup::Sites(m)) if m.sites.is_empty()));
     assert!(!app.visible_sites().contains(&SiteRow::Site(i)));
@@ -2597,7 +2616,7 @@ fn no_images_are_asked_for_on_a_board_with_images_off() {
     assert!(app.images.queued_urls().is_empty());
     // The viewer says why instead of opening.
     app.on_key(KeyEvent::from(KeyCode::Enter));
-    assert!(app.tab.viewer().is_none() && app.status.as_ref().unwrap().text.starts_with("Images are off on /x/"));
+    assert!(app.tab.viewer().is_none() && app.footer.get().unwrap().text.starts_with("Images are off on /x/"));
     // The same thread on a board with images: asked for.
     app.tab.gallery = None;
     app.tab.board = Some(Board { uri: "xy".into(), title: String::new(), nsfw: Some(false) });
@@ -2693,7 +2712,7 @@ fn searching_inside_saved_threads() {
     settle_until(&mut app, |a| a.tab.search.as_ref().unwrap().saved.as_ref().unwrap().finished);
     let s = app.tab.search.as_ref().unwrap();
     assert_eq!((s.hits.len(), s.saved.as_ref().unwrap().skipped), (0, 1));
-    assert_eq!(app.status.as_ref().unwrap().text, "No saved post matches \"quiet\"");
+    assert_eq!(app.footer.get().unwrap().text, "No saved post matches \"quiet\"");
     // Another search stops the one running: only its answers count.
     app.goto_str("saved rust");
     app.goto_str("saved crab");
@@ -2722,7 +2741,7 @@ fn searching_saved_threads_leaves_out_hidden_posts() {
     app.goto_str("saved crab");
     settle_until(&mut app, |a| a.tab.search.as_ref().unwrap().saved.as_ref().unwrap().finished);
     assert!(shown(&app).is_empty());
-    assert_eq!(app.status.as_ref().unwrap().text, "1 result, all hidden (Z shows them)");
+    assert_eq!(app.footer.get().unwrap().text, "1 result, all hidden (Z shows them)");
 }
 
 #[test]
@@ -2732,7 +2751,7 @@ fn searching_saved_threads_with_none_saved() {
     app.goto_str("saved anything");
     settle_until(&mut app, |a| a.tab.search.as_ref().is_some_and(|s| s.saved.as_ref().unwrap().finished));
     assert!(app.tab.search.as_ref().unwrap().hits.is_empty());
-    assert!(app.status.as_ref().unwrap().text.starts_with("Nothing is saved yet"));
+    assert!(app.footer.get().unwrap().text.starts_with("Nothing is saved yet"));
     // `saved` alone is still the Saved view.
     app.goto_str("saved");
     assert_eq!(app.tab.view, View::Saved);
@@ -2774,7 +2793,7 @@ fn updating_a_vichan_sites_boards() {
     app.activate_setting();
     app.on_key(KeyEvent::from(KeyCode::Char('r')));
     settle_until(&mut app, |a| matches!(a.adding(), Some(Adding::Boards { .. })));
-    let Some(Adding::Boards { update, drop: false, .. }) = app.adding() else { panic!("{:?}", app.status) };
+    let Some(Adding::Boards { update, drop: false, .. }) = app.adding() else { panic!("{:?}", app.footer.get()) };
     assert_eq!((update.added.len(), update.missing.len()), (1, 1));
     // d drops what the bar doesn't have; enter writes it, comments kept, and it's in use.
     app.on_key(KeyEvent::from(KeyCode::Char('d')));
@@ -2788,13 +2807,13 @@ fn updating_a_vichan_sites_boards() {
     // Again: nothing to change.
     app.refresh_board_list(0);
     settle_until(&mut app, |a| a.adding().is_none());
-    assert_eq!(app.status.as_ref().unwrap().text, "vb's board list is up to date");
+    assert_eq!(app.footer.get().unwrap().text, "vb's board list is up to date");
     // Pages without a bar: said, nothing changes.
     serve_text("vb.invalid", vec![("/", "<html></html>".into())]);
     crate::http::forget_host("vb.invalid");
     app.refresh_board_list(0);
     settle_until(&mut app, |a| a.adding().is_none());
-    assert!(app.status.as_ref().unwrap().text.contains("have no board list to read"));
+    assert!(app.footer.get().unwrap().text.contains("have no board list to read"));
     assert_eq!(app.sites[0].cfg.boards, saved.sites[0].boards);
     crate::http::serve_test_host("vb.invalid", None);
 }
@@ -2817,7 +2836,7 @@ fn hidden_words_hide_posts_everywhere() {
     app.on_key(KeyEvent::from(KeyCode::Char('a')));
     type_text(&mut app, "crypto");
     app.on_key(KeyEvent::from(KeyCode::Enter));
-    assert!(app.status.as_ref().unwrap().text.starts_with("Hiding posts with \"crypto\" (2 here)"), "{:?}", app.status);
+    assert!(app.footer.get().unwrap().text.starts_with("Hiding posts with \"crypto\" (2 here)"), "{:?}", app.footer.get());
     let hidden = |app: &App| app.tab.thread.as_ref().unwrap().marks.all_hidden();
     let label = Some(Hidden::ByFilter("hidden word: crypto".into()));
     assert_eq!(hidden(&app), [None, label.clone(), label.clone(), None]);
@@ -2969,7 +2988,7 @@ fn a_request_that_panics_ends_like_one_that_failed() {
     app.tab.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
     app.spawn("Loading the thread".into(), |_, _, _| -> Result<Vec<Post>> { std::panic::panic_any("deliberate: index out of bounds") }, App::thread_arrived);
     settle_until(&mut app, |a| a.tab.loading.is_none());
-    let status = app.status.as_ref().unwrap();
+    let status = app.footer.get().unwrap();
     assert!(status.error && status.text.contains("ck hit a bug: deliberate: index out of bounds"), "{}", status.text);
 }
 
@@ -3006,7 +3025,7 @@ fn removing_a_saved_copy_asks_again_once_the_question_is_gone() {
     app.saved_list.state.select(Some(0));
     app.act(Action::Remove);
     // The question goes (it expired, or something else was said): x asks again.
-    app.status = None;
+    expired(&mut app);
     app.act(Action::Remove);
     assert!(app.store.saved(&key).is_some());
     app.act(Action::Remove);
@@ -3034,13 +3053,24 @@ fn a_failed_load_stays_on_screen_in_plain_words() {
     let failed = app.tab.failed.clone().unwrap();
     assert_eq!(failed, "Couldn't reach 127.0.0.1:5 (connection refused). r tries again");
     // Long after the footer's message has gone, it's still where the threads would be.
-    app.status = None;
+    expired(&mut app);
     let screen = draw_at(&mut app, 100, 30);
     let text: String = screen.content.iter().map(|c| c.symbol()).collect();
     assert!(text.contains("Couldn't reach 127.0.0.1:5 (connection refused)") && !text.contains("No threads"), "{text}");
     // Trying again clears it.
     app.act(Action::Reload);
     assert!(app.tab.failed.is_none());
+}
+
+#[test]
+fn trying_again_clears_the_failure_from_the_footer_too() {
+    let mut app = app_with("[[site]]\nname = \"a\"\nkind = \"vichan\"\nurl = \"http://127.0.0.1:5\"\nboards = [\"x\"]");
+    app.goto_str("a/x");
+    settle_until(&mut app, |a| a.tab.loading.is_none());
+    assert!(app.footer.get().is_some_and(|s| s.error), "{:?}", app.footer.get());
+    // Seen, then r while it's still up: the old failure doesn't outlive the retry.
+    app.act(Action::Reload);
+    assert_eq!(app.footer.get(), None);
 }
 
 /// The local app on /x/, in the thread view.
@@ -3172,7 +3202,7 @@ fn replies_to_hidden_posts_hide_with_them() {
     // H on a reply says where it comes from; unhiding the post it replies to shows it.
     app.tab.thread.as_mut().unwrap().selected = 3;
     app.act(Action::Hide);
-    assert!(app.status.as_ref().unwrap().text.contains("reply to No.3"), "{:?}", app.status);
+    assert!(app.footer.get().unwrap().text.contains("reply to No.3"), "{:?}", app.footer.get());
     app.tab.thread.as_mut().unwrap().selected = 1;
     app.act(Action::Hide);
     assert_eq!(hidden(&app), [None, None, None, None, None, deep, r(6)]);
@@ -3370,7 +3400,7 @@ fn m_shows_posts_with_files_then_hides_images() {
     t.set_search("t".into());
     run_menu_row(&mut app, "only the posts with files");
     assert_eq!((media(&app), shown(&app)), (Media::Files, vec![1, 2, 4]));
-    assert_eq!(app.status.as_ref().unwrap().text, "3 posts with files; M again shows all, images hidden");
+    assert_eq!(app.footer.get().unwrap().text, "3 posts with files; M again shows all, images hidden");
     // The selected post had none: the next one that has is selected. Search finds what's
     // shown (not "three").
     let t = app.tab.thread.as_ref().unwrap();
@@ -3395,7 +3425,7 @@ fn m_shows_posts_with_files_then_hides_images() {
     app.tab.thread.as_mut().unwrap().select(1);
     app.act(Action::View);
     assert!(app.tab.viewer().is_none());
-    assert!(app.status.as_ref().unwrap().text.starts_with("Images are hidden in this thread (M shows them)"));
+    assert!(app.footer.get().unwrap().text.starts_with("Images are hidden in this thread (M shows them)"));
     app.act(Action::Media);
     assert!(media(&app) == Media::All && app.thread_images_on());
     // In a conversation, its posts whatever they have; leaving it, those with files.
@@ -3403,7 +3433,7 @@ fn m_shows_posts_with_files_then_hides_images() {
     app.act(Action::Conversation);
     app.act(Action::Media);
     assert_eq!(shown(&app), [2, 3]);
-    assert!(app.status.as_ref().unwrap().text.starts_with("Only posts with files, once you leave the conversation"));
+    assert!(app.footer.get().unwrap().text.starts_with("Only posts with files, once you leave the conversation"));
     app.on_key(KeyEvent::from(KeyCode::Esc));
     assert_eq!(shown(&app), [1, 2, 4, 5]);
     // Another thread starts with everything.
@@ -3473,10 +3503,10 @@ fn the_menu_offers_no_gallery_when_only_hidden_posts_have_files() {
     app.rehide(|a| a.store.toggle_hidden("a", "x", 2));
     // The gallery has nothing to show, and says why; so the menu doesn't offer it.
     app.act(Action::Gallery);
-    assert_eq!(app.status.as_ref().map(|s| s.text.as_str()), Some("Only hidden posts have files (Z shows them)"));
-    app.status = None;
+    assert_eq!(app.footer.get().map(|s| s.text.as_str()), Some("Only hidden posts have files (Z shows them)"));
+    expired(&mut app);
     app.act(Action::DownloadThread);
-    assert_eq!(app.status.as_ref().map(|s| s.text.as_str()), Some("Only hidden posts have files (Z shows them)"));
+    assert_eq!(app.footer.get().map(|s| s.text.as_str()), Some("Only hidden posts have files (Z shows them)"));
     app.on_key(KeyEvent::from(KeyCode::Char('.')));
     let m = app.menu().unwrap();
     let has = |a: Action| m.items.iter().any(|i| matches!(i, MenuItem::Act(x, _) if *x == a));
@@ -3758,4 +3788,180 @@ fn search_hits_with_the_same_numbers_in_two_saved_copies_are_told_apart() {
     app.tab.search = Some(s);
     let rows = app.row_keys(View::Search);
     assert_eq!(rows.iter().map(|k| app.row_of(View::Search, k)).collect::<Vec<_>>(), [Some(0), Some(1)]);
+}
+
+/// A data directory and a config file ck can't write: both sit under a plain file.
+fn unwritable(app: &mut App, dir: &std::path::Path) {
+    let blocked = dir.join("blocked");
+    std::fs::write(&blocked, "a file, not a folder").unwrap();
+    app.store = Store::load(Some(blocked.join("data"))).0;
+    app.config_path = Some(blocked.join("config.toml"));
+    assert!(app.edit_config(|_| Ok(())).is_err(), "the config write has to fail for these tests to mean anything");
+}
+
+/// The footer's message: what it says, and whether it's an error.
+fn footer(app: &App) -> (String, bool) {
+    app.footer.get().map(|s| (s.text.clone(), s.error)).unwrap_or_default()
+}
+
+#[test]
+fn a_hide_that_cant_be_saved_says_so() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = local_app();
+    unwritable(&mut app, dir.path());
+    app.tab.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
+    app.tab.catalog_board = Some("x".into());
+    app.tab.catalog = nos(&[1, 2]);
+    app.remark();
+    app.tab.view = View::Catalog;
+    app.tab.catalog_list.state.select(Some(0));
+    app.act(Action::Hide);
+    let (text, error) = footer(&app);
+    assert!(app.store.save().is_err(), "the hide wasn't written");
+    assert!(error && text.contains("Couldn't save"), "the failed write isn't reported: {text:?} (error: {error})");
+}
+
+#[test]
+fn a_sort_or_layout_that_cant_be_saved_says_so() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = local_app();
+    unwritable(&mut app, dir.path());
+    app.goto_str("a/x");
+    app.act(Action::Sort);
+    let (text, error) = footer(&app);
+    assert!(app.store.save().is_err(), "the sort wasn't written");
+    assert!(error && text.contains("Couldn't save"), "sort: the failed write isn't reported: {text:?} (error: {error})");
+    app.act(Action::Compact);
+    let (text, error) = footer(&app);
+    assert!(error && text.contains("Couldn't save"), "layout: the failed write isn't reported: {text:?} (error: {error})");
+}
+
+#[test]
+fn board_images_that_cant_be_saved_say_so() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = local_app();
+    unwritable(&mut app, dir.path());
+    app.goto_str("a/x");
+    app.toggle_board_images();
+    let (text, error) = footer(&app);
+    assert!(app.store.save().is_err(), "the image setting wasn't written");
+    assert!(error && text.contains("Couldn't save"), "toggle: the failed write isn't reported: {text:?} (error: {error})");
+    app.reset_board_images("a/x");
+    let (text, error) = footer(&app);
+    assert!(error && text.contains("Couldn't save"), "reset: the failed write isn't reported: {text:?} (error: {error})");
+}
+
+#[test]
+fn a_default_layout_kept_nowhere_doesnt_claim_it_was_kept() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = local_app();
+    unwritable(&mut app, dir.path());
+    app.cycle_default_layout();
+    let (text, error) = footer(&app);
+    assert!(app.store.save().is_err(), "the layout wasn't kept in the data directory either");
+    assert!(error, "neither the config nor the data directory could be written, but it's an info: {text:?}");
+    assert!(!text.contains("kept in the data directory"), "the data directory couldn't be written either: {text:?}");
+}
+
+#[test]
+fn a_hidden_word_that_cant_be_saved_is_an_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = local_app();
+    unwritable(&mut app, dir.path());
+    app.add_hidden_word("spam");
+    let (text, error) = footer(&app);
+    assert!(error, "the config write failed, but it's an info (2s, not error-styled): {text:?}");
+    // Removing one says the same failure the same way.
+    app.remove_hidden_word("spam", true);
+    let (removed, _) = footer(&app);
+    assert!(removed.contains("couldn't save it") && text.contains("couldn't save it"), "two wordings for one failure: {text:?} / {removed:?}");
+}
+
+#[test]
+fn taking_back_what_couldnt_be_written_writes_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = local_app();
+    unwritable(&mut app, dir.path());
+    app.add_hidden_word("spam");
+    drawn(&mut app);
+    app.undo_filter();
+    assert_eq!(footer(&app), ("Posts with \"spam\" aren't hidden now".into(), false), "it was never written, so nothing failed to be");
+}
+
+#[test]
+fn an_error_behind_the_spinner_waits_to_be_seen() {
+    let mut app = test_app();
+    let t0 = Instant::now();
+    app.clock = Clock { instant: Some(t0), ..Default::default() };
+    app.tab.loading = Some("Loading".into());
+    app.error("Couldn't save to the data directory: disk full");
+    app.poll();
+    app.clock = Clock { instant: Some(t0 + Duration::from_secs(60)), ..Default::default() };
+    app.poll();
+    assert!(footer(&app).1, "it ran out while the spinner hid it");
+    app.tab.loading = None;
+    app.poll();
+    app.clock = Clock { instant: Some(t0 + Duration::from_secs(65)), ..Default::default() };
+    app.poll();
+    assert_eq!(app.footer.get(), None, "5s once it's on screen");
+}
+
+#[test]
+fn a_board_added_and_opened_but_not_saved_still_says_so() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = local_app();
+    unwritable(&mut app, dir.path());
+    app.popup = Some(Popup::Adding(Adding::Board { site: 0, board: "zz".into(), open: Some("a/zz".into()) }));
+    app.on_key(KeyEvent::from(KeyCode::Enter));
+    let (text, error) = footer(&app);
+    assert!(error && text.contains("couldn't save it"), "opening the board replaced the config error: {text:?} (error: {error})");
+}
+
+#[test]
+fn an_unshown_error_isnt_replaced_by_the_next_info() {
+    let mut app = test_app();
+    app.error("Couldn't save watched threads: disk full");
+    app.info("Sorted by replies");
+    let (text, error) = footer(&app);
+    assert!(error && text.contains("disk full"), "an info replaced an error before it was drawn: {text:?}");
+}
+
+/// A request that couldn't connect, as the HTTP layer reports it.
+fn unreachable_request() -> anyhow::Error {
+    anyhow::Error::from(ureq::Error::ConnectionFailed).context("GET http://127.0.0.1:3/x/res/1.json")
+}
+
+#[test]
+fn a_thread_lookup_that_fails_is_said_in_plain_words() {
+    let plain = crate::http::plain(&unreachable_request());
+    assert_eq!(plain, "Couldn't reach 127.0.0.1:3");
+    // Finding which thread a post is in.
+    let mut app = local_app();
+    app.thread_found(0, Board { uri: "x".into(), title: String::new(), nsfw: None }, 5, None, Err(unreachable_request()));
+    assert_eq!(footer(&app).0, plain, "find_thread");
+}
+
+#[test]
+fn a_site_that_cant_be_asked_is_said_in_plain_words() {
+    let plain = crate::http::plain(&unreachable_request());
+    let mut app = local_app();
+    app.popup = Some(Popup::Adding(Adding::Looking { id: 7, host: "127.0.0.1".into(), open: None }));
+    app.detected(7, Err(unreachable_request()));
+    assert_eq!(footer(&app).0, plain, "adding a site");
+}
+
+#[test]
+fn an_archive_search_that_fails_is_said_in_plain_words() {
+    let plain = crate::http::plain(&unreachable_request());
+    let mut app = app_with(
+        "[[site]]\nname = \"chan\"\nkind = \"vichan\"\nurl = \"http://127.0.0.1:3\"\nboards = [\"g\"]\narchive = \"arch\"\n\
+         [[site]]\nname = \"arch\"\nkind = \"foolfuuka\"\nurl = \"http://localhost:3\"\nboards = [\"g\"]",
+    );
+    app.tab.board = Some(Board { uri: "g".into(), title: String::new(), nsfw: None });
+    app.tab.view = View::Catalog;
+    app.act(Action::ArchiveSearch);
+    type_text(&mut app, "borrow");
+    app.on_key(KeyEvent::from(KeyCode::Enter));
+    app.search_results(1, Err(unreachable_request()));
+    assert_eq!(footer(&app).0, plain, "archive search");
 }

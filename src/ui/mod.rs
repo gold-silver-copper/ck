@@ -469,9 +469,9 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
             Span::styled(format!(" {q}"), Style::new().fg(t.on_bar)),
             Span::styled("▏", Style::new().fg(t.primary)),
             Span::styled(
-                match (app.goto_text(), &app.status) {
-                    // Tab completion's candidates.
-                    (Some(_), Some(Status { text, error: false })) => format!("   {text}"),
+                match (app.goto_text(), app.status()) {
+                    // Tab completion's candidates, or what went wrong.
+                    (Some(_), Some(Status { text, error })) => format!("   {}{text}", if *error { "! " } else { "" }),
                     (Some(_), _) => "   enter go   tab complete   esc cancel".into(),
                     _ => "   enter accept   esc clear".into(),
                 },
@@ -483,7 +483,7 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
             Span::styled(format!(" {} ", spinner(app.tick)), bold(t.primary)),
             Span::styled(format!("{label}…"), Style::new().fg(t.on_bar)),
         ])
-    } else if let Some(s) = &app.status {
+    } else if let Some(s) = app.status() {
         Line::from([vec![Span::raw(" ")], status_spans(s, t)].concat())
     } else {
         Line::default()

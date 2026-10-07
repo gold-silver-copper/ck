@@ -205,7 +205,7 @@ impl App {
                 self.save_now();
                 self.info(format!("Saved thread.html and thread.json in {} (and in Saved)", tilde(&dir.display().to_string())));
             }
-            Err(e) => self.error(format!("Couldn't save the thread: {e:#}")),
+            Err(e) => self.error(e.context("Couldn't save the thread")),
         }
     }
 
@@ -216,7 +216,7 @@ impl App {
             return;
         }
         if let Err(e) = std::fs::create_dir_all(&dir) {
-            self.error(format!("Couldn't create {}: {e}", dir.display()));
+            self.error(anyhow::Error::from(e).context(format!("Couldn't create {}", dir.display())));
             return;
         }
         let d = &mut self.downloads;
@@ -234,7 +234,7 @@ impl App {
                 } else {
                     match crate::guard::result(|| http::download_to(&url, &path)) {
                         Ok(()) => DlEvent::Done,
-                        Err(e) => DlEvent::Failed(format!("{e:#}")),
+                        Err(e) => DlEvent::Failed(http::plain(&e)),
                     }
                 };
                 if !later.run(move |app| app.download_event(ev)) {
@@ -265,7 +265,7 @@ impl App {
                     if d.failed > 0 {
                         let _ = write!(msg, ", {} failed ({})", d.failed, d.last_error.as_deref().unwrap_or(""));
                     }
-                    self.status = Some(Status { text: msg, error: d.failed > 0 });
+                    if d.failed > 0 { self.error(msg) } else { self.info(msg) }
                 }
             }
         }
