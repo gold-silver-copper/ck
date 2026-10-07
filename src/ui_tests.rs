@@ -1752,3 +1752,146 @@ fn a_dead_watched_threads_counts_show_nowhere() {
     // The title agrees: 2 new, and no reply to you.
     assert_eq!(a.terminal_title().as_deref(), Some("ck: (2) Watched"));
 }
+
+// ----- text measured as it's drawn: one grapheme at a time (markup::columns) -----
+
+/// Text unicode-width measures at half its drawn cells: it counts "لا" as one cell, and
+/// ratatui draws it in two.
+fn lam_alef(n: usize) -> String {
+    "لا".repeat(n)
+}
+
+/// The cell `needle` starts at on row `y`, as drawn.
+fn cell_of(buf: &Buffer, y: u16, needle: &str) -> Option<u16> {
+    let row: Vec<&str> = (0..buf.area.width).map(|x| buf[(x, y)].symbol()).collect();
+    (0..row.len()).find(|&x| row.get(x..).is_some_and(|rest| rest.concat().starts_with(needle))).map(|x| x as u16)
+}
+
+#[test]
+fn narrow_catalog_keeps_its_counts_under_an_arabic_subject() {
+    // Subjects that fit as unicode-width measures them, but not as they're drawn.
+    for n in 12..=22 {
+        for compact in [false, true] {
+            let mut a = catalog_app(false);
+            if compact {
+                a.default_layout = crate::config::CatalogLayout::Compact;
+            }
+            a.tab.catalog[1].subject = Some(lam_alef(n));
+            let text = narrow(&mut a);
+            let row = text.lines().find(|l| l.contains("لا")).unwrap();
+            // The subject gives way to the counts, as an ASCII one does.
+            assert!(row.contains("312"), "{n} compact={compact}\n{text}");
+        }
+    }
+}
+
+#[test]
+fn a_tab_chip_keeps_its_unread_count_under_an_arabic_subject() {
+    let mut a = thread_app(false);
+    a.tab.thread.as_mut().unwrap().posts[0].subject = Some(lam_alef(30));
+    a.tabs.push(crate::app::Tab::new(0, std::time::Instant::now()));
+    assert_eq!(a.tab_unread(0), Some(2));
+    let (text, _) = render(&mut a);
+    // "kept whatever the label is cut to"
+    let chips = text.lines().nth(1).unwrap();
+    assert!(chips.contains("(2)"), "{text}");
+}
+
+#[test]
+fn site_columns_line_up_under_a_japanese_site_name() {
+    let mut a = app(false);
+    a.sites[1].cfg.name = "ふたば".into();
+    let (text, buf) = render(&mut a);
+    let rows: Vec<u16> = (0..buf.area.height).filter(|&y| cell_of(&buf, y, "https://").is_some()).collect();
+    let urls: Vec<_> = rows.iter().map(|&y| cell_of(&buf, y, "https://")).collect();
+    // The url column starts at the same cell on every site's row.
+    assert!(urls.windows(2).all(|w| w.first() == w.get(1)), "{urls:?}\n{text}");
+}
+
+#[test]
+fn the_menu_is_wide_enough_for_an_arabic_file_name() {
+    use ratatui::crossterm::event::{KeyCode, KeyEvent};
+    let mut a = thread_app(false);
+    let name = format!("{}.png", lam_alef(25));
+    let t = a.tab.thread.as_mut().unwrap();
+    t.posts[0].files[0].filename = name.clone();
+    t.focus = Some(Part::File(0));
+    render(&mut a);
+    a.on_key(KeyEvent::from(KeyCode::Char('.')));
+    assert!(a.menu().is_some_and(|m| m.items.iter().any(|i| matches!(i, crate::app::MenuItem::Enter(l) if l.contains(&name)))));
+    let text = render(&mut a).0;
+    // The panel is as wide as the label drawn in it.
+    assert!(text.contains(&name), "{text}");
+}
+
+#[test]
+fn wrapped_paths_fit_their_width_as_drawn() {
+    // "❤️" (a heart and an emoji-style selector) is drawn in two cells; each char alone is one.
+    let path = format!("/saves/{}/thread.html", "❤\u{fe0f}".repeat(12));
+    for line in crate::ui::wrap_path(&path, 10) {
+        assert!(crate::markup::columns(&line) <= 10, "{line:?} is {} cells", crate::markup::columns(&line));
+    }
+    // Every line draws something, even one too wide; a slash keeps the mark that goes with it.
+    assert_eq!(crate::ui::wrap_path("\u{200b}❤\u{fe0f}ab", 1), ["\u{200b}❤\u{fe0f}", "a", "b"]);
+    assert_eq!(crate::ui::wrap_path("abc/\u{301}de", 5), ["abc/\u{301}d", "e"]);
+}
+
+#[test]
+fn ui_pads_columns_by_cells() {
+    // std pads a `{:N}` placeholder by chars, and a char isn't a cell: "ふたば" is three chars
+    // in six. Any width (`{:16}`, `{:>16}`, `{x:w$}`) counts; the `0` flag pads numbers only.
+    fn width_spec(line: &str) -> bool {
+        line.split('{').skip(1).filter_map(|p| p.split_once('}')).filter_map(|(inner, _)| inner.split_once(':')).any(|(arg, spec)| {
+            let arg_ok = arg.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '.');
+            let mut rest = spec;
+            let mut it = rest.chars();
+            if let (Some(_), Some('<' | '^' | '>')) = (it.next(), it.next()) {
+                rest = it.as_str();
+            } else {
+                rest = rest.trim_start_matches(['<', '^', '>']);
+            }
+            let rest = rest.trim_start_matches(['+', '-']).trim_start_matches('#');
+            let named = rest.split_once('$').is_some_and(|(n, _)| !n.is_empty() && n.chars().all(|c| c.is_alphanumeric() || c == '_'));
+            arg_ok && !rest.starts_with('0') && (rest.starts_with(|c: char| c.is_ascii_digit()) || rest.starts_with('*') || named)
+        })
+    }
+    assert!(width_spec(r#"format!("{:<16}", x)"#) && width_spec(r#"format!("{s:16}")"#) && width_spec(r#"format!("{s:>w$}")"#));
+    assert!(!width_spec(r#"format!("{:02x}{:.1}{x:?}{}", a, b)"#) && !width_spec("Rect { x: 0, y: 1 }") && !width_spec("Vec::<u8>::new()"));
+    // All of src but the test files, which pad expected output on purpose, and the input log,
+    // which pads a number in a file.
+    let mut dirs = vec![std::path::PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/src"))];
+    let mut checked = 0;
+    while let Some(dir) = dirs.pop() {
+        for entry in std::fs::read_dir(&dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                dirs.push(path);
+                continue;
+            }
+            let name = path.file_name().unwrap().to_string_lossy();
+            if !name.ends_with(".rs") || ["tests.rs", "ui_tests.rs", "fuzz.rs", "e2e.rs", "bench.rs", "input_log.rs"].contains(&&*name) {
+                continue;
+            }
+            let src = std::fs::read_to_string(&path).unwrap();
+            // A source file's own test module sits at its end (other `#[cfg(test)]` items are
+            // checked like the rest).
+            let lines: Vec<&str> = src.lines().collect();
+            let module = |i: usize| lines.iter().skip(i + 1).find(|l| !l.starts_with("#[")).is_some_and(|l| l.starts_with("mod ") && l.ends_with('{'));
+            let tests = (0..lines.len()).find(|&i| lines.get(i) == Some(&"#[cfg(test)]") && module(i)).unwrap_or(lines.len());
+            for (n, line) in lines.iter().take(tests).enumerate() {
+                assert!(!width_spec(line), "{}:{}: pad by cells with ui::pad / ui::col, not a {{:N}} width:\n{line}", path.display(), n + 1);
+            }
+            checked += 1;
+        }
+    }
+    assert!(checked > 20, "only {checked} files checked");
+    use crate::markup;
+    use crate::ui::{col, pad};
+    assert_eq!(markup::columns(&pad("ふたば", 16)), 16);
+    assert_eq!(pad("a long name", 4), "a long name");
+    let cut = col("ふたばちゃんねるの画像掲示板", 16);
+    assert!(cut.trim_end().ends_with('…') && markup::columns(&cut) == 16, "{cut:?}");
+    assert_eq!(col("Watched", 16), format!("{:<16}", "Watched"));
+    // A column with no room is blank, not an ellipsis sticking out of it.
+    assert_eq!((col("Watched", 1), col("Watched", 0)), (" ".to_string(), String::new()));
+}

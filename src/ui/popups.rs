@@ -90,7 +90,7 @@ pub(super) fn draw_adding(f: &mut Frame, app: &App) {
             (format!("Add /{board}/ to {name}?"), "enter add · esc cancel", vec![text(format!("{name} doesn't list /{board}/ yet; the site has it."))])
         }
     };
-    let w = lines.iter().map(|l| l.width()).max().unwrap_or(0).max(title.width() + hint.width() + 8).max(60) + 6;
+    let w = lines.iter().map(|l| markup::spans_columns(&l.spans)).max().unwrap_or(0).max(markup::columns(&title) + markup::columns(hint) + 8).max(60) + 6;
     let inner = panel(f, w.min(100) as u16, cells(lines.len()).saturating_add(3), &title, hint);
     for (i, line) in lines.into_iter().enumerate() {
         put(f, inner.x, inner.y + i as u16, inner.width, line);
@@ -102,7 +102,7 @@ pub(super) fn draw_adding(f: &mut Frame, app: &App) {
 pub(super) fn draw_confirm(f: &mut Frame, app: &App) {
     let Some(Popup::Confirm(c)) = &app.popup else { return };
     let t = theme();
-    let w = (c.lines.iter().map(|l| l.width()).max().unwrap_or(0).max(c.title.width() + 24) + 6).min(100) as u16;
+    let w = (c.lines.iter().map(|l| markup::columns(l)).max().unwrap_or(0).max(markup::columns(c.title) + 24) + 6).min(100) as u16;
     let width = (w.min(f.area().width.saturating_sub(4)).saturating_sub(4) as usize).max(10);
     let lines: Vec<String> = c.lines.iter().flat_map(|l| wrap_path(l, width)).collect();
     let inner = panel(f, w, cells(lines.len()).saturating_add(3), c.title, "enter save · esc cancel");
@@ -113,27 +113,22 @@ pub(super) fn draw_confirm(f: &mut Frame, app: &App) {
 
 /// `text` in lines of at most `width` columns, broken after a `/` where it can be.
 pub(crate) fn wrap_path(text: &str, width: usize) -> Vec<String> {
-    let chars: Vec<char> = text.chars().collect();
+    use unicode_segmentation::UnicodeSegmentation;
     let mut out = Vec::new();
-    let mut rest = chars.as_slice();
+    let mut rest = text;
     while !rest.is_empty() {
-        // As many characters as fit (at least one), then back to just after the last slash.
-        let (mut end, mut w) = (0, 0);
-        for &c in rest {
-            let cw = unicode_width::UnicodeWidthChar::width(c).unwrap_or(0);
-            if w + cw > width && end > 0 {
-                break;
-            }
-            w += cw;
-            end += 1;
+        // As many graphemes as fit (at least one that's drawn), then back to just after the last slash.
+        let (mut line, mut after) = markup::split_at_columns(rest, width);
+        if markup::columns(line) == 0 {
+            let end = rest.grapheme_indices(true).find(|(_, g)| markup::columns(g) > 0).map_or(rest.len(), |(i, g)| i + g.len());
+            (line, after) = rest.split_at_checked(end).unwrap_or((rest, ""));
         }
-        let (mut line, mut after) = rest.split_at_checked(end).unwrap_or((rest, &[]));
         if !after.is_empty()
-            && let Some(slash) = line.iter().rposition(|&c| c == '/').filter(|&i| i + 1 > line.len() / 2)
+            && let Some((head, tail)) = line.grapheme_indices(true).rfind(|&(_, g)| g == "/").and_then(|(i, _)| rest.split_at_checked(i + 1)).filter(|(head, _)| markup::columns(head) > markup::columns(line) / 2)
         {
-            (line, after) = rest.split_at_checked(slash + 1).unwrap_or((line, after));
+            (line, after) = (head, tail);
         }
-        out.push(line.iter().collect());
+        out.push(line.to_string());
         rest = after;
     }
     if out.is_empty() {
@@ -150,11 +145,11 @@ pub(super) fn draw_menu(f: &mut Frame, app: &mut App) {
         _ => Vec::new(),
     };
     let Some(Popup::Menu(m)) = &mut app.popup else { return };
-    let key_w = keys.iter().map(|k| k.width()).max().unwrap_or(1).max(5);
+    let key_w = keys.iter().map(|k| markup::columns(k)).max().unwrap_or(1).max(5);
     let label = |i: &crate::app::MenuItem| match i {
         crate::app::MenuItem::Enter(l) | crate::app::MenuItem::Act(_, l) => l.clone(),
     };
-    let w = (m.items.iter().map(|i| label(i).width()).max().unwrap_or(10) + key_w + 8).max(m.title.width() + 24) as u16;
+    let w = (m.items.iter().map(|i| markup::columns(&label(i))).max().unwrap_or(10) + key_w + 8).max(markup::columns(&m.title) + 24) as u16;
     let title = if m.title.is_empty() { "Actions".to_string() } else { m.title.clone() };
     let inner = panel(f, w.min(90), cells(m.items.len()).saturating_add(3), &title, "enter run · esc close");
     let rows = inner.height as usize;
@@ -164,7 +159,7 @@ pub(super) fn draw_menu(f: &mut Frame, app: &mut App) {
     m.area = inner;
     list_rows(f, Rect { height: rows as u16, ..inner }, off, m.items.len(), Some(sel), |k| {
         let key = keys.get(k).cloned().unwrap_or_default();
-        Line::from(vec![Span::styled(format!("{key:<key_w$}  "), bold(t.primary)), Span::styled(m.items.get(k).map(label).unwrap_or_default(), Style::new().fg(t.text))])
+        Line::from(vec![Span::styled(format!("{}  ", pad(&key, key_w)), bold(t.primary)), Span::styled(m.items.get(k).map(label).unwrap_or_default(), Style::new().fg(t.text))])
     });
 }
 
@@ -199,7 +194,7 @@ pub(super) fn draw_preview(f: &mut Frame, app: &App) {
     for n in &p.elsewhere {
         lines.push(Line::styled(format!(">>{n} is in another thread or board; enter in the thread follows it"), dim()));
     }
-    while lines.last().is_some_and(|l| l.width() == 0) {
+    while lines.last().is_some_and(|l| markup::spans_columns(&l.spans) == 0) {
         lines.pop();
     }
     let inner = panel(f, w, cells(lines.len()).saturating_add(3), "Quoted posts", "j/k scroll · enter jump · esc close");
@@ -229,9 +224,9 @@ pub(super) fn draw_links(f: &mut Frame, app: &mut App) {
         };
         let room = (inner.width as usize).saturating_sub(9);
         let text = truncate(&text, room);
-        let extra = truncate(&extra, room.saturating_sub(text.width()));
+        let extra = truncate(&extra, room.saturating_sub(markup::columns(&text)));
         Line::from(vec![
-            chip(format!("{kind:<5}"), t.text_dim, t.surface_high),
+            chip(pad(kind, 5), t.text_dim, t.surface_high),
             Span::raw("  "),
             Span::styled(text, Style::new().fg(if kind == "file" { t.text } else { t.quotelink })),
             Span::styled(extra, dim()),
@@ -385,7 +380,7 @@ pub(super) fn draw_help(f: &mut Frame, app: &App) {
             let mut lines = vec![Line::styled(title, bold(t.primary))];
             for (k, v) in rows {
                 for (i, part) in wrap_words(v, usize::from(COL).saturating_sub(KEYS)).into_iter().enumerate() {
-                    let keys = if i == 0 { format!("  {k:<18} ") } else { " ".repeat(KEYS) };
+                    let keys = if i == 0 { format!("  {} ", pad(&k, 18)) } else { " ".repeat(KEYS) };
                     lines.push(Line::from(vec![Span::styled(keys, bold(t.text)), Span::styled(part, Style::new().fg(t.text_dim))]));
                 }
             }
@@ -403,7 +398,7 @@ pub(super) fn draw_help(f: &mut Frame, app: &App) {
     }
     let mut cols = [left, right];
     for c in &mut cols {
-        while c.last().is_some_and(|l| l.width() == 0) {
+        while c.last().is_some_and(|l| markup::spans_columns(&l.spans) == 0) {
             c.pop();
         }
     }
@@ -449,7 +444,7 @@ pub(super) fn draw_add_filter(f: &mut Frame, app: &App) {
     }
     let y = inner.y + cells(a.candidates.len()).saturating_add(1);
     let row = |f: &mut Frame, k: u16, name: &str, value: Vec<Span<'static>>, key: &str| {
-        let mut spans = vec![Span::styled(format!("{name:<8}"), dim())];
+        let mut spans = vec![Span::styled(pad(name, 8), dim())];
         spans.extend(value);
         put(f, inner.x, y + k, inner.width, spread(spans, vec![Span::styled(key.to_string(), dim())], inner.width as usize));
     };

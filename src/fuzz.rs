@@ -148,9 +148,10 @@ fn markup_once(seed: u64) {
             let wrapped = markup::wrap(line, width);
             for w in &wrapped {
                 // `wrap` treats widths under 2 as 2, so a wide character always fits.
-                // Only a grapheme wider than the whole width may stick out, alone.
-                let drawn = markup::line_columns(w);
-                let alone = unicode_segmentation::UnicodeSegmentation::graphemes(text(w).trim_start_matches('↪'), true).count() == 1;
+                // Only a grapheme wider than the whole width may stick out, alone but for what
+                // takes no cell (a zero-width space, a control character).
+                let drawn = markup::spans_columns(&w.spans);
+                let alone = unicode_segmentation::UnicodeSegmentation::graphemes(text(w).trim_start_matches('↪'), true).filter(|g| markup::columns(g) > 0).count() == 1;
                 assert!(drawn <= width.max(2) || alone, "a {drawn}-wide line at width {width}: {:?} ({})", text(w), ctx());
             }
             if line.style != markup::CODE_LINE {
@@ -161,6 +162,7 @@ fn markup_once(seed: u64) {
         }
         // What's drawn is measured alike whole or a character at a time (as a terminal
         // without grapheme clustering does), so nothing lands in the wrong cell.
+        #[allow(clippy::disallowed_methods, reason = "checks unicode-width's own measure, as a terminal does")]
         for w in markup::wrap(line, 40) {
             for s in &w.spans {
                 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};

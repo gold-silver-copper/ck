@@ -18,7 +18,7 @@ pub(super) fn draw_sites(f: &mut Frame, app: &mut App, area: Rect) {
                 let (unread, _) = app.store.watched_new();
                 let mut spans = vec![
                     Span::styled("◉  ", Style::new().fg(t.primary)),
-                    Span::styled(format!("{:<16}", "Watched"), bold(t.text)),
+                    Span::styled(pad("Watched", 16), bold(t.text)),
                     Span::styled(plural(n, "thread"), dim()),
                 ];
                 if unread > 0 {
@@ -28,14 +28,14 @@ pub(super) fn draw_sites(f: &mut Frame, app: &mut App, area: Rect) {
             }
             SiteRow::History => vec![Line::from(vec![
                 Span::styled("◷  ", Style::new().fg(t.primary)),
-                Span::styled(format!("{:<16}", "History"), bold(t.text)),
+                Span::styled(pad("History", 16), bold(t.text)),
                 Span::styled(plural(app.store.history.len(), "recent thread"), dim()),
             ])],
             SiteRow::Saved => {
                 let dead = app.store.saved.iter().filter(|m| m.dead).count();
                 let mut spans = vec![
                     Span::styled("▤  ", Style::new().fg(t.primary)),
-                    Span::styled(format!("{:<16}", "Saved"), bold(t.text)),
+                    Span::styled(pad("Saved", 16), bold(t.text)),
                     Span::styled(plural(app.store.saved.len(), "thread"), dim()),
                 ];
                 if dead > 0 {
@@ -47,7 +47,7 @@ pub(super) fn draw_sites(f: &mut Frame, app: &mut App, area: Rect) {
                 let Some(b) = app.favorites.get(i) else { return Vec::new() };
                 let left = vec![
                     Span::styled("★  ", Style::new().fg(t.primary)),
-                    Span::styled(format!("{:<16}", truncate(&format!("{} /{}/", b.site, b.board), 15)), bold(t.text)),
+                    Span::styled(col(&format!("{} /{}/", b.site, b.board), 16), bold(t.text)),
                     Span::styled(app.board_title(b).to_string(), dim()),
                 ];
                 // 1-9 open the first nine.
@@ -59,7 +59,7 @@ pub(super) fn draw_sites(f: &mut Frame, app: &mut App, area: Rect) {
                 let (name, title) = r.as_ref().map_or((String::new(), ""), |r| (format!("{} /{}/", r.site, r.board), app.board_title(r)));
                 vec![Line::from(vec![
                     Span::styled("↺  ", Style::new().fg(t.text_dim)),
-                    Span::styled(format!("{:<16}", truncate(&name, 15)), Style::new().fg(t.text)),
+                    Span::styled(col(&name, 16), Style::new().fg(t.text)),
                     Span::styled(title.to_string(), dim()),
                 ])]
             }
@@ -70,8 +70,8 @@ pub(super) fn draw_sites(f: &mut Frame, app: &mut App, area: Rect) {
                 let hidden = app.is_site_hidden(i);
                 let spans = vec![
                     Span::raw("   "),
-                    Span::styled(format!("{:<16}", s.cfg.name), if hidden { dim() } else { bold(t.text) }),
-                    chip(format!("{kind:<9}"), t.text_dim, t.surface_high),
+                    Span::styled(col(&s.cfg.name, 16), if hidden { dim() } else { bold(t.text) }),
+                    chip(pad(kind, 9), t.text_dim, t.surface_high),
                     Span::styled(format!("  {url}"), dim()),
                 ];
                 let right = if hidden { vec![chip("hidden", t.text_dim, t.surface_high)] } else { Vec::new() };
@@ -94,8 +94,8 @@ pub(super) fn draw_sites(f: &mut Frame, app: &mut App, area: Rect) {
 fn thread_row(key: &crate::store::ThreadKey, subject: &str) -> Vec<Span<'static>> {
     let t = theme();
     vec![
-        Span::styled(format!("{:<11}", key.site), dim()),
-        Span::styled(format!("{:<10}", format!("/{}/", key.board)), bold(t.primary)),
+        Span::styled(pad(&key.site, 11), dim()),
+        Span::styled(pad(&format!("/{}/", key.board), 10), bold(t.primary)),
         Span::styled(truncate(subject, 52), Style::new().fg(t.text)),
     ]
 }
@@ -187,13 +187,13 @@ pub(super) fn draw_saved(f: &mut Frame, app: &mut App, area: Rect) {
 
 pub(super) fn draw_boards(f: &mut Frame, app: &mut App, area: Rect) {
     let t = theme();
-    let width = app.boards().iter().map(|b| b.uri.width()).max().unwrap_or(1) + 4;
+    let width = app.boards().iter().map(|b| markup::columns(&b.uri)).max().unwrap_or(1) + 4;
     let rows = app.visible_boards();
     let mut state = app.tab.board_list.state;
     app.hit = draw_rows(f, area, rows.len(), &mut state, (1, 0), None, &|_| false, &mut |k| {
         let Some(b) = rows.get(k).and_then(|&i| app.boards().get(i)) else { return Vec::new() };
         let mut spans = vec![
-            Span::styled(format!("{:<width$}", format!("/{}/", b.uri)), bold(t.primary)),
+            Span::styled(pad(&format!("/{}/", b.uri), width), bold(t.primary)),
             Span::styled(b.title.clone(), Style::new().fg(t.text)),
         ];
         if b.nsfw == Some(true) {
@@ -275,21 +275,21 @@ pub(super) fn draw_catalog(f: &mut Frame, app: &mut App, area: Rect) {
             facts.push(ago(p.time, app.clock));
             facts.join(" · ")
         };
-        let head_w: usize = head.iter().map(|s| s.width()).sum();
+        let head_w = markup::spans_columns(&head);
         let long = facts(false);
-        let short = head_w.min(20) + long.width() + 4 > text_w;
+        let short = head_w.min(20) + markup::columns(&long) + 4 > text_w;
         meta.push(Span::styled(if short { facts(true) } else { long }, dim()));
         // The subject gives way to the counts.
-        let meta_w: usize = meta.iter().map(|s| s.width()).sum();
+        let meta_w = markup::spans_columns(&meta);
         let head_room = text_w.saturating_sub(meta_w + 2);
         if head_w > head_room
             && let Some(last) = head.last_mut()
         {
-            let others = head_w.saturating_sub(last.width());
+            let others = head_w.saturating_sub(markup::columns(&last.content));
             last.content = truncate(&last.content, head_room.saturating_sub(others)).into();
         }
         if compact {
-            let used: usize = head.iter().chain(&meta).map(|s| s.width()).sum();
+            let used = markup::spans_columns(&head) + markup::spans_columns(&meta);
             let room = text_w.saturating_sub(used + 4);
             if room > 8 {
                 head.push(Span::styled(format!("  {}", truncate(p.plain_text(), room)), dim()));
@@ -501,7 +501,7 @@ fn draw_grid(f: &mut Frame, app: &mut App, area: Rect) {
             Some(s) => (s.clone(), p.plain_text().to_string()),
             None => (p.plain_text().to_string(), String::new()),
         };
-        let used: usize = head.iter().map(|s| s.width()).sum();
+        let used = markup::spans_columns(&head);
         head.push(Span::styled(truncate(&title, (w as usize).saturating_sub(used)), if mark.hidden.is_some() { dim() } else { bold(t.text) }));
         let mut facts = Vec::new();
         if let Some(n) = app.new_replies(p) {

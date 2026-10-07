@@ -227,6 +227,9 @@ off. They're kept in the config as `favorites = ["4chan/g", "lainchan/λ"]`.
 Under them, marked ↺, are the last five boards you opened (that aren't favorites); `x`
 forgets one. The list is kept in the data directory (`recent_boards.json`).
 
+A site's name longer than its column is cut with "…" (`tab` after `:` still completes it
+in full).
+
 `x` on a site hides it from the home screen (`hidden_sites = [...]` in the config). The
 last row says how many are hidden; `enter` on it shows them (marked "hidden"), and `x` on
 one brings it back.
