@@ -2,7 +2,7 @@
 
 use std::time::{Duration, Instant};
 
-use super::{App, FilteredList, Sort, View};
+use super::{App, FilteredList, Opening, Sort, View};
 use crate::store::{Place, Session};
 
 /// How often the session is saved while ck runs (if it changed).
@@ -26,8 +26,7 @@ impl App {
     /// Where this tab is.
     pub fn place(&self) -> Place {
         // From settings or search results: the view they were opened from.
-        let view = match self.tab.view {
-            View::Settings => self.tab.settings_back.unwrap_or(View::Sites),
+        let view = match self.tab.place_view() {
             View::Search => View::Catalog,
             v => v,
         };
@@ -48,12 +47,12 @@ impl App {
             View::Thread => {
                 let t = self.tab.thread.as_ref();
                 place.thread = t.map(|t| t.no).or(self.tab.pending_thread);
-                place.selected = t.and_then(|t| t.current()).map(|p| p.no).or(self.tab.pending_post);
+                place.selected = t.and_then(|t| t.current()).map(|p| p.no).or_else(|| self.tab.opening().select);
                 // A poster's posts aren't kept: an ID is the thread's alone, and short-lived.
-                place.conversation = t.and_then(|t| Some(t.conversation.as_ref().filter(|c| c.poster.is_none())?.anchor)).or(self.tab.pending_conversation);
+                place.conversation = t.and_then(|t| Some(t.conversation.as_ref().filter(|c| c.poster.is_none())?.anchor)).or_else(|| self.tab.opening().conversation);
             }
             View::Catalog => {
-                place.selected = self.tab.catalog_list.state.selected().and_then(|i| self.visible_catalog().get(i).and_then(|&k| self.tab.catalog.get(k)).map(|p| p.no));
+                place.selected = self.tab.catalog_list.state.selected().and_then(|i| self.visible_catalog().get(i).and_then(|&k| self.tab.catalog.get(k)).map(|p| p.no)).or_else(|| self.tab.catalog_selecting());
             }
             _ => {}
         }
@@ -107,30 +106,24 @@ impl App {
         self.tab.catalog_list = FilteredList { filter: p.filter.clone(), ..FilteredList::top() };
         let board = p.board.as_ref().map(|b| self.find_board(b));
         match (p.view.as_str(), board, p.thread) {
-            ("watched", ..) => self.tab.view = View::Watched,
-            ("history", ..) => self.tab.view = View::History,
+            ("watched", ..) => self.tab.navigate(View::Watched),
+            ("history", ..) => self.tab.navigate(View::History),
             ("saved", Some(board), Some(no)) => {
-                self.tab.pending_conversation = p.conversation;
-                self.open_saved(&crate::store::ThreadKey { site: p.site.clone(), board: board.uri, no });
-                if let (Some(t), Some(no)) = (&mut self.tab.thread, p.selected) {
-                    t.select_post(no);
-                }
+                let open = Opening { select: p.selected, conversation: p.conversation, restoring: false };
+                self.open_saved(&crate::store::ThreadKey { site: p.site.clone(), board: board.uri, no }, open);
             }
-            ("saved", ..) => self.tab.view = View::Saved,
+            ("saved", ..) => self.tab.navigate(View::Saved),
             ("boards", ..) => self.enter_site(site),
             ("catalog", Some(board), _) => {
                 self.tab.board = Some(board);
                 self.tab.catalog.clear();
-                self.tab.view = View::Catalog;
-                self.tab.pending_catalog = p.selected;
-                self.load_catalog();
+                self.tab.navigate(View::Catalog);
+                self.load_catalog(p.selected);
             }
             ("thread", Some(board), Some(no)) => {
-                self.open_thread_at(board, no, p.selected);
-                self.tab.pending_conversation = p.conversation;
-                self.tab.restoring = true;
+                self.open_thread_at(board, no, Opening { select: p.selected, conversation: p.conversation, restoring: true });
             }
-            _ => self.tab.view = View::Sites,
+            _ => self.tab.navigate(View::Sites),
         }
     }
 }

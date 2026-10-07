@@ -700,7 +700,7 @@ fn data_dir_once(seed: u64) {
     // The Saved view, and each copy in it.
     app.goto_str("saved");
     for key in copies {
-        app.open_saved(&key);
+        app.open_saved(&key, crate::app::Opening::default());
         crate::test_fixtures::draw_at(&mut app, 60, 20);
     }
     for (w, h) in [(110, 32), (20, 5)] {

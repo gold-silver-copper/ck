@@ -25,8 +25,9 @@ pub(super) enum Modal {
     Filtering,
 }
 
-/// What a frame showed: the screen (its view and tab), how many tabs, and what's on top.
-pub(super) type Shown = ((View, usize, bool, bool), usize, Option<Modal>);
+/// What a frame showed: the screen (its view, tab and place), how many tabs, and what's on
+/// top.
+pub(super) type Shown = ((View, usize, bool, bool, u32), usize, Option<Modal>);
 
 /// What the mouse does with one gesture.
 type Handler = fn(&mut App, MouseEvent, Instant);
@@ -113,14 +114,15 @@ impl App {
 
     /// The wheel scrolls a thread three lines a notch.
     fn scroll_thread(&mut self, ev: MouseEvent, _: Instant) {
-        if let Some(t) = self.tab.thread.as_mut().filter(|_| self.tab.view == View::Thread) {
+        let thread = self.tab.view() == View::Thread;
+        if let Some(t) = self.tab.thread.as_mut().filter(|_| thread) {
             t.scroll_lines(if ev.kind == ScrollDown { 3 } else { -3 });
         }
     }
 
     /// The wheel scrolls a thread, and moves through a list.
     fn scroll(&mut self, ev: MouseEvent, now: Instant) {
-        if self.tab.view == View::Thread { self.scroll_thread(ev, now) } else { self.on_view_key(arrow(ev)) }
+        if self.tab.view() == View::Thread { self.scroll_thread(ev, now) } else { self.on_view_key(arrow(ev)) }
     }
 
     /// A right-click selects what's under it and opens its menu.
@@ -191,7 +193,7 @@ impl App {
         let open = [
             (self.tab.viewer().is_some(), Modal::Viewer),
             (matches!(self.tab.popup, Some(TabPopup::Preview(_))), Modal::Preview),
-            (self.tab.gallery.is_some() && self.tab.view == View::Thread, Modal::Gallery),
+            (self.tab.gallery.is_some() && self.tab.view() == View::Thread, Modal::Gallery),
             (matches!(self.tab.popup, Some(TabPopup::Links(_))), Modal::Links),
         ];
         open.into_iter().find_map(|(on, modal)| on.then_some(modal)).or_else(|| self.typing.as_ref().map(|t| match t {
@@ -206,12 +208,13 @@ impl App {
     /// its part) in a thread. Which, if anything.
     fn select_at(&mut self, col: u16, row: u16) -> Option<usize> {
         let at = self.click_target(col, row);
-        if let Some(g) = self.tab.gallery.as_mut().filter(|_| self.tab.view == View::Thread) {
+        let thread = self.tab.view() == View::Thread;
+        if let Some(g) = self.tab.gallery.as_mut().filter(|_| thread) {
             let k = at.filter(|&k| k < g.files.len())?;
             g.state.select(Some(k));
             return Some(k);
         }
-        if self.tab.view == View::Thread {
+        if thread {
             let (e, part) = self.thread_part_at(col, row)?;
             let t = self.tab.thread.as_mut()?;
             t.set_cursor(e);
@@ -291,7 +294,7 @@ impl App {
     /// A key for the view, with nothing on top.
     fn on_view_key(&mut self, key: KeyEvent) {
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
-        if self.tab.view == View::Search && self.keys.keys(Action::NextMatch).contains(&crate::keys::Key::from_event(&key)) {
+        if self.tab.view() == View::Search && self.keys.keys(Action::NextMatch).contains(&crate::keys::Key::from_event(&key)) {
             if self.more_results() {
                 self.load_search_page();
             }
@@ -310,13 +313,13 @@ impl App {
                     t.layout = None;
                 }
             }
-            KeyCode::Esc if self.tab.view == View::Thread && self.tab.thread.as_ref().is_some_and(|t| !t.search.is_empty()) => {
+            KeyCode::Esc if self.tab.view() == View::Thread && self.tab.thread.as_ref().is_some_and(|t| !t.search.is_empty()) => {
                 if let Some(t) = &mut self.tab.thread {
                     t.set_search(String::new());
                 }
             }
             // Out of a conversation, to the whole thread.
-            KeyCode::Esc if self.tab.view == View::Thread && self.tab.thread.as_ref().is_some_and(|t| t.conversation.is_some()) => {
+            KeyCode::Esc if self.tab.view() == View::Thread && self.tab.thread.as_ref().is_some_and(|t| t.conversation.is_some()) => {
                 if let Some(t) = &mut self.tab.thread {
                     t.leave_conversation();
                 }
@@ -329,10 +332,10 @@ impl App {
                     self.back();
                 }
             }
-            _ if self.tab.view == View::Catalog && self.grid_cols > 0 && self.on_grid_key(key.code) => {}
-            KeyCode::Char(c @ '1'..='9') if self.tab.view == View::Sites => self.open_favorite(c as usize - '1' as usize),
+            _ if self.tab.view() == View::Catalog && self.grid_cols > 0 && self.on_grid_key(key.code) => {}
+            KeyCode::Char(c @ '1'..='9') if self.tab.view() == View::Sites => self.open_favorite(c as usize - '1' as usize),
             KeyCode::Char('h') | KeyCode::Left | KeyCode::Backspace => self.back(),
-            _ if self.tab.view == View::Thread => self.on_thread_key(key.code, ctrl),
+            _ if self.tab.view() == View::Thread => self.on_thread_key(key.code, ctrl),
             KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right => self.enter(),
             code => {
                 let Some((p, len)) = self.filtered_list() else { return };
@@ -347,7 +350,7 @@ impl App {
                     KeyCode::Char('G') | KeyCode::End => p.move_by(isize::MAX / 2, len),
                     _ => {}
                 }
-                if self.tab.view == View::Search {
+                if self.tab.view() == View::Search {
                     self.search_moved();
                 }
             }
@@ -355,7 +358,7 @@ impl App {
     }
 
     pub fn scope(&self) -> Scope {
-        match self.tab.view {
+        match self.tab.view() {
             View::Sites | View::Boards | View::Settings | View::Search => Scope::Lists,
             View::Catalog => Scope::Catalog,
             View::Thread => Scope::Thread,
@@ -378,9 +381,9 @@ impl App {
         match action {
             Action::Quit => self.quit = true,
             Action::Help => self.popup = Some(Popup::Help(0)),
-            Action::Settings => self.open_settings(),
-            Action::Search if self.tab.view == View::Settings => {}
-            Action::Search if self.tab.view == View::Thread => {
+            Action::Settings => self.tab.navigate(View::Settings),
+            Action::Search if self.tab.view() == View::Settings => {}
+            Action::Search if self.tab.view() == View::Thread => {
                 if let Some(t) = &mut self.tab.thread {
                     t.set_search(String::new());
                     self.typing = Some(Typing::ThreadSearch);
@@ -419,7 +422,7 @@ impl App {
             Action::Favorite => self.toggle_favorite(),
             Action::AddSite => self.popup = Some(Popup::Adding(super::Adding::Typing(String::new()))),
             Action::BoardImages => self.toggle_board_images(),
-            Action::UpdateBoards if self.tab.view == View::Boards => self.refresh_board_list(self.tab.site),
+            Action::UpdateBoards if self.tab.view() == View::Boards => self.refresh_board_list(self.tab.site),
             Action::UpdateBoards => {}
             Action::SearchSaved => self.typing = Some(Typing::Goto("saved ".into())),
             Action::Follow => self.toggle_follow(),
@@ -585,7 +588,7 @@ impl App {
                 {
                     // Back to the thread we came from by a cross-thread link.
                     self.switch_site(site);
-                    self.open_thread_at(board, no, Some(post));
+                    self.open_thread_at(board, no, Opening::at(Some(post)));
                 }
             }
             Action::Unread => match (0..t.posts.len()).find(|&i| t.is_new(i)) {

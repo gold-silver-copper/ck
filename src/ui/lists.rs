@@ -202,7 +202,7 @@ pub(super) fn draw_boards(f: &mut Frame, app: &mut App, area: Rect) {
         vec![Line::from(spans)]
     });
     app.tab.board_list.state = state;
-    if app.drawn.body.is_none() && app.tab.loading.is_none() {
+    if app.drawn.body.is_none() && app.tab.loading().is_none() {
         empty(f, area, app.tab.failed.as_deref().unwrap_or("No boards"));
     }
 }
@@ -317,7 +317,7 @@ pub(super) fn draw_catalog(f: &mut Frame, app: &mut App, area: Rect) {
     app.drawn.body = draw_rows(f, area, visible.len(), &mut state, (height, gap), card, &highlighted, &mut build);
     app.tab.catalog_list.state = state;
     if app.drawn.body.is_none() {
-        if app.tab.loading.is_none() {
+        if app.tab.loading().is_none() {
             empty(f, area, app.tab.failed.as_deref().unwrap_or("No threads"));
         }
         return;
@@ -403,7 +403,7 @@ pub(super) fn draw_search(f: &mut Frame, app: &mut App, area: Rect) {
     let mut state = app.tab.search_list.state;
     let hit = draw_rows(f, area, visible.len(), &mut state, (3, 1), Some(t.surface), &|_| false, &mut build);
     app.tab.search_list.state = state;
-    if hit.is_none() && app.tab.loading.is_none() {
+    if hit.is_none() && app.tab.loading().is_none() {
         empty(f, area, if s.hits.is_empty() { "No results".to_string() } else { format!("All hidden ({} shows them)", app.keys.key(Action::ShowHidden)) }.as_str());
     }
     // Below the last card: more to load.
@@ -449,7 +449,7 @@ fn draw_grid(f: &mut Frame, app: &mut App, area: Rect) {
     let t = theme();
     let visible = app.visible_catalog();
     if visible.is_empty() {
-        if app.tab.loading.is_none() {
+        if app.tab.loading().is_none() {
             empty(f, area, app.tab.failed.as_deref().unwrap_or("No threads"));
         }
         return;

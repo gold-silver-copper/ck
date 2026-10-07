@@ -62,7 +62,7 @@ impl App {
     /// The board the `.` menu's image switch is for: the selected board in the Boards list,
     /// the catalog's, or the thread's.
     pub(super) fn images_target(&self) -> Option<(usize, String)> {
-        match self.tab.view {
+        match self.tab.view() {
             View::Boards => self.selected_index().and_then(|i| self.boards().get(i).map(|b| (self.tab.site, b.uri.clone()))),
             View::Catalog => self.tab.catalog_board.clone().map(|b| (self.tab.catalog_site, b)),
             View::Thread => self.tab.thread.as_ref().map(|t| (self.tab.site, t.board.clone())),
@@ -104,7 +104,7 @@ impl App {
 
     /// Opening an image (the viewer) where the post's board has images off: say so instead.
     pub(super) fn images_off_here(&mut self) -> bool {
-        let (on, board) = match self.tab.view {
+        let (on, board) = match self.tab.view() {
             View::Catalog => {
                 let Some(p) = self.selected_post() else { return false };
                 (self.catalog_images_on(p), p.board.clone().or_else(|| self.tab.catalog_board.clone()).unwrap_or_default())

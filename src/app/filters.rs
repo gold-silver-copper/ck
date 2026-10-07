@@ -287,7 +287,7 @@ impl App {
     /// The post `X` makes a filter from: in a thread the selected post (and its focused
     /// file), in a catalog the selected thread.
     fn filter_source(&self) -> Option<Source<'_>> {
-        match self.tab.view {
+        match self.tab.view() {
             View::Thread => {
                 let t = self.tab.thread.as_ref()?;
                 let p = t.current()?;

@@ -24,32 +24,32 @@ impl Whole {
 }
 
 impl App {
-    /// Run `job` on a thread, as the current request (shown as `label`), then `apply` what
-    /// it came to in the request's tab. The job gets the request id and a sender for partial
-    /// results.
+    /// Run `job` on a thread, as the tab's load (shown as `label`, to do `then` once it's
+    /// answered), then `apply` what it came to in the load's tab, if it's still the tab's
+    /// load. The job gets the request id and a sender for partial results.
     pub(super) fn spawn<T: Send + 'static>(
         &mut self,
         label: String,
+        then: Then,
         job: impl FnOnce(&dyn Backend, u64, &Sender<Msg>) -> Result<T> + Send + 'static,
         apply: impl FnOnce(&mut App, Result<T>) + Send + 'static,
     ) {
-        self.start(label, job, move |id, res| Msg::request(id, move |app| apply(app, res)));
+        self.start(label, then, job, move |id, res| Msg::answer(id, res, apply));
     }
 
     /// `spawn`, with `wrap` making the message its result is sent back in.
     fn start<T: Send + 'static>(
         &mut self,
         label: String,
+        then: Then,
         job: impl FnOnce(&dyn Backend, u64, &Sender<Msg>) -> Result<T> + Send + 'static,
         wrap: impl FnOnce(u64, Result<T>) -> Msg + Send + 'static,
     ) {
         self.next_id += 1;
         let id = self.next_id;
-        self.tab.req = Some(id);
+        self.tab.begin(id, label, then);
         let backend = self.current_site().backend.clone();
         let tx = self.tx.clone();
-        self.tab.loading = Some(label);
-        self.tab.failed = None;
         self.footer.clear_seen();
         std::thread::spawn(move || {
             let res = crate::guard::result(|| job(&*backend, id, &tx));
@@ -111,6 +111,7 @@ impl App {
         // A finished list is worth keeping even once the tab has moved on.
         self.start(
             label,
+            Then::Show,
             move |b, id, tx| {
                 b.boards(&|so_far| {
                     let so_far = so_far.to_vec();
@@ -128,13 +129,10 @@ impl App {
 
     /// A site's board list arrived for request `id`; it's shown even if the tab has moved on.
     pub(super) fn boards_arrived(&mut self, id: u64, site: usize, res: Result<Vec<Board>>) {
-        let stale = self.tab.req != Some(id);
-        if !stale {
-            self.tab.loading = None;
-        }
+        let current = self.tab.answered(id);
         match res {
             Ok(b) => self.set_boards(site, b, true),
-            Err(e) if !stale => self.load_failed(e),
+            Err(e) if current => self.load_failed(e),
             Err(e) => self.error(e),
         }
     }
@@ -142,14 +140,10 @@ impl App {
     /// The last copy kept of the catalog being fetched, fetched at `fetched`: shown only
     /// before anything fetched has arrived.
     fn cached_catalog_arrived(&mut self, posts: Vec<Post>, fetched: i64) {
-        if self.tab.catalog.is_empty() && self.tab.view == View::Catalog {
+        if self.tab.catalog.is_empty() && self.tab.place_view() == View::Catalog {
             self.tab.catalog_cached = Some(tabs::Offline { saved: fetched, dead: false });
-            self.show_catalog(posts);
-            if let Some(no) = self.tab.pending_catalog
-                && let Some(i) = self.row_of(View::Catalog, &RowKey::Thread(no))
-            {
-                self.tab.catalog_list.state.select(Some(i));
-            }
+            let select = self.tab.catalog_selecting();
+            self.show_catalog(posts, select);
         }
     }
 
@@ -157,69 +151,69 @@ impl App {
     /// among them yet, is selected once it comes (not the one the selection is moved to).
     pub(super) fn catalog_partial(&mut self, posts: Vec<Post>) {
         self.tab.catalog_cached = None;
-        let keep = self.tab.pending_catalog.or_else(|| self.selected_catalog_no());
-        self.show_catalog(posts);
-        self.tab.pending_catalog = keep.filter(|&no| self.row_of(View::Catalog, &RowKey::Thread(no)).is_none());
+        let keep = self.tab.catalog_selecting().or_else(|| self.selected_catalog_no());
+        self.show_catalog(posts, keep);
+        let waiting = keep.filter(|&no| self.row_of(View::Catalog, &RowKey::Thread(no)).is_none());
+        if let Some(select) = self.tab.catalog_select() {
+            *select = waiting;
+        }
     }
 
     pub(super) fn catalog_arrived(&mut self, res: Result<Vec<Post>>) {
-        self.tab.loading = None;
         match res {
             Ok(posts) => {
+                // A failed load keeps it, for `r` and the session.
+                let select = self.tab.catalog_select().and_then(Option::take);
                 self.tab.catalog_cached = None;
-                self.show_catalog(posts);
+                self.show_catalog(posts, select);
                 self.catalog_seen();
-                if let Some(no) = self.tab.pending_catalog.take()
-                    && let Some(i) = self.row_of(View::Catalog, &RowKey::Thread(no))
-                {
-                    self.tab.catalog_list.state.select(Some(i));
-                }
-                let len = self.visible_catalog().len();
-                self.tab.catalog_list.clamp(len);
             }
             Err(e) if http::is_not_found(&e) => {
-                let board = self.tab.board.as_ref().map_or_else(String::new, |b| b.uri.clone());
-                self.load_failed(format!("There's no /{board}/ on {}", self.current_site().cfg.name));
+                // Said of the board and site it was asked on (only a load writes them).
+                let board = self.tab.catalog_board.clone().unwrap_or_default();
+                let site = self.sites.get(self.tab.catalog_site).map_or(String::new(), |s| s.cfg.name.clone());
+                self.load_failed(format!("There's no /{board}/ on {site}"));
             }
             Err(e) => self.load_failed(e),
         }
-        // A thread to select that never came isn't waited for by the next load.
-        self.tab.pending_catalog = None;
     }
 
     /// The last copy kept of the thread being fetched, fetched at `fetched`: shown only
     /// before anything fetched (or saved) is.
     fn cached_thread_arrived(&mut self, t: Thread, fetched: i64) {
-        if self.tab.thread.is_none() && self.tab.view == View::Thread && self.tab.saved().is_none() {
+        if self.tab.thread.is_none() && self.tab.place_view() == View::Thread && self.tab.saved().is_none() {
             self.set_cached_thread(t, fetched);
         }
     }
 
-    pub(super) fn thread_arrived(&mut self, res: Result<Thread>) {
-        self.tab.loading = None;
+    /// The thread `key` asked for (its 404 marks it dead) came to `res`, checked as an answer
+    /// for it (`Thread::answer`).
+    pub(super) fn thread_arrived(&mut self, key: &ThreadKey, res: Result<Thread>) {
+        let open = self.tab.opened();
         self.tab.thread_checked = self.clock.instant();
-        let restoring = std::mem::take(&mut self.tab.restoring);
         match res {
-            Ok(t) => self.show_thread(t, None),
+            // The thread asked for, on the board and site the tab still shows (a key from
+            // when it was asked, never from where the tab is now).
+            Ok(t) if self.tab.board.as_ref().is_some_and(|b| self.key(&b.uri, t.no()) == *key) => self.show_thread(t, None, open),
+            Ok(_) => {}
             Err(e) if http::is_not_found(&e) => {
-                let key = self.tab.board.as_ref().map(|b| self.key(&b.uri, self.tab.pending_thread.unwrap_or_default()));
-                if key.as_ref().is_some_and(|k| self.store.mark_dead(k)) {
+                if self.store.mark_dead(key) {
                     self.save();
                 }
-                if restoring {
+                if open.restoring {
                     // Last session's thread is gone: its catalog instead.
-                    self.tab.view = View::Catalog;
-                    self.load_catalog();
+                    self.tab.navigate(View::Catalog);
+                    self.load_catalog(None);
                     self.info("The thread you had open last time is gone (archived or deleted)");
-                } else if let Some(key) = key {
-                    self.thread_gone(&key);
+                } else {
+                    self.thread_gone(key);
                 }
             }
             Err(e) => self.load_failed(e),
         }
     }
 
-    pub(super) fn load_catalog(&mut self) {
+    pub(super) fn load_catalog(&mut self, select: Option<u64>) {
         let Some(board) = self.tab.board.clone() else { return };
         self.tab.catalog_board = Some(board.uri.clone());
         self.tab.catalog_site = self.tab.site;
@@ -254,10 +248,10 @@ impl App {
             }
             res
         };
-        self.spawn(label, job, App::catalog_arrived);
+        self.spawn(label, Then::Catalog { select }, job, App::catalog_arrived);
     }
 
-    pub(super) fn load_thread(&mut self, no: u64) {
+    pub(super) fn load_thread(&mut self, no: u64, open: Opening) {
         let Some(board) = self.tab.board.clone() else { return };
         // Opening it (not reloading what's shown): its last copy shows while it loads.
         let opening = self.tab.thread.as_ref().is_none_or(|t| t.no != no || t.board != board.uri);
@@ -274,13 +268,8 @@ impl App {
         // A watched thread's saved copy is its copy (kept once, not in the page cache too).
         let saved = self.store.saved(&key).map(|m| m.saved);
         let watched = self.store.watched(&key).is_some();
-        if opening
-            && watched
-            && let Some(at) = saved
-            && let Some(t) = self.store.load_saved(&key).ok().and_then(Thread::saved)
-        {
-            self.set_cached_thread(t, at);
-        }
+        // Shown once the load is the tab's, opened as it says.
+        let copy = saved.filter(|_| opening && watched).and_then(|at| Some((self.store.load_saved(&key).ok().and_then(Thread::saved)?, at)));
         let pages = self.pages.clone().filter(|_| !watched);
         let read = pages.clone().filter(|_| opening && self.tab.thread.is_none());
         let (site, now) = (key.site.clone(), self.clock.now());
@@ -299,18 +288,21 @@ impl App {
             }
             res
         };
-        self.spawn(format!("Loading thread {no}"), job, App::thread_arrived);
+        self.spawn(format!("Loading thread {no}"), Then::Thread { open }, job, move |app, r| app.thread_arrived(&key, r));
+        if let Some((t, at)) = copy {
+            self.set_cached_thread(t, at);
+        }
     }
 
     /// The selected catalog thread's number, when the catalog is shown.
     fn selected_catalog_no(&self) -> Option<u64> {
-        self.selected_index().filter(|_| self.tab.view == View::Catalog).and_then(|i| self.tab.catalog.get(i)).map(|p| p.no)
+        self.selected_index().filter(|_| self.tab.view() == View::Catalog).and_then(|i| self.tab.catalog.get(i)).map(|p| p.no)
     }
 
-    /// Show catalog threads, keeping the selected thread selected (by number), or the one
-    /// waiting to be.
-    pub(super) fn show_catalog(&mut self, posts: Vec<Post>) {
-        let selected = self.tab.pending_catalog.or_else(|| self.selected_catalog_no());
+    /// Show catalog threads, selecting `select` if it's among them, else keeping the
+    /// selected thread selected (by number).
+    pub(super) fn show_catalog(&mut self, posts: Vec<Post>, select: Option<u64>) {
+        let selected = select.or_else(|| self.selected_catalog_no());
         let site = self.sites.get(self.tab.catalog_site).map_or(String::new(), |s| s.cfg.name.clone());
         self.tab.catalog_marks = self.catalog_marks_for(&site, &posts, |p| self.board_of(p));
         self.tab.catalog = posts;
@@ -321,17 +313,20 @@ impl App {
         self.tab.catalog_list.clamp(len);
     }
 
-    /// Show posts as thread fetched (tests' shorthand for an answer of the thread they start).
+    /// Show posts as thread fetched, opened plainly (tests' shorthand for an answer of the
+    /// thread they start).
     #[cfg(test)]
     pub(crate) fn set_thread(&mut self, posts: Vec<Post>) {
         if let Some(t) = posts.first().map(|p| p.no).and_then(|no| Thread::answer(no, posts).ok()) {
-            self.show_thread(t, None);
+            self.show_thread(t, None, Opening::default());
         }
     }
 
-    /// Show the last copy kept of a thread being fetched, fetched at `at`. It's not a visit.
+    /// Show the last copy kept of a thread being fetched, fetched at `at`, opened as the
+    /// load says. It's not a visit.
     pub(super) fn set_cached_thread(&mut self, t: Thread, at: i64) {
-        self.show_thread(t, Some(ThreadCopy::Cached(tabs::Offline { saved: at, dead: false })));
+        let open = self.tab.opening();
+        self.show_thread(t, Some(ThreadCopy::Cached(tabs::Offline { saved: at, dead: false })), open);
     }
 
     /// How many posts a thread was last known with, whole: shown (`shown`), or counted while
@@ -359,8 +354,9 @@ impl App {
         view.live().filter(|t| !shrank(self.known(key, view.known), t.posts().len())).map(Whole)
     }
 
-    /// Show a thread: fetched (`None`), or a copy.
-    pub(super) fn show_thread(&mut self, t: Thread, copy: Option<ThreadCopy>) {
+    /// Show a thread: fetched (`None`), or a copy. Opening it (not refreshing what's shown),
+    /// as `open` says.
+    pub(super) fn show_thread(&mut self, t: Thread, copy: Option<ThreadCopy>, open: Opening) {
         // Posts replacing the copy shown while they loaded (fetched ones, or a saved copy): a
         // first open, as far as visits go (the copy wasn't one).
         let replacing = self.tab.cached().is_some() && !matches!(copy, Some(ThreadCopy::Cached(_)));
@@ -451,11 +447,11 @@ impl App {
             }
             None => {
                 tv.new_after = last_seen;
-                if let Some(i) = self.tab.pending_post.take().and_then(|no| tv.index.get(&no).copied()) {
+                if let Some(i) = open.select.and_then(|no| tv.index.get(&no).copied()) {
                     tv.selected = i;
                 }
                 // A conversation that was open last time.
-                if let Some(&i) = self.tab.pending_conversation.take().and_then(|no| tv.index.get(&no)) {
+                if let Some(&i) = open.conversation.and_then(|no| tv.index.get(&no)) {
                     let selected = tv.selected;
                     tv.selected = i;
                     if tv.enter_conversation().is_ok() && tv.in_view(selected) {
@@ -536,7 +532,8 @@ impl App {
     pub(super) fn background(&mut self) {
         self.know_nsfw(self.tab.site);
         // A saved copy open isn't refreshed (a watched thread still is, below, unless it's dead).
-        let open = self.tab.thread.as_ref().filter(|_| self.tab.view == View::Thread && self.tab.saved().is_none()).map(|t| self.key(&t.board, t.no));
+        // Behind the settings it's refreshed as a watched thread is (counted, not visited).
+        let open = self.tab.thread.as_ref().filter(|_| self.tab.view() == View::Thread && self.tab.saved().is_none()).map(|t| self.key(&t.board, t.no));
         let now = self.clock.instant();
         // Pages of a board none of whose watched threads has been refreshed for two of the
         // longest rounds (all unwatched, say) are too old to show.
@@ -549,7 +546,7 @@ impl App {
         };
         let every = self.thread_every();
         if let Some(key) = &open
-            && self.tab.loading.is_none()
+            && self.tab.loading().is_none()
             && now.saturating_duration_since(self.tab.thread_checked) >= every
             && fetched_since(key, every)
             && !self.refreshing.contains(key)
@@ -637,7 +634,7 @@ impl App {
 
     pub(super) fn refreshed(&mut self, key: ThreadKey, res: Result<Thread>) {
         self.refreshing.remove(&key);
-        let is_open = self.tab.view == View::Thread
+        let is_open = self.tab.view() == View::Thread
             && self.tab.saved().is_none()
             && self.tab.thread.as_ref().is_some_and(|t| self.key(&t.board, t.no) == key)
             && self.current_site().cfg.name == key.site;
@@ -649,7 +646,7 @@ impl App {
             Ok(t) if is_open => {
                 let newest = |app: &App| app.tab.thread.as_ref().map_or(0, |t| max_no(&t.live_posts()));
                 let before = newest(self);
-                self.show_thread(t, None);
+                self.show_thread(t, None, Opening::default());
                 self.tab.thread_quiet = if newest(self) > before { 0 } else { self.tab.thread_quiet.saturating_add(1) };
             }
             Ok(t) => {

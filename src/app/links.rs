@@ -24,7 +24,7 @@ impl App {
     pub fn open_links(&mut self) {
         let Some(post) = self.selected_post() else { return };
         let here = self.tab.board.as_ref().map(|b| b.uri.clone()).unwrap_or_default();
-        let thread = self.tab.thread.as_ref().filter(|_| self.tab.view == View::Thread);
+        let thread = self.tab.thread.as_ref().filter(|_| self.tab.view() == View::Thread);
         let mut items: Vec<LinkItem> = Vec::new();
         for l in &post.links {
             let board = l.board.clone().unwrap_or_else(|| here.clone());

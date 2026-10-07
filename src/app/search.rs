@@ -5,7 +5,7 @@ use ratatui::crossterm::event::{KeyCode, KeyEvent};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use super::{App, FilteredList, Marks, ThreadView, View};
+use super::{App, FilteredList, Marks, Opening, Then, ThreadView, View};
 use crate::store::ThreadKey;
 use crate::backend::SearchPage;
 use crate::config::SiteKind;
@@ -124,12 +124,12 @@ impl App {
         let (Some(archive), Some(board)) = (self.archive_site(), self.tab.board.as_ref().map(|b| b.uri.clone())) else { return };
         let back = match &self.tab.search {
             Some(s) => s.back,
-            None => (self.tab.site, self.tab.view),
+            None => (self.tab.site, self.tab.place_view()),
         };
         self.switch_site(archive);
         self.tab.search = Some(Search { saved: None, board, query, hits: Vec::new(), marks: Marks::default(), total: None, pages: 0, back });
         self.tab.search_list = FilteredList::top();
-        self.tab.view = View::Search;
+        self.tab.navigate(View::Search);
         self.load_search_page();
     }
 
@@ -141,7 +141,7 @@ impl App {
         };
         let back = match &self.tab.search {
             Some(s) => s.back,
-            None => (self.tab.site, if self.tab.view == View::Search { View::Saved } else { self.tab.view }),
+            None => (self.tab.site, if self.tab.place_view() == View::Search { View::Saved } else { self.tab.place_view() }),
         };
         self.saved_search += 1;
         let (id, stop) = (self.saved_search, Arc::new(AtomicBool::new(false)));
@@ -152,7 +152,7 @@ impl App {
         let saved = SavedSearch { keys: Vec::new(), copies: Vec::new(), done: 0, of, skipped: 0, finished: of == 0, id, stop: stop.clone() };
         self.tab.search = Some(Search { saved: Some(saved), board: String::new(), query: query.to_string(), hits: Vec::new(), marks: Marks::default(), total: None, pages: 0, back });
         self.tab.search_list = FilteredList::top();
-        self.tab.view = View::Search;
+        self.tab.navigate(View::Search);
         // Saving waits for nothing: copies being written are read as they were.
         let later = self.later();
         let needle = query.to_lowercase();
@@ -223,12 +223,11 @@ impl App {
         }
         let (board, query, page) = (s.board.clone(), s.query.clone(), s.pages + 1);
         let label = if page == 1 { format!("Searching /{board}/ for \"{query}\"") } else { format!("Loading page {page} of results") };
-        self.spawn(label, move |b, _, _| b.search(&board, &query, page), move |app, r| app.search_results(page, r));
+        self.spawn(label, Then::Show, move |b, _, _| b.search(&board, &query, page), move |app, r| app.search_results(page, r));
     }
 
     /// A page of archive search results arrived.
     pub fn search_results(&mut self, page: u32, res: anyhow::Result<SearchPage>) {
-        self.tab.loading = None;
         let Some(s) = &mut self.tab.search else { return };
         match res {
             Ok(p) => {
@@ -268,7 +267,7 @@ impl App {
     /// Reaching the end of the results loads the next page.
     pub fn search_moved(&mut self) {
         let at_end = self.tab.search_list.state.selected().is_some_and(|i| i + 1 >= self.visible_hits().len());
-        if at_end && self.more_results() && self.tab.loading.is_none() {
+        if at_end && self.more_results() && self.tab.loading().is_none() {
             self.load_search_page();
         }
     }
@@ -281,8 +280,8 @@ impl App {
         if let Some(saved) = &s.saved {
             let (Some(key), Some((_, post))) = (saved.keys.get(k).cloned(), s.hits.get(k)) else { return };
             let (no, query) = (post.no, s.query.clone());
-            self.open_saved(&key);
-            if let Some(t) = self.tab.thread.as_mut().filter(|_| self.tab.view == View::Thread) {
+            self.open_saved(&key, Opening::default());
+            if let Some(t) = self.reading() {
                 t.select_post(no);
                 t.set_search(query);
                 self.tab.return_to = Some(View::Search);
@@ -292,7 +291,7 @@ impl App {
         let Some((thread, post)) = s.hits.get(k) else { return };
         let (thread, no) = (*thread, post.no);
         let board = self.find_board(post.board.as_deref().unwrap_or(&s.board));
-        self.open_thread_at(board, thread, Some(no));
+        self.open_thread_at(board, thread, Opening::at(Some(no)));
         self.tab.return_to = Some(View::Search);
     }
 

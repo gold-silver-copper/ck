@@ -358,7 +358,7 @@ fn help_here(app: &App) -> &'static str {
     if app.tab.viewer().is_some() {
         return "Image viewer";
     }
-    match app.tab.view {
+    match app.tab.view() {
         View::Catalog => "Catalog",
         View::Thread => "Thread",
         View::Watched | View::History | View::Saved => "Watched, History, Saved",

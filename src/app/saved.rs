@@ -4,14 +4,14 @@
 use std::path::PathBuf;
 
 use super::tabs::{Offline, ThreadCopy};
-use super::{App, View};
+use super::{App, Opening, View};
 use crate::images::Kind;
 use crate::model::{Attachment, Thread};
 use crate::store::ThreadKey;
 
 impl App {
     /// Open a thread's saved copy. It's read offline: nothing in it is fetched.
-    pub fn open_saved(&mut self, key: &ThreadKey) {
+    pub fn open_saved(&mut self, key: &ThreadKey, open: Opening) {
         let Some(site) = self.site_index(&key.site) else {
             self.error(format!("No site named {} in the config", key.site));
             return;
@@ -30,16 +30,11 @@ impl App {
             self.error("The saved copy has no posts");
             return;
         };
-        if self.tab.view != View::Thread {
-            self.tab.return_to = Some(self.tab.view);
+        if self.tab.place_view() != View::Thread {
+            self.tab.return_to = Some(self.tab.place_view());
         }
         self.switch_site(site);
         self.tab.board = Some(self.find_board(&key.board));
-        // A request in flight in this tab is dropped (its answer will be ignored).
-        self.tab.req = None;
-        self.tab.loading = None;
-        self.tab.from_catalog = false;
-        self.tab.gallery = None;
         self.tab.archive_offer = None;
         self.tab.saved_offer = None;
         // The live thread, if that's what's open, keeps its place in the copy.
@@ -47,8 +42,9 @@ impl App {
         if !same {
             self.tab.thread = None;
         }
-        self.tab.view = View::Thread;
-        self.show_thread(t, Some(ThreadCopy::Saved(Offline { saved, dead })));
+        self.tab.navigate(View::Thread);
+        self.tab.from_catalog = false;
+        self.show_thread(t, Some(ThreadCopy::Saved(Offline { saved, dead })), open);
     }
 
     /// `r` on a saved copy: the live thread, unless it's known to be gone.
@@ -63,7 +59,7 @@ impl App {
         let no = t.no;
         // The copy stays on screen until the live thread arrives, which keeps its place.
         self.tab.copy = None;
-        self.load_thread(no);
+        self.load_thread(no, Opening::default());
     }
 
     /// The thread a site's configured archive would have, if it has one.
@@ -76,7 +72,7 @@ impl App {
     /// What the viewer shows for a file: the image itself, or the thumbnail for other files.
     /// A saved copy's images come from the download folder, else their cached thumbnail.
     pub fn viewer_source(&self, file: &Attachment) -> Option<(String, Kind)> {
-        let full = if self.tab.saved().is_some() && self.tab.view == View::Thread {
+        let full = if self.tab.saved().is_some() && self.tab.view() == View::Thread {
             self.downloaded(file).filter(|_| file.is_image()).map(|path| format!("file://{}", path.display()))
         } else {
             file.image().map(Into::into)
@@ -97,7 +93,7 @@ impl App {
     pub(super) fn take_saved_offer(&mut self) -> bool {
         match self.tab.saved_offer.take() {
             Some(key) if self.tab.thread.is_none() => {
-                self.open_saved(&key);
+                self.open_saved(&key, Opening::default());
                 true
             }
             _ => false,

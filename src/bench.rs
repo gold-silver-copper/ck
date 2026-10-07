@@ -55,7 +55,7 @@ fn bench_thread() {
     let posts = Futaba::fourchan(None).parse_thread("g", &fixture("4chan_thread.json"));
     let posts = scale(&posts, 1000);
     let mut a = app();
-    a.tab.view = View::Thread;
+    a.tab.navigate(View::Thread);
     a.tab.thread = Some(ThreadView::new("g".into(), posts[0].no, posts.clone()));
     let mut t = term();
     eprintln!("\n== thread, {} posts ==", posts.len());
@@ -87,7 +87,7 @@ fn bench_thread() {
     // The same on ten times the thread: the cost should be the screen's, not the thread's.
     let big = scale(&posts, 10_000);
     let mut b = app();
-    b.tab.view = View::Thread;
+    b.tab.navigate(View::Thread);
     b.tab.thread = Some(ThreadView::new("g".into(), big[0].no, big.clone()));
     eprintln!("\n== thread, {} posts ==", big.len());
     draw(&mut t, &mut b);
@@ -154,7 +154,7 @@ fn bench_catalog() {
     let cat = scale(&Futaba::fourchan(None).parse_catalog("g", &v), 150);
     let mut a = app();
     a.images = Images::offline();
-    a.tab.view = View::Catalog;
+    a.tab.navigate(View::Catalog);
     a.tab.catalog = cat;
     a.tab.catalog_list.state.select(Some(0));
     let mut t = term();
@@ -257,7 +257,7 @@ fn bench_images() {
             for i in 0..3 {
                 a.images.insert_decoded(&format!("https://x/{i}.png.thumb"), DynamicImage::new_rgb8(250, 250));
             }
-            a.tab.view = View::Thread;
+            a.tab.navigate(View::Thread);
             a.tab.thread = Some(ThreadView::new("g".into(), 100, posts.clone()));
             let mut t = term();
             let start = Instant::now();
@@ -315,7 +315,7 @@ fn bench_hidden_words() {
     let words: Vec<String> = (0..50).map(|i| format!("word{i}")).chain(["the end".into(), "c++".into()]).take(50).collect();
     for (label, words) in [("no hidden words", Vec::new()), ("50 hidden words", words)] {
         let mut a = app();
-        a.tab.view = View::Thread;
+        a.tab.navigate(View::Thread);
         a.rehide(|a| a.hiding.set_filters(crate::filter::Filters::new(&[]).unwrap().with_words(&words).unwrap()));
         a.tab.thread = Some(ThreadView::new("g".into(), posts[0].no, posts.clone()));
         let mut t = term();

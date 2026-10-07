@@ -58,7 +58,7 @@ impl App {
     /// The board a `*` applies to: the selected one in Boards, the open one in a catalog.
     fn current_board_ref(&self) -> Option<BoardRef> {
         let site = self.current_site().cfg.name.clone();
-        let board = match self.tab.view {
+        let board = match self.tab.view() {
             View::Boards => self.selected_index().and_then(|i| self.boards().get(i))?.uri.clone(),
             View::Catalog | View::Thread => self.tab.board.as_ref()?.uri.clone(),
             View::Sites => match self.selected_site_row()? {

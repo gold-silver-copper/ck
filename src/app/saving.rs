@@ -70,7 +70,7 @@ impl App {
         let Some(v) = self.tab.viewer() else { return };
         let Some(file) = v.files.get(v.index).cloned() else { return };
         let no = v.posts.get(v.index).copied();
-        let from = if self.tab.view == View::Thread {
+        let from = if self.tab.view() == View::Thread {
             self.tab.thread.as_ref().and_then(|t| {
                 let p = match no {
                     Some(n) => t.posts.get(*t.index.get(&n)?)?,
