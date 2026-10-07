@@ -2,6 +2,7 @@
 //! arrives, and keeping open and watched threads refreshed.
 
 use super::*;
+use crate::store::Status;
 
 impl App {
     /// Run `job` on a thread, as the current request (shown as `label`), then `apply` what
@@ -183,22 +184,19 @@ impl App {
         let restoring = std::mem::take(&mut self.tab.restoring);
         match res {
             Ok(posts) => self.set_thread(posts),
-            // Last session's thread is gone: its catalog instead.
-            Err(e) if restoring && http::is_not_found(&e) => {
-                self.tab.view = View::Catalog;
-                self.load_catalog();
-                self.info("The thread you had open last time is gone (archived or deleted)");
-            }
             Err(e) if http::is_not_found(&e) => {
-                let Some(key) = self.tab.board.as_ref().map(|b| self.key(&b.uri, self.tab.pending_thread.unwrap_or_default())) else {
-                    return;
-                };
-                if let Some(w) = self.store.watched_mut(&key) {
-                    w.dead = true;
+                let key = self.tab.board.as_ref().map(|b| self.key(&b.uri, self.tab.pending_thread.unwrap_or_default()));
+                if key.as_ref().is_some_and(|k| self.store.mark_dead(k)) {
                     self.save();
                 }
-                self.store.saved_dead(&key);
-                self.thread_gone(&key);
+                if restoring {
+                    // Last session's thread is gone: its catalog instead.
+                    self.tab.view = View::Catalog;
+                    self.load_catalog();
+                    self.info("The thread you had open last time is gone (archived or deleted)");
+                } else if let Some(key) = key {
+                    self.thread_gone(&key);
+                }
             }
             Err(e) => self.load_failed(&http::plain(&e)),
         }
@@ -518,7 +516,7 @@ impl App {
             return;
         }
         let due = self.store.watched.iter().find(|w| {
-            !w.dead
+            !w.status.is_dead()
                 && Some(&w.key) != open.as_ref()
                 && !self.refreshing.contains(&w.key)
                 && self.watched_checked.get(&w.key).is_none_or(|t| now.saturating_duration_since(*t) >= self.watched_every(&w.key))
@@ -628,8 +626,7 @@ impl App {
                 let mine = w.mine.clone();
                 let to_you = |p: &Post| p.quotes.iter().any(|q| mine.contains(q));
                 let unread: Vec<&Post> = posts.iter().filter(|p| p.no > w.last_seen && shown(p)).collect();
-                w.unread = unread.len();
-                w.replies = unread.iter().filter(|p| to_you(p)).count();
+                w.status = Status::Live { unread: unread.len(), replies: unread.iter().filter(|p| to_you(p)).count() };
                 // Tell about posts newer than this session's last refresh (not on the first
                 // one, which may find posts from long ago).
                 let fresh: Vec<&&Post> = unread.iter().filter(|p| prev.is_some_and(|m| p.no > m)).collect();
@@ -645,7 +642,6 @@ impl App {
                     filter: caught.into_iter().next().unwrap_or_default(),
                 };
                 w.posts = posts.len();
-                w.dead = false;
                 generals::note_limit(w, &posts);
                 if w.subject.is_empty() {
                     w.subject = subject;
@@ -661,11 +657,9 @@ impl App {
                 self.save();
             }
             Err(e) if http::is_not_found(&e) => {
-                if let Some(w) = self.store.watched_mut(&key) {
-                    w.dead = true;
+                if self.store.mark_dead(&key) {
                     self.save();
                 }
-                self.store.saved_dead(&key);
                 if is_open {
                     self.thread_gone(&key);
                 }

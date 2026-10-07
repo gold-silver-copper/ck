@@ -391,8 +391,9 @@ number.
 `w` watches the open thread, or the selected one in a catalog. The "Watched" entry at the
 top of the Sites view lists watched threads from all sites with their post counts and how
 many posts are new (posts you've hidden, or your filters and hidden words hide, aren't
-counted, nor notified about); threads that 404 stay listed as "archived/deleted". "History" lists the
-last 100 threads you opened. `x` removes an entry from either list.
+counted, nor notified about); threads that 404 stay listed as "archived/deleted", with
+nothing new (the totals on the Watched entry, its view and the title leave them out).
+"History" lists the last 100 threads you opened. `x` removes an entry from either list.
 
 The open thread refreshes in the background every 10 seconds and watched threads every
 60 seconds (change with `refresh_thread_secs` / `refresh_watched_secs`; those are also the

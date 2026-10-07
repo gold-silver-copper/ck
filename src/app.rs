@@ -848,7 +848,7 @@ impl App {
         }
         // At capacity, a finished refresh wakes the loop anyway (and due ones mustn't spin it).
         if self.refreshing.len() < MAX_REFRESHING {
-            for w in self.store.watched.iter().filter(|w| !w.dead && !self.refreshing.contains(&w.key)) {
+            for w in self.store.watched.iter().filter(|w| !w.status.is_dead() && !self.refreshing.contains(&w.key)) {
                 match self.watched_checked.get(&w.key) {
                     Some(&t) => after(t, self.watched_every(&w.key)),
                     None => after(now, Duration::ZERO),

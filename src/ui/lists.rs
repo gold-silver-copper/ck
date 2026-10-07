@@ -15,7 +15,7 @@ pub(super) fn draw_sites(f: &mut Frame, app: &mut App, area: Rect) {
         match row {
             SiteRow::Watched => {
                 let n = app.store.watched.len();
-                let unread = app.store.watched.iter().fold(0usize, |n, w| n.saturating_add(w.unread));
+                let (unread, _) = app.store.watched_new();
                 let mut spans = vec![
                     Span::styled("◉  ", Style::new().fg(t.primary)),
                     Span::styled(format!("{:<16}", "Watched"), bold(t.text)),
@@ -114,20 +114,20 @@ pub(super) fn draw_watched(f: &mut Frame, app: &mut App, area: Rect) {
         if let Some(g) = &w.general {
             right.extend([chip(format!("follows {g}"), t.on_primary_container, t.primary_container), Span::raw(" ")]);
         }
-        if w.at_limit && !w.dead {
+        let (dead, (unread, replies)) = (w.status.is_dead(), w.status.counts());
+        if w.at_limit && !dead {
             right.extend([chip("bump limit", t.text_dim, t.surface_high), Span::raw(" ")]);
         }
-        if w.replies > 0 {
-            let n = w.replies;
-            right.extend([chip(format!("{n} repl{} to you", if n == 1 { "y" } else { "ies" }), t.on_primary, t.primary), Span::raw(" ")]);
+        if replies > 0 {
+            right.extend([chip(format!("{replies} repl{} to you", if replies == 1 { "y" } else { "ies" }), t.on_primary, t.primary), Span::raw(" ")]);
         }
-        if w.dead {
+        if dead {
             right.extend([chip("archived/deleted", t.background, t.error), Span::raw("  ")]);
-        } else if w.unread > 0 {
-            right.extend([chip(format!("{} new", w.unread), t.background, t.new), Span::raw("  ")]);
+        } else if unread > 0 {
+            right.extend([chip(format!("{unread} new"), t.background, t.new), Span::raw("  ")]);
         }
         // Its page in the board's index; on the last, it's next to fall off.
-        match app.thread_page(&w.key).filter(|_| !w.dead) {
+        match app.thread_page(&w.key).filter(|_| !dead) {
             Some((p, of)) if p >= of => right.extend([chip(format!("last page {p}/{of}"), t.background, t.warning), Span::raw("  ")]),
             Some((p, of)) => right.push(Span::styled(format!("p{p}/{of}  ·  "), dim())),
             None => {}
