@@ -10,7 +10,7 @@ use serde_json::json;
 
 use crate::download;
 use crate::markup;
-use crate::model::Post;
+use crate::model::{Post, Target};
 use crate::store::write_atomic;
 use crate::theme::{Theme, mark};
 
@@ -210,8 +210,15 @@ fn body_html(p: &Post, numbers: &std::collections::HashSet<u64>) -> String {
             out.push('\n');
         }
         in_code = code;
+        let mut at = 0usize;
         for s in &line.spans {
-            out.push_str(&span_html(&s.content, s.style, numbers));
+            // A web link goes to its target (from the post's anchors), whatever its text says.
+            let url = p.anchors.iter().find_map(|a| match &a.to {
+                Target::Url(u) if a.line == k && a.start <= at && at < a.end => Some(u.as_str()),
+                _ => None,
+            });
+            out.push_str(&span_html(&s.content, s.style, url, numbers));
+            at = at.saturating_add(s.content.len());
         }
     }
     if in_code {
@@ -220,15 +227,17 @@ fn body_html(p: &Post, numbers: &std::collections::HashSet<u64>) -> String {
     out
 }
 
-fn span_html(content: &str, style: Style, numbers: &std::collections::HashSet<u64>) -> String {
+/// A span as HTML. `url` is where it goes if it's part of a web link: only an http(s)
+/// address becomes a link, anything else stays text.
+fn span_html(content: &str, style: Style, url: Option<&str>, numbers: &std::collections::HashSet<u64>) -> String {
     let body = text(content).into_owned();
     let mut html = if markup::is_quote_link(style) {
         match markup::quote_target(content).filter(|n| numbers.contains(n)) {
             Some(n) => format!(r##"<a class="quote" href="#p{n}">{body}</a>"##),
             None => format!(r#"<span class="quote">{body}</span>"#),
         }
-    } else if style.fg == Some(mark::LINK) {
-        format!(r#"<a href="{}">{body}</a>"#, attr(content))
+    } else if let Some(u) = url.filter(|u| style.fg == Some(mark::LINK) && (u.starts_with("http://") || u.starts_with("https://"))) {
+        format!(r#"<a href="{}">{body}</a>"#, attr(u))
     } else if markup::is_spoiler(style) {
         format!(r#"<span class="spoiler">{body}</span>"#)
     } else {
@@ -295,5 +304,20 @@ mod tests {
         assert_eq!(v["posts"][0]["files"][0]["saved_as"], "1_cat.png");
         assert_eq!(v["posts"][0]["text"], "Hello world & secret\n>green");
         assert!(!dir.path().join("thread.html.tmp").exists());
+    }
+
+    #[test]
+    fn links_go_where_they_point() {
+        let p: Post = parse_html(
+            r#"see <a href="https://x.org/a">this <b>page</b></a>, <a href="https://y.org/">javascript:alert(1)</a> and https://z.org/b"#,
+            Flavor::Fourchan,
+        )
+        .into();
+        let html = body_html(&p, &Default::default());
+        // A link's address is its target, not its text, even across styles.
+        assert!(html.contains(r#"<a href="https://x.org/a">this </a><b><a href="https://x.org/a">page</a></b>"#), "{html}");
+        assert!(html.contains(r#"<a href="https://y.org/">javascript:alert(1)</a>"#), "{html}");
+        assert!(html.contains(r#"<a href="https://z.org/b">https://z.org/b</a>"#), "{html}");
+        assert!(!html.contains(r#"href="javascript"#), "{html}");
     }
 }
