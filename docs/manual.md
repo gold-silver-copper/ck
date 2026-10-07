@@ -245,8 +245,10 @@ anyway). The tabs are part of the session that's restored at the next start.
 ### Going to a URL
 
 `:` asks where to go. Paste a thread or board URL from any of your sites (pasting while
-nothing else is being typed starts this by itself), or type a short form. A link to a site
-ck doesn't have yet offers to add it (see [Adding sites](#adding-sites)), then goes there.
+nothing else is being typed starts this by itself), or type a short form. A site's own page
+(`https://lainchan.org/index.html`) goes to its board list, and a jschan site's
+`/overboard.html` to its overboard. A link to a site ck doesn't have yet offers to add it
+(see [Adding sites](#adding-sites)), then goes there.
 
 | input                  | goes to                                            |
 |------------------------|----------------------------------------------------|

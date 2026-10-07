@@ -62,6 +62,13 @@ pub fn resolve(input: &str, sites: &[SiteInfo], here: (usize, Option<&str>)) -> 
         let (path, fragment) = after.split_once('#').unwrap_or((after, ""));
         let path = path.split('?').next().unwrap_or(path);
         let (board, thread, post) = parse_path(path, fragment);
+        // A page at the top (`/index.html`, `/rules.html`) is the site, not a board, except
+        // jschan's `/overboard.html`, which is its overboard.
+        let board = board.and_then(|b| match b.split_once('.') {
+            None => Some(b),
+            Some(("overboard", _)) => Some("overboard".into()),
+            Some(_) => None,
+        });
         return Ok(Target { site, board, thread, post });
     }
     // Short forms. `>>>/g/123` is a cross-board quote.
@@ -185,6 +192,10 @@ mod tests {
         assert_eq!(at("https://desuarchive.org/a/thread/1000/#1002"), t(site("desuarchive"), "a", Some(1000), Some(1002)));
         assert_eq!(at("https://desuarchive.org/a/post/1002/"), t(site("desuarchive"), "a", None, Some(1002)));
         assert!(resolve("https://example.com/g/thread/1", &infos, (0, None)).unwrap_err().to_string().contains("example.com"));
+        // A page's file name isn't a board: the site's home page is its board list.
+        assert_eq!(at("https://lainchan.org/index.html"), Target { site: site("lainchan"), board: None, thread: None, post: None });
+        assert_eq!(at("https://lainchan.org/%CE%BB/index.html"), t(site("lainchan"), "λ", None, None));
+        assert_eq!(at("https://zzzchan.xyz/overboard.html"), t(site("zzzchan"), "overboard", None, None));
     }
 
     #[test]
