@@ -360,8 +360,9 @@ impl App {
             Action::Conversation => self.toggle_conversation(),
             Action::Poster => self.toggle_poster(),
             Action::Media => self.cycle_media(),
+            Action::Browser | Action::Copy if self.focused_file().is_some_and(|f| f.link().is_none()) => self.info(super::NEITHER),
             Action::Browser => match self.focused_url() {
-                Some((_, url)) => self.open_url(&url),
+                Some((what, url)) => self.open_link(what, &url),
                 None => self.open_in_browser(),
             },
             Action::View => match self.focused() {
@@ -672,8 +673,8 @@ impl App {
             }
             KeyCode::Char('h' | 'k') | KeyCode::Left | KeyCode::Up => v.index = (v.index + n - 1) % n,
             // Space pauses an animated GIF; otherwise it's the next file.
-            KeyCode::Char(' ') if v.files.get(v.index).is_some_and(|f| self.images.toggle_pause(&f.url)) => {
-                let paused = v.files.get(v.index).is_some_and(|f| self.images.is_paused(&f.url));
+            KeyCode::Char(' ') if v.files.get(v.index).is_some_and(|f| f.image().is_some_and(|u| self.images.toggle_pause(u))) => {
+                let paused = v.files.get(v.index).and_then(|f| f.image()).is_some_and(|u| self.images.is_paused(u));
                 self.info(if paused { "Paused (space plays)" } else { "Playing" });
             }
             KeyCode::Char('l' | 'j' | ' ') | KeyCode::Right | KeyCode::Down => v.index = (v.index + 1) % n,

@@ -9,7 +9,7 @@ use serde_json::Value;
 use super::{Backend, Partial, ThreadPages, as_u32};
 use crate::http::{as_bool, as_i64, as_str, as_u64, encode_segment as enc, get_json, items};
 use crate::markup;
-use crate::model::{Attachment, Board, Flag, Post};
+use crate::model::{Attachment, Board, FileKind, Flag, Post};
 
 pub struct Futaba {
     api: String,
@@ -66,8 +66,8 @@ impl Futaba {
         }
         let ext = ext.trim_start_matches('.').to_ascii_lowercase();
         let thumb_ext = match ext.as_str() {
-            "jpg" | "jpeg" | "png" | "gif" | "webp" => self.thumb_ext.clone().unwrap_or(ext),
             "webm" | "mp4" => "jpg".into(),
+            e if FileKind::from_ext(e) == FileKind::Image => self.thumb_ext.clone().unwrap_or(ext),
             _ => return None, // generic file icon
         };
         if flat {
@@ -81,9 +81,12 @@ impl Futaba {
         let path = as_str(&f["file_path"])?;
         let name = as_str(&f["filename"]).map(|n| markup::decode(&n)).unwrap_or_default();
         let spoiler = as_bool(&f["spoiler"]);
+        let filename = format!("{name}{}", as_str(&f["ext"]).unwrap_or_default());
+        let url = format!("{}{path}", self.media);
         Some(Attachment {
-            filename: format!("{name}{}", as_str(&f["ext"]).unwrap_or_default()),
-            url: format!("{}{path}", self.media),
+            kind: FileKind::of(None, Some(&url), &filename),
+            filename,
+            url: Some(url),
             thumb: as_str(&f["thumb_path"]).filter(|_| !spoiler).map(|t| format!("{}{t}", self.media)),
             spoiler,
             width: as_u32(&f["w"]),
@@ -103,9 +106,11 @@ impl Futaba {
         let filename = as_str(&v["filename"]).map(|f| markup::decode(&f)).unwrap_or_else(|| tim.clone());
         let spoiler = as_bool(&v["spoiler"]);
         let flat = as_u64(&v["fpath"]) == Some(1);
+        let (filename, url) = (format!("{filename}{ext}"), self.file_url(board, &tim, &ext, flat));
         Some(Attachment {
-            filename: format!("{filename}{ext}"),
-            url: self.file_url(board, &tim, &ext, flat),
+            kind: FileKind::of(None, Some(&url), &filename),
+            filename,
+            url: Some(url),
             thumb: if spoiler { None } else { self.thumb_url(board, &tim, &ext, flat) },
             spoiler,
             width: as_u32(&v["w"]),
@@ -285,7 +290,7 @@ mod tests {
         let posts = b.parse_thread("λ", &fixture("vichan_thread.json"));
         assert_eq!(posts[0].no, 30364);
         // vichan marks deleted files with ext "deleted"; they're dropped.
-        assert!(posts.iter().flat_map(|p| &p.files).all(|f| !f.url.ends_with("deleted")));
+        assert!(posts.iter().flat_map(|p| &p.files).all(|f| f.url.as_ref().is_some_and(|u| !u.ends_with("deleted"))));
         assert!(posts.iter().any(|p| p.links.iter().any(|l| l.thread == Some(30364))));
         assert!(posts.iter().any(|p| p.urls == ["https://youtu.be/nUsDk8wjRPs"]));
     }
@@ -298,8 +303,8 @@ mod tests {
         assert_eq!(posts[0].no, 2923329);
         let files: Vec<_> = posts.iter().flat_map(|p| &p.files).collect();
         assert_eq!(files.len(), 7);
-        let f = files.iter().find(|f| f.url.ends_with("1790754948757-9.jpg")).unwrap();
-        assert_eq!(f.url, "https://leftypol.org/leftypol/src/1790754948757-9.jpg");
+        let f = files.iter().find(|f| f.url.as_ref().is_some_and(|u| u.ends_with("1790754948757-9.jpg"))).unwrap();
+        assert_eq!(f.url.as_deref(), Some("https://leftypol.org/leftypol/src/1790754948757-9.jpg"));
         assert_eq!(f.thumb.as_deref(), Some("https://leftypol.org/leftypol/thumb/1790754948757-9.webp"));
         assert_eq!((f.filename.as_str(), f.width, f.size), ("842251815915.jpg", Some(1080), Some(178528)));
         let cat = b.parse_catalog("leftypol", &fixture("leftypol_catalog.json"));
@@ -315,7 +320,7 @@ mod tests {
         let boards: Vec<_> = cat.iter().map(|p| p.board.as_deref().unwrap()).collect();
         assert_eq!(boards, ["leftypol", "latam", "siberia", "tech", "games"]);
         // Files are under the thread's own board, not the overboard.
-        assert!(cat.iter().flat_map(|p| &p.files).all(|f| !f.url.contains("/overboard/")));
+        assert!(cat.iter().flat_map(|p| &p.files).all(|f| f.url.as_ref().is_some_and(|u| !u.contains("/overboard/"))));
     }
 
     #[test]
@@ -327,7 +332,7 @@ mod tests {
         let f = |ext: &str| cat.iter().flat_map(|p| &p.files).find(|f| f.filename.ends_with(ext)).unwrap().clone();
         let jpg = f(".jpg");
         let tim = "888d8dada6c13986ebca008cfdf8eb67fbe39f21346ca1e5c6321171239238a9";
-        assert_eq!(jpg.url, format!("https://nerv.8kun.top/file_store/{tim}.jpg"));
+        assert_eq!(jpg.url, Some(format!("https://nerv.8kun.top/file_store/{tim}.jpg")));
         assert_eq!(jpg.thumb, Some(format!("https://nerv.8kun.top/file_store/thumb/{tim}.jpg")));
         // Videos get jpg thumbnails, images keep their extension (checked live).
         assert!(f(".mp4").thumb.unwrap().ends_with(".jpg"));
@@ -385,7 +390,7 @@ mod tests {
         let b = Futaba::fourchan(None);
         let p = b.post("g", &catalog_thread(&fixture("4chan_catalog.json"), 109949798));
         let f = &p.files[0];
-        assert_eq!(f.url, "https://i.4cdn.org/g/1790800293810251.mp4");
+        assert_eq!(f.url.as_deref(), Some("https://i.4cdn.org/g/1790800293810251.mp4"));
         assert_eq!(f.thumb.as_deref(), Some("https://i.4cdn.org/g/1790800293810251s.jpg"));
         assert!(f.is_video() && !f.spoiler);
 

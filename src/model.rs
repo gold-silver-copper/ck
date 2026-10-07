@@ -41,10 +41,56 @@ pub struct Anchor {
     pub to: Target,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+/// What a file is, as the site says or its name tells.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+#[cfg_attr(test, derive(Default))]
+pub enum FileKind { Image, Video, #[cfg_attr(test, default)] Other }
+
+impl FileKind {
+    /// What a file is: the engine's mime when it says video or an image ck draws, else the
+    /// file URL's extension, else the original name's. The only place a kind is decided.
+    pub fn of(mime: Option<&str>, url: Option<&str>, filename: &str) -> Self {
+        match mime.and_then(|m| m.split_once('/')) {
+            Some(("video", _)) => Self::Video,
+            Some(("image", sub)) if Self::from_ext(sub) == Self::Image => Self::Image,
+            _ => url.and_then(url_ext).or_else(|| ext_of(filename)).map_or(Self::Other, |e| Self::from_ext(&e)),
+        }
+    }
+
+    /// The one list of extensions ck knows.
+    pub fn from_ext(ext: &str) -> Self {
+        match ext.to_ascii_lowercase().as_str() {
+            "jpg" | "jpeg" | "png" | "gif" | "webp" => Self::Image,
+            "webm" | "mp4" | "mov" | "m4v" | "mkv" => Self::Video,
+            _ => Self::Other,
+        }
+    }
+}
+
+/// Lowercase extension of a name's last path segment, without the dot; none when what
+/// follows the last dot isn't one (`build v1.2 final`).
+fn ext_of(name: &str) -> Option<String> {
+    let (_, e) = name.rsplit('/').next().unwrap_or(name).rsplit_once('.')?;
+    (!e.is_empty() && e.len() <= 5 && e.chars().all(|c| c.is_ascii_alphanumeric())).then(|| e.to_ascii_lowercase())
+}
+
+/// A URL's extension, its query and fragment left out (a file's name may have `?` or `#`).
+fn url_ext(url: &str) -> Option<String> {
+    ext_of(url.split(['?', '#']).next().unwrap_or(url))
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(test, derive(Default))]
+#[serde(from = "StoredAttachment")]
 pub struct Attachment {
     pub filename: String,
-    pub url: String,
+    /// The full file; `None` when the site or archive has only the thumbnail. Never the thumbnail.
+    /// Saved as `""` when there's none, which older versions of ck still read.
+    #[serde(serialize_with = "url_or_empty")]
+    pub url: Option<String>,
+    /// What the original is, as the site says or its name tells ([`FileKind::of`]).
+    pub kind: FileKind,
     /// Thumbnail image, if the site makes one we can show (not for spoilers or generic icons).
     pub thumb: Option<String>,
     pub spoiler: bool,
@@ -55,20 +101,76 @@ pub struct Attachment {
     pub md5: Option<String>,
 }
 
+fn url_or_empty<S: serde::Serializer>(url: &Option<String>, s: S) -> Result<S::Ok, S::Error> {
+    s.serialize_str(url.as_deref().unwrap_or_default())
+}
+
+/// An attachment as saved copies have it: no `kind` from older versions of ck, `""` for no
+/// file, and a FoolFuuka file the archive didn't keep stored with its thumbnail as `url`.
+#[derive(serde::Deserialize)]
+struct StoredAttachment {
+    filename: String, url: Option<String>, kind: Option<FileKind>, thumb: Option<String>, spoiler: bool,
+    width: Option<u32>, height: Option<u32>, size: Option<u64>, md5: Option<String>,
+}
+
+impl From<StoredAttachment> for Attachment {
+    fn from(s: StoredAttachment) -> Self {
+        // Old copies only: a thumbnail that stood in for its file. LynxChan (its files are
+        // under `/.media/`) gives a small image as its own thumbnail; that one is the file.
+        // A spoilered file kept no thumbnail of its own, so there it's told by FoolFuuka's
+        // thumbnail name, `<tim>s.jpg`.
+        let tim_thumb = |u: &str| u.rsplit('/').next().and_then(|n| n.strip_suffix("s.jpg")).is_some_and(|t| !t.is_empty() && t.bytes().all(|b| b.is_ascii_digit()));
+        let stand_in = |u: &String| {
+            s.kind.is_none()
+                && match &s.thumb {
+                    Some(t) => t == u && !u.contains("/.media/"),
+                    None => s.spoiler && tim_thumb(u),
+                }
+        };
+        let url = s.url.filter(|u| !u.is_empty() && !stand_in(u));
+        let kind = s.kind.unwrap_or_else(|| FileKind::of(None, url.as_deref(), &s.filename));
+        let StoredAttachment { filename, thumb, spoiler, width, height, size, md5, .. } = s;
+        Self { filename, url, kind, thumb, spoiler, width, height, size, md5 }
+    }
+}
+
+/// What [`Attachment::link`] calls a thumbnail standing in for its file.
+pub const THUMBNAIL_URL: &str = "thumbnail URL";
+
 impl Attachment {
-    /// Lowercase file extension of the full file, without the dot.
+    /// Lowercase extension for labels, read as [`FileKind::of`] reads it: the file URL's,
+    /// else the original name's.
     pub fn ext(&self) -> String {
-        let name = self.url.rsplit('/').next().unwrap_or("");
-        name.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).unwrap_or_default()
+        self.url.as_deref().and_then(url_ext).or_else(|| ext_of(&self.filename)).unwrap_or_default()
     }
 
     pub fn is_video(&self) -> bool {
-        matches!(self.ext().as_str(), "webm" | "mp4" | "mov" | "m4v" | "mkv")
+        self.kind == FileKind::Video
     }
 
-    /// Whether the full file is something we can decode and show in the terminal.
+    /// Whether the original is something we can decode and show in the terminal.
     pub fn is_image(&self) -> bool {
-        matches!(self.ext().as_str(), "jpg" | "jpeg" | "png" | "gif" | "webp")
+        self.kind == FileKind::Image
+    }
+
+    /// The full file, when ck can draw it itself.
+    pub fn image(&self) -> Option<&str> {
+        self.url.as_deref().filter(|_| self.is_image())
+    }
+
+    /// What opening, copying or showing a link acts on, and what to call it: the file,
+    /// else its thumbnail.
+    pub fn link(&self) -> Option<(&'static str, &str)> {
+        self.url.as_deref().map(|u| ("file URL", u)).or_else(|| self.thumb.as_deref().map(|t| (THUMBNAIL_URL, t)))
+    }
+}
+
+#[cfg(test)]
+impl Attachment {
+    /// A file at `url`, of the kind its extension says.
+    pub fn at(url: impl Into<String>) -> Self {
+        let url = url.into();
+        Self { kind: FileKind::of(None, Some(&url), ""), url: Some(url), ..Default::default() }
     }
 }
 
@@ -188,6 +290,27 @@ impl Post {
 #[cfg(test)]
 mod tests {
     use crate::markup::{Flavor, parse_html};
+
+    #[test]
+    fn file_kind_from_mime_then_url_then_name() {
+        use super::FileKind::{self, *};
+        // The mime wins; an image the terminal can't draw is a plain file.
+        assert_eq!(FileKind::of(Some("video/mp4"), Some("https://x/a.jpg"), "a.jpg"), Video);
+        assert_eq!(FileKind::of(Some("image/jpeg"), Some("https://x/a"), ""), Image);
+        assert_eq!(FileKind::of(Some("image/svg+xml"), None, "a.svg"), Other);
+        // An image mime ck has no name for leaves it to the extension.
+        assert_eq!(FileKind::of(Some("image/apng"), Some("https://x/a.png"), "a.png"), Image);
+        // A mime that says neither (or nothing) leaves it to the file's URL, without its
+        // query, then the original name.
+        assert_eq!(FileKind::of(Some("application/octet-stream"), Some("https://x/a.webm"), "a"), Video);
+        assert_eq!(FileKind::of(Some(""), Some("https://x/a.WEBM?x=1.png"), "a.png"), Video);
+        assert_eq!(FileKind::of(None, Some("https://x.y/a"), "clip.webm"), Video);
+        assert_eq!(FileKind::of(None, None, "noext"), Other);
+        // An original name is only a name: `?` and `#` are part of it.
+        assert_eq!(FileKind::of(None, None, "what?.webm"), Video);
+        assert_eq!(FileKind::of(None, None, "a#b.png"), Image);
+        assert_eq!(FileKind::of(None, None, "build v1.2 final"), Other);
+    }
 
     #[test]
     fn plain_text_hides_spoilers() {

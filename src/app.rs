@@ -21,7 +21,7 @@ use crate::filter::{Filters, Hidden};
 use crate::http;
 use crate::images::Images;
 use crate::keys::{Action, KeyMap, Scope};
-use crate::model::{Attachment, Board, Link, Post, max_no};
+use crate::model::{Attachment, Board, FileKind, Link, Post, max_no};
 use crate::store::{Store, ThreadKey};
 use crate::theme::{self, ThemeDef, ThemeSetting};
 
@@ -102,6 +102,9 @@ pub enum View {
 const BOARDS_MAX_AGE: i64 = 24 * 3600;
 
 /// Background changes to the data directory are written at most this often.
+/// What opening, copying or saving a file says when the site has neither it nor its thumbnail.
+const NEITHER: &str = "Neither the file nor its thumbnail is available";
+
 const SAVE_EVERY: Duration = Duration::from_secs(2);
 
 /// Watched-thread refreshes running at once.
@@ -1487,22 +1490,27 @@ impl App {
         }
     }
 
-    /// Open a file externally: videos in mpv when it's installed, everything else in the default opener.
+    /// Open a file externally: videos in mpv when it's installed, everything else in the
+    /// default opener; a file the site or archive didn't keep, as its thumbnail.
     pub fn open_file(&mut self, f: &Attachment) {
-        if f.is_video() && on_path("mpv") && !crate::sandboxed() {
-            let mut cmd = std::process::Command::new("mpv");
-            cmd.arg(&f.url)
-                .stdin(std::process::Stdio::null())
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null());
-            #[cfg(unix)]
-            std::os::unix::process::CommandExt::process_group(&mut cmd, 0);
-            match cmd.spawn() {
-                Ok(_) => self.info(format!("Playing {} in mpv", f.filename)),
-                Err(e) => self.error(anyhow::Error::from(e).context("Couldn't start mpv")),
-            }
-        } else {
-            self.open_url(&f.url);
+        let url = match (f.url.as_deref(), f.kind) {
+            (Some(u), FileKind::Video) if on_path("mpv") && !crate::sandboxed() => u,
+            (Some(u), _) => return self.open_url(u),
+            (None, _) => return match &f.thumb {
+                Some(t) => self.open_link(crate::model::THUMBNAIL_URL, t),
+                None => self.info(NEITHER),
+            },
+        };
+        let mut cmd = std::process::Command::new("mpv");
+        cmd.arg(url)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null());
+        #[cfg(unix)]
+        std::os::unix::process::CommandExt::process_group(&mut cmd, 0);
+        match cmd.spawn() {
+            Ok(_) => self.info(format!("Playing {} in mpv", f.filename)),
+            Err(e) => self.error(anyhow::Error::from(e).context("Couldn't start mpv")),
         }
     }
 
@@ -1721,7 +1729,13 @@ impl App {
     fn copy(&mut self, link: bool) {
         let what = if let Some(v) = self.tab.viewer() {
             let post_link = v.link.clone().or_else(|| self.viewer_post_link()).or_else(|| self.gallery_link(v.index));
-            if link { post_link.map(|l| ("link", l)) } else { v.files.get(v.index).map(|f| ("file URL", f.url.clone())) }
+            if link {
+                post_link.map(|l| ("link", l))
+            } else {
+                let Some(f) = v.files.get(v.index) else { return };
+                let Some((what, u)) = f.link() else { return self.info(NEITHER) };
+                Some((what, u.to_string()))
+            }
         } else if link {
             self.selected_link().map(|l| ("link", l))
         } else {
@@ -1777,6 +1791,15 @@ impl App {
     fn open_in_browser(&mut self) {
         if let Some(url) = self.selected_link() {
             self.open_url(&url);
+        }
+    }
+
+    /// Open what [`Attachment::link`] or a focused part gave: a thumbnail standing in for
+    /// its file says so.
+    pub fn open_link(&mut self, what: &str, url: &str) {
+        self.open_url(url);
+        if what == crate::model::THUMBNAIL_URL && self.status().is_none_or(|s| !s.error) {
+            self.info(format!("Only the thumbnail is available; opened {url}"));
         }
     }
 

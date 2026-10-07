@@ -202,7 +202,7 @@ fn picker(proto: ProtocolType) -> Picker {
 }
 
 fn file(url: &str) -> Attachment {
-    Attachment { filename: "x.png".into(), url: url.into(), thumb: Some(format!("{url}.thumb")), ..Default::default() }
+    Attachment { filename: "x.png".into(), thumb: Some(format!("{url}.thumb")), ..Attachment::at(url) }
 }
 
 #[test]

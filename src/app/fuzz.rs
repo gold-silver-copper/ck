@@ -20,7 +20,7 @@ use crate::backend::{Partial, SearchPage, ThreadPages};
 use crate::fuzz::{self, Rng};
 use crate::markup;
 use crate::http::{HttpError, lock};
-use crate::model::Attachment;
+use crate::model::{Attachment, FileKind};
 
 // ----- fake sites -----
 
@@ -190,7 +190,9 @@ impl Fake {
             height: rng.chance(70).then(|| rng.below(5000) as u32),
             size: rng.chance(70).then(|| rng.below(1 << 30) as u64),
             md5: rng.chance(30).then(|| format!("{:x}", rng.next())),
-            url,
+            kind: FileKind::of(None, Some(&url), ""),
+            // Sometimes the archive kept only the thumbnail.
+            url: (!rng.chance(5)).then_some(url),
         }
     }
 

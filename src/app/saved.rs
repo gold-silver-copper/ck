@@ -77,22 +77,20 @@ impl App {
     /// What the viewer shows for a file: the image itself, or the thumbnail for other files.
     /// A saved copy's images come from the download folder, else their cached thumbnail.
     pub fn viewer_source(&self, file: &Attachment) -> Option<(String, Kind)> {
-        let thumb = || file.thumb.clone().map(|u| (u, Kind::Thumb));
-        if self.tab.saved().is_none() || self.tab.view != View::Thread {
-            return if file.is_image() { Some((file.url.clone(), Kind::Full)) } else { thumb() };
-        }
-        match self.downloaded(file).filter(|_| file.is_image()) {
-            Some(path) => Some((format!("file://{}", path.display()), Kind::Full)),
-            None => thumb(),
-        }
+        let full = if self.tab.saved().is_some() && self.tab.view == View::Thread {
+            self.downloaded(file).filter(|_| file.is_image()).map(|path| format!("file://{}", path.display()))
+        } else {
+            file.image().map(Into::into)
+        };
+        full.map(|u| (u, Kind::Full)).or_else(|| file.thumb.clone().map(|u| (u, Kind::Thumb)))
     }
 
     /// Where `d` saved the open thread's file, if it did.
     pub fn downloaded(&self, file: &Attachment) -> Option<PathBuf> {
         let t = self.tab.thread.as_ref()?;
-        let p = t.posts.iter().find(|p| p.files.iter().any(|f| f.url == file.url))?;
+        let p = t.posts.iter().find(|p| p.files.iter().any(|f| f.url.is_some() && f.url == file.url))?;
         let dir = crate::download::dir(self.download_dir.as_deref(), &self.current_site().cfg.name, &t.board, t.no);
-        let path = crate::download::jobs(&[p], &dir).into_iter().find(|(u, _)| *u == file.url)?.1;
+        let path = crate::download::job(p, file, &dir).into_iter().next()?.1;
         path.is_file().then_some(path)
     }
 

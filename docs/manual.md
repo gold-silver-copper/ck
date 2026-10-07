@@ -85,8 +85,8 @@ ones for where you are.
 | `h`/`l`, arrows | previous / next file (animated GIFs play); from a thread, every file in it (or in the conversation shown) |
 | space | pause an animated GIF |
 | `+` / `-` / `0` | zoom in / out (up to 800%) / fit again; zoomed in, `h`/`j`/`k`/`l` and the arrows move around, page up / down change file, `esc` fits |
-| `i`  | open the file externally |
-| `y` / `Y` | copy the file's URL / the post's link [`copy`, `copy_link`] |
+| `i`  | open the file externally (its thumbnail, when that's all there is) |
+| `y` / `Y` | copy the file's URL (or its thumbnail's) / the post's link [`copy`, `copy_link`] |
 | `d`  | save the file [`download`] |
 | `R`  | reverse image search [`image_search`] |
 | `esc`, `q` | close |
@@ -571,7 +571,11 @@ title bar. Thumbnails are skipped in terminals narrower than 60 columns.
 
 Animated GIFs play in the viewer, at up to 20 frames a second (frames are prepared in the
 background, and scaled down if a long GIF would take too much memory). Videos open
-externally with `i`.
+externally with `i`. When the site or archive has only a file's thumbnail, the viewer
+shows it and says so; `i` and `y` in the viewer, and `o` and `y` on the focused file in a
+thread, act on the thumbnail's address and say so, and `d` says there's no file to save.
+A spoilered file the archive didn't keep has no thumbnail either: the viewer, and opening,
+copying or saving it, say neither is available. The menu offers only what there is.
 
 Images load in the background through the same rate limiter as everything else, only for
 what's on screen (or about to be), and are kept in a bounded in-memory cache. Thumbnails
@@ -637,15 +641,19 @@ already exist are skipped, so saving all the thread's files again later only fet
 what's new. Progress shows at the right of the footer. Downloads go through the same rate
 limiter as images. A file lands whole or not at all, like ck's state files: a download that
 fails leaves nothing behind, and a download never writes through a symlink at its name.
+When the site or archive has only a file's thumbnail, saving skips it.
 
 ### Saving a thread
 
 "Save the thread as a page…" in the `.` menu writes the open thread into its download
 folder as `thread.html`, a page with the current theme's colors that reads offline, and
 `thread.json`, the posts as data (`"format": 1`). Files already saved there are shown from
-the folder; the others link to the site. So saving all the thread's files and then the
-page makes a complete offline copy. Saving again replaces both. The thread is also saved
-for ck itself, to open from the Saved view.
+the folder; the others link to the site (to the thumbnail when that's all the site has,
+and nowhere when it has neither). So saving all the thread's files and then the page
+makes a complete offline copy. Saving again replaces both. Each file in `thread.json` has
+a `kind` (`image`, `video` or `other`); a file the site or archive has only the thumbnail
+of has `"url": null`. The thread is also saved for ck itself, to open from the Saved view;
+there such a file's `url` is `""`, so older versions of ck still read the copy.
 
 ## Themes and settings
 

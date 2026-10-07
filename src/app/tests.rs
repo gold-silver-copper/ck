@@ -264,7 +264,7 @@ fn copies_text_and_links() {
     app.act(Action::CopyLink);
     assert_eq!(app.copied.as_deref(), Some("https://boards.4chan.org/g/thread/1#p2"));
     // The viewer copies the file's URL, or the post's link.
-    app.tab.thread.as_mut().unwrap().posts[1].files = vec![Attachment { url: "https://i.4cdn.org/g/1.png".into(), ..Default::default() }];
+    app.tab.thread.as_mut().unwrap().posts[1].files = vec![Attachment::at("https://i.4cdn.org/g/1.png")];
     app.images = crate::images::Images::offline();
     app.act(Action::View);
     app.on_key(KeyEvent::from(KeyCode::Char('y')));
@@ -386,7 +386,7 @@ fn links_panel_lists_and_opens() {
     app.tab.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
     let html = r#"<a href="/x/res/1.html#1" class="quotelink">&gt;&gt;1</a> <a href="/xy/res/9.html#10">&gt;&gt;&gt;/xy/10</a> see https://example.com/a"#;
     let parsed = crate::markup::parse_html(html, crate::markup::Flavor::Vichan);
-    let reply = Post { no: 2, files: vec![Attachment { filename: "a.png".into(), url: "http://127.0.0.1:3/x/src/a.png".into(), ..Default::default() }], ..parsed.into() };
+    let reply = Post { no: 2, files: vec![Attachment { filename: "a.png".into(), ..Attachment::at("http://127.0.0.1:3/x/src/a.png") }], ..parsed.into() };
     app.tab.thread = Some(ThreadView::new("x".into(), 1, vec![Post { no: 1, ..Default::default() }, reply]));
     app.tab.thread.as_mut().unwrap().selected = 1;
     app.tab.view = View::Thread;
@@ -736,7 +736,7 @@ fn the_gallery_leaves_out_hidden_posts() {
     let mut app = local_app();
     app.images = crate::images::Images::offline();
     app.tab.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
-    let file = |name: &str| Attachment { filename: name.into(), url: format!("http://127.0.0.1:3/x/src/{name}"), ..Default::default() };
+    let file = |name: &str| Attachment { filename: name.into(), ..Attachment::at(format!("http://127.0.0.1:3/x/src/{name}")) };
     let post = |no, files: Vec<Attachment>| Post { no, files, ..Default::default() };
     app.tab.thread = Some(ThreadView::new("x".into(), 1, vec![post(1, vec![file("a.png")]), post(2, vec![file("hidden.png")]), post(3, vec![file("b.jpg")])]));
     app.tab.view = View::Thread;
@@ -817,7 +817,7 @@ fn gallery_of_the_threads_files() {
     app.download_dir = Some(dir.path().display().to_string());
     app.images = crate::images::Images::offline();
     app.tab.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
-    let file = |name: &str| Attachment { filename: name.into(), url: format!("http://127.0.0.1:3/x/src/{name}"), ..Default::default() };
+    let file = |name: &str| Attachment { filename: name.into(), ..Attachment::at(format!("http://127.0.0.1:3/x/src/{name}")) };
     let post = |no, files: Vec<Attachment>| Post { no, files, ..Default::default() };
     app.tab.thread = Some(ThreadView::new("x".into(), 1, vec![post(1, vec![file("a.png")]), post(2, vec![]), post(3, vec![file("b.jpg"), file("c.gif")])]));
     app.tab.view = View::Thread;
@@ -937,10 +937,58 @@ fn search_results_leave_out_hidden_posts() {
 }
 
 #[test]
+fn a_file_with_only_its_thumbnail_is_never_taken_for_the_file() {
+    let mut app = local_app();
+    app.images = crate::images::Images::offline();
+    let thumb = "https://i.example/1s.jpg";
+    let file = Attachment { filename: "clip.webm".into(), url: None, kind: FileKind::Video, thumb: Some(thumb.into()), ..Default::default() };
+    app.tab.thread = Some(ThreadView::new("x".into(), 1, vec![Post { no: 1, files: vec![file.clone()], ..Default::default() }]));
+    app.tab.view = View::Thread;
+    app.act(Action::View);
+    // Shown as the thumbnail it is; nothing to save; o, y and i act on the thumbnail and say so.
+    assert_eq!(app.viewer_source(&file), Some((thumb.into(), crate::images::Kind::Thumb)));
+    app.on_key(KeyEvent::from(KeyCode::Char('d')));
+    assert_eq!(app.status().unwrap().text, "Only the thumbnail is available; there's no file to save");
+    app.on_key(KeyEvent::from(KeyCode::Char('y')));
+    assert_eq!((app.copied.as_deref(), app.status().unwrap().text.as_str()), (Some(thumb), "Copied thumbnail URL: https://i.example/1s.jpg"));
+    app.on_key(KeyEvent::from(KeyCode::Char('i')));
+    assert_eq!(app.opened.as_deref(), Some(thumb));
+    assert!(app.status().unwrap().text.starts_with("Only the thumbnail is available"));
+    // The same file focused in the thread: `o` and `d` say so too.
+    app.on_key(KeyEvent::from(KeyCode::Esc));
+    app.act(Action::NextPart);
+    app.opened = None;
+    app.act(Action::Browser);
+    assert_eq!((app.opened.as_deref(), app.status().unwrap().text.as_str()), (Some(thumb), "Only the thumbnail is available; opened https://i.example/1s.jpg"));
+    app.act(Action::Download);
+    assert_eq!(app.status().unwrap().text, "Only the thumbnail is available; there's no file to save");
+    // The menu offers the thumbnail, and no saving.
+    app.on_key(KeyEvent::from(KeyCode::Char('.')));
+    let items = &app.menu().unwrap().items;
+    let label = |a: Action| items.iter().find_map(|i| if let MenuItem::Act(x, l) = i { (*x == a).then(|| l.to_string()) } else { None });
+    assert_eq!(label(Action::Copy).as_deref(), Some("copy the thumbnail's URL"));
+    assert!([Action::Download, Action::DownloadPost, Action::DownloadThread].iter().all(|&a| label(a).is_none()), "{items:?}");
+    app.popup = None;
+    // A spoilered file the archive didn't keep has neither: everything says so, and `o`
+    // and `y` don't fall back to the post.
+    let gone = Attachment { thumb: None, spoiler: true, ..file };
+    app.tab.thread.as_mut().unwrap().posts[0].files = vec![gone.clone()];
+    let neither = "Neither the file nor its thumbnail is available";
+    app.opened = None;
+    for a in [Action::Browser, Action::Copy, Action::Download] {
+        app.footer = Footer::default();
+        app.act(a);
+        assert_eq!(app.status().map(|s| s.text.as_str()), Some(neither), "{a:?}");
+    }
+    app.open_file(&gone);
+    assert_eq!((app.opened.as_deref(), app.status().map(|s| s.text.as_str())), (None, Some(neither)));
+}
+
+#[test]
 fn reverse_image_search() {
     let mut app = local_app();
     app.images = crate::images::Images::offline();
-    let file = |name: &str, thumb| Attachment { filename: name.into(), url: format!("https://i.example/{name}"), thumb, ..Default::default() };
+    let file = |name: &str, thumb| Attachment { filename: name.into(), thumb, ..Attachment::at(format!("https://i.example/{name}")) };
     let files = vec![file("a.png", None), file("b.webm", Some("https://i.example/bs.jpg".into())), file("c.pdf", None)];
     app.tab.thread = Some(ThreadView::new("x".into(), 1, vec![Post { no: 1, files, ..Default::default() }]));
     app.tab.view = View::Thread;
@@ -1348,7 +1396,7 @@ fn tab_focuses_parts_and_the_verbs_follow_it() {
     app.images = Images::offline();
     app.goto_str("a/x/1");
     let html = r##"<a href="#p1" class="quotelink">&gt;&gt;1</a> see https://example.com/a"##;
-    let file = |name: &str| Attachment { filename: name.into(), url: format!("http://127.0.0.1:3/x/src/{name}"), ..Default::default() };
+    let file = |name: &str| Attachment { filename: name.into(), ..Attachment::at(format!("http://127.0.0.1:3/x/src/{name}")) };
     let reply = Post { no: 2, files: vec![file("a.png"), file("b.webm")], ..crate::markup::parse_html(html, crate::markup::Flavor::Vichan).into() };
     app.handle(answer(app.tab.req.unwrap(), App::thread_arrived, Ok(vec![Post { no: 1, ..Default::default() }, reply, Post { no: 3, ..Default::default() }])));
     let tab = |app: &mut App, shift: bool| app.on_key(if shift { KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT) } else { KeyEvent::from(KeyCode::Tab) });
@@ -1405,7 +1453,7 @@ fn tab_focuses_parts_and_the_verbs_follow_it() {
 fn the_menu_runs_what_it_lists() {
     let mut app = local_app();
     app.goto_str("a/x/1");
-    app.handle(answer(app.tab.req.unwrap(), App::thread_arrived, Ok(vec![Post { no: 1, files: vec![Attachment { filename: "a.png".into(), url: "http://127.0.0.1:3/a.png".into(), ..Default::default() }], ..Default::default() }])));
+    app.handle(answer(app.tab.req.unwrap(), App::thread_arrived, Ok(vec![Post { no: 1, files: vec![Attachment { filename: "a.png".into(), ..Attachment::at("http://127.0.0.1:3/a.png") }], ..Default::default() }])));
     app.on_key(KeyEvent::from(KeyCode::Char('.')));
     let m = app.menu().unwrap();
     let has = |a: Action| m.items.iter().any(|i| matches!(i, MenuItem::Act(x, _) if *x == a));
@@ -2002,7 +2050,7 @@ fn the_viewer_goes_through_the_whole_thread_and_zooms() {
     let mut app = local_app();
     app.images = crate::images::Images::offline();
     app.goto_str("a/x/1");
-    let file = |name: &str| Attachment { filename: name.into(), url: format!("http://127.0.0.1:9/{name}"), ..Default::default() };
+    let file = |name: &str| Attachment { filename: name.into(), ..Attachment::at(format!("http://127.0.0.1:9/{name}")) };
     let post = |no, files: Vec<Attachment>| Post { no, files, ..Default::default() };
     app.handle(answer(app.tab.req.unwrap(), App::thread_arrived, Ok(vec![post(1, vec![file("a.png")]), post(2, vec![]), post(3, vec![file("b.png"), file("c.png")]), post(4, vec![file("d.png")])])));
     app.tab.thread.as_mut().unwrap().select(2);
@@ -2175,7 +2223,7 @@ fn saving_needs_a_target_or_asks_first() {
     app.download_dir = Some(dir.path().display().to_string());
     app.images = Images::offline();
     app.goto_str("a/x/1");
-    let file = |name: &str| Attachment { filename: name.into(), url: format!("http://127.0.0.1:3/x/src/{name}"), size: Some(1 << 20), ..Default::default() };
+    let file = |name: &str| Attachment { filename: name.into(), size: Some(1 << 20), ..Attachment::at(format!("http://127.0.0.1:3/x/src/{name}")) };
     let posts = vec![
         Post { no: 1, files: vec![file("a.png")], ..Default::default() },
         Post { no: 2, files: vec![file("b.png"), file("c.png")], ..Default::default() },
@@ -2237,7 +2285,7 @@ fn an_action_without_a_key_is_in_the_menu() {
     app.keys = KeyMap::new(&overrides).unwrap();
     app.download_dir = Some(dir.path().display().to_string());
     app.goto_str("a/x/1");
-    let file = Attachment { filename: "a.png".into(), url: "http://127.0.0.1:3/x/src/a.png".into(), ..Default::default() };
+    let file = Attachment { filename: "a.png".into(), ..Attachment::at("http://127.0.0.1:3/x/src/a.png") };
     app.handle(answer(app.tab.req.unwrap(), App::thread_arrived, Ok(vec![Post { no: 1, files: vec![file], ..Default::default() }])));
     app.on_key(KeyEvent::from(KeyCode::Tab));
     app.on_key(KeyEvent::from(KeyCode::Char('d')));
@@ -3497,7 +3545,7 @@ fn following_a_general_through_the_site() {
 fn the_menu_offers_no_gallery_when_only_hidden_posts_have_files() {
     let mut app = local_app();
     app.tab.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
-    let file = Attachment { filename: "hidden.png".into(), url: "http://127.0.0.1:3/x/src/hidden.png".into(), ..Default::default() };
+    let file = Attachment { filename: "hidden.png".into(), ..Attachment::at("http://127.0.0.1:3/x/src/hidden.png") };
     app.tab.thread = Some(ThreadView::new("x".into(), 1, vec![Post { no: 1, ..Default::default() }, Post { no: 2, files: vec![file], ..Default::default() }]));
     app.tab.view = View::Thread;
     app.rehide(|a| a.store.toggle_hidden("a", "x", 2));
@@ -3511,6 +3559,23 @@ fn the_menu_offers_no_gallery_when_only_hidden_posts_have_files() {
     let m = app.menu().unwrap();
     let has = |a: Action| m.items.iter().any(|i| matches!(i, MenuItem::Act(x, _) if *x == a));
     assert!(!has(Action::Gallery) && !has(Action::DownloadThread), "{:?}", m.items);
+}
+
+#[test]
+fn only_hidden_thumbnails_are_not_files_to_save() {
+    // A hidden post's file the archive kept only the thumbnail of: showing hidden posts
+    // brings it to the gallery, but there's still nothing to save.
+    let mut app = local_app();
+    app.tab.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
+    let file = Attachment { filename: "clip.webm".into(), url: None, kind: FileKind::Video, thumb: Some("http://127.0.0.1:3/x/thumb/1s.jpg".into()), ..Default::default() };
+    app.tab.thread = Some(ThreadView::new("x".into(), 1, vec![Post { no: 1, ..Default::default() }, Post { no: 2, files: vec![file], ..Default::default() }]));
+    app.tab.view = View::Thread;
+    app.rehide(|a| a.store.toggle_hidden("a", "x", 2));
+    app.act(Action::Gallery);
+    assert_eq!(app.status().map(|s| s.text.as_str()), Some("Only hidden posts have files (Z shows them)"));
+    app.footer = Footer::default();
+    app.act(Action::DownloadThread);
+    assert_eq!(app.status().map(|s| s.text.as_str()), Some("Thread has no files to save"));
 }
 
 #[test]
@@ -3700,7 +3765,7 @@ fn gallery_files_keep_their_posts_when_the_live_thread_replaces_a_cached_copy() 
     let mut app = thread_app();
     app.download_dir = Some(dir.path().display().to_string());
     app.images = crate::images::Images::offline();
-    let file = |name: &str| Attachment { filename: name.into(), url: format!("http://127.0.0.1:3/x/src/{name}"), ..Default::default() };
+    let file = |name: &str| Attachment { filename: name.into(), ..Attachment::at(format!("http://127.0.0.1:3/x/src/{name}")) };
     let post = |no, files: Vec<Attachment>| Post { no, files, ..Default::default() };
     // The cached copy has No.2; the live thread, arriving with the gallery open, doesn't.
     app.set_cached_thread(vec![post(1, vec![]), post(2, vec![]), post(3, vec![file("3.png")]), post(4, vec![file("4.png")])], 0);

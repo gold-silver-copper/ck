@@ -71,7 +71,7 @@ pub fn posts_saying(list: &[(u64, &str)]) -> Vec<Post> {
 
 /// A post with one PNG on the local app's first site.
 pub fn with_file(no: u64, board: Option<&str>) -> Post {
-    let file = Attachment { filename: format!("{no}.png"), url: format!("http://127.0.0.1:3/src/{no}.png"), thumb: Some(format!("http://127.0.0.1:3/thumb/{no}.png")), ..Default::default() };
+    let file = Attachment { filename: format!("{no}.png"), thumb: Some(format!("http://127.0.0.1:3/thumb/{no}.png")), ..Attachment::at(format!("http://127.0.0.1:3/src/{no}.png")) };
     Post { no, files: vec![file], board: board.map(String::from), body: vec![Line::from("text")], ..Default::default() }
 }
 
@@ -91,12 +91,11 @@ pub fn post(no: u64, age: i64, subject: Option<&str>, html: &str) -> Post {
 pub fn file(name: &str) -> Attachment {
     Attachment {
         filename: name.into(),
-        url: format!("https://i.example/{name}"),
         thumb: Some(format!("https://i.example/thumb/{name}")),
         width: Some(800),
         height: Some(600),
         size: Some(123_456),
-        ..Default::default()
+        ..Attachment::at(format!("https://i.example/{name}"))
     }
 }
 

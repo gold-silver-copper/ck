@@ -47,7 +47,7 @@ impl App {
             items.push(LinkItem::Quote(l.clone(), label));
         }
         items.extend(post.urls.iter().cloned().map(LinkItem::Url));
-        items.extend(post.files.iter().cloned().map(LinkItem::File));
+        items.extend(post.files.iter().filter(|f| f.link().is_some()).cloned().map(LinkItem::File));
         if items.is_empty() {
             self.info("Post has no links");
             return;
@@ -106,7 +106,7 @@ impl App {
         let Some(TabPopup::Links(p)) = &self.tab.popup else { return None };
         Some(match p.items.get(i)? {
             LinkItem::Url(u) => u.clone(),
-            LinkItem::File(f) => f.url.clone(),
+            LinkItem::File(f) => f.link()?.1.to_string(),
             LinkItem::Quote(l, _) => {
                 let backend = &self.current_site().backend;
                 let board = l.board.clone().or_else(|| self.tab.board.as_ref().map(|b| b.uri.clone()))?;
@@ -138,7 +138,7 @@ impl App {
         };
         // Videos and others: their thumbnail is what can be searched.
         let files: Vec<(String, String)> =
-            files.iter().filter_map(|f| Some((f.filename.clone(), if f.is_image() { f.url.clone() } else { f.thumb.clone()? }))).collect();
+            files.iter().filter_map(|f| Some((f.filename.clone(), f.image().or(f.thumb.as_deref())?.to_string()))).collect();
         if files.is_empty() {
             self.info("Post has no image to search for");
             return;
