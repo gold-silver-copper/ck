@@ -152,7 +152,7 @@ pub struct Store {
     pub seen: std::collections::BTreeMap<String, std::collections::BTreeMap<u64, SeenThread>>,
     /// Threads kept in `threads/` (see `saved`), newest first.
     pub saved: Vec<SavedMeta>,
-    /// Past this many bytes, the oldest dead, unwatched copies are removed.
+    /// Past this many bytes, the oldest unwatched copies are removed.
     pub saved_max: u64,
     /// Writes saved copies in the background (with a data directory).
     writer: Option<crate::writer::Writer<Wrote>>,
@@ -455,8 +455,8 @@ impl Store {
         true
     }
 
-    /// Collect what background writes came to: copies' sizes (then the oldest dead copies
-    /// go, past `saved_max`), and errors to tell about.
+    /// Collect what background writes came to: copies' sizes (then the oldest unwatched
+    /// copies go, past `saved_max`), and errors to tell about.
     pub fn settle(&mut self) -> Vec<String> {
         let Some(writer) = &self.writer else { return Vec::new() };
         let mut errors = Vec::new();
@@ -548,8 +548,9 @@ impl Store {
         }
     }
 
-    /// Past `saved_max` bytes, remove the oldest copies that are dead and not watched (never
-    /// a watched thread's).
+    /// Past `saved_max` bytes, remove the oldest copies of threads not watched, dead or not
+    /// (a thread that's still up is only known to be once it's refetched, which an unwatched
+    /// one isn't). Never a watched thread's.
     fn prune_saved(&mut self) {
         if self.saved_max == 0 {
             return;
@@ -557,7 +558,7 @@ impl Store {
         let mut total = self.saved.iter().fold(0u64, |sum, m| sum.saturating_add(m.bytes));
         while total > self.saved_max {
             let watched = |m: &SavedMeta| self.watched.iter().any(|w| w.key == m.key);
-            let Some(m) = self.saved.iter().rev().find(|m| m.dead && !watched(m)) else { break };
+            let Some(m) = self.saved.iter().rev().find(|m| !watched(m)) else { break };
             total = total.saturating_sub(m.bytes);
             let key = m.key.clone();
             self.forget_saved(&key);
@@ -869,7 +870,7 @@ mod tests {
     }
 
     #[test]
-    fn pruning_spares_watched_and_live_copies() {
+    fn pruning_spares_only_watched_copies() {
         let dir = tempfile::tempdir().unwrap();
         let (mut s, _) = Store::load(Some(dir.path().to_path_buf()));
         let many: Vec<u64> = (1..50).collect();
@@ -878,17 +879,20 @@ mod tests {
         }
         s.flush(std::time::Duration::from_secs(10));
         let one = s.saved[0].bytes;
-        // 1 and 2 dead; 1 watched.
+        // 1 and 2 dead; 1, 4 and 5 watched. 3 is up but unwatched (say, saved as a page).
         s.saved_dead(&key(1));
         s.saved_dead(&key(2));
-        s.toggle_watch(key(1), String::new(), 0, 0);
+        for no in [1, 4, 5] {
+            s.toggle_watch(key(no), String::new(), 0, 0);
+        }
         s.saved_max = one * 2;
         s.keep_thread(&key(5), "", "u", &posts(&many), 5);
-        // Once written, only 2 can go; the rest stay over the limit.
+        // Once written, the unwatched ones go, oldest first, dead or not; the watched ones
+        // stay, even over the limit.
         s.flush(std::time::Duration::from_secs(10));
         let left: Vec<u64> = s.saved.iter().map(|m| m.key.no).collect();
-        assert_eq!(left, [5, 4, 3, 1]);
-        assert!(!dir.path().join("threads/4chan/g/2.json").exists());
+        assert_eq!(left, [5, 4, 1]);
+        assert!(!dir.path().join("threads/4chan/g/2.json").exists() && !dir.path().join("threads/4chan/g/3.json").exists());
         assert!(dir.path().join("threads/4chan/g/1.json").exists());
         s.forget_saved(&key(4));
         s.flush(std::time::Duration::from_secs(10));
@@ -896,6 +900,8 @@ mod tests {
         // A write that fails is told about.
         std::fs::remove_dir_all(dir.path().join("threads")).unwrap();
         std::fs::write(dir.path().join("threads"), "not a folder").unwrap();
+        // (Watched, so it stays over the limit.)
+        s.toggle_watch(key(6), String::new(), 0, 0);
         s.keep_thread(&key(6), "", "u", &posts(&many), 6);
         let errors = s.flush(std::time::Duration::from_secs(10));
         assert!(errors.len() == 1 && errors[0].contains("Couldn't save a copy of thread 6"), "{errors:?}");

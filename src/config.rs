@@ -24,7 +24,7 @@ pub struct Config {
     #[serde(default = "default_refresh_watched")]
     pub refresh_watched_secs: u64,
     /// Saved copies of threads (see the Saved view) are kept to this many megabytes: past it,
-    /// the oldest dead, unwatched ones go. 0 keeps everything.
+    /// the oldest ones of threads not watched go. 0 keeps everything.
     #[serde(default = "default_saved_max_mb")]
     pub saved_max_mb: u64,
     /// The last copy of each catalog and thread opened is kept (in the cache directory) to
