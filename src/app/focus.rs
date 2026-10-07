@@ -307,8 +307,8 @@ impl App {
         if p.body.iter().flat_map(|l| &l.spans).any(|s| crate::markup::is_spoiler(s.style)) {
             items.push(act(A::Spoiler, "show its spoilers"));
         }
-        items.push(act(A::Mine, if t.mine.contains(&p.no) { "it's not yours" } else { "mark it as yours" }));
-        let hidden = t.marks.get(t.selected).is_some_and(|m| m.hidden.is_some());
+        items.push(act(A::Mine, if t.marks.is_mine(p.no) { "it's not yours" } else { "mark it as yours" }));
+        let hidden = t.marks.why_hidden(t.selected).is_some();
         items.push(act(A::Hide, if hidden { "unhide it" } else { "hide it" }));
         items.push(act(A::Filter, "hide or highlight posts like it…"));
         let by_poster = t.conversation.as_ref().is_some_and(|c| c.poster.is_some());
@@ -330,8 +330,10 @@ impl App {
         ));
         items.push(act(A::Watch, if self.menu_watching(t.no) { "stop watching the thread" } else { "watch the thread" }));
         items.push(act(A::Follow, "follow the thread as a general"));
-        if t.posts.iter().any(|p| !p.files.is_empty()) {
+        if t.gallery_files().next().is_some() {
             items.push(act(A::Gallery, "all the thread's files"));
+        }
+        if t.unhidden_posts().any(|(_, p)| !p.files.is_empty()) {
             items.push(act(A::DownloadThread, "save all the thread's files…"));
         }
         if self.can_jump_back() {
@@ -381,7 +383,7 @@ impl App {
             items.push(act(A::CopyLink, "copy its link"));
             items.push(act(A::Browser, "open it in the browser"));
         }
-        items.push(act(A::ShowHidden, if self.show_hidden { "leave out hidden threads" } else { "show hidden threads" }));
+        items.push(act(A::ShowHidden, if self.hiding.show() { "leave out hidden threads" } else { "show hidden threads" }));
         let sort = self.tab.catalog_sort;
         items.push(MenuItem::Act(A::Sort, format!("sort by {} (now {})", sort.next().as_str(), sort.as_str())));
         let layout = self.layout();

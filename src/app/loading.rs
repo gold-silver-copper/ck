@@ -2,7 +2,6 @@
 //! arrives, and keeping open and watched threads refreshed.
 
 use super::*;
-use crate::store::Status;
 
 impl App {
     /// Run `job` on a thread, as the current request (shown as `label`), then `apply` what
@@ -301,8 +300,9 @@ impl App {
     /// waiting to be.
     pub(super) fn show_catalog(&mut self, posts: Vec<Post>) {
         let selected = self.tab.pending_catalog.or_else(|| self.selected_catalog_no());
+        let site = self.sites.get(self.tab.catalog_site).map_or(String::new(), |s| s.cfg.name.clone());
+        self.tab.catalog_marks = self.catalog_marks_for(&site, &posts, |p| self.board_of(p));
         self.tab.catalog = posts;
-        self.remark_catalog();
         if let Some(i) = selected.and_then(|no| self.row_of(View::Catalog, &RowKey::Thread(no))) {
             self.tab.catalog_list.state.select(Some(i));
         }
@@ -347,6 +347,7 @@ impl App {
             _ => (posts, HashSet::new(), false),
         };
         let mut tv = ThreadView::new(board, no, posts);
+        tv.marks = self.thread_marks(&key.site, &tv);
         tv.margin = self.scroll_margin;
         tv.deleted = deleted;
         tv.shrinks = old.as_ref().map_or(0, |o| o.shrinks) + u32::from(shrank);
@@ -414,7 +415,7 @@ impl App {
             self.fetched_thread(&key, &tv.live_posts(), shown_max);
         }
         self.tab.thread = Some(tv);
-        self.remark_thread();
+        self.tab.thread_site = self.tab.site;
         // Following: the first new entry that isn't hidden, revealed as `j` would.
         if let Some(last) = follow
             && let Some(t) = &mut self.tab.thread
@@ -507,7 +508,7 @@ impl App {
         if self.refreshing.len() >= MAX_REFRESHING {
             return;
         }
-        let due = self.store.watched.iter().find(|w| {
+        let due = self.store.all_watched().iter().find(|w| {
             !w.status.is_dead()
                 && Some(&w.key) != open.as_ref()
                 && !self.refreshing.contains(&w.key)
@@ -605,31 +606,32 @@ impl App {
                 // Quiet: nothing past what the last refresh found (the first one of the
                 // session starts over).
                 let quiet = prev.is_some_and(|m| max_no(&posts) <= m);
-                // Hidden posts (by a filter, a hidden word, by hand, or as replies to those)
-                // aren't new or replies to you: the thread passes them over when it's open.
-                let view = ThreadView::new(key.board.clone(), key.no, posts.clone());
-                let marks = self.thread_marks(&key.site, &view);
-                let shown = |p: &Post| view.index.get(&p.no).and_then(|&i| marks.get(i)).is_none_or(|m| m.hidden.is_none());
                 let Some(w) = self.store.watched_mut(&key) else { return };
                 let max_no = max_no(&posts);
                 if w.last_seen == 0 {
                     w.last_seen = max_no;
                 }
-                let mine = w.mine.clone();
-                let to_you = |p: &Post| p.quotes.iter().any(|q| mine.contains(q));
-                let unread: Vec<&Post> = posts.iter().filter(|p| p.no > w.last_seen && shown(p)).collect();
-                w.status = Status::Live { unread: unread.len(), replies: unread.iter().filter(|p| to_you(p)).count() };
+                let last_seen = w.last_seen;
+                // Hidden posts (by a filter, a hidden word, by hand, or as replies to those)
+                // aren't new or replies to you: the thread passes them over when it's open.
+                // What decides it is kept, to count them again when what's hidden changes.
+                let fresh = with_ancestry(&posts, |p| p.no > last_seen);
+                let count = self.unread_counter(&key, &fresh);
+                let (unread, replies) = count(last_seen);
                 // Tell about posts newer than this session's last refresh (not on the first
                 // one, which may find posts from long ago).
-                let fresh: Vec<&&Post> = unread.iter().filter(|p| prev.is_some_and(|m| p.no > m)).collect();
+                let (new, new_replies) = prev.map_or((0, 0), |m| count(last_seen.max(m)));
                 // Those a `notify` filter catches, hidden or not: asked for by name.
-                let past = |p: &&Post| p.no > w.last_seen && prev.is_some_and(|m| p.no > m);
-                let caught: Vec<String> = posts.iter().filter(past).filter_map(|p| self.filters.check(&key.site, &key.board, p, p.no == key.no).notify).collect();
+                let past = |p: &&Post| p.no > last_seen && prev.is_some_and(|m| p.no > m);
+                let caught: Vec<String> = posts.iter().filter(past).filter_map(|p| self.hiding.filters().check(&key.site, &key.board, p, p.no == key.no).notify).collect();
+                let Some(w) = self.store.watched_mut(&key) else { return };
+                // Found: live, whatever it was.
+                w.refreshed((unread, replies), fresh);
                 let note = Note {
                     key: key.clone(),
                     subject: if w.subject.is_empty() { subject.clone() } else { w.subject.clone() },
-                    new: fresh.len(),
-                    replies: fresh.iter().filter(|p| to_you(p)).count(),
+                    new,
+                    replies: new_replies,
                     caught: caught.len(),
                     filter: caught.into_iter().next().unwrap_or_default(),
                 };

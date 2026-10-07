@@ -641,9 +641,9 @@ fn data_dir_once(seed: u64) {
     let (mut store, _) = Store::load(Some(data.clone()));
     for i in 0..rng.below(6) as u64 {
         let key = ThreadKey { site: rng.pick(&["4chan", "lainchan", "nosuch"]).to_string(), board: "g".into(), no: 100 + i };
-        store.toggle_watch(key.clone(), format!("thread {i}"), 10, 105 + i);
+        store.watch(key.clone(), format!("thread {i}"), 10, 105 + i);
         store.visit(&key, "subject", 10, 109, START + i as i64);
-        store.toggle_hidden(&key.site, "g", 200 + i);
+        store.toggle_hidden(&key.site, "g", 200 + i).unchecked();
         store.opened(&key.site, "g", key.no, 9, START);
         // A saved copy, some of them of dead threads (dead in Watched too).
         let html = format!("<span class=\"quote\">&gt;{i}</span><br><a href=\"#p{}\" class=\"quotelink\">&gt;&gt;{}</a> <s>spoiler</s>", key.no, key.no);

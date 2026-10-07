@@ -5,7 +5,7 @@ use ratatui::buffer::Buffer;
 use crate::app::{App, Clock, Part, Popup, Preview, SettingsPopup, ThreadView, View, Viewer};
 use crate::images::Images;
 use crate::model::{Board, Post};
-use crate::store::{Status, ThreadKey, Visit, Watched};
+use crate::store::{Status, ThreadKey, Visit};
 use crate::test_fixtures::*;
 use crate::theme::theme;
 
@@ -14,11 +14,11 @@ const HOUR: i64 = 3600;
 fn app(images: bool) -> App {
     let mut app = test_app();
     let key = |board: &str, no| ThreadKey { site: "4chan".into(), board: board.into(), no };
-    app.store.watched = vec![
-        Watched { status: Status::Live { unread: 2, replies: 0 }, ..Watched::new(key("g", 1000), "Snapshot thread".into(), 5, 1002) },
-        Watched { status: Status::Dead, ..Watched::new(key("g", 900), "Old thread".into(), 300, 1199) },
-        Watched::new(ThreadKey { site: "lainchan".into(), board: "λ".into(), no: 42 }, "Programming Employment".into(), 92, 77),
-    ];
+    app.store.watch(key("g", 1000), "Snapshot thread".into(), 5, 1002);
+    app.store.watch(key("g", 900), "Old thread".into(), 300, 1199);
+    app.store.watch(ThreadKey { site: "lainchan".into(), board: "λ".into(), no: 42 }, "Programming Employment".into(), 92, 77);
+    app.store.watched_vec()[0].status = Status::Live { unread: 2, replies: 0 };
+    app.store.watched_vec()[1].status = Status::Dead;
     app.store.history = vec![
         Visit { key: key("g", 1000), subject: "Snapshot thread".into(), last_seen: 1004, opened: NOW - 120 },
         Visit { key: key("b", 5), subject: "Random thread".into(), last_seen: 9, opened: NOW - 30 * HOUR },
@@ -540,11 +540,11 @@ fn a_tab_counts_its_watched_threads_new_posts() {
     let (text, _) = render(&mut a);
     assert!(text.lines().nth(1).unwrap().contains("2 Snapshot thread (2)"), "{text}");
     // Read (or not watched): no count.
-    a.store.watched[0].status = Status::READ;
+    a.store.watched_vec()[0].status = Status::READ;
     let (text, _) = render(&mut a);
     assert!(!text.lines().nth(1).unwrap().contains('('), "{text}");
     // A narrow tab keeps the count and cuts the subject.
-    a.store.watched[0].status = Status::Live { unread: 12, replies: 0 };
+    a.store.watched_vec()[0].status = Status::Live { unread: 12, replies: 0 };
     let (text, _) = render_at(&mut a, 30, 20);
     assert!(text.lines().nth(1).unwrap().contains("(12)"), "{text}");
 }
@@ -941,33 +941,32 @@ fn links_panel() {
 
 fn with_filters(a: &mut App) {
     let cfg = "[[filter]]\npattern = \"Rust\"\naction = \"highlight\"\nlabel = \"rust\"\n[[filter]]\npattern = \"implying\"\nlabel = \"no implying\"";
-    a.filters = crate::filter::tests::filters(cfg).unwrap();
+    a.rehide(|a| a.hiding.set_filters(crate::filter::tests::filters(cfg).unwrap()));
 }
 
 #[test]
 fn filtered_catalog_and_thread() {
     let mut a = catalog_app(true);
     with_filters(&mut a);
-    a.store.toggle_hidden("4chan", "g", 1100);
-    a.remark_catalog();
+    a.rehide(|a| a.store.toggle_hidden("4chan", "g", 1100));
     a.tab.catalog_list.state.select(Some(0));
     insta::assert_snapshot!(snapshot(&mut a));
     // Z: hidden ones shown, marked.
-    a.show_hidden = true;
+    a.rehide(|a| a.hiding.toggle_show());
     insta::assert_snapshot!("filtered_catalog_shown", snapshot(&mut a));
     insta::assert_snapshot!("filtered_catalog_backgrounds", bg_map(&mut a));
-    a.show_hidden = false;
+    a.rehide(|a| a.hiding.toggle_show());
     a.tab.view = View::Thread;
     a.tab.thread = Some(thread());
-    a.remark_thread();
+    a.remark();
     insta::assert_snapshot!("filtered_thread", snapshot(&mut a));
 }
 
 #[test]
 fn your_posts_and_replies() {
     let mut a = thread_app(false);
-    a.tab.thread.as_mut().unwrap().mine.insert(1001);
-    a.store.watched[0].status = Status::Live { unread: 2, replies: 1 };
+    a.rehide(|a| a.store.toggle_mine(&ThreadKey { site: "4chan".into(), board: "g".into(), no: 1000 }, 1001));
+    a.store.watched_vec()[0].status = Status::Live { unread: 2, replies: 1 };
     insta::assert_snapshot!(snapshot(&mut a));
     a.tab.view = View::Watched;
     insta::assert_snapshot!("watched_with_replies", snapshot(&mut a));
@@ -1040,19 +1039,21 @@ fn hidden_search_results() {
     a.tab.view = View::Search;
     let page = crate::backend::foolfuuka::parse_search(&crate::backend::fixture("foolfuuka_search.json")).unwrap();
     let first = page.hits[0].1.no;
-    let mut s = crate::app::Search::for_tests("g", "rust borrow checker", page);
-    s.hidden = vec![true, false, false, false];
-    a.tab.search = Some(s);
+    let nos: Vec<u64> = page.hits.iter().map(|(_, p)| p.no).collect();
+    a.tab.search = Some(crate::app::Search::for_tests("g", "rust borrow checker", page));
+    a.rehide(|a| a.store.toggle_hidden("desuarchive", "g", first));
     a.tab.search_list.state.select(Some(0));
     let text = render(&mut a).0;
     assert!(!text.contains(&format!("No.{first}")) && text.contains("1 hidden"), "{text}");
     // Z: shown, marked.
-    a.show_hidden = true;
+    a.rehide(|a| a.hiding.toggle_show());
     let text = render(&mut a).0;
     assert!(text.lines().any(|l| l.contains(&format!("No.{first}")) && l.contains(" hidden ")), "{text}");
     // All hidden: says so, and how to see them.
-    a.show_hidden = false;
-    a.tab.search.as_mut().unwrap().hidden = vec![true; 4];
+    a.rehide(|a| a.hiding.toggle_show());
+    for &no in nos.iter().skip(1) {
+        a.rehide(|a| a.store.toggle_hidden("desuarchive", "g", no));
+    }
     let text = render(&mut a).0;
     assert!(text.contains("All hidden (Z shows them)"), "{text}");
 }
@@ -1161,8 +1162,8 @@ fn home_with_favorites() {
 fn watched_generals() {
     let mut a = app(false);
     a.tab.view = View::Watched;
-    a.store.watched[0].general = Some("/lmg/".into());
-    a.store.watched[0].at_limit = true;
+    a.store.watched_vec()[0].general = Some("/lmg/".into());
+    a.store.watched_vec()[0].at_limit = true;
     insta::assert_snapshot!(snapshot(&mut a));
 }
 
@@ -1246,7 +1247,7 @@ fn a_quote_of_a_hidden_post_peeks_at_nothing() {
     use ratatui::crossterm::event::{KeyCode, KeyEvent};
     let mut a = thread_app(false);
     with_filters(&mut a);
-    a.remark_thread();
+    a.remark();
     a.tab.thread.as_mut().unwrap().select(3);
     render(&mut a);
     // tab to No.1003's quote of No.1001, which a filter hides.
@@ -1435,9 +1436,8 @@ fn updating_a_built_in_sites_boards() {
 fn a_hidden_words_label() {
     let mut a = thread_app(false);
     a.hidden_words = vec!["implying".into()];
-    a.filters = crate::filter::Filters::new(&[]).unwrap().with_words(&a.hidden_words).unwrap();
-    a.remark_thread();
-    a.tab.thread.as_mut().unwrap().show_hidden = true;
+    a.rehide(|a| a.hiding.set_filters(crate::filter::Filters::new(&[]).unwrap().with_words(&a.hidden_words).unwrap()));
+    a.rehide(|a| a.hiding.toggle_show());
     let text = render(&mut a).0;
     // Just "hidden": the label doesn't repeat the word it hides.
     assert!(text.contains(" hidden ") && !text.contains("hidden word"), "{text}");
@@ -1687,7 +1687,7 @@ fn huge_counts_from_the_data_files_dont_overflow() {
     let mut a = app(false);
     for no in [1, 2] {
         let key = ThreadKey { site: "4chan".into(), board: "g".into(), no };
-        a.store.toggle_watch(key.clone(), "t".into(), 1, 1);
+        a.store.watch(key.clone(), "t".into(), 1, 1);
         let w = a.store.watched_mut(&key).unwrap();
         w.status = Status::Live { unread: usize::MAX, replies: usize::MAX };
     }
@@ -1730,6 +1730,43 @@ fn arabic_text_fits_where_it_is_drawn() {
     assert_eq!((cut.as_str(), crate::markup::columns(&cut)), ("لالالا…", 7));
 }
 
+#[test]
+fn a_quote_of_a_hidden_post_previews_only_hidden() {
+    use ratatui::crossterm::event::{KeyCode, KeyEvent};
+    let mut a = thread_app(false);
+    with_filters(&mut a);
+    a.remark();
+    a.tab.thread.as_mut().unwrap().select(3);
+    // p on No.1003, which quotes No.1001, which a filter hides.
+    a.on_key(KeyEvent::from(KeyCode::Char('p')));
+    assert!(matches!(a.tab.popup, Some(crate::app::TabPopup::Preview(_))));
+    let text = render(&mut a).0;
+    assert!(text.contains("Quoted posts") && !text.contains("implying"), "{text}");
+}
+
+#[test]
+fn the_catalog_header_counts_no_hidden_thread_as_new() {
+    let mut a = catalog_app(false);
+    a.tab.catalog_new.insert(1100);
+    a.rehide(|a| a.store.toggle_hidden("4chan", "g", 1100));
+    let text = render(&mut a).0;
+    let top = text.lines().next().unwrap();
+    assert!(top.contains("1 hidden") && !top.contains("new"), "{top}");
+}
+
+#[test]
+fn no_gallery_hint_when_only_hidden_posts_have_files() {
+    let mut a = thread_app(false);
+    // Only the OP has a file; with images of No.1003's instead, hidden by hand.
+    let t = a.tab.thread.as_mut().unwrap();
+    let file = t.posts[0].files.clone();
+    t.posts[0].files.clear();
+    t.posts[3].files = file;
+    a.rehide(|a| a.store.toggle_hidden("4chan", "g", 1003));
+    let text = render(&mut a).0;
+    assert!(!text.lines().last().unwrap().contains("gallery"), "{text}");
+}
+
 /// A dead watched thread's last counts (unread posts, replies to you) aren't new anywhere:
 /// not on the Sites screen's Watched row, the Watched view's bar, its own row, nor the
 /// terminal title. One live thread with 2 new is all there is. The dead one comes from a
@@ -1738,7 +1775,7 @@ fn arabic_text_fits_where_it_is_drawn() {
 fn a_dead_watched_threads_counts_show_nowhere() {
     let mut a = app(false);
     let old = r#"{"site":"4chan","board":"g","no":900,"subject":"Old thread","posts":300,"last_seen":1199,"unread":3,"dead":true,"replies":2}"#;
-    a.store.watched[1] = serde_json::from_str(old).unwrap();
+    a.store.watched_vec()[1] = serde_json::from_str(old).unwrap();
     let line = |text: &str, has: &str| text.lines().find(|l| l.contains(has)).unwrap_or_default().to_string();
     a.tab.view = View::Sites;
     let sites = render(&mut a).0;

@@ -4,8 +4,7 @@
 use std::collections::HashSet;
 use std::time::Instant;
 
-use super::{App, FilteredList, Gallery, LinksPanel, Preview, Search, Sort, ThreadView, View, Viewer, thread_subject};
-use crate::filter::Mark;
+use super::{App, FilteredList, Gallery, LinksPanel, Marks, Preview, Search, Sort, ThreadView, View, Viewer, thread_subject};
 use crate::model::{Board, Post};
 use crate::store::ThreadKey;
 
@@ -58,7 +57,7 @@ pub struct Tab {
     pub board: Option<Board>,
     pub catalog: Vec<Post>,
     /// What filters and hiding say about each catalog thread.
-    pub catalog_marks: Vec<Mark>,
+    pub catalog_marks: Marks,
     /// Catalog threads that weren't there on the previous visit.
     pub catalog_new: HashSet<u64>,
     pub thread: Option<ThreadView>,
@@ -78,6 +77,8 @@ pub struct Tab {
     pub catalog_board: Option<String>,
     /// The site the loaded catalog is from.
     pub catalog_site: usize,
+    /// The site the open thread is from (an archive search moves the tab to the archive).
+    pub thread_site: usize,
     /// The board whose catalog is loaded, to return to from a thread opened on another board
     /// (an overboard's threads live on their own boards).
     pub catalog_of: Option<Board>,
@@ -139,7 +140,7 @@ impl Tab {
             site,
             board: None,
             catalog: Vec::new(),
-            catalog_marks: Vec::new(),
+            catalog_marks: Marks::default(),
             catalog_new: HashSet::new(),
             thread: None,
             loading: None,
@@ -149,6 +150,7 @@ impl Tab {
             pending_post: None,
             catalog_board: None,
             catalog_site: site,
+            thread_site: site,
             catalog_of: None,
             from_catalog: false,
             archive_offer: None,

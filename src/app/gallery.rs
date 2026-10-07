@@ -22,18 +22,24 @@ impl App {
         // In a conversation, its files; not hidden posts' (unless shown).
         // Starting at the selected post's first file, or the next one after it.
         let (mut files, mut start) = (Vec::new(), None);
-        for (i, p) in t.posts.iter().enumerate().filter(|&(i, _)| t.in_view(i) && !t.is_collapsed(i)) {
+        for (i, p) in t.shown_posts() {
             if i >= t.selected && !p.files.is_empty() {
                 start = start.or(Some(files.len()));
             }
             files.extend(p.files.iter().map(|f| (p.no, f.clone())));
         }
         if files.is_empty() {
-            self.info(if t.conversation.is_some() { "The conversation has no files" } else { "Thread has no files" });
-            return;
+            let msg = self.no_files(if t.conversation.is_some() { "The conversation has no files" } else { "Thread has no files" }, true);
+            return self.info(msg);
         }
         let state = ListState::default().with_selected(Some(start.unwrap_or(0)));
         self.tab.gallery = Some(Gallery { files, state, cols: 1 });
+    }
+
+    /// `none`, or that only hidden posts (of those in view, `in_view`) have files.
+    pub(super) fn no_files(&self, none: &str, in_view: bool) -> String {
+        let hidden = self.tab.thread.as_ref().is_some_and(|t| t.posts.iter().enumerate().any(|(i, p)| !p.files.is_empty() && (!in_view || t.in_view(i))));
+        if hidden { format!("Only hidden posts have files ({} shows them)", self.keys.key(Action::ShowHidden)) } else { none.to_string() }
     }
 
     pub fn on_gallery_key(&mut self, key: KeyEvent) {
@@ -119,7 +125,7 @@ impl App {
     pub(super) fn thread_viewer(&mut self, k: usize) -> bool {
         let Some(t) = self.tab.thread.as_ref().filter(|_| self.tab.view == View::Thread) else { return false };
         let (mut files, mut posts, mut start) = (Vec::new(), Vec::new(), None);
-        for (i, p) in t.posts.iter().enumerate().filter(|&(i, _)| t.in_view(i) && (i == t.selected || !t.is_collapsed(i))) {
+        for (i, p) in t.shown_and_selected() {
             for (j, f) in p.files.iter().enumerate() {
                 if i == t.selected && j == k {
                     start = Some(files.len());

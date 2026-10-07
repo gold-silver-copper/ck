@@ -162,10 +162,10 @@ fn bench_catalog() {
 
     // Filters run once per load; frames only look the results up.
     let toml_text: String = (0..20).map(|i| format!("[[filter]]\npattern = \"(?i)word{i}|other{i}\"\n")).collect();
-    a.filters = crate::filter::tests::filters(&toml_text).unwrap();
+    a.rehide(|a| a.hiding.set_filters(crate::filter::tests::filters(&toml_text).unwrap()));
     a.tab.catalog = scale(&a.tab.catalog, 300);
     eprintln!("\n== catalog, 300 threads, 20 filters ==");
-    time("filtering (once per load)", 50, || a.remark_catalog());
+    time("filtering (once per load)", 50, || a.remark());
     time("frame", 200, || draw(&mut t, &mut a));
 }
 
@@ -291,7 +291,7 @@ fn bench_saved_search() {
         let mut first = None;
         for k in &keys {
             let bytes = std::fs::read(crate::saved::path(dir.path(), k)).unwrap();
-            let hits = crate::saved_search::matching(&bytes, needle).unwrap();
+            let (hits, _) = crate::saved_search::matching(&bytes, needle).unwrap();
             if first.is_none() && !hits.is_empty() {
                 first = Some(start.elapsed());
             }
@@ -315,10 +315,10 @@ fn bench_hidden_words() {
     for (label, words) in [("no hidden words", Vec::new()), ("50 hidden words", words)] {
         let mut a = app();
         a.tab.view = View::Thread;
-        a.filters = crate::filter::Filters::new(&[]).unwrap().with_words(&words).unwrap();
+        a.rehide(|a| a.hiding.set_filters(crate::filter::Filters::new(&[]).unwrap().with_words(&words).unwrap()));
         a.tab.thread = Some(ThreadView::new("g".into(), posts[0].no, posts.clone()));
         let mut t = term();
-        time(&format!("{label}: marking the thread"), 20, || a.remark_thread());
+        time(&format!("{label}: marking the thread"), 20, || a.remark());
         time(&format!("{label}: frame with full layout rebuild"), 50, || {
             if let Some(th) = &mut a.tab.thread {
                 th.layout = None;

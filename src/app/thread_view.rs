@@ -167,11 +167,8 @@ pub struct ThreadView {
     pub expanded: HashSet<Vec<u64>>,
     /// The selected entry; `selected` is its post.
     cursor: usize,
-    /// What filters and hiding say about each post, and whether hidden ones are shown.
-    pub marks: Vec<Mark>,
-    pub show_hidden: bool,
-    /// Posts marked as yours.
-    pub mine: HashSet<u64>,
+    /// What hiding says about each post, whether hidden ones are shown, and which are yours.
+    pub marks: Marks,
     /// The part of the selected post that has focus (`tab`); `None`: the post itself.
     pub focus: Option<Part>,
     /// The selection moved: scroll it into view at the next draw (once it's laid out), so.
@@ -358,7 +355,27 @@ impl ThreadView {
 
     /// The post is collapsed to a line: hidden, not shown anyway, and not the OP.
     pub fn is_collapsed(&self, i: usize) -> bool {
-        i > 0 && !self.show_hidden && self.marks.get(i).is_some_and(|m| m.hidden.is_some())
+        i > 0 && !self.marks.shown(i)
+    }
+
+    /// The posts not collapsed, by index.
+    pub fn unhidden_posts(&self) -> impl Iterator<Item = (usize, &Post)> {
+        self.posts.iter().enumerate().filter(|&(i, _)| !self.is_collapsed(i))
+    }
+
+    /// The posts shown: in view (`c`, `I`, `M`), and not collapsed.
+    pub fn shown_posts(&self) -> impl Iterator<Item = (usize, &Post)> {
+        self.unhidden_posts().filter(|&(i, _)| self.in_view(i))
+    }
+
+    /// The posts shown, and the selected one even when it's collapsed: what `v` goes through.
+    pub fn shown_and_selected(&self) -> impl Iterator<Item = (usize, &Post)> {
+        self.posts.iter().enumerate().filter(|&(i, _)| self.in_view(i) && (i == self.selected || !self.is_collapsed(i)))
+    }
+
+    /// The files of the posts shown: what the gallery has.
+    pub fn gallery_files(&self) -> impl Iterator<Item = (usize, &Attachment)> {
+        self.shown_posts().flat_map(|(i, p)| p.files.iter().map(move |f| (i, f)))
     }
 
     /// The selected post.
@@ -394,7 +411,7 @@ impl ThreadView {
                 text.get_or_insert_with(|| self.post_text(i)).contains(&needle)
             };
             // Not in hidden posts (unless shown): a match would say what they hide.
-            let m = texts.iter_mut().enumerate().filter_map(|(i, text)| (self.in_view(i) && !self.is_collapsed(i) && found(i, text)).then_some(i)).collect();
+            let m = self.shown_posts().map(|(i, _)| i).filter(|&i| texts.get_mut(i).is_some_and(|text| found(i, text))).collect();
             self.search_texts = texts;
             m
         };
@@ -679,7 +696,7 @@ impl ThreadView {
         let bottom = self.scroll + self.viewport;
         let below = self.entries.iter().enumerate().filter(|&(e, x)| l.starts.get(e).is_some_and(|&s| s >= bottom) && self.is_new(x.post));
         below.fold((0, 0), |(n, yours), (_, x)| {
-            let to_you = self.posts.get(x.post).is_some_and(|p| p.quotes.iter().any(|q| self.mine.contains(q)));
+            let to_you = self.posts.get(x.post).is_some_and(|p| p.quotes.iter().any(|&q| self.marks.is_mine(q)));
             (n + 1, yours + usize::from(to_you))
         })
     }

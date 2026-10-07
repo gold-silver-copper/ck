@@ -22,7 +22,6 @@ use crate::http;
 use crate::images::{Images, Kind, State};
 use crate::keys::{self, Action, KeyMap};
 use crate::config::CatalogLayout;
-use crate::filter::Mark;
 use crate::markup;
 use crate::model::{Attachment, Post};
 use crate::theme::{self, ROLES, Theme, theme};
@@ -297,13 +296,13 @@ fn location(app: &App) -> (Vec<String>, Vec<Span<'static>>) {
         }
         View::Catalog => {
             meta.push(plural(app.tab.catalog.len(), "thread"));
-            let new = app.tab.catalog.iter().filter(|p| app.tab.catalog_new.contains(&p.no)).count();
+            let new = app.shown_catalog().filter(|(_, p)| app.tab.catalog_new.contains(&p.no)).count();
             if new > 0 {
                 meta.push(format!("{new} new"));
             }
-            let hidden = app.tab.catalog_marks.iter().filter(|m| m.hidden.is_some()).count();
+            let hidden = app.tab.catalog_marks.hidden_count();
             if hidden > 0 {
-                meta.push(if app.show_hidden { format!("{hidden} hidden, shown") } else { format!("{hidden} hidden") });
+                meta.push(if app.hiding.show() { format!("{hidden} hidden, shown") } else { format!("{hidden} hidden") });
             }
             if app.tab.catalog_sort != Sort::Bump {
                 meta.push(app.tab.catalog_sort.as_str().into());
@@ -370,7 +369,7 @@ fn location(app: &App) -> (Vec<String>, Vec<Span<'static>>) {
         }
         View::Watched => {
             let (unread, _) = app.store.watched_new();
-            meta.push(plural(app.store.watched.len(), "thread"));
+            meta.push(plural(app.store.all_watched().len(), "thread"));
             if unread > 0 {
                 meta.push(format!("{unread} new"));
             }
@@ -392,7 +391,7 @@ fn location(app: &App) -> (Vec<String>, Vec<Span<'static>>) {
                 Some(t) => meta.push(format!("{} of {}", s.hits.len(), plural(t as usize, "result"))),
                 None => meta.push(plural(s.hits.len(), "result")),
             }
-            let hidden = s.hidden.iter().filter(|&&h| h).count();
+            let hidden = s.marks.hidden_count();
             if hidden > 0 {
                 meta.push(format!("{hidden} hidden"));
             }
@@ -619,7 +618,7 @@ fn footer_hints(app: &App) -> Vec<(String, &'static str)> {
                 hints.push((k(Action::Hints), "hints"));
                 hints.push((k(Action::Search), "search"));
                 hints.push((k(Action::Watch), if app.menu_watching(t.no) { "unwatch" } else { "watch" }));
-                if t.posts.iter().any(|p| !p.files.is_empty()) {
+                if t.gallery_files().next().is_some() {
                     hints.push((k(Action::Gallery), "gallery"));
                 }
                 hints

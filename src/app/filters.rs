@@ -8,7 +8,7 @@ use ratatui::widgets::ListState;
 use super::settings::SettingsPopup;
 use super::{App, Part, Popup, View, edit_text, list_move};
 use crate::config::FilterEdit;
-use crate::filter::{Field, FilterAction, FilterConfig, Filters, Hidden};
+use crate::filter::{Field, FilterAction, FilterConfig, Filters};
 use crate::model::Post;
 
 /// Where a filter applies.
@@ -424,8 +424,8 @@ impl App {
         let saved = self.write_hidden_words();
         self.apply_filters();
         let label = format!("hidden word: {word}");
-        let posts = self.tab.thread.as_ref().map_or(0, |t| t.marks.iter().filter(|m| m.hidden.as_ref().and_then(Hidden::filter) == Some(&label)).count());
-        let threads = self.tab.catalog_marks.iter().filter(|m| m.hidden.as_ref().and_then(Hidden::filter) == Some(&label)).count();
+        let posts = self.tab.thread.as_ref().map_or(0, |t| t.marks.hidden_by(&label));
+        let threads = self.tab.catalog_marks.hidden_by(&label);
         let here = match (posts, threads) {
             (0, 0) => String::new(),
             (p, 0) => format!(" ({p} here)"),
@@ -493,12 +493,9 @@ impl App {
     /// The filters changed: rebuild them, and mark every tab's catalog and thread again.
     pub(super) fn apply_filters(&mut self) {
         match Filters::from_config(&self.filter_cfgs, &self.hidden_words) {
-            Ok(f) => self.filters = f,
+            Ok(f) => self.rehide(|a| a.hiding.set_filters(f)),
             Err(e) => self.error(format!("{e:#}")),
         }
-        self.remark_tabs();
-        let len = self.visible_catalog().len();
-        self.tab.catalog_list.clamp(len);
     }
 
     /// How many posts of the open thread, and threads of the open catalog, `f` catches

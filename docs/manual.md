@@ -296,9 +296,14 @@ the viewer's own commands apply.
 (dimmed and marked) so they can be unhidden with another `H`. Hidden posts collapse to
 one line, so replies to them still make sense. They're marked just "hidden", not why
 (that would show what a filter or hidden word hides); `H` on one says why. Until `Z`
-shows them, they're left out of the thread's search and gallery too, and a quote of one
-previews only "hidden". Hiding, `Z` and filter changes apply to every tab at once. What
-you hide is remembered per board in
+shows them, they're left out of the thread's search and gallery too (`V` and the footer
+and `.` menu offer the gallery only when it has files to show; when only hidden posts have
+files, `V` says so), a quote of one previews
+only "hidden" (with `p` or focused), saving all the thread's files leaves theirs out, and
+hidden threads aren't counted as new in the catalog's header. Hiding, `Z` and filter
+changes apply to every tab at once, and Watched's counts of new posts and replies to you
+(and the tabs and terminal title) follow at once for the threads refreshed since ck
+started (one that 404'd stays at nothing new). What you hide is remembered per board in
 the data directory.
 
 `recursive_hiding = true` (or Settings › Hidden replies) hides the replies too: in a
@@ -475,7 +480,9 @@ Generals are threads that start over when they fill up (/lmg/, /hsg/, …). `F` 
 its thread, the catalog, or Watched) follows it: it's watched, and when it 404s or 4chan
 says it hit its bump limit, ck looks for the next thread whose subject has the same
 `/tag/` (or, without a tag, the same subject minus its number) in that board's catalog.
-The newest match is watched and followed instead, and you're notified. A thread that died
+The newest match that isn't hidden (by hand, a filter or a hidden word, whatever `Z`
+says) is watched and followed instead, and you're notified; a hidden one is passed over,
+even for an older match. A thread that died
 is dropped from Watched; one that's only full stays until it dies. The search is one
 background catalog request, repeated at most every 10 minutes while nothing is found.
 Watched shows "follows /lmg/" on followed threads; `F` again stops following.
@@ -518,7 +525,8 @@ Settings › Terminal title) leaves the title alone.
 
 ck never posts, so it can't know which posts are yours: `m` marks the selected post as
 yours (and watches the thread). Replies to it are counted in Watched ("1 reply to you"),
-quotes of it read `>>123 (You)`, and they get their own notification.
+quotes of it read `>>123 (You)`, and they get their own notification. The marks show in
+every tab at once; unwatching the thread (`w`, or `x` in Watched) forgets them.
 
 ck keeps its state as JSON in `$XDG_DATA_HOME/ck` (default `~/.local/share/ck`):
 `watched.json`, `history.json`, `recent_boards.json`, `board_prefs.json` (each board's
@@ -548,7 +556,8 @@ Each page of 25 results is one request; going down past the last one (or `n`) lo
 next. Archives limit how often you can search; when they say no, ck shows their message.
 Posts your filters or hidden words hide, or that you've hidden, are left out of the
 results (the title says how many) until `Z` shows them, marked "hidden"; this goes for
-`:saved` searches too.
+`:saved` searches too, where replies to hidden posts are left out as in their thread
+(`recursive_hiding`, or a `recursive` filter).
 
 ## Images
 
@@ -612,10 +621,11 @@ url = "https://saucenao.com/search.php?url={url}"
 Only one key saves files: `d`, which saves the file in front of you (one you've focused
 with `tab`, the one in the image viewer, or the one selected in the gallery). On a post
 with nothing focused it says how instead of saving anything. The `.` menu saves more: all
-of a post's files, all of the thread's ("save all the thread's files…"), or the thread as
-a page ("save the thread as a page…"). The last two first say what they'll write (how many
-files, about how big) and where; `enter` saves, anything else cancels. To have keys for
-these, give `download_post`, `download_thread` or `export` one (see
+of a post's files, all of the thread's ("save all the thread's files…": the whole
+thread's, even in a conversation, but not hidden posts' unless `Z` shows them), or the
+thread as a page ("save the thread as a page…"). The last two first say what they'll
+write (how many files, about how big) and where; `enter` saves, anything else cancels. To
+have keys for these, give `download_post`, `download_thread` or `export` one (see
 [Remapping keys](#remapping-keys)); they still ask first.
 
 Files go into `~/Downloads/ck/{site}/{board}/{thread}/` (your system's Downloads folder).

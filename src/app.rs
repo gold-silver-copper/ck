@@ -17,7 +17,7 @@ pub use crate::config::Sort;
 use crate::config::{CatalogLayout, ColorMode, Config, ImagesMode, SiteConfig};
 use crate::disk_cache::DiskCache;
 use crate::download;
-use crate::filter::{Filters, Hidden, Mark};
+use crate::filter::{Filters, Hidden};
 use crate::http;
 use crate::images::Images;
 use crate::keys::{Action, KeyMap, Scope};
@@ -46,6 +46,8 @@ mod generals;
 mod loading;
 mod thread_view;
 mod goto;
+mod hiding;
+pub use hiding::{Changed, Hiding, Marks, ancestry, with_ancestry};
 pub use goto::start_error;
 mod home;
 mod links;
@@ -401,7 +403,8 @@ pub struct App {
     /// last tried (a failed one isn't retried within `MIN_REFETCH`).
     boards_refreshing: HashSet<usize>,
     boards_tried: HashMap<usize, Instant>,
-    pub filters: Filters,
+    /// Filters, hidden words, hidden replies and `Z`: what decides what's hidden.
+    pub hiding: Hiding,
     /// The last copies of catalogs and threads, to open them at once (none in tests).
     pub pages: Option<crate::pages::Pages>,
     /// `scroll_margin`: where the selected post sits while reading (a fraction of the screen).
@@ -410,12 +413,8 @@ pub struct App {
     pub filter_cfgs: Vec<crate::filter::FilterConfig>,
     /// `hidden_words`: posts with one are hidden everywhere.
     pub hidden_words: Vec<String>,
-    /// `recursive_hiding`: in a thread, replies to a hidden post are hidden with it.
-    pub recursive_hiding: bool,
     /// The filter just added (and where): `u` as the next key takes it back.
     pub filter_undo: Option<filters::Undo>,
-    /// Show hidden threads and posts (dimmed) instead of leaving them out.
-    pub show_hidden: bool,
     pub status: Option<Status>,
     /// The status message as last seen by `expire_status`, and when it appeared.
     status_since: Option<(String, Instant)>,
@@ -554,16 +553,14 @@ impl App {
             notified: Vec::new(),
             boards_refreshing: HashSet::new(),
             boards_tried: HashMap::new(),
-            filters,
+            hiding: Hiding::new(filters, cfg.recursive_hiding),
             hidden_words: cfg.hidden_words.clone(),
-            recursive_hiding: cfg.recursive_hiding,
             filter_cfgs: cfg.filters.clone(),
             scroll_margin: if cfg.scroll_margin.is_finite() { cfg.scroll_margin.clamp(0.0, 0.5) } else { 0.3 },
             pages: crate::pages::Pages::default_dir()
                 .filter(|_| !cfg!(test) && cfg.page_cache_mb > 0)
                 .map(|d| crate::pages::Pages::new(d, cfg.page_cache_mb.saturating_mul(1024 * 1024))),
             filter_undo: None,
-            show_hidden: false,
             status: None,
             status_since: None,
             popup: None,
@@ -642,7 +639,7 @@ impl App {
     }
 
     pub fn visible_watched(&self) -> Vec<usize> {
-        filtered(&self.watched_list.filter, &self.store.watched, |w| format!("{} {} {} {}", w.key.site, w.key.board, w.key.no, w.subject))
+        filtered(&self.watched_list.filter, self.store.all_watched(), |w| format!("{} {} {} {}", w.key.site, w.key.board, w.key.no, w.subject))
     }
 
     pub fn visible_saved(&self) -> Vec<usize> {
@@ -663,9 +660,7 @@ impl App {
 
     pub fn visible_catalog(&self) -> Vec<usize> {
         let needle = self.tab.catalog_list.filter.to_lowercase();
-        let shown = |i: usize| self.show_hidden || self.tab.catalog_marks.get(i).is_none_or(|m| m.hidden.is_none());
-        let mut v: Vec<(usize, &Post)> =
-            self.tab.catalog.iter().enumerate().filter(|&(i, p)| shown(i) && p.search_text().contains(&needle)).collect();
+        let mut v: Vec<(usize, &Post)> = self.shown_catalog().filter(|(_, p)| p.search_text().contains(&needle)).collect();
         match self.tab.catalog_sort {
             Sort::Bump => {}
             Sort::Replies => v.sort_by_key(|&(_, p)| std::cmp::Reverse(p.replies.unwrap_or(0))),
@@ -675,10 +670,10 @@ impl App {
         // What a `top` filter highlights first, then (`watched_first`) the threads you watch,
         // each in the sort's order. The filters are rules written to come first whatever the
         // sort; watching is a sort of its own.
-        let top = |&(i, _): &(usize, &Post)| self.tab.catalog_marks.get(i).is_some_and(|m| m.top);
+        let top = |&(i, _): &(usize, &Post)| self.tab.catalog_marks.top(i);
         let site = self.sites.get(self.tab.catalog_site).map_or("", |s| s.cfg.name.as_str());
         let watched: HashSet<(&str, u64)> = match self.watched_first {
-            true => self.store.watched.iter().filter(|w| w.key.site == site).map(|w| (w.key.board.as_str(), w.key.no)).collect(),
+            true => self.store.all_watched().iter().filter(|w| w.key.site == site).map(|w| (w.key.board.as_str(), w.key.no)).collect(),
             false => HashSet::new(),
         };
         let watching = |&(_, p): &(usize, &Post)| !watched.is_empty() && watched.contains(&(self.board_of(p).as_str(), p.no));
@@ -728,7 +723,7 @@ impl App {
             View::Sites => self.visible_sites().into_iter().map(|r| if let SiteRow::Recent(i) = r { RowKey::Recent(self.store.recent_boards.get(i).cloned().unwrap_or_default()) } else { RowKey::Site(r) }).collect(),
             View::Boards => self.visible_boards().into_iter().filter_map(|i| self.boards().get(i)).map(|b| RowKey::Board(b.uri.clone())).collect(),
             View::Catalog => self.visible_catalog().into_iter().filter_map(|i| self.tab.catalog.get(i)).map(|p| RowKey::Thread(p.no)).collect(),
-            View::Watched => self.visible_watched().into_iter().filter_map(|i| self.store.watched.get(i)).map(|w| RowKey::Listed(w.key.clone())).collect(),
+            View::Watched => self.visible_watched().into_iter().filter_map(|i| self.store.all_watched().get(i)).map(|w| RowKey::Listed(w.key.clone())).collect(),
             View::History => self.visible_history().into_iter().filter_map(|i| self.store.history.get(i)).map(|h| RowKey::Listed(h.key.clone())).collect(),
             View::Saved => self.visible_saved().into_iter().filter_map(|i| self.store.saved.get(i)).map(|s| RowKey::Listed(s.key.clone())).collect(),
             View::Search => {
@@ -888,7 +883,7 @@ impl App {
         }
         // At capacity, a finished refresh wakes the loop anyway (and due ones mustn't spin it).
         if self.refreshing.len() < MAX_REFRESHING {
-            for w in self.store.watched.iter().filter(|w| !w.status.is_dead() && !self.refreshing.contains(&w.key)) {
+            for w in self.store.all_watched().iter().filter(|w| !w.status.is_dead() && !self.refreshing.contains(&w.key)) {
                 match self.watched_checked.get(&w.key) {
                     Some(&t) => after(t, self.watched_every(&w.key)),
                     None => after(now, Duration::ZERO),
@@ -1044,31 +1039,6 @@ impl App {
 
     // ----- filters and hiding -----
 
-    /// What filters and hiding by hand say about posts (on the board `board_of` gives each).
-    /// (`thread`: the posts of one thread, the first its OP; else a catalog's OPs.)
-    fn marks(&self, site: &str, posts: &[Post], thread: bool, board_of: impl Fn(&Post) -> String) -> Vec<Mark> {
-        let mut hidden: HashMap<String, HashSet<u64>> = HashMap::new();
-        let mark = |(i, p): (usize, &Post)| {
-            let board = board_of(p);
-            let mut m = self.filters.check(site, &board, p, !thread || i == 0);
-            let by_hand = hidden.entry(board).or_insert_with_key(|b| self.store.hidden_on(site, b));
-            if m.hidden.is_none() && by_hand.contains(&p.no) {
-                m.hidden = Some(Hidden::ByHand);
-            }
-            m
-        };
-        posts.iter().enumerate().map(mark).collect()
-    }
-
-    /// What filters and hiding say about a thread's posts, replies to hidden ones included
-    /// (`recursive_hiding`, or a `recursive` filter).
-    fn thread_marks(&self, site: &str, t: &ThreadView) -> Vec<Mark> {
-        let mut marks = self.marks(site, &t.posts, true, |_| t.board.clone());
-        let all = self.recursive_hiding;
-        crate::filter::spread_hiding(&mut marks, &t.posts, &t.index, &t.backlinks, |m| all || m.recursive);
-        marks
-    }
-
     /// Note which catalog threads are new since the last visit (and remember them all).
     fn catalog_seen(&mut self) {
         let nos: Vec<u64> = self.tab.catalog.iter().map(|p| p.no).collect();
@@ -1086,35 +1056,9 @@ impl App {
         p.replies.filter(|&r| r > seen).map(|r| r - seen)
     }
 
-    pub fn remark_catalog(&mut self) {
-        let marks = self.marks(&self.current_site().cfg.name, &self.tab.catalog, false, |p| self.board_of(p));
-        self.tab.catalog_marks = marks;
-    }
-
     /// The board a catalog thread is on (overboards mix boards).
     pub fn board_of(&self, p: &Post) -> String {
         p.board.clone().or_else(|| self.tab.catalog_board.clone()).or_else(|| self.tab.board.as_ref().map(|b| b.uri.clone())).unwrap_or_default()
-    }
-
-    pub fn remark_thread(&mut self) {
-        let Some(t) = &self.tab.thread else { return };
-        let marks = self.thread_marks(&self.current_site().cfg.name, t);
-        let mine = self.store.watched(&self.key(&t.board, t.no)).map(|w| w.mine.iter().copied().collect()).unwrap_or_default();
-        let show = self.show_hidden;
-        if let Some(t) = &mut self.tab.thread {
-            t.marks = marks;
-            t.mine = mine;
-            t.show_hidden = show;
-            t.layout = None;
-            // What's hidden changed, so what a search finds may have.
-            if !t.search.is_empty() {
-                t.set_search(t.search.clone());
-            }
-            // A post just collapsed (hidden) has no parts to focus.
-            if t.focus.as_ref().is_some_and(|f| !t.parts_of(t.entry()).contains(f)) {
-                t.focus = None;
-            }
-        }
     }
 
     /// `H`: hide or unhide the selected thread (catalog) or post (thread) by hand.
@@ -1123,61 +1067,40 @@ impl App {
             View::Catalog => {
                 let Some(i) = self.selected_index() else { return };
                 let Some(p) = self.tab.catalog.get(i) else { return };
-                (self.board_of(p), p.no, "thread", self.tab.catalog_marks.get(i).cloned())
+                (self.board_of(p), p.no, "thread", self.tab.catalog_marks.why_hidden(i).cloned())
             }
             View::Thread => {
                 let Some(t) = &self.tab.thread else { return };
                 let what = if t.selected == 0 { "thread" } else { "post" };
-                (t.board.clone(), t.current().map_or(t.no, |p| p.no), what, t.marks.get(t.selected).cloned())
+                (t.board.clone(), t.current().map_or(t.no, |p| p.no), what, t.marks.why_hidden(t.selected).cloned())
             }
             _ => return,
         };
-        match mark.and_then(|m| m.hidden) {
+        match mark {
             Some(Hidden::ByFilter(label)) => return self.info(format!("Hidden by the filter \"{label}\"; Settings › Filters changes it")),
             Some(Hidden::Reply(to)) => return self.info(format!("Hidden as a reply to No.{to}, which is hidden; unhiding that one shows it")),
             _ => {}
         }
         let site = self.current_site().cfg.name.clone();
-        let hidden = self.store.toggle_hidden(&site, &board, no);
+        let hidden = self.rehide(|a| a.store.toggle_hidden(&site, &board, no));
         self.save_now();
         let show = self.keys.key(Action::ShowHidden);
         self.info(if hidden { format!("Hid {what} {no} ({show} shows hidden ones)") } else { format!("Unhid {what} {no}") });
-        self.remark_tabs();
         self.clamp_list();
-    }
-
-    /// What's hidden (or whether it's shown) changed: mark every tab's catalog, thread and
-    /// search results again, not just this one's.
-    pub(super) fn remark_tabs(&mut self) {
-        let active = self.active;
-        for i in (0..self.tabs.len()).filter(|&i| i != active) {
-            self.switch_tab(i);
-            self.remark_catalog();
-            self.remark_thread();
-            self.remark_search();
-            let (catalog, hits) = (self.visible_catalog().len(), self.visible_hits().len());
-            self.tab.catalog_list.clamp(catalog);
-            self.tab.search_list.clamp(hits);
-        }
-        self.switch_tab(active);
-        self.remark_catalog();
-        self.remark_thread();
-        self.remark_search();
     }
 
     /// `Z`: show hidden threads and posts (dimmed), or leave them out again.
     fn toggle_show_hidden(&mut self) {
         // Keep the same thread selected in the catalog.
         let keep = self.selected_index().filter(|_| self.tab.view == View::Catalog);
-        self.show_hidden = !self.show_hidden;
-        self.remark_tabs();
+        let shown = self.rehide(|a| a.hiding.toggle_show());
         if let Some(i) = keep
             && let Some(pos) = self.visible_catalog().iter().position(|&v| v == i)
         {
             self.tab.catalog_list.state.select(Some(pos));
         }
         self.clamp_list();
-        self.info(if self.show_hidden { "Showing hidden threads and posts" } else { "Leaving out hidden threads and posts" });
+        self.info(if shown { "Showing hidden threads and posts" } else { "Leaving out hidden threads and posts" });
     }
 
     // ----- downloads and settings -----
@@ -1281,7 +1204,11 @@ impl App {
             _ => return,
         };
         let key = self.key(&board, no);
-        let watching = self.store.toggle_watch(key.clone(), subject, posts, last_seen);
+        // Unwatching forgets which posts are yours; watching changes nothing hidden.
+        let watching = self.store.watch(key.clone(), subject, posts, last_seen);
+        if !watching {
+            self.rehide(|a| a.store.unwatch(&key));
+        }
         if watching {
             self.keep_open_thread(&key);
         }
@@ -1385,19 +1312,12 @@ impl App {
         if self.store.watched(&key).is_none() {
             let posts = t.live_posts();
             let (subject, len, max_no) = (thread_subject(&posts), posts.len(), max_no(&posts));
-            self.store.toggle_watch(key.clone(), subject, len, max_no);
+            self.store.watch(key.clone(), subject, len, max_no);
             self.keep_open_thread(&key);
         }
-        let Some(w) = self.store.watched_mut(&key) else { return };
-        let mine = !w.mine.contains(&no);
-        if mine {
-            w.mine.push(no);
-        } else {
-            w.mine.retain(|&n| n != no);
-        }
+        let mine = self.rehide(|a| a.store.toggle_mine(&key, no));
         self.info(if mine { format!("Marked No.{no} as yours; replies to it will be counted and notified") } else { format!("No.{no} isn't marked as yours any more") });
         self.save_now();
-        self.remark_thread();
     }
 
     /// Open a thread from Watched or History, switching site and board as needed.
@@ -1621,8 +1541,10 @@ impl App {
         let Some(i) = self.selected_index() else { return };
         match self.tab.view {
             View::Watched => {
-                let w = self.store.watched.remove(i);
-                self.info(format!("Stopped watching thread {}", w.key.no));
+                let Some(key) = self.store.all_watched().get(i).map(|w| w.key.clone()) else { return };
+                // As w does: its (You) marks go from every tab.
+                self.rehide(|a| a.store.unwatch(&key));
+                self.info(format!("Stopped watching thread {}", key.no));
             }
             View::History => {
                 self.store.history.remove(i);
@@ -1663,7 +1585,7 @@ impl App {
     fn selected_listed(&self) -> Option<(&ThreadKey, &str)> {
         let i = self.selected_index()?;
         match self.tab.view {
-            View::Watched => self.store.watched.get(i).map(|w| (&w.key, w.subject.as_str())),
+            View::Watched => self.store.all_watched().get(i).map(|w| (&w.key, w.subject.as_str())),
             View::History => self.store.history.get(i).map(|v| (&v.key, v.subject.as_str())),
             View::Saved => self.store.saved.get(i).map(|m| (&m.key, m.subject.as_str())),
             _ => None,
@@ -1794,7 +1716,7 @@ impl App {
             View::Search => {
                 if let Some(s) = &mut self.tab.search {
                     s.hits.clear();
-                    s.hidden.clear();
+                    s.marks = Marks::default();
                     s.pages = 0;
                 }
                 self.load_search_page();

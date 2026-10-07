@@ -48,7 +48,7 @@ impl App {
                 (self.key(&self.board_of(op), op.no), thread_subject(std::slice::from_ref(op)), 1, 0)
             }
             (View::Watched, _) => {
-                let Some(w) = self.selected_index().and_then(|i| self.store.watched.get(i)) else { return };
+                let Some(w) = self.selected_index().and_then(|i| self.store.all_watched().get(i)) else { return };
                 (w.key.clone(), w.subject.clone(), w.posts, w.last_seen)
             }
             _ => return,
@@ -64,8 +64,7 @@ impl App {
             self.error("Can't tell which general this is: its subject has no /tag/ or name");
             return;
         };
-        if self.store.watched(&key).is_none() {
-            self.store.toggle_watch(key.clone(), subject, posts, max_no);
+        if self.store.watch(key.clone(), subject, posts, max_no) {
             self.keep_open_thread(&key);
         }
         if let Some(w) = self.store.watched_mut(&key) {
@@ -80,7 +79,7 @@ impl App {
     pub(super) fn check_generals(&mut self, now: Instant) {
         let due: Vec<ThreadKey> = self
             .store
-            .watched
+            .all_watched()
             .iter()
             .filter(|w| w.general.is_some() && (w.status.is_dead() || w.at_limit))
             .filter(|w| !self.generals_searching.contains(&w.key))
@@ -124,22 +123,23 @@ impl App {
         let Some(w) = self.store.watched(key) else { return };
         let Some(pattern) = w.general.clone() else { return };
         let dead = w.status.is_dead();
+        // Not one that's hidden, whether hidden ones are shown or not.
+        let marks = self.catalog_marks_for(&key.site, &catalog, |_| key.board.clone());
         let next = catalog
             .iter()
-            .filter(|op| op.no > key.no && op.board.as_deref().is_none_or(|b| b == key.board) && is_general(&pattern, op))
-            .max_by_key(|op| op.no);
-        let Some(op) = next else { return };
+            .enumerate()
+            .filter(|(i, op)| marks.why_hidden(*i).is_none() && op.no > key.no && op.board.as_deref().is_none_or(|b| b == key.board) && is_general(&pattern, op))
+            .max_by_key(|(_, op)| op.no);
+        let Some((_, op)) = next else { return };
         let new_key = ThreadKey { site: key.site.clone(), board: key.board.clone(), no: op.no };
         let subject = thread_subject(std::slice::from_ref(op));
-        if self.store.watched(&new_key).is_none() {
-            self.store.toggle_watch(new_key.clone(), subject.clone(), op.replies.map_or(1, |r| r as usize + 1), 0);
-        }
+        self.store.watch(new_key.clone(), subject.clone(), op.replies.map_or(1, |r| r as usize + 1), 0);
         if let Some(n) = self.store.watched_mut(&new_key) {
             n.general = Some(pattern.clone());
         }
         // A dead thread has nothing more to show; one at its bump limit is still going.
         if dead {
-            self.store.watched.retain(|w| w.key != *key);
+            self.rehide(|a| a.store.unwatch(key));
         } else if let Some(old) = self.store.watched_mut(key) {
             old.general = None;
         }
@@ -166,7 +166,7 @@ impl App {
         // Never back: a short or broken answer doesn't bring old threads up again.
         self.board_notified_max.insert(board, newest.max(seen));
         for op in catalog.iter().filter(here).filter(|op| op.no > seen) {
-            let Some(filter) = self.filters.check(&key.site, &key.board, op, true).notify else { continue };
+            let Some(filter) = self.hiding.filters().check(&key.site, &key.board, op, true).notify else { continue };
             let thread = ThreadKey { site: key.site.clone(), board: key.board.clone(), no: op.no };
             let note = Note { key: thread, subject: thread_subject(std::slice::from_ref(op)), new: 0, replies: 0, caught: 1, filter };
             self.notes_since.get_or_insert_with(|| self.clock.instant());

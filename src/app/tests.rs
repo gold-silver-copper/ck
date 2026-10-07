@@ -64,7 +64,7 @@ fn clicks_on_a_settings_popup_never_reach_the_rows_behind() {
     let t0 = Instant::now();
     app.on_mouse(mouse(left, area.x, area.y + row as u16), t0);
     app.on_mouse(mouse(left, area.x, area.y + row as u16), t0 + Duration::from_millis(100));
-    assert!(!app.recursive_hiding);
+    assert!(!app.hiding.recursive());
     assert_eq!(app.settings_list.state.selected(), settings::position("Hidden words"));
     assert!(matches!(app.popup, Some(Popup::Settings(SettingsPopup::HiddenWords { .. }))));
 }
@@ -105,7 +105,7 @@ fn sleeps_until_the_next_thing_to_do() {
     app.status_since = None;
     // A watched thread that was never refreshed is due now.
     let key = ThreadKey { site: "4chan".into(), board: "g".into(), no: 1 };
-    app.store.watched.push(crate::store::Watched::new(key, String::new(), 1, 1));
+    app.store.watch(key, String::new(), 1, 1);
     assert_eq!(app.next_wake(now), Duration::ZERO);
     // But while the maximum number of refreshes is running, due ones don't spin the loop.
     for no in [2, 3] {
@@ -411,15 +411,15 @@ fn links_panel_lists_and_opens() {
 fn filters_and_hiding() {
     let mut app = local_app();
     let cfg = "[[filter]]\npattern = \"(?i)spam\"\nlabel = \"spam\"\n[[filter]]\npattern = \"rust\"\naction = \"highlight\"";
-    app.filters = crate::filter::tests::filters(cfg).unwrap();
+    app.rehide(|a| a.hiding.set_filters(crate::filter::tests::filters(cfg).unwrap()));
     app.tab.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
     app.tab.catalog_board = Some("x".into());
     let op = |no, subject: &str| Post { no, subject: Some(subject.into()), ..Default::default() };
     app.tab.catalog = vec![op(1, "SPAM here"), op(2, "rust thread"), op(3, "other")];
-    app.remark_catalog();
+    app.remark();
     app.tab.view = View::Catalog;
     assert_eq!(app.visible_catalog(), [1, 2]);
-    assert_eq!(app.tab.catalog_marks[1].highlight.as_deref(), Some("rust"));
+    assert_eq!(app.tab.catalog_marks.highlight(1), Some("rust"));
     // H hides by hand; the filter's own can't be unhidden by H.
     app.tab.catalog_list.state.select(Some(1));
     app.act(Action::Hide);
@@ -455,10 +455,10 @@ fn hidden_posts_are_not_new_in_watched_threads() {
     let mut app = local_app();
     let key = ThreadKey { site: "a".into(), board: "x".into(), no: 1 };
     let post = |no, quotes: Vec<u64>, text: &str| Post { no, quotes, body: vec![Line::raw(text.to_string())], ..Default::default() };
-    app.filters = crate::filter::tests::filters("[[filter]]\npattern = \"spam\"\n\n[[filter]]\npattern = \"rust\"\naction = \"highlight\"\nnotify = true\n").unwrap();
-    app.recursive_hiding = true;
-    app.store.toggle_watch(key.clone(), "One".into(), 2, 5);
-    app.store.watched_mut(&key).unwrap().mine.push(5);
+    app.rehide(|a| a.hiding.set_filters(crate::filter::tests::filters("[[filter]]\npattern = \"spam\"\n\n[[filter]]\npattern = \"rust\"\naction = \"highlight\"\nnotify = true\n").unwrap()));
+    app.rehide(|a| a.hiding.set_recursive(true));
+    app.store.watch(key.clone(), "One".into(), 2, 5);
+    app.store.toggle_mine(&key, 5).unchecked();
     let start = vec![post(1, vec![], ""), post(5, vec![], "")];
     app.refreshed(key.clone(), Ok(start.clone()));
     // A hidden reply to yours, a reply to that (hidden with it), and one you can see.
@@ -482,9 +482,9 @@ fn notifies_about_new_posts_and_replies_to_yours() {
     let mut app = local_app();
     let key = |no| ThreadKey { site: "a".into(), board: "x".into(), no };
     let post = |no, quotes: Vec<u64>| Post { no, quotes, ..Default::default() };
-    app.store.toggle_watch(key(1), "One".into(), 2, 5);
-    app.store.toggle_watch(key(2), "Two".into(), 1, 20);
-    app.store.watched_mut(&key(1)).unwrap().mine.push(5);
+    app.store.watch(key(1), "One".into(), 2, 5);
+    app.store.watch(key(2), "Two".into(), 1, 20);
+    app.store.toggle_mine(&key(1), 5).unchecked();
     // The first refresh of the session tells nothing.
     app.refreshed(key(1), Ok(vec![post(1, vec![]), post(5, vec![]), post(6, vec![5])]));
     app.flush_notes(Instant::now());
@@ -514,10 +514,10 @@ fn notify_filters_tell_about_what_they_catch_once() {
     let mut app = local_app();
     let cfg = "[[filter]]\npattern = \"^Ab3d$\"\nfield = \"id\"\naction = \"highlight\"\nnotify = true\nlabel = \"that guy\"\n\
                [[filter]]\npattern = \"(?i)/lmg/\"\nfield = \"subject\"\nop = true\naction = \"highlight\"\nnotify = true\nlabel = \"lmg\"";
-    app.filters = crate::filter::tests::filters(cfg).unwrap();
+    app.rehide(|a| a.hiding.set_filters(crate::filter::tests::filters(cfg).unwrap()));
     let key = |no| ThreadKey { site: "a".into(), board: "x".into(), no };
     let post = |no, id: &str| Post { no, id: Some(id.into()), ..Default::default() };
-    app.store.toggle_watch(key(1), "One".into(), 1, 1);
+    app.store.watch(key(1), "One".into(), 1, 1);
     // The first refresh of the session tells nothing, though it catches one.
     app.refreshed(key(1), Ok(vec![post(1, "x"), post(2, "Ab3d")]));
     app.flush_notes(Instant::now());
@@ -545,12 +545,12 @@ fn notify_filters_tell_about_what_they_catch_once() {
 fn top_filters_put_highlighted_threads_first() {
     let mut app = local_app();
     let cfg = "[[filter]]\npattern = \"rust\"\naction = \"highlight\"\ntop = true\n[[filter]]\npattern = \"go\"\naction = \"highlight\"";
-    app.filters = crate::filter::tests::filters(cfg).unwrap();
+    app.rehide(|a| a.hiding.set_filters(crate::filter::tests::filters(cfg).unwrap()));
     app.tab.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
     app.tab.catalog_board = Some("x".into());
     let op = |no, subject: &str, replies| Post { no, subject: Some(subject.into()), replies: Some(replies), time: no as i64, ..Default::default() };
     app.tab.catalog = vec![op(1, "go", 5), op(2, "rust 1", 1), op(3, "c", 9), op(4, "rust 2", 3)];
-    app.remark_catalog();
+    app.remark();
     app.tab.view = View::Catalog;
     // Bump order, with the top ones first (in that order).
     assert_eq!(app.visible_catalog(), [1, 3, 0, 2]);
@@ -563,17 +563,17 @@ fn top_filters_put_highlighted_threads_first() {
 #[test]
 fn watched_threads_first_after_top_ones() {
     let mut app = local_app();
-    app.filters = crate::filter::tests::filters("[[filter]]\npattern = \"rust\"\naction = \"highlight\"\ntop = true").unwrap();
+    app.rehide(|a| a.hiding.set_filters(crate::filter::tests::filters("[[filter]]\npattern = \"rust\"\naction = \"highlight\"\ntop = true").unwrap()));
     app.tab.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
     app.tab.catalog_board = Some("x".into());
     let op = |no, subject: &str, replies| Post { no, subject: Some(subject.into()), replies: Some(replies), time: no as i64, ..Default::default() };
     app.tab.catalog = vec![op(1, "go", 5), op(2, "rust 1", 1), op(3, "c", 9), op(4, "rust 2", 3), op(5, "d", 7)];
-    app.remark_catalog();
+    app.remark();
     app.tab.view = View::Catalog;
     let key = |site: &str, board: &str, no| ThreadKey { site: site.into(), board: board.into(), no };
     // Watched: 3 and 4 here; 1 on another board, 5 on another site.
     for k in [key("a", "x", 3), key("a", "x", 4), key("a", "xy", 1), key("b", "x", 5)] {
-        app.store.toggle_watch(k, String::new(), 0, 0);
+        app.store.watch(k, String::new(), 0, 0);
     }
     // Off: the sort, with the top ones first.
     assert!(!app.watched_first);
@@ -606,10 +606,10 @@ fn marking_posts_as_yours_watches_the_thread() {
     app.tab.view = View::Thread;
     app.act(Action::Mine);
     let key = ThreadKey { site: "a".into(), board: "x".into(), no: 1 };
-    assert_eq!(app.store.watched(&key).unwrap().mine, [2]);
-    assert!(app.tab.thread.as_ref().unwrap().mine.contains(&2));
+    assert_eq!(app.store.watched(&key).unwrap().mine(), [2]);
+    assert!(app.tab.thread.as_ref().unwrap().marks.is_mine(2));
     app.act(Action::Mine);
-    assert!(app.store.watched(&key).unwrap().mine.is_empty());
+    assert!(app.store.watched(&key).unwrap().mine().is_empty());
 }
 
 #[test]
@@ -732,8 +732,7 @@ fn the_gallery_leaves_out_hidden_posts() {
     app.tab.thread = Some(ThreadView::new("x".into(), 1, vec![post(1, vec![file("a.png")]), post(2, vec![file("hidden.png")]), post(3, vec![file("b.jpg")])]));
     app.tab.view = View::Thread;
     let site = app.current_site().cfg.name.clone();
-    app.store.toggle_hidden(&site, "x", 2);
-    app.remark_thread();
+    app.rehide(|a| a.store.toggle_hidden(&site, "x", 2));
     let names = |app: &App| app.tab.gallery.as_ref().unwrap().files.iter().map(|(_, f)| f.filename.clone()).collect::<Vec<_>>();
     app.act(Action::Gallery);
     assert_eq!(names(&app), ["a.png", "b.jpg"]);
@@ -749,12 +748,11 @@ fn searching_a_thread_passes_hidden_posts_over() {
     let mut app = local_app();
     let post = |no, text: &str| Post { no, body: vec![Line::raw(text.to_string())], ..Default::default() };
     app.hidden_words = vec!["crypto".into()];
-    app.filters = crate::filter::Filters::new(&[]).unwrap().with_words(&app.hidden_words).unwrap();
+    app.rehide(|a| a.hiding.set_filters(crate::filter::Filters::new(&[]).unwrap().with_words(&a.hidden_words).unwrap()));
     app.tab.thread = Some(ThreadView::new("x".into(), 1, vec![post(1, "a thread"), post(2, "buy crypto"), post(3, "crypto is bad, says a post you can read")]));
     app.tab.view = View::Thread;
     let site = app.current_site().cfg.name.clone();
-    app.store.toggle_hidden(&site, "x", 3);
-    app.remark_thread();
+    app.rehide(|a| a.store.toggle_hidden(&site, "x", 3));
     let matches = |app: &App| app.tab.thread.as_ref().unwrap().matches.clone();
     app.tab.thread.as_mut().unwrap().set_search("crypto".into());
     assert!(matches(&app).is_empty());
@@ -781,13 +779,13 @@ fn hiding_marks_every_tab_again() {
     app.tab.catalog = vec![post(1, "a thread"), post(7, "crypto general")];
     app.tab.catalog_board = Some("x".into());
     app.tab.view = View::Catalog;
-    app.remark_catalog();
+    app.remark();
     app.switch_tab(0);
     let hidden = |app: &mut App| {
         app.switch_tab(1);
         let t = app.tab.thread.as_ref().unwrap();
-        let marks = (t.marks.iter().map(|m| m.hidden.is_some()).collect::<Vec<_>>(), t.show_hidden);
-        let catalog = app.tab.catalog_marks.iter().map(|m| m.hidden.is_some()).collect::<Vec<_>>();
+        let marks = (t.marks.all_hidden().iter().map(Option::is_some).collect::<Vec<_>>(), t.marks.show_hidden());
+        let catalog = app.tab.catalog_marks.all_hidden().iter().map(Option::is_some).collect::<Vec<_>>();
         app.switch_tab(0);
         (marks, catalog)
     };
@@ -902,7 +900,7 @@ fn search_results_leave_out_hidden_posts() {
     let page = crate::backend::foolfuuka::parse_search(&crate::backend::fixture("foolfuuka_search.json")).unwrap();
     let nos: Vec<u64> = page.hits.iter().map(|(_, p)| p.no).collect();
     // One hidden by hand, one by a hidden word (the longest word in it, and in no other).
-    app.store.toggle_hidden("arch", "g", nos[0]);
+    app.rehide(|a| a.store.toggle_hidden("arch", "g", nos[0]));
     let text = |k: usize| page.hits[k].1.plain_text().to_lowercase();
     let word = text(2)
         .split(|c: char| !c.is_alphanumeric())
@@ -911,7 +909,7 @@ fn search_results_leave_out_hidden_posts() {
         .unwrap()
         .to_string();
     app.hidden_words = vec![word];
-    app.filters = crate::filter::Filters::new(&[]).unwrap().with_words(&app.hidden_words).unwrap();
+    app.rehide(|a| a.hiding.set_filters(crate::filter::Filters::new(&[]).unwrap().with_words(&a.hidden_words).unwrap()));
     app.handle(answer(app.tab.req.unwrap(), |a, (page, r)| a.search_results(page, r), (1, Ok(page))));
     let shown = |app: &App| app.visible_hits().iter().map(|&k| app.tab.search.as_ref().unwrap().hits[k].1.no).collect::<Vec<_>>();
     assert_eq!(shown(&app), [nos[1], nos[3]]);
@@ -924,8 +922,7 @@ fn search_results_leave_out_hidden_posts() {
     app.act(Action::ShowHidden);
     assert_eq!(shown(&app), nos);
     app.act(Action::ShowHidden);
-    app.store.toggle_hidden("arch", "g", nos[0]);
-    app.remark_search();
+    app.rehide(|a| a.store.toggle_hidden("arch", "g", nos[0]));
     assert_eq!(shown(&app), [nos[0], nos[1], nos[3]]);
 }
 
@@ -1235,7 +1232,7 @@ fn following_a_general() {
     assert!(app.store.watched(&key(20)).is_some());
     // F again stops following.
     app.tab.view = View::Watched;
-    let i = app.store.watched.iter().position(|w| w.key == key(20)).unwrap();
+    let i = app.store.all_watched().iter().position(|w| w.key == key(20)).unwrap();
     app.watched_list.state.select(Some(i));
     app.act(Action::Follow);
     assert_eq!(app.store.watched(&key(20)).unwrap().general, None);
@@ -1445,7 +1442,7 @@ fn watched_threads_are_saved_as_posts_arrive() {
     app.set_thread(nos(&[1, 2, 3]));
     assert_eq!(app.store.saved(&key(1)).unwrap().posts, 3);
     // A watched thread refreshed in the background, too.
-    app.store.toggle_watch(key(7), "seven".into(), 1, 7);
+    app.store.watch(key(7), "seven".into(), 1, 7);
     app.refreshed(key(7), Ok(nos(&[7, 8])));
     app.flush_writes();
     assert!(file(7).exists());
@@ -1484,7 +1481,7 @@ fn a_dead_thread_offers_its_saved_copy() {
     let mut app = saving_app(dir.path(), 10_000);
     let key = ThreadKey { site: "a".into(), board: "x".into(), no: 1 };
     // A watched thread opens from its saved copy at once, and when it's gone, that's it.
-    app.store.toggle_watch(key.clone(), "one".into(), 2, 2);
+    app.store.watch(key.clone(), "one".into(), 2, 2);
     app.store.keep_thread(&key, "one", "u", &nos(&[1, 2]), 10_000 - 7200);
     app.goto_str("a/x/1");
     assert_eq!(app.tab.cached(), Some(tabs::Offline { saved: 10_000 - 7200, dead: false }));
@@ -1493,7 +1490,7 @@ fn a_dead_thread_offers_its_saved_copy() {
     assert!(app.store.watched(&key).unwrap().status.is_dead() && app.store.saved(&key).unwrap().dead);
     assert_eq!((app.tab.cached(), app.tab.saved().map(|o| o.dead)), (None, Some(true)));
     // An exported copy of a thread that isn't watched: offered when the thread is gone.
-    app.store.toggle_watch(key.clone(), String::new(), 0, 0);
+    app.rehide(|a| a.store.unwatch(&key));
     app.goto_str("a/x");
     app.goto_str("a/x/1");
     assert!(app.tab.thread.is_none());
@@ -1586,8 +1583,8 @@ fn the_saved_view_lists_and_removes_after_asking() {
     app.flush_writes();
     assert!(app.store.saved(&key(3)).is_none() && !dir.path().join("threads/a/x/3.json").exists());
     // Unwatching keeps a copy.
-    app.store.toggle_watch(key(1), String::new(), 1, 1);
-    app.store.toggle_watch(key(1), String::new(), 1, 1);
+    app.store.watch(key(1), String::new(), 1, 1);
+    app.rehide(|a| a.store.unwatch(&key(1)));
     assert!(app.store.saved(&key(1)).is_some());
     // From : too.
     app.tab.view = View::Sites;
@@ -1683,12 +1680,12 @@ fn x_filters_posts_like_the_selected_one() {
     assert!(text.ends_with(added), "{text}");
     // Applied at once: both posts by the name collapse.
     let t = app.tab.thread.as_ref().unwrap();
-    assert!(t.marks[1].hidden.is_some() && t.marks[3].hidden.is_some() && t.marks[2].hidden.is_none());
+    assert!(t.marks.why_hidden(1).is_some() && t.marks.why_hidden(3).is_some() && t.marks.why_hidden(2).is_none());
     assert!(app.status.as_ref().unwrap().text.contains("Hiding Named !Trip (2 here) · u undoes"));
     // u takes it back, from the file too.
     app.on_key(KeyEvent::from(KeyCode::Char('u')));
     assert_eq!(config_text(&app), FILTER_CONFIG);
-    assert!(app.tab.thread.as_ref().unwrap().marks[1].hidden.is_none() && app.filter_cfgs.len() == 1);
+    assert!(app.tab.thread.as_ref().unwrap().marks.why_hidden(1).is_none() && app.filter_cfgs.len() == 1);
     // Highlight, everywhere, with a label of its own; u isn't undo after another key.
     app.act(Action::Filter);
     for k in ['a', 's', 's', 'e'] {
@@ -1704,7 +1701,7 @@ fn x_filters_posts_like_the_selected_one() {
     app.on_key(KeyEvent::from(KeyCode::Enter));
     let f = app.filter_cfgs.last().unwrap();
     assert_eq!((f.action, f.sites.len(), f.boards.len(), f.label.as_deref()), (crate::filter::FilterAction::Highlight, 0, 0, Some("him")));
-    assert_eq!(app.tab.thread.as_ref().unwrap().marks[3].highlight.as_deref(), Some("him"));
+    assert_eq!(app.tab.thread.as_ref().unwrap().marks.highlight(3), Some("him"));
     app.on_key(KeyEvent::from(KeyCode::Char('j')));
     app.on_key(KeyEvent::from(KeyCode::Char('u')));
     assert_eq!(app.filter_cfgs.len(), 2);
@@ -1774,7 +1771,7 @@ fn the_filter_list_edits_turns_off_and_removes() {
         app.on_key(KeyEvent::from(KeyCode::Enter));
     }
     assert_eq!(app.filter_cfgs[1].fields(), [crate::filter::Field::Name]);
-    assert!(app.tab.thread.as_ref().unwrap().marks[1].hidden.is_some());
+    assert!(app.tab.thread.as_ref().unwrap().marks.why_hidden(1).is_some());
     // The last field can't go.
     app.on_key(KeyEvent::from(KeyCode::Up));
     app.on_key(KeyEvent::from(KeyCode::Down));
@@ -1787,7 +1784,7 @@ fn the_filter_list_edits_turns_off_and_removes() {
     if let Some(SettingsPopup::FilterEdit { row: r, .. }) = app.settings_popup_mut() {
         *r = crate::app::EDIT_ROWS.iter().position(|r| *r == crate::app::EditRow::Posts).unwrap();
     }
-    let hidden = |app: &App| app.tab.thread.as_ref().unwrap().marks[1].hidden.is_some();
+    let hidden = |app: &App| app.tab.thread.as_ref().unwrap().marks.why_hidden(1).is_some();
     app.on_key(KeyEvent::from(KeyCode::Enter));
     assert!(config_text(&app).contains("op = true") && !hidden(&app));
     app.on_key(KeyEvent::from(KeyCode::Enter));
@@ -1800,7 +1797,7 @@ fn the_filter_list_edits_turns_off_and_removes() {
     assert_eq!((counts[1], list.selected()), ((2, 0), Some(1)));
     app.on_key(KeyEvent::from(KeyCode::Char(' ')));
     assert!(config_text(&app).contains("enabled = false"));
-    assert!(app.tab.thread.as_ref().unwrap().marks[1].hidden.is_none());
+    assert!(app.tab.thread.as_ref().unwrap().marks.why_hidden(1).is_none());
     let reloaded: Config = toml::from_str(&config_text(&app)).unwrap();
     assert!(!reloaded.filters[1].enabled && reloaded.filters[0].enabled);
     // x removes it; the first filter and its comments are as they were.
@@ -2424,8 +2421,8 @@ fn hidden_posts_are_not_new_in_the_open_thread() {
     }
     draw_at(&mut app, 100, 30);
     // 41-45 arrive, 41 and 43 hidden: three are new, and U skips the hidden line.
-    app.store.toggle_hidden("a", "x", 41);
-    app.store.toggle_hidden("a", "x", 43);
+    app.rehide(|a| a.store.toggle_hidden("a", "x", 41));
+    app.rehide(|a| a.store.toggle_hidden("a", "x", 43));
     app.set_thread(posts_upto(45));
     draw_at(&mut app, 100, 30);
     let t = app.tab.thread.as_ref().unwrap();
@@ -2457,7 +2454,7 @@ fn following_edge_cases() {
     assert_eq!((t.current().unwrap().no, t.new_below().0), (40, 0));
     assert!(t.scroll >= scroll);
     // New posts that are hidden are passed over; all hidden: nothing moves.
-    app.store.toggle_hidden("a", "x", 41);
+    app.rehide(|a| a.store.toggle_hidden("a", "x", 41));
     app.set_thread(posts_upto(42));
     draw_at(&mut app, 100, 30);
     assert_eq!(app.tab.thread.as_ref().unwrap().current().unwrap().no, 42);
@@ -2620,7 +2617,7 @@ fn an_overboard_follows_each_threads_board() {
     app.tab.catalog_site = 0;
     app.tab.catalog_board = Some("all".into());
     app.tab.catalog = (1..=6).map(|no| with_file(no, Some(if no % 2 == 0 { "x" } else { "xy" }))).collect();
-    app.tab.catalog_marks = vec![Default::default(); 6];
+    app.tab.catalog_marks = crate::app::Marks::from_marks(vec![Default::default(); 6]);
     app.tab.catalog_list.state.select(Some(0));
     draw_at(&mut app, 100, 40);
     let asked = app.images.queued_urls();
@@ -2715,8 +2712,8 @@ fn searching_saved_threads_leaves_out_hidden_posts() {
     app.flush_writes();
     // A hidden word, and a post hidden by hand on its own board.
     app.hidden_words = vec!["crab".into()];
-    app.filters = crate::filter::Filters::new(&[]).unwrap().with_words(&app.hidden_words).unwrap();
-    app.store.toggle_hidden("a", "x", 3);
+    app.rehide(|a| a.hiding.set_filters(crate::filter::Filters::new(&[]).unwrap().with_words(&a.hidden_words).unwrap()));
+    app.rehide(|a| a.store.toggle_hidden("a", "x", 3));
     app.goto_str("saved rust");
     settle_until(&mut app, |a| a.tab.search.as_ref().unwrap().saved.as_ref().unwrap().finished);
     let shown = |app: &App| app.visible_hits().iter().map(|&k| app.tab.search.as_ref().unwrap().hits[k].1.no).collect::<Vec<_>>();
@@ -2821,7 +2818,7 @@ fn hidden_words_hide_posts_everywhere() {
     type_text(&mut app, "crypto");
     app.on_key(KeyEvent::from(KeyCode::Enter));
     assert!(app.status.as_ref().unwrap().text.starts_with("Hiding posts with \"crypto\" (2 here)"), "{:?}", app.status);
-    let hidden = |app: &App| app.tab.thread.as_ref().unwrap().marks.iter().map(|m| m.hidden.clone()).collect::<Vec<_>>();
+    let hidden = |app: &App| app.tab.thread.as_ref().unwrap().marks.all_hidden();
     let label = Some(Hidden::ByFilter("hidden word: crypto".into()));
     assert_eq!(hidden(&app), [None, label.clone(), label.clone(), None]);
     // Saved, the file's comments kept; a config without it loads as before.
@@ -2853,8 +2850,8 @@ fn hidden_words_hide_posts_everywhere() {
     app.apply_filters();
     app.tab.catalog = posts_saying(&[(10, "crypto thread"), (11, "a thread")]);
     app.tab.catalog_board = Some("x".into());
-    app.remark_catalog();
-    assert_eq!(app.tab.catalog_marks.iter().map(|m| m.hidden.clone()).collect::<Vec<_>>(), [label, None]);
+    app.remark();
+    assert_eq!(app.tab.catalog_marks.all_hidden(), [label, None]);
 }
 
 #[test]
@@ -2993,7 +2990,7 @@ fn new_posts_wait_for_notifying_by_the_app_clock() {
     // The app's clock is an hour on from the real one.
     let later = Instant::now() + Duration::from_secs(3600);
     app.clock = Clock { instant: Some(later), ..Default::default() };
-    app.store.toggle_watch(key.clone(), "One".into(), 1, 1);
+    app.store.watch(key.clone(), "One".into(), 1, 1);
     app.refreshed(key.clone(), Ok(vec![post(1)]));
     app.refreshed(key, Ok(vec![post(1), post(2)]));
     assert_eq!(app.notes_since, Some(later));
@@ -3155,7 +3152,7 @@ fn replies_to_hidden_posts_hide_with_them() {
         quoting(6, &[], "recurse"),
         quoting(7, &[6], "seven"),
     ]);
-    let hidden = |app: &App| app.tab.thread.as_ref().unwrap().marks.iter().map(|m| m.hidden.clone()).collect::<Vec<_>>();
+    let hidden = |app: &App| app.tab.thread.as_ref().unwrap().marks.all_hidden();
     let r = |no| Some(Hidden::Reply(no));
     let deep = Some(Hidden::ByFilter("deep".into()));
     assert_eq!(hidden(&app), [None, None, None, None, None, deep.clone(), r(6)]);
@@ -3167,7 +3164,7 @@ fn replies_to_hidden_posts_hide_with_them() {
     app.open_settings();
     app.settings_list.state.select(settings::position("Hidden replies"));
     app.enter();
-    assert!(app.recursive_hiding && config_text(&app).contains("recursive_hiding = true"));
+    assert!(app.hiding.recursive() && config_text(&app).contains("recursive_hiding = true"));
     app.tab.view = View::Thread;
     assert_eq!(hidden(&app), [None, Some(Hidden::ByHand), r(2), r(3), None, deep.clone(), r(6)]);
     let screen: String = draw_at(&mut app, 100, 40).content.iter().map(|c| c.symbol()).collect();
@@ -3188,8 +3185,8 @@ fn replies_to_hidden_posts_hide_with_them() {
     assert_eq!(hidden(&app).last().unwrap(), &r(4));
     // The catalog's threads aren't replies to anything.
     app.tab.catalog = vec![quoting(6, &[], "recurse"), quoting(10, &[6], "x")];
-    app.remark_catalog();
-    assert!(app.tab.catalog_marks[1].hidden.is_none());
+    app.remark();
+    assert!(app.tab.catalog_marks.why_hidden(1).is_none());
 }
 
 #[test]
@@ -3199,8 +3196,8 @@ fn the_terminal_title_says_where_and_whats_new() {
     let title = |app: &App| app.terminal_title().unwrap_or_default();
     // Away from a thread: the watched threads' unread posts, and whether some reply to yours.
     assert_eq!(title(&app), "ck: Sites");
-    app.store.toggle_watch(key(1), "One".into(), 2, 5);
-    app.store.toggle_watch(key(9), "Gone".into(), 2, 5);
+    app.store.watch(key(1), "One".into(), 2, 5);
+    app.store.watch(key(9), "Gone".into(), 2, 5);
     app.store.watched_mut(&key(1)).unwrap().status = Status::Live { unread: 3, replies: 0 };
     assert_eq!(title(&app), "ck: (3) Sites");
     app.store.watched_mut(&key(1)).unwrap().status = Status::Live { unread: 3, replies: 1 };
@@ -3214,9 +3211,8 @@ fn the_terminal_title_says_where_and_whats_new() {
     posts[0].subject = Some("Evil\x1b]2;owned\x07 sub\u{9b}2Jject\n".into());
     posts[3].quotes = vec![2];
     app.set_thread(posts);
-    let t = app.tab.thread.as_mut().unwrap();
-    t.new_after = 2;
-    t.mine.insert(2);
+    app.tab.thread.as_mut().unwrap().new_after = 2;
+    app.rehide(|a| a.store.toggle_mine(&key(1), 2));
     draw_at(&mut app, 80, 8);
     assert_eq!(title(&app), "ck: (2) (You) /x/ Evil ]2;owned sub 2Jject");
     app.on_key(KeyEvent::from(KeyCode::Char('G')));
@@ -3240,7 +3236,7 @@ fn quiet_threads_are_refreshed_less_often() {
     at(&mut app, 0);
     // A watched thread: each refresh that brings nothing waits half as long again, up to
     // ten times the setting (60s) and 10 minutes; a new post starts over.
-    app.store.toggle_watch(key(1), "One".into(), 2, 2);
+    app.store.watch(key(1), "One".into(), 2, 2);
     let mut every = Vec::new();
     for _ in 0..9 {
         app.refreshed(key(1), Ok(nos(&[1, 2])));
@@ -3265,7 +3261,7 @@ fn quiet_threads_are_refreshed_less_often() {
     app.refresh_backoff = false;
     assert_eq!(app.watched_every(&key(1)), Duration::from_secs(60));
     app.refresh_backoff = true;
-    app.store.toggle_watch(key(1), String::new(), 0, 0);
+    app.rehide(|a| a.store.unwatch(&key(1)));
 
     // The open thread the same, from 10s up to 100s; opening it (or r) starts over.
     at(&mut app, 1000);
@@ -3316,8 +3312,8 @@ fn watched_threads_know_their_page_once_a_round_per_board() {
     let t0 = Instant::now();
     app.clock = Clock { instant: Some(t0), ..Default::default() };
     let key = |no| ThreadKey { site: "p".into(), board: "tech".into(), no };
-    app.store.toggle_watch(key(30364), "First".into(), 2, 2);
-    app.store.toggle_watch(key(39212), "Last".into(), 2, 2);
+    app.store.watch(key(30364), "First".into(), 2, 2);
+    app.store.watch(key(39212), "Last".into(), 2, 2);
     let pages = |asked: &Arc<std::sync::Mutex<Vec<String>>>| http::lock(asked).iter().filter(|u| u.ends_with("/threads.json")).count();
     // Both threads refresh (one at a time), and the board's pages are asked for once.
     for _ in 0..2 {
@@ -3335,8 +3331,8 @@ fn watched_threads_know_their_page_once_a_round_per_board() {
     settle_until(&mut app, |a| a.refreshing.is_empty() && a.pages_asking.is_empty());
     assert_eq!(pages(&asked), 2);
     // A thread that isn't watched (open, say) doesn't ask.
-    app.store.toggle_watch(key(30364), String::new(), 0, 0);
-    app.store.toggle_watch(key(39212), String::new(), 0, 0);
+    app.rehide(|a| a.store.unwatch(&key(30364)));
+    app.rehide(|a| a.store.unwatch(&key(39212)));
     app.clock = Clock { instant: Some(t0 + Duration::from_secs(200)), ..Default::default() };
     app.refresh_in_background(key(30364));
     settle_until(&mut app, |a| a.refreshing.is_empty() && a.pages_asking.is_empty());
@@ -3465,6 +3461,183 @@ fn following_a_general_through_the_site() {
     crate::http::serve_test_host(host, None);
 }
 
+// Hiding hides everywhere: each of these reads posts or threads past the hiding marks.
+
+#[test]
+fn the_menu_offers_no_gallery_when_only_hidden_posts_have_files() {
+    let mut app = local_app();
+    app.tab.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
+    let file = Attachment { filename: "hidden.png".into(), url: "http://127.0.0.1:3/x/src/hidden.png".into(), ..Default::default() };
+    app.tab.thread = Some(ThreadView::new("x".into(), 1, vec![Post { no: 1, ..Default::default() }, Post { no: 2, files: vec![file], ..Default::default() }]));
+    app.tab.view = View::Thread;
+    app.rehide(|a| a.store.toggle_hidden("a", "x", 2));
+    // The gallery has nothing to show, and says why; so the menu doesn't offer it.
+    app.act(Action::Gallery);
+    assert_eq!(app.status.as_ref().map(|s| s.text.as_str()), Some("Only hidden posts have files (Z shows them)"));
+    app.status = None;
+    app.act(Action::DownloadThread);
+    assert_eq!(app.status.as_ref().map(|s| s.text.as_str()), Some("Only hidden posts have files (Z shows them)"));
+    app.on_key(KeyEvent::from(KeyCode::Char('.')));
+    let m = app.menu().unwrap();
+    let has = |a: Action| m.items.iter().any(|i| matches!(i, MenuItem::Act(x, _) if *x == a));
+    assert!(!has(Action::Gallery) && !has(Action::DownloadThread), "{:?}", m.items);
+}
+
+#[test]
+fn hiding_recounts_new_posts_in_watched_threads() {
+    let mut app = local_app();
+    let key = ThreadKey { site: "a".into(), board: "x".into(), no: 1 };
+    app.store.watch(key.clone(), "One".into(), 1, 1);
+    let start = posts_saying(&[(1, "a thread")]);
+    app.refreshed(key.clone(), Ok(start));
+    app.refreshed(key.clone(), Ok(posts_saying(&[(1, "a thread"), (2, "buy crypto"), (3, "hello")])));
+    assert_eq!(app.store.watched(&key).unwrap().status.counts().0, 2);
+    // A hidden word hides No.2: Watched's "new" leaves it out at once, not at the next refresh.
+    app.hidden_words = vec!["crypto".into()];
+    app.apply_filters();
+    assert_eq!(app.store.watched(&key).unwrap().status.counts().0, 1);
+    // And counts it again when the word goes.
+    app.hidden_words.clear();
+    app.apply_filters();
+    assert_eq!(app.store.watched(&key).unwrap().status.counts().0, 2);
+}
+
+/// Hiding's recount and a 404 are one count: once the thread is gone, nothing that
+/// changes what's hidden brings its last new posts back, in it or in the totals.
+#[test]
+fn hiding_recounts_nothing_in_a_dead_watched_thread() {
+    let mut app = local_app();
+    let key = ThreadKey { site: "a".into(), board: "x".into(), no: 1 };
+    app.store.watch(key.clone(), "One".into(), 1, 1);
+    app.refreshed(key.clone(), Ok(posts_saying(&[(1, "a thread")])));
+    app.refreshed(key.clone(), Ok(posts_saying(&[(1, "a thread"), (2, "buy crypto"), (3, "hello")])));
+    assert_eq!(app.store.watched_new(), (2, 0));
+    app.refreshed(key.clone(), Err(gone()));
+    assert_eq!(app.store.watched(&key).unwrap().status, Status::Dead);
+    for words in [vec!["crypto".to_string()], Vec::new()] {
+        app.hidden_words = words;
+        app.apply_filters();
+        assert_eq!((app.store.watched(&key).unwrap().status, app.store.watched_new()), (Status::Dead, (0, 0)));
+    }
+}
+
+#[test]
+fn following_a_general_passes_hidden_threads_over() {
+    let mut app = local_app();
+    app.tab.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
+    let op = |no, subject: &str| Post { no, subject: Some(subject.into()), replies: Some(10), ..Default::default() };
+    app.set_thread(vec![op(10, "/lmg/ - Local Models General #5"), Post { no: 11, ..Default::default() }]);
+    app.tab.view = View::Thread;
+    app.act(Action::Follow);
+    let key = |no| ThreadKey { site: "a".into(), board: "x".into(), no };
+    // The next one is caught by a hidden word: it isn't watched, followed or announced.
+    app.hidden_words = vec!["shill".into()];
+    app.apply_filters();
+    app.notified.clear();
+    app.general_catalog(&key(10), Ok(vec![op(10, "/lmg/ - Local Models General #5"), op(13, "/lmg/ - shill edition")]));
+    assert!(app.store.watched(&key(13)).is_none());
+    assert!(app.notified.is_empty(), "{:?}", app.notified);
+}
+
+#[test]
+fn searching_saved_threads_leaves_out_replies_to_hidden_posts() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = saving_app(dir.path(), 1000);
+    app.rehide(|a| a.hiding.set_recursive(true));
+    let key = ThreadKey { site: "a".into(), board: "x".into(), no: 1 };
+    let mut posts = posts_saying(&[(1, "a thread"), (2, "buy crypto"), (3, "crypto, rust says"), (4, "rust, by that guy")]);
+    posts[2].quotes = vec![2];
+    posts[3].id = Some("Ab3d".into());
+    app.store.keep_thread(&key, "one", "u", &posts, 900);
+    let that_guy = crate::filter::FilterConfig::new("^Ab3d$".into(), &[crate::filter::Field::Id]);
+    app.rehide(|a| a.hiding.set_filters(crate::filter::Filters::new(&[that_guy]).unwrap()));
+    app.flush_writes();
+    app.rehide(|a| a.store.toggle_hidden("a", "x", 2));
+    // In the thread, No.3 is hidden as a reply to No.2.
+    app.tab.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
+    app.set_thread(posts);
+    assert!(matches!(app.tab.thread.as_ref().unwrap().marks.why_hidden(2), Some(&Hidden::Reply(2))));
+    // So the search of the saved threads leaves it out too, and No.4, which a filter on its
+    // poster's ID hides.
+    app.goto_str("saved rust");
+    settle_until(&mut app, |a| a.tab.search.as_ref().unwrap().saved.as_ref().unwrap().finished);
+    let s = app.tab.search.as_ref().unwrap();
+    assert_eq!(s.hits.len(), 2);
+    let shown: Vec<u64> = app.visible_hits().iter().map(|&k| s.hits[k].1.no).collect();
+    assert!(shown.is_empty(), "{shown:?} shown though hidden in their thread");
+}
+
+#[test]
+fn marking_a_post_as_yours_reaches_every_tab() {
+    let mut app = local_app();
+    let thread = || ThreadView::new("x".into(), 1, vec![Post { no: 1, ..Default::default() }, Post { no: 2, ..Default::default() }]);
+    app.tab.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
+    app.tab.thread = Some(thread());
+    app.tab.view = View::Thread;
+    app.tabs.push(Tab::new(0, Instant::now()));
+    app.switch_tab(1);
+    app.tab.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
+    app.tab.thread = Some(thread());
+    app.tab.view = View::Thread;
+    app.switch_tab(0);
+    app.tab.thread.as_mut().unwrap().selected = 1;
+    app.act(Action::Mine);
+    app.switch_tab(1);
+    assert!(app.tab.thread.as_ref().unwrap().marks.is_mine(2), "the other tab still doesn't mark No.2 (You)");
+}
+
+#[test]
+fn unwatching_a_thread_forgets_which_posts_are_yours() {
+    let mut app = local_app();
+    app.tab.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
+    app.tab.thread = Some(ThreadView::new("x".into(), 1, vec![Post { no: 1, ..Default::default() }, Post { no: 2, ..Default::default() }]));
+    app.tab.thread.as_mut().unwrap().selected = 1;
+    app.tab.view = View::Thread;
+    app.act(Action::Mine);
+    let key = ThreadKey { site: "a".into(), board: "x".into(), no: 1 };
+    assert!(app.store.watched(&key).is_some());
+    // w stops watching it, and with that its list of yours goes: (You) goes too.
+    app.act(Action::Watch);
+    assert!(app.store.watched(&key).is_none());
+    assert!(!app.tab.thread.as_ref().unwrap().marks.is_mine(2), "No.2 still shown as yours");
+    // So does x in Watched, from another tab.
+    app.act(Action::Mine);
+    assert!(app.tab.thread.as_ref().unwrap().marks.is_mine(2));
+    app.new_tab();
+    app.tab.view = View::Watched;
+    app.act(Action::Remove);
+    assert!(app.store.watched(&key).is_none());
+    app.switch_tab(0);
+    assert!(!app.tab.thread.as_ref().unwrap().marks.is_mine(2), "No.2 still shown as yours after x in Watched");
+}
+
+#[test]
+fn a_tab_searching_the_archive_keeps_its_catalog_and_thread_hidden() {
+    let mut app = app_with(
+        "[[site]]\nname = \"chan\"\nkind = \"vichan\"\nurl = \"http://127.0.0.1:3\"\nboards = [\"g\"]\narchive = \"arch\"\n\
+         [[site]]\nname = \"arch\"\nkind = \"foolfuuka\"\nurl = \"http://localhost:3\"\nboards = [\"g\"]",
+    );
+    app.tab.board = Some(Board { uri: "g".into(), title: String::new(), nsfw: None });
+    app.tab.catalog = nos(&[1, 2]);
+    app.set_thread(nos(&[1, 2]));
+    app.rehide(|a| a.store.toggle_hidden("chan", "g", 2));
+    let hidden = |app: &App| (app.tab.catalog_marks.why_hidden(1).is_some(), app.tab.thread.as_ref().unwrap().marks.why_hidden(1).is_some());
+    assert_eq!(hidden(&app), (true, true));
+    // The tab searches the archive (another site), and meanwhile what's hidden is decided
+    // again (here: `Z` twice in another tab): No.2 is still hidden on chan's /g/.
+    app.tab.view = View::Catalog;
+    app.act(Action::ArchiveSearch);
+    app.on_key(KeyEvent::from(KeyCode::Char('x')));
+    app.on_key(KeyEvent::from(KeyCode::Enter));
+    assert_eq!(app.tab.site, 1);
+    app.new_tab();
+    app.act(Action::ShowHidden);
+    app.act(Action::ShowHidden);
+    app.switch_tab(0);
+    app.close_search();
+    assert_eq!(hidden(&app), (true, true), "No.2 shown once the search closed");
+}
+
 /// A watched thread that 404s has nothing new any more: its unread posts and replies to
 /// you go with it, whichever load found it gone (a background refresh, opening it, or
 /// restoring last session's place).
@@ -3472,18 +3645,18 @@ fn following_a_general_through_the_site() {
 fn a_watched_thread_that_404s_keeps_no_counts() {
     let mut app = local_app();
     let key = |no| ThreadKey { site: "a".into(), board: "x".into(), no };
-    app.store.toggle_watch(key(1), "One".into(), 2, 5);
+    app.store.watch(key(1), "One".into(), 2, 5);
     app.store.watched_mut(&key(1)).unwrap().status = Status::Live { unread: 3, replies: 2 };
     app.refreshed(key(1), Err(gone()));
     assert_eq!(app.store.watched(&key(1)).unwrap().status, Status::Dead, "refresh 404");
     // Opened and found gone.
-    app.store.toggle_watch(key(2), "Two".into(), 2, 5);
+    app.store.watch(key(2), "Two".into(), 2, 5);
     app.store.watched_mut(&key(2)).unwrap().status = Status::Live { unread: 4, replies: 1 };
     app.goto_str("a/x/2");
     app.handle(answer(app.tab.req.unwrap(), App::thread_arrived, Err(gone())));
     assert_eq!(app.store.watched(&key(2)).unwrap().status, Status::Dead, "open 404");
     // Last session's thread, found gone on restoring it.
-    app.store.toggle_watch(key(3), "Three".into(), 2, 5);
+    app.store.watch(key(3), "Three".into(), 2, 5);
     app.store.watched_mut(&key(3)).unwrap().status = Status::Live { unread: 5, replies: 1 };
     app.goto_str("a/x/3");
     app.tab.restoring = true;
