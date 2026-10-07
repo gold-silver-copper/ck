@@ -307,7 +307,7 @@ pub fn detect(link: &Link) -> Result<SiteConfig> {
     match (a.answered, a.refused, a.unreachable) {
         (false, Some(code), _) => bail!("{host} refused ck's requests (HTTP {code}); some sites let only browsers in"),
         (false, None, Some(e)) => bail!("Couldn't reach {host}: {e:#}"),
-        _ => bail!("{host} doesn't answer like jschan, LynxChan, FoolFuuka, vichan or makaba.{hint} README › Adding sites shows how to add one by hand."),
+        _ => bail!("{host} doesn't answer like jschan, LynxChan, FoolFuuka, vichan or makaba.{hint} The manual (docs/manual.md) › Adding sites shows how to add one by hand."),
     }
 }
 

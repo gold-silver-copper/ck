@@ -258,7 +258,7 @@ pub(super) fn draw_image_search(f: &mut Frame, app: &mut App) {
     });
 }
 
-/// Key help, by section, with the configured keys. Keep in sync with the README.
+/// Key help, by section, with the configured keys. Keep in sync with the manual (docs/manual.md).
 fn help_sections(keys: &KeyMap) -> Vec<(&'static str, Vec<(String, &'static str)>)> {
     let k = |a| keys.label(a);
     let pair = |a, b| format!("{} / {}", keys.label(a), keys.label(b));
