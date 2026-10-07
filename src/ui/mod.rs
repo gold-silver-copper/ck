@@ -152,6 +152,8 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     // A saved copy is read offline: its images only come from disk.
     app.images.offline = app.tab.view == View::Thread && app.tab.saved().is_some();
     f.buffer_mut().set_style(all, Style::new().fg(t.text).bg(t.background));
+    // Only chips drawn this frame can be clicked: none under the viewer.
+    app.tab_chips.clear();
     if app.tab.viewer().is_some() {
         draw_viewer(f, app);
     } else {
@@ -210,7 +212,6 @@ pub fn draw(f: &mut Frame, app: &mut App) {
 /// With more than one tab, their chips in the row under the bar (the current one stands
 /// out); clicking one switches to it.
 fn draw_tab_row(f: &mut Frame, app: &mut App, area: Rect) {
-    app.tab_chips.clear();
     let n = app.tabs.len();
     if n < 2 {
         return;

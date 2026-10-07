@@ -1081,6 +1081,23 @@ fn tabs_row() {
     insta::assert_snapshot!("tabs_row_backgrounds", bg_map(&mut a));
 }
 
+#[test]
+fn tab_chips_hidden_under_the_viewer_cant_be_clicked() {
+    use ratatui::crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+    let mut a = catalog_app(false);
+    a.tab.catalog_list.state.select(Some(1));
+    a.new_tab();
+    snapshot(&mut a);
+    let (chip, other) = a.tab_chips.iter().find(|&&(_, i)| i != a.active).copied().unwrap();
+    // The viewer is drawn over the whole screen: the row the chips were on is its own.
+    a.tab.popup = Some(crate::app::TabPopup::Viewer(Viewer::new(vec![file("op.png")], 0, None)));
+    snapshot(&mut a);
+    let active = a.active;
+    let click = MouseEvent { kind: MouseEventKind::Down(MouseButton::Left), column: chip.x, row: chip.y, modifiers: KeyModifiers::NONE };
+    a.on_mouse(click, std::time::Instant::now());
+    assert!(a.active == active && active != other && a.tab.viewer().is_some());
+}
+
 
 #[test]
 fn help_fits_at_110x36_and_scrolls_when_small() {
