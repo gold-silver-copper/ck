@@ -6,7 +6,7 @@ use std::fmt::Write as _;
 use anyhow::Result;
 use serde_json::Value;
 
-use super::{Backend, Partial, as_u32, saturate};
+use super::{Backend, Partial, as_u32, saturate, site_error};
 use crate::http::{as_bool, as_str, as_u64, encode_segment as enc, get_json, items, is_not_found};
 use crate::markup;
 use crate::model::{Attachment, Board, FileKind, Flag, Post};
@@ -24,8 +24,16 @@ impl Lynxchan {
         Self { base, boards }
     }
 
+    /// A wrapped answer is unwrapped; one whose status isn't "ok" is an error with its text.
     fn get(&self, path: &str) -> Result<Value> {
-        Ok(unwrap(get_json(&format!("{}{path}", self.base))?))
+        let url = format!("{}{path}", self.base);
+        let v = get_json(&url)?;
+        let text = || v.get("data").map(|d| as_str(d).unwrap_or_else(|| d.to_string())).unwrap_or_default();
+        match v.get("status").and_then(Value::as_str) {
+            None | Some("ok") => Ok(unwrap(v)),
+            Some("error") => Err(site_error(&url, &text())),
+            Some(status) => anyhow::bail!("{status}: {}", text()),
+        }
     }
 
     /// Thread OPs from `/{board}/catalog.json`.
@@ -188,7 +196,7 @@ impl Backend for Lynxchan {
         }
     }
 
-    fn thread(&self, board: &str, no: u64) -> Result<Vec<Post>> {
+    fn thread_unchecked(&self, board: &str, no: u64) -> Result<Vec<Post>> {
         Ok(self.parse_thread(&self.get(&format!("/{}/res/{no}.json", enc(board)))?))
     }
 

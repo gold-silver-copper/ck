@@ -131,7 +131,7 @@ impl Backend for Makaba {
         Ok(self.parse_catalog(&get_json(&format!("{}/{}/catalog.json", self.base, enc(board)))?))
     }
 
-    fn thread(&self, board: &str, no: u64) -> Result<Vec<Post>> {
+    fn thread_unchecked(&self, board: &str, no: u64) -> Result<Vec<Post>> {
         Ok(self.parse_thread(&get_json(&format!("{}/{}/res/{no}.json", self.base, enc(board)))?))
     }
 

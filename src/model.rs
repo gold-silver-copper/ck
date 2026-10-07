@@ -242,6 +242,52 @@ pub fn max_no(posts: &[Post]) -> u64 {
     posts.iter().map(|p| p.no).max().unwrap_or(0)
 }
 
+/// An answer with fewer than 1/`SHRUNK` of the posts last known of a thread is more likely
+/// cut short (or a page the site sent while in trouble) than moderators deleting most of it.
+pub const SHRUNK: usize = 2;
+
+/// Whether `got` posts are fewer than half (`SHRUNK`) of the `had` last known.
+pub fn shrank(had: usize, got: usize) -> bool {
+    got.saturating_mul(SHRUNK) < had
+}
+
+/// A thread as a site answered for it: OP first, the OP being the thread asked for.
+#[derive(Debug, Clone)]
+pub struct Thread {
+    no: u64,
+    posts: Vec<Post>,
+}
+
+impl Thread {
+    /// The site's answer for thread `no`: an error if it has no posts, or is another thread.
+    pub fn answer(no: u64, posts: Vec<Post>) -> anyhow::Result<Thread> {
+        match posts.first().map(|p| p.no) {
+            None => anyhow::bail!("The site sent thread {no} without any posts"),
+            Some(op) if op != no => anyhow::bail!("The site answered thread {no} with thread {op}"),
+            Some(_) => Ok(Thread { no, posts }),
+        }
+    }
+
+    /// A copy on disk: any with posts, under its OP's number (older copies may be of the
+    /// thread a site answered with).
+    pub fn saved(copy: crate::saved::SavedThread) -> Option<Thread> {
+        let posts: Vec<Post> = copy.posts.into_iter().map(Post::from).collect();
+        Some(Thread { no: posts.first()?.no, posts })
+    }
+
+    pub fn no(&self) -> u64 {
+        self.no
+    }
+
+    pub fn posts(&self) -> &[Post] {
+        &self.posts
+    }
+
+    pub fn into_posts(self) -> Vec<Post> {
+        self.posts
+    }
+}
+
 /// What searching inside a thread looks through, lowercased: the name, subject, file names
 /// and text (`plain`, hidden spoilers left out). Searching saved threads uses it too.
 pub fn search_haystack<'a>(name: &str, subject: Option<&str>, files: impl IntoIterator<Item = &'a str>, plain: &str) -> String {
@@ -318,5 +364,28 @@ mod tests {
         let p = super::Post { body: parsed.lines, ..Default::default() };
         assert_eq!(p.plain_text(), "With a [spoiler] of $5");
         assert_eq!(p.search_text(), "0  with a [spoiler] of $5");
+    }
+
+    fn posts(ns: &[u64]) -> Vec<super::Post> {
+        ns.iter().map(|&no| super::Post { no, ..Default::default() }).collect()
+    }
+
+    #[test]
+    fn an_answer_is_the_thread_asked_for() {
+        use super::Thread;
+        assert!(Thread::answer(5, Vec::new()).is_err());
+        let e = Thread::answer(5, posts(&[7, 8])).unwrap_err();
+        assert_eq!(e.to_string(), "The site answered thread 5 with thread 7");
+        let t = Thread::answer(5, posts(&[5, 6])).unwrap();
+        assert_eq!((t.no(), t.posts().len()), (5, 2));
+    }
+
+    #[test]
+    fn fewer_than_half_the_posts_known_is_cut_short() {
+        // Exactly half isn't; one fewer is.
+        assert!(!super::shrank(10, 5));
+        assert!(super::shrank(10, 4));
+        assert!(!super::shrank(0, 1));
+        assert!(super::shrank(3, 1));
     }
 }

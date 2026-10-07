@@ -6,7 +6,7 @@ use std::fmt::Write as _;
 use anyhow::Result;
 use serde_json::Value;
 
-use super::{Backend, Partial, SearchPage, as_u32, saturate};
+use super::{Backend, Partial, SearchPage, as_u32, saturate, site_error};
 use crate::http::{as_bool, as_i64, as_str, as_u64, encode_segment as enc, get_json, items, register_media_host};
 use crate::markup::{self, Flavor};
 use crate::model::{Attachment, Board, FileKind, Flag, Post};
@@ -26,6 +26,12 @@ impl Foolfuuka {
 
     fn api(&self, query: &str) -> Result<Value> {
         get_json(&format!("{}/_/api/chan/{query}", self.base))
+    }
+
+    /// `api`, with an `{"error": ...}` answer an error (not found, if it says so).
+    fn checked(&self, query: &str) -> Result<Value> {
+        let v = self.api(query)?;
+        v.get("error").and_then(as_str).map_or(Ok(v), |msg| Err(site_error(&format!("{}/_/api/chan/{query}", self.base), &msg)))
     }
 }
 
@@ -195,12 +201,12 @@ impl Backend for Foolfuuka {
         parse_search(&self.api(&format!("search/?boards={}&text={}&page={page}", enc(board), enc(query)))?)
     }
 
-    fn thread(&self, board: &str, no: u64) -> Result<Vec<Post>> {
-        Ok(parse_thread(&self.api(&format!("thread/?board={}&num={no}", enc(board)))?))
+    fn thread_unchecked(&self, board: &str, no: u64) -> Result<Vec<Post>> {
+        Ok(parse_thread(&self.checked(&format!("thread/?board={}&num={no}", enc(board)))?))
     }
 
     fn find_thread(&self, board: &str, post: u64) -> Result<Option<u64>> {
-        let v = self.api(&format!("post/?board={}&num={post}", enc(board)))?;
+        let v = self.checked(&format!("post/?board={}&num={post}", enc(board)))?;
         Ok(v.get("thread_num").and_then(as_u64))
     }
 

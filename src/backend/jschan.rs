@@ -147,7 +147,7 @@ impl Backend for Jschan {
         Ok(items(&v).map(|t| post(&self.base, t)).collect())
     }
 
-    fn thread(&self, board: &str, no: u64) -> Result<Vec<Post>> {
+    fn thread_unchecked(&self, board: &str, no: u64) -> Result<Vec<Post>> {
         let v = get_json(&format!("{}/{}/thread/{no}.json", self.base, enc(board)))?;
         Ok(parse_thread(&self.base, &v))
     }
