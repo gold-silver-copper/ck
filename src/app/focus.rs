@@ -64,7 +64,7 @@ fn labels(n: usize) -> Vec<String> {
 impl App {
     /// The focused part of the selected post, in a thread.
     pub fn focused(&self) -> Option<&Part> {
-        self.tab.thread.as_ref().filter(|_| self.tab.view == View::Thread && self.tab.gallery.is_none())?.focus.as_ref()
+        self.tab.thread.as_ref().filter(|_| self.tab.view() == View::Thread && self.tab.gallery.is_none())?.focus.as_ref()
     }
 
     /// `enter` on a part: an image in the viewer, a quote's post, a URL in the browser, the
@@ -217,10 +217,10 @@ impl App {
         let mut items: Vec<MenuItem> = Vec::new();
         let title = if let Some(v) = self.tab.viewer() {
             viewer_menu(v, &mut items)
-        } else if self.tab.view == View::Thread && self.tab.gallery.is_some() {
+        } else if self.tab.view() == View::Thread && self.tab.gallery.is_some() {
             gallery_menu(&mut items)
         } else {
-            match self.tab.view {
+            match self.tab.view() {
                 View::Thread => self.thread_menu(&mut items),
                 View::Catalog => self.catalog_menu(&mut items),
                 View::Sites => self.sites_menu(&mut items),
@@ -462,7 +462,7 @@ impl App {
         if self.selected_index().is_some() {
             items.push(MenuItem::Enter("open the thread".into()));
             items.push(act(A::NewTab, "open it in a new tab"));
-            items.push(act(A::Remove, if self.tab.view == View::Watched { "stop watching it" } else { "forget it" }));
+            items.push(act(A::Remove, if self.tab.view() == View::Watched { "stop watching it" } else { "forget it" }));
             items.push(act(A::Copy, "copy its subject and link"));
             items.push(act(A::CopyLink, "copy its link"));
             items.push(act(A::Browser, "open it in the browser"));
@@ -594,14 +594,14 @@ impl App {
                 }
             }
             Some(Hit::List { area, offset, item_height }) => {
-                let keys = self.row_keys(self.tab.view);
+                let keys = self.row_keys(self.tab.view());
                 for r in 0..(area.height / item_height.max(1)) as usize {
                     let Some(key) = keys.get(offset + r) else { break };
                     at.push((area.x, area.y + r as u16 * item_height.max(1), HintTo::Row(key.clone())));
                 }
             }
             Some(Hit::Grid { area, offset, cols, cell }) => {
-                let keys = self.row_keys(self.tab.view);
+                let keys = self.row_keys(self.tab.view());
                 for r in 0..(area.height / cell.1.max(1)) as usize {
                     for c in 0..cols {
                         if let Some(key) = keys.get(offset + r * cols + c) {
@@ -665,7 +665,7 @@ impl App {
                 }
             }
             HintTo::Row(key) => {
-                let Some(i) = self.row_of(self.tab.view, &key) else {
+                let Some(i) = self.row_of(self.tab.view(), &key) else {
                     self.info(CHANGED);
                     return;
                 };

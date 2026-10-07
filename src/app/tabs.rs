@@ -1,7 +1,7 @@
 //! Tabs: each is a place (view, site, board, catalog, thread, ...) of its own. The active
 //! tab is `App::tab`; the others wait in `App::tabs`, and switching swaps them in and out.
 
-use super::{App, LinksPanel, Preview, Tab, View, Viewer, thread_subject};
+use super::{App, LinksPanel, Opening, Preview, Tab, View, Viewer, thread_subject};
 use crate::model::Board;
 use crate::store::ThreadKey;
 
@@ -67,7 +67,7 @@ impl App {
 
     /// The inactive tab whose request this is.
     pub(super) fn tab_of(&self, id: u64) -> Option<usize> {
-        self.tabs.iter().enumerate().position(|(i, t)| i != self.active && t.req == Some(id))
+        self.tabs.iter().enumerate().position(|(i, t)| i != self.active && t.req() == Some(id))
     }
 }
 
@@ -87,7 +87,7 @@ impl App {
             self.info(format!("{MAX_TABS} tabs is the most; close one with {}", self.keys.key(crate::keys::Action::CloseTab)));
             return;
         }
-        let open = match self.tab.view {
+        let open = match self.tab.view() {
             View::Catalog => self.selected_index().and_then(|i| self.tab.catalog.get(i)).map(|p| Open::Thread(self.find_board(&self.board_of(p)), p.no)),
             View::Watched | View::History => self.selected_listed().map(|(key, _)| Open::Key(key.clone())),
             View::Saved => self.selected_listed().map(|(key, _)| Open::Saved(key.clone())),
@@ -107,9 +107,9 @@ impl App {
         self.switch_tab(at);
         self.tab.board = board;
         match open {
-            Open::Thread(board, no) => self.open_thread_at(board, no, None),
+            Open::Thread(board, no) => self.open_thread_at(board, no, Opening::default()),
             Open::Key(key) => self.open_key(key),
-            Open::Saved(key) => self.open_saved(&key),
+            Open::Saved(key) => self.open_saved(&key, Opening::default()),
             Open::Link(link) => self.follow(&link),
         }
     }
@@ -161,7 +161,7 @@ impl App {
     /// Watched), when there are any.
     pub fn tab_unread(&self, i: usize) -> Option<usize> {
         let t = self.tab_at(i);
-        let th = t.thread.as_ref().filter(|_| t.view == View::Thread)?;
+        let th = t.thread.as_ref().filter(|_| t.view() == View::Thread)?;
         let site = self.sites.get(t.site)?.cfg.name.clone();
         let w = self.store.watched(&ThreadKey { site, board: th.board.clone(), no: th.no })?;
         Some(w.status.counts().0).filter(|&n| n > 0)
@@ -174,13 +174,13 @@ impl App {
         if !self.set_title {
             return None;
         }
-        let (new, yours) = match self.tab.thread.as_ref().filter(|_| self.tab.view == View::Thread) {
+        let (new, yours) = match self.tab.thread.as_ref().filter(|_| self.tab.view() == View::Thread) {
             Some(th) => th.new_below(),
             None => self.store.watched_new(),
         };
         let new = if new > 0 { format!("({new}) ") } else { String::new() };
         let yours = if yours > 0 { "(You) " } else { "" };
-        let place = match self.tab.thread.as_ref().filter(|_| self.tab.view == View::Thread) {
+        let place = match self.tab.thread.as_ref().filter(|_| self.tab.view() == View::Thread) {
             Some(th) => format!("/{}/ {}", th.board, thread_subject(&th.posts)),
             None => self.tab_label(self.active),
         };
@@ -210,7 +210,7 @@ impl App {
     pub fn tab_label(&self, i: usize) -> String {
         let t = self.tab_at(i);
         let board = t.board.as_ref().map_or("", |b| b.uri.as_str());
-        match t.view {
+        match t.view() {
             View::Thread => match &t.thread {
                 Some(th) => thread_subject(&th.posts),
                 None => format!("/{board}/{}", t.pending_thread.unwrap_or_default()),

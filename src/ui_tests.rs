@@ -40,7 +40,7 @@ fn app(images: bool) -> App {
 /// The app on the thread fixture.
 fn thread_app(images: bool) -> App {
     let mut a = app(images);
-    a.tab.view = View::Thread;
+    a.tab.navigate(View::Thread);
     a.tab.thread = Some(thread());
     a
 }
@@ -48,7 +48,7 @@ fn thread_app(images: bool) -> App {
 /// The app on the catalog fixture.
 fn catalog_app(images: bool) -> App {
     let mut a = app(images);
-    a.tab.view = View::Catalog;
+    a.tab.navigate(View::Catalog);
     a.tab.catalog = catalog();
     a
 }
@@ -155,7 +155,7 @@ fn sites() {
 #[test]
 fn boards() {
     let mut a = app(false);
-    a.tab.view = View::Boards;
+    a.tab.navigate(View::Boards);
     a.tab.board_list.state.select(Some(2));
     insta::assert_snapshot!(snapshot(&mut a));
 }
@@ -218,7 +218,7 @@ fn search_highlight() {
 #[test]
 fn watched() {
     let mut a = app(false);
-    a.tab.view = View::Watched;
+    a.tab.navigate(View::Watched);
     insta::assert_snapshot!(snapshot(&mut a));
 }
 
@@ -230,7 +230,7 @@ fn watched_threads_pages() {
     let mut a = app(false);
     a.board_pages.insert(("4chan".into(), "g".into()), ThreadPages { page: [(1000, 3), (900, 10)].into(), of: 10 });
     a.board_pages.insert(("lainchan".into(), "λ".into()), ThreadPages { page: [(42, 13)].into(), of: 13 });
-    a.tab.view = View::Watched;
+    a.tab.navigate(View::Watched);
     insta::assert_snapshot!(snapshot(&mut a));
     // The thread's bar says it too.
     let mut a = thread_app(false);
@@ -257,10 +257,10 @@ fn with_saved(a: &mut App) {
 fn saved() {
     let mut a = app(false);
     with_saved(&mut a);
-    a.tab.view = View::Saved;
+    a.tab.navigate(View::Saved);
     insta::assert_snapshot!(snapshot(&mut a));
     // The home screen counts them.
-    a.tab.view = View::Sites;
+    a.tab.navigate(View::Sites);
     assert!(snapshot(&mut a).contains("Saved           3 threads, 1 gone from the site"));
 }
 
@@ -276,7 +276,7 @@ fn saved_dead_thread() {
 fn thread_gone_offers_the_saved_copy() {
     let mut a = app(false);
     with_saved(&mut a);
-    a.tab.view = View::Thread;
+    a.tab.navigate(View::Thread);
     a.thread_gone(&ThreadKey { site: "4chan".into(), board: "g".into(), no: 900 });
     insta::assert_snapshot!(snapshot(&mut a));
 }
@@ -309,7 +309,7 @@ fn filter_list() {
     let mut a = thread_app(false);
     a.filter_cfgs = some_filters();
     a.tab.thread.as_mut().unwrap().posts[2].name = "Named !Trip".into();
-    a.open_settings();
+    a.tab.navigate(View::Settings);
     a.popup = Some(Popup::Settings(a.filter_list(1)));
     insta::assert_snapshot!(snapshot(&mut a));
 }
@@ -318,7 +318,7 @@ fn filter_list() {
 fn filter_editor() {
     let mut a = thread_app(false);
     a.filter_cfgs = some_filters();
-    a.open_settings();
+    a.tab.navigate(View::Settings);
     let draft = a.filter_cfgs[1].clone();
     a.popup = Some(Popup::Settings(SettingsPopup::FilterEdit { index: Some(1), draft: draft.clone(), row: 0, typing: Some("^Named (!Trip".into()) }));
     insta::assert_snapshot!(snapshot(&mut a));
@@ -398,7 +398,7 @@ fn only_posts_with_files_or_no_images() {
 fn thread_from_its_last_copy() {
     let mut a = thread_app(false);
     a.tab.copy = Some(crate::app::ThreadCopy::Cached(crate::app::Offline { saved: NOW - 3 * 60, dead: false }));
-    a.tab.loading = Some("Loading thread 1000".into());
+    a.tab.fake_load(1, "Loading thread 1000", crate::app::Then::Show);
     insta::assert_snapshot!(snapshot(&mut a));
 }
 
@@ -422,7 +422,7 @@ fn poster_ids_and_flags() {
     use crate::app::HintTo;
     use ratatui::crossterm::event::{KeyCode, KeyEvent};
     let mut a = app(false);
-    a.tab.view = View::Thread;
+    a.tab.navigate(View::Thread);
     a.tab.board = Some(Board { uri: "pol".into(), title: "Politically Incorrect".into(), nsfw: Some(true) });
     let posts = crate::backend::futaba::Futaba::fourchan(None).parse_thread("pol", &crate::backend::fixture("4chan_pol_thread.json"));
     a.tab.thread = Some(ThreadView::new("pol".into(), 487211034, posts));
@@ -552,7 +552,7 @@ fn a_tab_counts_its_watched_threads_new_posts() {
 /// A long thread: posts of different lengths, every one numbered in its text.
 fn long_thread_app(n: u64) -> App {
     let mut a = app(false);
-    a.tab.view = View::Thread;
+    a.tab.navigate(View::Thread);
     let posts: Vec<Post> = (0..n).map(|k| post(2000 + k, HOUR, None, &format!("post {k}<br>{}", "and a line<br>".repeat((k % 7) as usize)))).collect();
     a.tab.thread = Some(ThreadView::new("g".into(), 2000, posts));
     a
@@ -639,7 +639,7 @@ fn long_threads_are_laid_out_near_the_view_only() {
 /// A thread with a post three screens tall between short ones (the last quotes it).
 fn tall_app() -> App {
     let mut a = app(false);
-    a.tab.view = View::Thread;
+    a.tab.navigate(View::Thread);
     let lines: String = (1..=70).map(|k| format!("line {k}<br>")).collect();
     let posts = vec![
         post(3000, HOUR, Some("Tall"), "first"),
@@ -861,7 +861,7 @@ fn hint_labels_from_before_a_refresh_dont_focus_what_is_gone() {
 #[test]
 fn history() {
     let mut a = app(false);
-    a.tab.view = View::History;
+    a.tab.navigate(View::History);
     insta::assert_snapshot!(snapshot(&mut a));
 }
 
@@ -879,7 +879,7 @@ fn image_viewer_placeholder() {
 #[test]
 fn settings() {
     let mut a = app(false);
-    a.open_settings();
+    a.tab.navigate(View::Settings);
     insta::assert_snapshot!(snapshot(&mut a));
     insta::assert_snapshot!("settings_backgrounds", bg_map(&mut a));
 }
@@ -887,7 +887,7 @@ fn settings() {
 #[test]
 fn theme_picker() {
     let mut a = app(false);
-    a.open_settings();
+    a.tab.navigate(View::Settings);
     a.activate_setting();
     assert!(matches!(a.settings_popup(), Some(SettingsPopup::Themes { .. })));
     insta::assert_snapshot!(snapshot(&mut a));
@@ -896,7 +896,7 @@ fn theme_picker() {
 #[test]
 fn color_editor() {
     let mut a = app(false);
-    a.open_settings();
+    a.tab.navigate(View::Settings);
     a.settings_list.state.select(Some(1));
     a.activate_setting();
     assert!(matches!(a.settings_popup(), Some(SettingsPopup::Colors { .. })));
@@ -919,7 +919,7 @@ fn other_themes_and_256_colors() {
 #[test]
 fn key_editor() {
     let mut a = app(false);
-    a.open_settings();
+    a.tab.navigate(View::Settings);
     let keys = crate::app::settings().count() - 1;
     a.settings_list.state.select(Some(keys));
     a.activate_setting();
@@ -956,7 +956,7 @@ fn filtered_catalog_and_thread() {
     insta::assert_snapshot!("filtered_catalog_shown", snapshot(&mut a));
     insta::assert_snapshot!("filtered_catalog_backgrounds", bg_map(&mut a));
     a.rehide(|a| a.hiding.toggle_show());
-    a.tab.view = View::Thread;
+    a.tab.navigate(View::Thread);
     a.tab.thread = Some(thread());
     a.remark();
     insta::assert_snapshot!("filtered_thread", snapshot(&mut a));
@@ -968,7 +968,7 @@ fn your_posts_and_replies() {
     a.rehide(|a| a.store.toggle_mine(&ThreadKey { site: "4chan".into(), board: "g".into(), no: 1000 }, 1001));
     a.store.watched_vec()[0].status = Status::Live { unread: 2, replies: 1 };
     insta::assert_snapshot!(snapshot(&mut a));
-    a.tab.view = View::Watched;
+    a.tab.navigate(View::Watched);
     insta::assert_snapshot!("watched_with_replies", snapshot(&mut a));
 }
 
@@ -1022,10 +1022,10 @@ fn archive_search_results() {
     let v = crate::backend::fixture("foolfuuka_search.json");
     a.tab.site = a.site_index("desuarchive").unwrap();
     a.typing = Some(crate::app::Typing::ArchiveQuery("borrow".into()));
-    a.tab.view = View::Catalog;
+    a.tab.navigate(View::Catalog);
     insta::assert_snapshot!("archive_search_typing", snapshot(&mut a));
     a.typing = None;
-    a.tab.view = View::Search;
+    a.tab.navigate(View::Search);
     let page = crate::backend::foolfuuka::parse_search(&v).unwrap();
     a.tab.search = Some(crate::app::Search::for_tests("g", "rust borrow checker", page));
     a.tab.search_list.state.select(Some(0));
@@ -1036,7 +1036,7 @@ fn archive_search_results() {
 fn hidden_search_results() {
     let mut a = app(false);
     a.tab.site = a.site_index("desuarchive").unwrap();
-    a.tab.view = View::Search;
+    a.tab.navigate(View::Search);
     let page = crate::backend::foolfuuka::parse_search(&crate::backend::fixture("foolfuuka_search.json")).unwrap();
     let first = page.hits[0].1.no;
     let nos: Vec<u64> = page.hits.iter().map(|(_, p)| p.no).collect();
@@ -1116,13 +1116,13 @@ fn help_fits_at_110x36_and_scrolls_when_small() {
 fn narrow_screens() {
     let mut a = app(false);
     // Settings scroll to the selected one.
-    a.open_settings();
+    a.tab.navigate(View::Settings);
     let last = crate::app::settings().count() - 1;
     a.settings_list.state.select(Some(last));
     let (text, _) = render_at(&mut a, 60, 20);
     assert!(text.contains("Key bindings"), "{text}");
     // Long crumbs give way with an ellipsis, before the counts.
-    a.tab.view = View::Thread;
+    a.tab.navigate(View::Thread);
     let mut t = thread();
     t.posts[0].subject = Some("A very long subject that can't possibly fit in a narrow terminal".into());
     a.tab.thread = Some(t);
@@ -1161,7 +1161,7 @@ fn home_with_favorites() {
 #[test]
 fn watched_generals() {
     let mut a = app(false);
-    a.tab.view = View::Watched;
+    a.tab.navigate(View::Watched);
     a.store.watched_vec()[0].general = Some("/lmg/".into());
     a.store.watched_vec()[0].at_limit = true;
     insta::assert_snapshot!(snapshot(&mut a));
@@ -1306,7 +1306,7 @@ fn link_hints() {
     c.on_key(KeyEvent::from(KeyCode::Char('f')));
     insta::assert_snapshot!("link_hints_catalog", snapshot(&mut c));
     c.on_key(KeyEvent::from(KeyCode::Char('s')));
-    assert_eq!((c.tab.view, c.tab.pending_thread.unwrap()), (View::Thread, c.tab.catalog[1].no));
+    assert_eq!((c.tab.view(), c.tab.pending_thread.unwrap()), (View::Thread, c.tab.catalog[1].no));
 }
 
 #[test]
@@ -1411,7 +1411,7 @@ fn saved_search_results() {
     let mut s = Search::for_tests("", "rust", crate::backend::SearchPage { hits, total: None });
     s.saved = Some(SavedSearch::for_tests(vec![key("g", 1000), key("g", 900)], 2, 5, false));
     a.tab.search = Some(s);
-    a.tab.view = View::Search;
+    a.tab.navigate(View::Search);
     insta::assert_snapshot!(snapshot(&mut a));
 }
 
@@ -1448,7 +1448,7 @@ fn settings_list_popups() {
     use crate::app::MySites;
     use crate::config::{SiteConfig, SiteKind};
     let mut a = app(false);
-    a.open_settings();
+    a.tab.navigate(View::Settings);
     let site = |name: &str| SiteConfig { name: name.into(), kind: SiteKind::Vichan, url: Some(format!("https://{name}.example")), boards: None, thumb_ext: None, archive: None, media_url: None };
     let mut shots = Vec::new();
     // Your sites: none, then three with one armed for removal.
@@ -1500,7 +1500,7 @@ fn every_view_draws_on_tiny_screens() {
         ("sites", || app(false)),
         ("boards", || {
             let mut a = app(false);
-            a.tab.view = View::Boards;
+            a.tab.navigate(View::Boards);
             a
         }),
         ("catalog", || catalog_app(true)),
@@ -1537,22 +1537,22 @@ fn every_view_draws_on_tiny_screens() {
         }),
         ("watched", || {
             let mut a = app(false);
-            a.tab.view = View::Watched;
+            a.tab.navigate(View::Watched);
             a
         }),
         ("history", || {
             let mut a = app(false);
-            a.tab.view = View::History;
+            a.tab.navigate(View::History);
             a
         }),
         ("settings", || {
             let mut a = app(false);
-            a.open_settings();
+            a.tab.navigate(View::Settings);
             a
         }),
         ("theme picker", || {
             let mut a = app(false);
-            a.open_settings();
+            a.tab.navigate(View::Settings);
             a.activate_setting();
             a
         }),
@@ -1569,7 +1569,7 @@ fn every_view_draws_on_tiny_screens() {
 #[test]
 fn thread_gone_without_a_copy_offers_the_archive() {
     let mut a = app(false);
-    a.tab.view = View::Thread;
+    a.tab.navigate(View::Thread);
     a.thread_gone(&ThreadKey { site: "4chan".into(), board: "g".into(), no: 901 });
     let text = &a.status.as_ref().unwrap().text;
     assert_eq!(text, "Thread was deleted or archived: a opens it in desuarchive");
@@ -1692,7 +1692,7 @@ fn huge_counts_from_the_data_files_dont_overflow() {
         w.status = Status::Live { unread: usize::MAX, replies: usize::MAX };
     }
     render(&mut a);
-    a.tab.view = View::Watched;
+    a.tab.navigate(View::Watched);
     render(&mut a);
     assert!(a.terminal_title().unwrap().starts_with(&format!("ck: ({}) (You) ", usize::MAX)));
 }
@@ -1777,11 +1777,11 @@ fn a_dead_watched_threads_counts_show_nowhere() {
     let old = r#"{"site":"4chan","board":"g","no":900,"subject":"Old thread","posts":300,"last_seen":1199,"unread":3,"dead":true,"replies":2}"#;
     a.store.watched_vec()[1] = serde_json::from_str(old).unwrap();
     let line = |text: &str, has: &str| text.lines().find(|l| l.contains(has)).unwrap_or_default().to_string();
-    a.tab.view = View::Sites;
+    a.tab.navigate(View::Sites);
     let sites = render(&mut a).0;
     let row = line(&sites, "Watched");
     assert!(row.contains("2 new") && !row.contains("5 new"), "Sites row: {row:?}");
-    a.tab.view = View::Watched;
+    a.tab.navigate(View::Watched);
     let watched = render(&mut a).0;
     let bar = watched.lines().next().unwrap_or_default().to_string();
     assert!(bar.contains("2 new") && !bar.contains("5 new"), "Watched bar: {bar:?}");

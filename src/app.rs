@@ -78,7 +78,7 @@ pub use thread_view::{CONVERSATION_MAX, conversation_of};
 pub use sites::{Adding, MySites, origin as site_origin};
 #[cfg(test)]
 pub use sites::BoardsUpdate;
-pub use tab::Tab;
+pub use tab::{Opening, Tab, Then};
 pub use tabs::{MAX_TABS, Offline, TabPopup, ThreadCopy, Trail};
 pub use settings::{SettingsPopup, key_rows, rows as setting_rows, settings, tilde};
 
@@ -327,6 +327,16 @@ impl Msg {
     /// What request `id` found: `apply` runs in its tab, if it's still waiting for it.
     fn request(id: u64, apply: impl FnOnce(&mut App) + Send + 'static) -> Msg {
         Msg::ForRequest { id, keep_if_stale: false, apply: Box::new(apply) }
+    }
+
+    /// What load `id` came to, `res`: `apply` runs in its tab, once, if it's still the tab's
+    /// load. Only this hands a load's answer out.
+    fn answer<T: Send + 'static>(id: u64, res: T, apply: impl FnOnce(&mut App, T) + Send + 'static) -> Msg {
+        Msg::request(id, move |app| {
+            if app.tab.answered(id) {
+                apply(app, res);
+            }
+        })
     }
 
     /// `request`, but applied even once its tab has moved on.
@@ -693,7 +703,7 @@ impl App {
 
     /// What's on screen, broadly: when it changes, the screen is painted whole.
     pub fn screen(&self) -> (View, usize, bool, bool) {
-        (self.tab.view, self.active, self.tab.viewer().is_some(), self.tab.gallery.is_some())
+        (self.tab.view(), self.active, self.tab.viewer().is_some(), self.tab.gallery.is_some())
     }
 
     /// Keep the current list's selection on a row that exists.
@@ -705,7 +715,7 @@ impl App {
 
     /// The current view's list, and how many rows it has.
     fn filtered_list(&mut self) -> Option<(&mut FilteredList, usize)> {
-        Some(match self.tab.view {
+        Some(match self.tab.view() {
             View::Sites => (self.visible_sites().len(), &mut self.site_list),
             View::Boards => (self.visible_boards().len(), &mut self.tab.board_list),
             View::Catalog => (self.visible_catalog().len(), &mut self.tab.catalog_list),
@@ -857,7 +867,7 @@ impl App {
     /// due refresh, and at most a second (relative times like "5s ago" stay current).
     pub fn next_wake(&self, now: Instant) -> Duration {
         let mut wake = Duration::from_secs(1);
-        let animating = self.tab.loading.is_some() || !self.refreshing.is_empty() || self.downloads.running > 0 || self.tab.viewer().is_some();
+        let animating = self.tab.loading().is_some() || !self.refreshing.is_empty() || self.downloads.running > 0 || self.tab.viewer().is_some();
         if animating {
             wake = wake.min(Duration::from_millis(100));
         }
@@ -880,7 +890,7 @@ impl App {
         if let (Some(s), Some((_, since))) = (&self.status, &self.status_since) {
             after(*since, s.ttl());
         }
-        if self.tab.view == View::Thread && self.tab.thread.is_some() && self.tab.loading.is_none() && self.tab.saved().is_none() {
+        if self.tab.view() == View::Thread && self.tab.thread.is_some() && self.tab.loading().is_none() && self.tab.saved().is_none() {
             after(self.tab.thread_checked, self.thread_every());
         }
         // At capacity, a finished refresh wakes the loop anyway (and due ones mustn't spin it).
@@ -959,16 +969,26 @@ impl App {
             Msg::ForRequest { id, keep_if_stale, apply } => {
                 // A response to another request: another tab's is handled there, the rest
                 // are stale.
-                if Some(id) != self.tab.req {
+                if Some(id) != self.tab.req() {
                     if let Some(i) = self.tab_of(id) {
-                        return self.handle_in_tab(i, apply);
+                        return self.handle_in_tab(i, Box::new(move |app| app.land(apply)));
                     }
                     if !keep_if_stale {
                         return;
                     }
                 }
-                apply(self);
+                self.land(apply);
             }
+        }
+    }
+
+    /// Apply what a request found: it lands on the place, under the settings if they're open,
+    /// and they stay open over wherever it leaves the tab.
+    fn land(&mut self, apply: Box<dyn FnOnce(&mut App) + Send>) {
+        let over = self.tab.close_settings();
+        apply(self);
+        if over {
+            self.tab.navigate(View::Settings);
         }
     }
 
@@ -1065,7 +1085,7 @@ impl App {
 
     /// `H`: hide or unhide the selected thread (catalog) or post (thread) by hand.
     fn toggle_hidden(&mut self) {
-        let (board, no, what, mark) = match self.tab.view {
+        let (board, no, what, mark) = match self.tab.view() {
             View::Catalog => {
                 let Some(i) = self.selected_index() else { return };
                 let Some(p) = self.tab.catalog.get(i) else { return };
@@ -1094,7 +1114,7 @@ impl App {
     /// `Z`: show hidden threads and posts (dimmed), or leave them out again.
     fn toggle_show_hidden(&mut self) {
         // Keep the same thread selected in the catalog.
-        let keep = self.selected_index().filter(|_| self.tab.view == View::Catalog);
+        let keep = self.selected_index().filter(|_| self.tab.view() == View::Catalog);
         let shown = self.rehide(|a| a.hiding.toggle_show());
         if let Some(i) = keep
             && let Some(pos) = self.visible_catalog().iter().position(|&v| v == i)
@@ -1190,7 +1210,7 @@ impl App {
     }
 
     fn toggle_watch(&mut self) {
-        let (board, no, subject, posts, last_seen) = match (self.tab.view, &self.tab.board) {
+        let (board, no, subject, posts, last_seen) = match (self.tab.view(), &self.tab.board) {
             (View::Thread, _) => {
                 let Some(t) = &self.tab.thread else { return };
                 let posts = t.live_posts();
@@ -1224,9 +1244,15 @@ impl App {
         self.save_now();
     }
 
+    /// The thread being read: shown, with no gallery over it.
+    fn reading(&mut self) -> Option<&mut ThreadView> {
+        let shown = self.tab.view() == View::Thread && self.tab.gallery.is_none();
+        self.tab.thread.as_mut().filter(|_| shown)
+    }
+
     /// `c`: the selected post's conversation alone, or the whole thread again.
     fn toggle_conversation(&mut self) {
-        let Some(t) = self.tab.thread.as_mut().filter(|_| self.tab.view == View::Thread && self.tab.gallery.is_none()) else { return };
+        let Some(t) = self.reading() else { return };
         if t.conversation.is_some() {
             t.leave_conversation();
             return;
@@ -1243,7 +1269,7 @@ impl App {
 
     /// `I`: the selected post's poster's posts alone, or the whole thread again.
     fn toggle_poster(&mut self) {
-        let Some(t) = self.tab.thread.as_mut().filter(|_| self.tab.view == View::Thread && self.tab.gallery.is_none()) else { return };
+        let Some(t) = self.reading() else { return };
         if t.conversation.as_ref().is_some_and(|c| c.poster.is_some()) {
             t.leave_conversation();
             return;
@@ -1259,7 +1285,7 @@ impl App {
 
     /// `M`: all posts, only those with files, all with their images hidden, and round again.
     fn cycle_media(&mut self) {
-        let Some(t) = self.tab.thread.as_mut().filter(|_| self.tab.view == View::Thread && self.tab.gallery.is_none()) else { return };
+        let Some(t) = self.reading() else { return };
         let next = t.media.next();
         let n = t.set_media(next);
         let talking = t.conversation.is_some();
@@ -1294,7 +1320,7 @@ impl App {
     /// copy open is kept as it is (a copy saved under another number, when the site answered
     /// with another thread, is kept under this one too).
     fn keep_open_thread(&mut self, key: &ThreadKey) {
-        if self.tab.view != View::Thread || (self.tab.saved().is_some() && self.store.saved(key).is_some()) {
+        if self.tab.view() != View::Thread || (self.tab.saved().is_some() && self.store.saved(key).is_some()) {
             return;
         }
         let Some(t) = self.tab.thread.as_ref().filter(|t| self.key(&t.board, t.no) == *key) else { return };
@@ -1330,13 +1356,9 @@ impl App {
         };
         self.switch_site(site);
         let board = self.boards().iter().find(|b| b.uri == key.board).cloned();
-        self.tab.board = Some(board.unwrap_or(Board { uri: key.board, title: String::new(), nsfw: None }));
-        self.tab.return_to = Some(self.tab.view);
-        self.tab.from_catalog = false;
-        self.tab.gallery = None;
-        self.tab.thread = None;
-        self.tab.view = View::Thread;
-        self.load_thread(key.no);
+        let board = board.unwrap_or(Board { uri: key.board, title: String::new(), nsfw: None });
+        self.tab.return_to = Some(self.tab.place_view());
+        self.open_thread_at(board, key.no, Opening::default());
     }
 
     /// Make `site` the current one, with its board list if it's saved (else fetched in the
@@ -1415,10 +1437,10 @@ impl App {
         };
         match (link.thread, link.post) {
             (Some(no), post) => {
-                if self.tab.view == View::Thread {
+                if self.tab.view() == View::Thread {
                     self.leave_trail(board);
                 }
-                self.open_thread_at(target, no, post);
+                self.open_thread_at(target, no, Opening::at(post));
             }
             (None, None) => {
                 // A board link: open its catalog.
@@ -1429,8 +1451,8 @@ impl App {
                 // Ask the engine which thread the post is in (only some can).
                 let uri = target.uri.clone();
                 let label = format!("Looking up post {post}");
-                let (site, trail) = (self.tab.site, self.trail_here(board).filter(|_| self.tab.view == View::Thread));
-                self.spawn(label, move |b, _, _| b.find_thread(&uri, post), move |app, r| app.thread_found(site, target, post, trail, r));
+                let (site, trail) = (self.tab.site, self.trail_here(board).filter(|_| self.tab.view() == View::Thread));
+                self.spawn(label, Then::Show, move |b, _, _| b.find_thread(&uri, post), move |app, r| app.thread_found(site, target, post, trail, r));
             }
         }
     }
@@ -1439,18 +1461,11 @@ impl App {
     /// there (only now moving to that site), leaving `trail`, where the lookup was asked
     /// from, for `u`.
     fn thread_found(&mut self, site: usize, board: Board, post: u64, trail: Option<Trail>, res: Result<Option<u64>>) {
-        self.tab.loading = None;
         match res {
             Ok(Some(no)) => {
                 self.tab.trail.extend(trail);
-                let in_settings = self.tab.view == View::Settings;
                 self.switch_site(site);
-                self.open_thread_at(board, no, Some(post));
-                // Found while the settings were open: the thread is behind them.
-                if in_settings {
-                    self.tab.settings_back = Some(View::Thread);
-                    self.tab.view = View::Settings;
-                }
+                self.open_thread_at(board, no, Opening::at(Some(post)));
             }
             Ok(None) => {
                 self.error(format!("Post {post} isn't in this thread, and this site can't say which thread it's in"));
@@ -1465,20 +1480,18 @@ impl App {
         known.unwrap_or_else(|| Board { uri: uri.to_string(), title: String::new(), nsfw: None })
     }
 
-    /// Open a thread on the current site, selecting `post` when it arrives.
-    fn open_thread_at(&mut self, board: Board, no: u64, post: Option<u64>) {
-        self.tab.from_catalog = false;
-        self.tab.gallery = None;
+    /// Open a thread on the current site, as `open` says once it arrives.
+    fn open_thread_at(&mut self, board: Board, no: u64, open: Opening) {
         self.tab.board = Some(board);
-        self.tab.pending_post = post;
         self.tab.thread = None;
-        self.tab.view = View::Thread;
-        self.load_thread(no);
+        self.tab.navigate(View::Thread);
+        self.tab.from_catalog = false;
+        self.load_thread(no, open);
     }
 
     /// The post whose files `v`, `i`, `d` act on: the selected catalog entry or thread post.
     fn selected_post(&self) -> Option<&Post> {
-        match self.tab.view {
+        match self.tab.view() {
             View::Catalog => self.selected_index().and_then(|i| self.tab.catalog.get(i)),
             View::Thread => self.tab.thread.as_ref().and_then(ThreadView::current),
             _ => None,
@@ -1524,7 +1537,7 @@ impl App {
     }
 
     fn remove_entry(&mut self) {
-        if self.tab.view == View::Sites {
+        if self.tab.view() == View::Sites {
             match self.selected_site_row() {
                 Some(SiteRow::Favorite(i)) => {
                     let f = self.favorites.remove(i);
@@ -1541,7 +1554,7 @@ impl App {
             return;
         }
         let Some(i) = self.selected_index() else { return };
-        match self.tab.view {
+        match self.tab.view() {
             View::Watched => {
                 let Some(key) = self.store.all_watched().get(i).map(|w| w.key.clone()) else { return };
                 // As w does: its (You) marks go from every tab.
@@ -1573,7 +1586,7 @@ impl App {
 
     /// Index of the selected item in the current list's underlying data (not for Sites).
     fn selected_index(&self) -> Option<usize> {
-        match self.tab.view {
+        match self.tab.view() {
             View::Sites | View::Thread | View::Settings | View::Search => None,
             View::Boards => self.tab.board_list.state.selected().and_then(|i| self.visible_boards().get(i).copied()),
             View::Catalog => self.tab.catalog_list.state.selected().and_then(|i| self.visible_catalog().get(i).copied()),
@@ -1586,7 +1599,7 @@ impl App {
     /// The selected thread in Watched, History or Saved: its key and subject.
     fn selected_listed(&self) -> Option<(&ThreadKey, &str)> {
         let i = self.selected_index()?;
-        match self.tab.view {
+        match self.tab.view() {
             View::Watched => self.store.all_watched().get(i).map(|w| (&w.key, w.subject.as_str())),
             View::History => self.store.history.get(i).map(|v| (&v.key, v.subject.as_str())),
             View::Saved => self.store.saved.get(i).map(|m| (&m.key, m.subject.as_str())),
@@ -1595,13 +1608,13 @@ impl App {
     }
 
     fn enter(&mut self) {
-        match (self.tab.view, self.selected_index()) {
+        match (self.tab.view(), self.selected_index()) {
             (View::Settings, _) => self.activate_setting(),
             (View::Search, _) => self.open_search_hit(),
             (View::Sites, _) => match self.selected_site_row() {
-                Some(SiteRow::Watched) => self.tab.view = View::Watched,
-                Some(SiteRow::History) => self.tab.view = View::History,
-                Some(SiteRow::Saved) => self.tab.view = View::Saved,
+                Some(SiteRow::Watched) => self.tab.navigate(View::Watched),
+                Some(SiteRow::History) => self.tab.navigate(View::History),
+                Some(SiteRow::Saved) => self.tab.navigate(View::Saved),
                 Some(SiteRow::Favorite(i)) => self.open_favorite(i),
                 Some(SiteRow::Recent(i)) => {
                     if let Some(b) = self.recent_board(i) {
@@ -1617,7 +1630,7 @@ impl App {
             },
             (View::Watched | View::History | View::Saved, Some(_)) => {
                 let Some(key) = self.selected_listed().map(|(k, _)| k.clone()) else { return };
-                if self.tab.view == View::Saved { self.open_saved(&key) } else { self.open_key(key) }
+                if self.tab.view() == View::Saved { self.open_saved(&key, Opening::default()) } else { self.open_key(key) }
             }
             (View::Boards, Some(i)) => {
                 if let Some(b) = self.boards().get(i).cloned() {
@@ -1628,14 +1641,11 @@ impl App {
                 let Some(p) = self.tab.catalog.get(i) else { return };
                 let no = p.no;
                 // On an overboard the thread lives on its own board.
-                if let Some(uri) = p.board.clone().filter(|b| Some(b) != self.tab.catalog_board.as_ref()) {
-                    self.tab.board = Some(self.find_board(&uri));
-                }
-                self.tab.thread = None;
+                let board = p.board.clone().filter(|b| Some(b) != self.tab.catalog_board.as_ref()).map(|uri| self.find_board(&uri));
+                let Some(board) = board.or_else(|| self.tab.board.clone()) else { return };
+                self.open_thread_at(board, no, Opening::default());
                 self.tab.return_to = None;
                 self.tab.from_catalog = true;
-                self.tab.view = View::Thread;
-                self.load_thread(no);
             }
             _ => {}
         }
@@ -1647,9 +1657,8 @@ impl App {
         self.tab.catalog.clear();
         self.tab.catalog_cached = None;
         self.tab.catalog_list = FilteredList::top();
-        self.tab.pending_catalog = None;
-        self.tab.view = View::Catalog;
-        self.load_catalog();
+        self.tab.navigate(View::Catalog);
+        self.load_catalog(None);
     }
 
     fn enter_site(&mut self, i: usize) {
@@ -1657,7 +1666,7 @@ impl App {
             self.tab.board_list = FilteredList::default();
         }
         self.tab.site = i;
-        self.tab.view = View::Boards;
+        self.tab.navigate(View::Boards);
         if self.tab.board_list.state.selected().is_none() {
             self.tab.board_list.state.select(Some(0));
         }
@@ -1682,38 +1691,34 @@ impl App {
     }
 
     fn back(&mut self) {
-        self.tab.gallery = None;
-        // The failure was the view's being left.
-        self.tab.failed = None;
-        self.tab.view = match self.tab.view {
-            View::Sites | View::Boards | View::Watched | View::History | View::Saved => View::Sites,
-            View::Settings => self.tab.settings_back.take().unwrap_or(View::Sites),
+        // Closing the settings leaves the place under them as it was.
+        if self.tab.close_settings() {
+            return;
+        }
+        let from_catalog = self.tab.from_catalog;
+        let to = match self.tab.view() {
             View::Search => self.close_search(),
             View::Catalog => View::Boards,
             View::Thread => self.tab.return_to.take().unwrap_or(View::Catalog),
+            _ => View::Sites,
         };
+        self.tab.navigate(to);
         self.tab.trail.clear();
         // Back to the catalog the thread was opened from (an overboard's, maybe).
-        if self.tab.view == View::Catalog && std::mem::take(&mut self.tab.from_catalog) {
+        if to == View::Catalog && from_catalog {
             self.tab.board = self.tab.catalog_of.clone();
         }
         // After following links to another board (or a board of the same name on another
         // site), the loaded catalog is for the old one.
-        if self.tab.view == View::Catalog
+        if to == View::Catalog
             && let Some(board) = self.tab.board.clone().filter(|b| Some(&b.uri) != self.tab.catalog_board.as_ref() || self.tab.site != self.tab.catalog_site)
         {
             self.open_catalog(board);
-            return;
-        }
-        // Navigating away cancels any in-flight request (its response will be ignored).
-        if self.tab.loading.is_some() {
-            self.tab.req = None;
-            self.tab.loading = None;
         }
     }
 
     fn refresh(&mut self) {
-        match self.tab.view {
+        match self.tab.view() {
             View::Sites | View::Watched | View::History | View::Saved | View::Settings => {}
             View::Search => {
                 if let Some(s) = &mut self.tab.search {
@@ -1724,11 +1729,15 @@ impl App {
                 self.load_search_page();
             }
             View::Boards => self.load_boards(),
-            View::Catalog => self.load_catalog(),
+            View::Catalog => {
+                let select = self.tab.catalog_selecting();
+                self.load_catalog(select);
+            }
             View::Thread if self.tab.saved().is_some() => self.refresh_saved(),
+            // Not loaded yet (a failure, or another load took over): the thread asked for.
             View::Thread => {
-                if let Some(no) = self.tab.thread.as_ref().map(|t| t.no) {
-                    self.load_thread(no);
+                if let Some(no) = self.tab.thread.as_ref().map(|t| t.no).or(self.tab.pending_thread) {
+                    self.load_thread(no, self.tab.opening());
                 }
             }
         }
@@ -1746,7 +1755,7 @@ impl App {
                 let url = self.thread_link(key, None).unwrap_or_default();
                 format!("{subject}\n{url}").trim().to_string()
             };
-            match self.tab.view {
+            match self.tab.view() {
                 View::Thread => self.tab.thread.as_ref().and_then(ThreadView::current).map(|p| ("text", copy_text(p, false))),
                 View::Catalog => self.selected_post().map(|p| ("text", copy_text(p, true))),
                 View::Watched | View::History | View::Saved => self.selected_listed().map(|(key, subject)| ("text", saved(key, subject))),
@@ -1782,7 +1791,7 @@ impl App {
     /// The link to what's selected: a post in a thread, a catalog thread, a saved thread, a board.
     fn selected_link(&self) -> Option<String> {
         let backend = &self.current_site().backend;
-        match (self.tab.view, &self.tab.board) {
+        match (self.tab.view(), &self.tab.board) {
             (View::Watched | View::History | View::Saved, _) => self.selected_listed().and_then(|(key, _)| self.thread_link(key, None)),
             (View::Boards, _) => self.selected_index().and_then(|i| self.boards().get(i)).map(|board| backend.board_url(&board.uri)),
             (View::Catalog, Some(b)) => self.selected_post().map(|p| backend.thread_url(p.board.as_deref().unwrap_or(&b.uri), p.no)),

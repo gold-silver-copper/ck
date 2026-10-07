@@ -148,7 +148,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     let t = theme();
     let all = f.area();
     // A saved copy is read offline: its images only come from disk.
-    app.images.offline = app.tab.view == View::Thread && app.tab.saved().is_some();
+    app.images.offline = app.tab.view() == View::Thread && app.tab.saved().is_some();
     f.buffer_mut().set_style(all, Style::new().fg(t.text).bg(t.background));
     // Only chips drawn this frame can be clicked: none under the viewer.
     app.tab_chips.clear();
@@ -161,7 +161,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         draw_app_bar(f, app, bar);
         draw_tab_row(f, app, gap.inner(Margin::new(MARGIN, 0)));
         let content = body.inner(Margin::new(MARGIN, 0));
-        match app.tab.view {
+        match app.tab.view() {
             View::Sites => draw_sites(f, app, content),
             View::Boards => draw_boards(f, app, content),
             View::Catalog => draw_catalog(f, app, content),
@@ -285,7 +285,7 @@ fn location(app: &App) -> (Vec<String>, Vec<Span<'static>>) {
         app.tab.board.as_ref().map(|b| if b.title.is_empty() { format!("/{}/", b.uri) } else { format!("/{}/  {}", b.uri, b.title) })
     };
     let mut meta: Vec<String> = Vec::new();
-    let crumbs = match app.tab.view {
+    let crumbs = match app.tab.view() {
         View::Sites => {
             meta.push(plural(app.sites.len(), "site"));
             vec!["Sites".to_string()]
@@ -404,7 +404,7 @@ fn location(app: &App) -> (Vec<String>, Vec<Span<'static>>) {
     };
     let mut spans: Vec<Span> = Vec::new();
     // An active filter or search, unless it's being typed (the footer shows that).
-    let query = match app.tab.view {
+    let query = match app.tab.view() {
         View::Thread => app.tab.thread.as_ref().filter(|th| !th.search.is_empty() && app.typing != Some(Typing::ThreadSearch)).map(|th| {
             let k = th.matches.len();
             format!("/{}  {}", th.search, count(k, "match", "matches"))
@@ -415,16 +415,16 @@ fn location(app: &App) -> (Vec<String>, Vec<Span<'static>>) {
         spans.extend([chip(q, t.on_primary_container, t.primary_container), Span::raw("  ")]);
     }
     // A thread on its board's last page is next to fall off.
-    let last_page = app.tab.thread.as_ref().filter(|_| app.tab.view == View::Thread).and_then(|th| app.thread_page(&app.key(&th.board, th.no)));
+    let last_page = app.tab.thread.as_ref().filter(|_| app.tab.view() == View::Thread).and_then(|th| app.thread_page(&app.key(&th.board, th.no)));
     if let Some((p, of)) = last_page.filter(|(p, of)| p >= of) {
         spans.extend([chip(format!("last page {p}/{of}"), t.background, t.warning), Span::raw("  ")]);
     }
     // Only the posts with files, or images hidden (`M`).
-    if let Some(label) = app.tab.thread.as_ref().filter(|_| app.tab.view == View::Thread).and_then(|th| th.media.label()) {
+    if let Some(label) = app.tab.thread.as_ref().filter(|_| app.tab.view() == View::Thread).and_then(|th| th.media.label()) {
         spans.extend([chip(label, t.on_primary_container, t.primary_container), Span::raw("  ")]);
     }
     // A saved copy, read offline; or the last copy kept, shown while it loads.
-    let copy = match app.tab.view {
+    let copy = match app.tab.view() {
         View::Thread => app.tab.copy.map(|c| match c {
             ThreadCopy::Saved(o) => ("saved", o),
             ThreadCopy::Cached(o) => ("cached", o),
@@ -478,7 +478,7 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
                 dim(),
             ),
         ])
-    } else if let Some(label) = &app.tab.loading {
+    } else if let Some(label) = &app.tab.loading() {
         Line::from(vec![
             Span::styled(format!(" {} ", spinner(app.tick)), bold(t.primary)),
             Span::styled(format!("{label}…"), Style::new().fg(t.on_bar)),
@@ -524,7 +524,7 @@ fn fit_hints(mut hints: Vec<(String, &'static str)>, width: usize) -> Line<'stat
 /// Key hints for the footer, with the configured keys, most useful first; help is last.
 fn footer_hints(app: &App) -> Vec<(String, &'static str)> {
     let k = |a| app.keys.key(a);
-    let mut hints: Vec<(String, &'static str)> = match app.tab.view {
+    let mut hints: Vec<(String, &'static str)> = match app.tab.view() {
         View::Thread if app.tab.gallery.is_some() => vec![
             ("h/j/k/l".into(), "move"),
             ("enter".into(), "view"),
@@ -668,10 +668,10 @@ fn footer_hints(app: &App) -> Vec<(String, &'static str)> {
         ],
     };
     // A saved copy of a thread that's still up: the live one is a key away.
-    if app.tab.view == View::Thread && app.tab.gallery.is_none() && app.focused().is_none() && app.tab.saved().is_some_and(|o| !o.dead) {
+    if app.tab.view() == View::Thread && app.tab.gallery.is_none() && app.focused().is_none() && app.tab.saved().is_some_and(|o| !o.dead) {
         hints.insert(0, (k(Action::Reload), "live thread"));
     }
-    if app.tab.view != View::Settings {
+    if app.tab.view() != View::Settings {
         hints.push((k(Action::Settings), "settings"));
     }
     hints.push((k(Action::Help), "help"));
@@ -679,7 +679,7 @@ fn footer_hints(app: &App) -> Vec<(String, &'static str)> {
 }
 
 fn current_filter(app: &App) -> &str {
-    match app.tab.view {
+    match app.tab.view() {
         View::Sites => &app.site_list.filter,
         View::Boards => &app.tab.board_list.filter,
         View::Catalog => &app.tab.catalog_list.filter,

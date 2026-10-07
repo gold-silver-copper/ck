@@ -6,7 +6,7 @@ use super::*;
 pub(super) fn draw_thread(f: &mut Frame, app: &mut App, area: Rect) {
     let off = !app.thread_images_on();
     let Some(t) = &mut app.tab.thread else {
-        if app.tab.loading.is_some() {
+        if app.tab.loading().is_some() {
             return;
         }
         match app.tab.saved_offer.as_ref().and_then(|k| app.store.saved(k)) {

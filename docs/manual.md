@@ -264,7 +264,7 @@ nothing else is being typed starts this by itself), or type a short form. A site
 | `saved`, `watched`, `history` | that list                                   |
 
 `tab` completes site and board names. `esc` (or `u` from a thread) goes back to where you
-were. `ck URL` (or `ck 4chan/g`) starts there.
+were (from Settings: to the place under them). `ck URL` (or `ck 4chan/g`) starts there.
 
 ### Remapping keys
 
@@ -650,9 +650,14 @@ ck draws flat: no lines or boxes, just areas of color. The screen is the darkest
 catalog entries and posts are cards a step lighter, and popups another step up; the
 selected row, card or post is tinted and marked by a stripe in the theme's accent color.
 
-`,` opens Settings. Its options are saved to your config file, keeping your comments
-(a symlinked config is written through the link, and keeps its permissions), and the file
-is created from the default if you don't have one yet:
+`,` opens Settings. They open over where you are: what's loading there goes on loading
+and lands under them (a post looked up opens its thread there), and `esc` closes them on
+wherever that left you. The thread under them isn't refreshed as the open one meanwhile:
+if it's watched, its new posts count as unread, as any watched thread's do. `:` from
+Settings closes them and goes from the place under them. Their options are saved to your
+config file, keeping your comments (a symlinked config is written through the link, and
+keeps its permissions), and the file is created from the default if you don't have one
+yet:
 
 - **Theme**: pick from the built-in themes (material, material-light, nord, gruvbox,
   catppuccin, tokyo-night, solarized-light, terminal, which uses your terminal's own
@@ -705,7 +710,8 @@ All settings are optional; see `config.example.toml` for every option with comme
 - `download_dir = "~/stuff/{site}/{board}/{thread}"`
 - `restore_session = false` to start at the site list instead of where you left off (the
   view, thread and selected post, catalog sort and filter, saved in the data directory
-  as `session.json`). `ck URL` always starts at the URL.
+  as `session.json`; a thread or catalog that failed to load is kept as it was asked
+  for, and `r` tries it again the same way). `ck URL` always starts at the URL.
 - `favorites = ["4chan/g", ...]`, `hidden_sites = ["wizchan", ...]`: see
   [The home screen](#the-home-screen).
 - `notify = "auto" | "bell" | "off"`, `notify_command = [...]`: see

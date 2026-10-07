@@ -8,11 +8,53 @@ use super::tabs::{Offline, TabPopup, ThreadCopy, Trail};
 use crate::model::{Board, Post};
 use crate::store::ThreadKey;
 
-/// One tab's place: the active one is `App::tab`.
+/// What a load is to do once it's answered, beyond showing what came. Its answer's handler
+/// is handed what the load was asked for (a thread's key) by the closure that started it.
+pub enum Then {
+    /// Just show it (a board list, search results, the thread a post is in).
+    Show,
+    /// Select the catalog thread `select` once it's there.
+    Catalog { select: Option<u64> },
+    /// Open the thread as `open` says.
+    Thread { open: Opening },
+}
+
+/// How a thread being loaded is opened once it arrives.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Opening {
+    /// The post to select.
+    pub select: Option<u64>,
+    /// The post whose conversation to show (a session's).
+    pub conversation: Option<u64>,
+    /// It's the thread last session had open: if it's gone, its catalog instead.
+    pub restoring: bool,
+}
+
+impl Opening {
+    /// Opened on `select`.
+    pub fn at(select: Option<u64>) -> Self {
+        Opening { select, ..Opening::default() }
+    }
+}
+
+/// The tab's load in flight (or answered): its request, its label while it's in flight,
+/// and what to do with its answer.
+struct Load {
+    id: u64,
+    label: Option<String>,
+    then: Then,
+}
+
+/// One tab's place: the active one is `App::tab`. Only `navigate` moves it, and moving it
+/// ends the load that was going to land there.
 pub struct Tab {
-    pub view: View,
-    /// Where esc goes back to from Settings.
-    pub settings_back: Option<View>,
+    /// Where the tab is (never Settings: they open over it).
+    view: View,
+    /// The settings are open over the place.
+    settings: bool,
+    /// The tab's last load, whose answers are its own. It outlives its label: a cached
+    /// answer's note comes after the answer. `None` once dropped by navigating away.
+    load: Option<Load>,
     pub board_list: FilteredList,
     pub catalog_list: FilteredList,
     pub catalog_sort: Sort,
@@ -29,18 +71,12 @@ pub struct Tab {
     /// Catalog threads that weren't there on the previous visit.
     pub catalog_new: HashSet<u64>,
     pub thread: Option<ThreadView>,
-    /// Label of the in-flight request, if any.
-    pub loading: Option<String>,
     /// The tab's own popup, if any: one at a time.
     pub popup: Option<TabPopup>,
     /// The thread's files as a grid (`V`), over the thread.
     pub gallery: Option<Gallery>,
     /// Threads left by following cross-thread links, for `u`.
     pub trail: Vec<Trail>,
-    /// Post to select once the loading thread arrives.
-    pub pending_post: Option<u64>,
-    /// Post whose conversation to show once the loading thread arrives (a session's).
-    pub pending_conversation: Option<u64>,
     /// Board the loaded catalog belongs to.
     pub catalog_board: Option<String>,
     /// The site the loaded catalog is from.
@@ -60,17 +96,10 @@ pub struct Tab {
     pub copy: Option<ThreadCopy>,
     /// The same for the catalog.
     pub catalog_cached: Option<Offline>,
-    /// The tab's last request, whose answers are its own. It outlives `loading`: a cached
-    /// answer's note comes after the answer. `None` once dropped by navigating away.
-    pub req: Option<u64>,
     /// Why the tab's last load failed, shown where what it loads would be (until the next).
     pub failed: Option<String>,
     /// The thread number of the last thread load, for 404 handling.
     pub pending_thread: Option<u64>,
-    /// Thread to select in the catalog once it loads (restoring a session).
-    pub pending_catalog: Option<u64>,
-    /// The open thread is being restored from the last session.
-    pub restoring: bool,
     /// Archive search: its results and the list over them.
     pub search: Option<Search>,
     pub search_list: FilteredList,
@@ -95,10 +124,106 @@ impl Tab {
         if let Some(ThreadCopy::Cached(o)) = self.copy { Some(o) } else { None }
     }
 
+    /// What's shown: the settings, if they're open, else the place.
+    pub fn view(&self) -> View {
+        if self.settings { View::Settings } else { self.view }
+    }
+
+    /// The place, under the settings if they're open.
+    pub fn place_view(&self) -> View {
+        self.view
+    }
+
+    /// Go to `to`. Settings open over the place and change nothing else; anywhere else
+    /// closes them, and ends the load, the gallery and the failure of the place left (not
+    /// the thread, which search results go back to).
+    pub fn navigate(&mut self, to: View) {
+        if to == View::Settings {
+            self.settings = true;
+            return;
+        }
+        self.settings = false;
+        self.view = to;
+        self.load = None;
+        self.gallery = None;
+        self.failed = None;
+    }
+
+    /// Close the settings: whether they were open.
+    pub fn close_settings(&mut self) -> bool {
+        std::mem::take(&mut self.settings)
+    }
+
+    /// The tab's request, whose answers are its own.
+    pub fn req(&self) -> Option<u64> {
+        self.load.as_ref().map(|l| l.id)
+    }
+
+    /// The label of the load in flight, if one is.
+    pub fn loading(&self) -> Option<&str> {
+        self.load.as_ref().and_then(|l| l.label.as_deref())
+    }
+
+    /// Start load `id`, shown as `label`, to do `then` with its answer.
+    pub(super) fn begin(&mut self, id: u64, label: String, then: Then) {
+        self.load = Some(Load { id, label: Some(label), then });
+        self.failed = None;
+    }
+
+    /// Load `id` was answered: whether that's to be applied (it's still the tab's load, and
+    /// wasn't answered before). The load stays the tab's, with what it was to do: its note
+    /// may follow, and a failed open is tried again (or saved in the session) as asked.
+    pub(super) fn answered(&mut self, id: u64) -> bool {
+        self.load.as_mut().filter(|l| l.id == id).and_then(|l| l.label.take()).is_some()
+    }
+
+    /// How the thread being loaded is to be opened.
+    pub fn opening(&self) -> Opening {
+        match self.load.as_ref().map(|l| &l.then) {
+            Some(Then::Thread { open }) => *open,
+            _ => Opening::default(),
+        }
+    }
+
+    /// How the thread loaded is opened, for its answer: a restore is answered once.
+    pub(super) fn opened(&mut self) -> Opening {
+        match self.load.as_mut().map(|l| &mut l.then) {
+            Some(Then::Thread { open }) => {
+                let was = *open;
+                open.restoring = false;
+                was
+            }
+            _ => Opening::default(),
+        }
+    }
+
+    /// The thread the catalog being loaded is to select, if it's still to come.
+    pub fn catalog_selecting(&self) -> Option<u64> {
+        match self.load.as_ref().map(|l| &l.then) {
+            Some(Then::Catalog { select }) => *select,
+            _ => None,
+        }
+    }
+
+    /// The same, to change.
+    pub(super) fn catalog_select(&mut self) -> Option<&mut Option<u64>> {
+        match self.load.as_mut().map(|l| &mut l.then) {
+            Some(Then::Catalog { select }) => Some(select),
+            _ => None,
+        }
+    }
+
+    /// A load in flight, as `begin` starts it (without a request to answer it).
+    #[cfg(test)]
+    pub fn fake_load(&mut self, id: u64, label: &str, then: Then) {
+        self.begin(id, label.to_string(), then);
+    }
+
     pub fn new(site: usize, now: Instant) -> Self {
         Self {
             view: View::Sites,
-            settings_back: None,
+            settings: false,
+            load: None,
             board_list: FilteredList::top(),
             catalog_list: FilteredList::default(),
             catalog_sort: Sort::default(),
@@ -111,11 +236,9 @@ impl Tab {
             catalog_marks: Marks::default(),
             catalog_new: HashSet::new(),
             thread: None,
-            loading: None,
             popup: None,
             gallery: None,
             trail: Vec::new(),
-            pending_post: None,
             catalog_board: None,
             catalog_site: site,
             thread_site: site,
@@ -123,14 +246,10 @@ impl Tab {
             from_catalog: false,
             archive_offer: None,
             saved_offer: None,
-            pending_conversation: None,
             copy: None,
             catalog_cached: None,
-            req: None,
             failed: None,
             pending_thread: None,
-            pending_catalog: None,
-            restoring: false,
             search: None,
             search_list: FilteredList::default(),
         }

@@ -123,7 +123,7 @@ impl App {
     /// leaving out hidden posts), from the selected post's file `k`. False if that file
     /// isn't among them.
     pub(super) fn thread_viewer(&mut self, k: usize) -> bool {
-        let Some(t) = self.tab.thread.as_ref().filter(|_| self.tab.view == View::Thread) else { return false };
+        let Some(t) = self.tab.thread.as_ref().filter(|_| self.tab.view() == View::Thread) else { return false };
         let (mut files, mut posts, mut start) = (Vec::new(), Vec::new(), None);
         for (i, p) in t.shown_and_selected() {
             for (j, f) in p.files.iter().enumerate() {

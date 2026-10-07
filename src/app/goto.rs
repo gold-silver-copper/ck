@@ -2,7 +2,7 @@
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 
-use super::{App, Popup, View};
+use super::{App, Opening, Popup, View};
 use crate::config::SiteConfig;
 use crate::model::Board;
 use crate::route::{self, SiteInfo, Target};
@@ -43,12 +43,9 @@ impl App {
     /// Go where `input` leads, or say why it can't.
     pub fn goto_str(&mut self, input: &str) {
         if let Some(view) = list_named(input) {
-            self.tab.gallery = None;
-            self.tab.view = view;
-            return;
+            return self.tab.navigate(view);
         }
         if let Some(query) = saved_query(input) {
-            self.tab.gallery = None;
             return self.search_saved(query);
         }
         // A link to a site ck doesn't have (`somechan.org/b/`, not a board called that): ask
@@ -68,22 +65,21 @@ impl App {
     }
 
     pub(super) fn go(&mut self, target: Target) {
-        let from_thread = self.tab.view == View::Thread;
+        let from_thread = self.tab.place_view() == View::Thread;
         // `u` comes back to the thread this was opened from.
         if let Some(b) = self.tab.board.clone().filter(|_| from_thread && target.thread.is_some()) {
             self.leave_trail(b);
         }
-        let back_to = self.tab.view;
+        let back_to = self.tab.place_view();
         let Some(uri) = target.board else {
             self.switch_site(target.site);
-            self.tab.view = View::Boards;
-            return;
+            return self.tab.navigate(View::Boards);
         };
         match (target.thread, target.post) {
             (Some(no), post) => {
                 self.switch_site(target.site);
-                self.open_thread_at(self.find_board(&uri), no, post);
-                if !from_thread && back_to != View::Settings {
+                self.open_thread_at(self.find_board(&uri), no, Opening::at(post));
+                if !from_thread {
                     self.tab.return_to = Some(back_to);
                 }
             }
@@ -91,11 +87,13 @@ impl App {
                 // A post without its thread (FoolFuuka's /post/ links): ask the engine of the
                 // post's site. The tab moves there only once it's found; `u` comes back here.
                 let Some(backend) = self.sites.get(target.site).map(|s| s.backend.clone()) else { return };
+                // The settings close, as they do wherever else this goes.
+                self.tab.close_settings();
                 let board = self.known_boards(target.site).and_then(|b| b.into_iter().find(|b| b.uri == uri));
                 let board = board.unwrap_or_else(|| Board { uri: uri.clone(), title: String::new(), nsfw: None });
                 let trail = self.tab.board.clone().filter(|_| from_thread).and_then(|b| self.trail_here(b));
                 let (label, site) = (format!("Looking up post {post}"), target.site);
-                self.spawn(label, move |_, _, _| backend.find_thread(&uri, post), move |app, r| app.thread_found(site, board, post, trail, r));
+                self.spawn(label, super::Then::Show, move |_, _, _| backend.find_thread(&uri, post), move |app, r| app.thread_found(site, board, post, trail, r));
             }
             (None, None) => {
                 self.switch_site(target.site);

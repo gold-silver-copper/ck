@@ -37,7 +37,7 @@ impl App {
     /// `F`: follow (or stop following) the open or selected thread as a general. Following
     /// also watches it.
     pub fn toggle_follow(&mut self) {
-        let (key, subject, posts, max_no) = match (self.tab.view, &self.tab.board) {
+        let (key, subject, posts, max_no) = match (self.tab.view(), &self.tab.board) {
             (View::Thread, _) => {
                 let Some(t) = &self.tab.thread else { return };
                 let posts = t.live_posts();

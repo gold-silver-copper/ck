@@ -761,7 +761,7 @@ impl World {
                 app.on_key(KeyEvent::from(KeyCode::Enter));
                 // A filter made from a post catches that post, at once.
                 if fresh && app.filter_cfgs.len() == before + 1 {
-                    let at = match app.tab.view {
+                    let at = match app.tab.view() {
                         View::Thread => app.tab.thread.as_ref().and_then(|t| Some((&t.marks, *t.index.get(&post)?))),
                         _ => app.tab.catalog.iter().position(|p| p.no == post).map(|i| (&app.tab.catalog_marks, i)),
                     };
@@ -770,7 +770,7 @@ impl World {
                 }
             }
             Act::ReadToEnd => {
-                let reading = |app: &App| app.tab.view == View::Thread && app.modal_open().is_none() && app.tab.thread.is_some();
+                let reading = |app: &App| app.tab.view() == View::Thread && app.modal_open().is_none() && app.tab.thread.is_some();
                 if !reading(app) {
                     return;
                 }
@@ -791,7 +791,7 @@ impl World {
                 panic!("j never reached the end of the thread");
             }
             Act::PreviewRefresh => {
-                if app.tab.view != View::Thread || app.modal_open().is_some() {
+                if app.tab.view() != View::Thread || app.modal_open().is_some() {
                     return;
                 }
                 if let Some(t) = &mut app.tab.thread
@@ -807,7 +807,7 @@ impl World {
             Act::FilterList(seed) => {
                 let mut rng = Rng::new(*seed);
                 app.on_key(KeyEvent::from(KeyCode::Char(',')));
-                if app.tab.view != View::Settings || app.settings_popup().is_some() {
+                if app.tab.view() != View::Settings || app.settings_popup().is_some() {
                     return;
                 }
                 app.settings_list.state.select(settings::position("Filters"));
@@ -824,7 +824,7 @@ impl World {
                     app.paste("saved");
                     app.on_key(KeyEvent::from(KeyCode::Enter));
                 }
-                let in_saved = app.tab.view == View::Saved;
+                let in_saved = app.tab.view() == View::Saved;
                 if let Some((p, len)) = app.filtered_list().filter(|(_, len)| *len > 0 && in_saved) {
                     p.state.select(Some(k % len));
                     app.on_key(KeyEvent::from(KeyCode::Enter));
@@ -931,7 +931,7 @@ fn replay(seed: u64, acts: &[Act]) -> Result<(), (String, String)> {
                 let a = &world.app;
                 let hid = a.store.hidden_count();
                 let m = a.tab.catalog_marks.hidden_count();
-                eprintln!("TRACE {step} {act}: tab {} view {:?} site {} board {:?} cat_board {} cat {} hidden-marks {m} store {hid:?} filters {}", a.active, a.tab.view, a.current_site().cfg.name, a.tab.board.as_ref().map(|b| &b.uri), a.tab.catalog_board.as_deref().unwrap_or_default(), a.tab.catalog.len(), a.filter_cfgs.len());
+                eprintln!("TRACE {step} {act}: tab {} view {:?} site {} board {:?} cat_board {} cat {} hidden-marks {m} store {hid:?} filters {}", a.active, a.tab.view(), a.current_site().cfg.name, a.tab.board.as_ref().map(|b| &b.uri), a.tab.catalog_board.as_deref().unwrap_or_default(), a.tab.catalog.len(), a.filter_cfgs.len());
                 let w: Vec<String> = a.store.all_watched().iter().map(|w| format!("{}/{}/{} dead={} seen={}", w.key.site, w.key.board, w.key.no, w.status.is_dead(), w.last_seen)).collect();
                 let sv: Vec<String> = a.store.saved.iter().map(|m| format!("{}/{}/{}", m.key.site, m.key.board, m.key.no)).collect();
                 eprintln!("TRACE   watched {w:?} saved {sv:?} status {:?}", a.status.as_ref().map(|s| &s.text));
@@ -1049,8 +1049,9 @@ fn check(app: &App) {
         {
             fail(format!("tab {i}: focus on {f:?}, not a part of post {}", t.selected));
         }
-        if tab.loading.is_some() && tab.req.is_none() {
-            fail(format!("tab {i} is loading with no request"));
+        // A thread place with nothing shown is loading, says why not, or `r` loads it.
+        if tab.place_view() == View::Thread && tab.thread.is_none() && tab.loading().is_none() && tab.failed.is_none() && tab.pending_thread.is_none() {
+            fail(format!("tab {i}: a thread with nothing shown and no way to load it"));
         }
         // A copy shown while loading is marked as one, and there's something to show.
         if tab.cached().is_some() && tab.thread.is_none() {
@@ -1091,8 +1092,8 @@ fn check(app: &App) {
             fail(format!("hint labels overlap: {labels:?}"));
         }
     }
-    if app.settings_popup().is_some() && app.tab.view != View::Settings {
-        fail(format!("a settings popup in {:?}", app.tab.view));
+    if app.settings_popup().is_some() && app.tab.view() != View::Settings {
+        fail(format!("a settings popup in {:?}", app.tab.view()));
     }
     if let Some(p) = app.image_search_panel()
         && p.list.selected().is_some_and(|r| !matches!(p.rows.get(r), Some(Ok(_))))
@@ -1221,12 +1222,12 @@ impl Before {
         let watched_alive = |k: &ThreadKey| app.store.watched(k).is_some_and(|w| !w.status.is_dead());
         let saved = app.store.saved.iter().map(|m| (m.key.clone(), m.dead && app.store.watched(&m.key).is_none())).collect();
         let offline_dead = match (app.tab.saved(), &app.tab.thread) {
-            (Some(o), Some(t)) if o.dead && app.tab.view == View::Thread => {
+            (Some(o), Some(t)) if o.dead && app.tab.view() == View::Thread => {
                 Some(app.key(&t.board, t.no)).filter(|k| !watched_alive(k)).map(|k| (app.active, k))
             }
             _ => None,
         };
-        let shown = app.tab.view == View::Thread && app.tab.gallery.is_none() && app.tab.viewer().is_none();
+        let shown = app.tab.view() == View::Thread && app.tab.gallery.is_none() && app.tab.viewer().is_none();
         let reading = app.tab.thread.as_ref().filter(|_| shown).and_then(|t| {
             let top = t.posts[t.entries.get(t.layout.as_ref()?.entry_at(t.scroll))?.post].no;
             Some((app.active, t.board.clone(), t.no, t.posts.len(), t.at_end(), top))
@@ -1237,7 +1238,7 @@ impl Before {
             .as_ref()
             .filter(|_| app.tab.copy.is_none())
             .map(|t| ((app.active, app.tabs.len()), t.board.clone(), t.no, t.posts.iter().map(|p| p.no).collect(), t.shrinks));
-        Before { saved, in_saved_view: app.tab.view == View::Saved, offline_dead, log: gate.log_len(), filters: app.filter_cfgs.clone(), recursive_hiding: app.hiding.recursive(), reading, live }
+        Before { saved, in_saved_view: app.tab.view() == View::Saved, offline_dead, log: gate.log_len(), filters: app.filter_cfgs.clone(), recursive_hiding: app.hiding.recursive(), reading, live }
     }
 }
 
@@ -1248,7 +1249,7 @@ fn check_images(app: &App, before: &[String]) {
     if asked.is_empty() {
         return;
     }
-    let off_thumbs: Vec<&str> = match app.tab.view {
+    let off_thumbs: Vec<&str> = match app.tab.view() {
         View::Thread => app
             .tab
             .thread
@@ -1260,7 +1261,7 @@ fn check_images(app: &App, before: &[String]) {
         _ => Vec::new(),
     };
     // A thumbnail shared with a post on a board that shows images can be asked for.
-    let shared = |u: &str| match app.tab.view {
+    let shared = |u: &str| match app.tab.view() {
         View::Catalog => app.tab.catalog.iter().filter(|p| app.catalog_images_on(p)).any(|p| p.files.iter().any(|f| f.thumb.as_deref() == Some(u))),
         _ => false,
     };
@@ -1273,7 +1274,7 @@ fn check_images(app: &App, before: &[String]) {
 /// is on screen; reading elsewhere, the same post is at the top.
 fn check_follow(app: &App, before: &Before) {
     let Some((tab, board, no, posts, at_end, top)) = &before.reading else { return };
-    let shown = app.tab.view == View::Thread && app.tab.gallery.is_none() && app.tab.viewer().is_none();
+    let shown = app.tab.view() == View::Thread && app.tab.gallery.is_none() && app.tab.viewer().is_none();
     let Some(t) = app.tab.thread.as_ref().filter(|t| shown && app.active == *tab && t.board == *board && t.no == *no && t.posts.len() > *posts) else { return };
     let Some(l) = &t.layout else { return };
     let e = t.entry();
@@ -1294,7 +1295,7 @@ fn check_follow(app: &App, before: &Before) {
 /// layout would give.
 fn check_layout(app: &mut App) {
     let clock = app.clock;
-    let drawn = app.tab.view == View::Thread && app.tab.gallery.is_none() && app.tab.viewer().is_none();
+    let drawn = app.tab.view() == View::Thread && app.tab.gallery.is_none() && app.tab.viewer().is_none();
     let Some(t) = app.tab.thread.as_mut().filter(|_| drawn) else { return };
     let Some((width, thumbs)) = t.layout.as_ref().map(|l| (l.width, l.thumbs_on)) else { return };
     let full = crate::ui::layout_all(t, width, thumbs, clock);
@@ -1385,7 +1386,7 @@ fn check_saved(app: &App, before: &Before, calls: &[String], removed: &mut HashS
     for (key, prunable) in &before.saved {
         if app.store.saved(key).is_none() {
             // (A step can go back into the Saved view and press x twice there.)
-            let in_saved = before.in_saved_view || app.tab.view == View::Saved;
+            let in_saved = before.in_saved_view || app.tab.view() == View::Saved;
             assert!(in_saved || *prunable, "the saved copy of {key:?} vanished outside the Saved view");
             removed.insert(key.clone());
         }
@@ -1407,7 +1408,7 @@ fn check_saved(app: &App, before: &Before, calls: &[String], removed: &mut HashS
 fn check_idle(app: &App) {
     let stuck: Vec<String> = std::iter::once(&app.tab)
         .chain(app.tabs.iter().enumerate().filter(|&(i, _)| i != app.active).map(|(_, t)| t))
-        .filter_map(|t| t.loading.clone())
+        .filter_map(|t| t.loading().map(String::from))
         .collect();
     assert!(stuck.is_empty(), "still loading with nothing in flight: {stuck:?}");
     assert!(app.refreshing.is_empty(), "refreshes stuck: {:?}", app.refreshing);
@@ -1450,7 +1451,7 @@ fn closing_a_tab_isnt_a_refresh() {
     let mut app = crate::test_fixtures::local_app();
     let open = |app: &mut App, n: u64| {
         app.tab.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
-        app.tab.view = View::Thread;
+        app.tab.navigate(View::Thread);
         app.set_thread(crate::test_fixtures::posts_upto(n));
     };
     open(&mut app, 5);
