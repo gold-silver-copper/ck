@@ -19,9 +19,14 @@ pub struct Gallery {
 impl App {
     pub fn open_gallery(&mut self) {
         let Some(t) = &self.tab.thread else { return };
-        // In a conversation, its files.
-        let files: Vec<(usize, Attachment)> =
-            t.posts.iter().enumerate().filter(|&(i, _)| t.in_view(i)).flat_map(|(i, p)| p.files.iter().map(move |f| (i, f.clone()))).collect();
+        // In a conversation, its files; not hidden posts' (unless shown).
+        let files: Vec<(usize, Attachment)> = t
+            .posts
+            .iter()
+            .enumerate()
+            .filter(|&(i, _)| t.in_view(i) && !t.is_collapsed(i))
+            .flat_map(|(i, p)| p.files.iter().map(move |f| (i, f.clone())))
+            .collect();
         if files.is_empty() {
             self.info(if t.conversation.is_some() { "The conversation has no files" } else { "Thread has no files" });
             return;

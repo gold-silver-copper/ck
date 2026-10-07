@@ -699,7 +699,7 @@ impl App {
             View::History => (self.visible_history().len(), &mut self.history_list),
             View::Saved => (self.visible_saved().len(), &mut self.saved_list),
             View::Settings => (settings::settings().count(), &mut self.settings_list),
-            View::Search => (self.tab.search.as_ref().map_or(0, |s| s.hits.len()), &mut self.tab.search_list),
+            View::Search => (self.visible_hits().len(), &mut self.tab.search_list),
             View::Thread => return None,
         })
         .map(|(len, p)| (p, len))
@@ -1006,8 +1006,7 @@ impl App {
 
     /// What filters and hiding by hand say about posts (on the board `board_of` gives each).
     /// (`thread`: the posts of one thread, the first its OP; else a catalog's OPs.)
-    fn marks(&self, posts: &[Post], thread: bool, board_of: impl Fn(&Post) -> String) -> Vec<Mark> {
-        let site = &self.current_site().cfg.name;
+    fn marks(&self, site: &str, posts: &[Post], thread: bool, board_of: impl Fn(&Post) -> String) -> Vec<Mark> {
         let mut hidden: HashMap<String, HashSet<u64>> = HashMap::new();
         let mark = |(i, p): (usize, &Post)| {
             let board = board_of(p);
@@ -1023,8 +1022,8 @@ impl App {
 
     /// What filters and hiding say about a thread's posts, replies to hidden ones included
     /// (`recursive_hiding`, or a `recursive` filter).
-    fn thread_marks(&self, t: &ThreadView) -> Vec<Mark> {
-        let mut marks = self.marks(&t.posts, true, |_| t.board.clone());
+    fn thread_marks(&self, site: &str, t: &ThreadView) -> Vec<Mark> {
+        let mut marks = self.marks(site, &t.posts, true, |_| t.board.clone());
         let all = self.recursive_hiding;
         crate::filter::spread_hiding(&mut marks, &t.posts, &t.index, &t.backlinks, |m| all || m.recursive);
         marks
@@ -1048,7 +1047,7 @@ impl App {
     }
 
     pub fn remark_catalog(&mut self) {
-        let marks = self.marks(&self.tab.catalog, false, |p| self.board_of(p));
+        let marks = self.marks(&self.current_site().cfg.name, &self.tab.catalog, false, |p| self.board_of(p));
         self.tab.catalog_marks = marks;
     }
 
@@ -1059,7 +1058,7 @@ impl App {
 
     pub fn remark_thread(&mut self) {
         let Some(t) = &self.tab.thread else { return };
-        let marks = self.thread_marks(t);
+        let marks = self.thread_marks(&self.current_site().cfg.name, t);
         let mine = self.store.watched(&self.key(&t.board, t.no)).map(|w| w.mine.iter().copied().collect()).unwrap_or_default();
         let show = self.show_hidden;
         if let Some(t) = &mut self.tab.thread {
@@ -1067,6 +1066,10 @@ impl App {
             t.mine = mine;
             t.show_hidden = show;
             t.layout = None;
+            // What's hidden changed, so what a search finds may have.
+            if !t.search.is_empty() {
+                t.set_search(t.search.clone());
+            }
             // A post just collapsed (hidden) has no parts to focus.
             if t.focus.as_ref().is_some_and(|f| !t.parts_of(t.entry()).contains(f)) {
                 t.focus = None;
@@ -1101,6 +1104,7 @@ impl App {
         self.info(if hidden { format!("Hid {what} {no} ({show} shows hidden ones)") } else { format!("Unhid {what} {no}") });
         self.remark_catalog();
         self.remark_thread();
+        self.remark_search();
         self.clamp_list();
     }
 
@@ -1722,6 +1726,7 @@ impl App {
             View::Search => {
                 if let Some(s) = &mut self.tab.search {
                     s.hits.clear();
+                    s.hidden.clear();
                     s.pages = 0;
                 }
                 self.load_search_page();

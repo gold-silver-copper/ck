@@ -322,12 +322,15 @@ the viewer's own commands apply.
 
 `H` hides the selected catalog thread or thread post; `Z` shows hidden ones again
 (dimmed and marked) so they can be unhidden with another `H`. Hidden posts collapse to
-one line, so replies to them still make sense. What you hide is remembered per board in
+one line, so replies to them still make sense. They're marked just "hidden", not why
+(that would show what a filter or hidden word hides); `H` on one says why. Until `Z`
+shows them, they're left out of the thread's search and gallery too, and a quote of one
+previews only "hidden". What you hide is remembered per board in
 the data directory.
 
 `recursive_hiding = true` (or Settings › Hidden replies) hides the replies too: in a
 thread, posts that quote a hidden post, and the posts that quote those, on down, collapse
-to "hidden: a reply to hidden No.123". `recursive = true` on a `[[filter]]` does that for
+too. `recursive = true` on a `[[filter]]` does that for
 what the filter hides (also in Settings › Filters, as "Replies"). Unhiding the post they
 reply to shows them again; `H` on one of them says which post that is. The OP never
 counts (everyone quotes it), and catalogs aren't affected.
@@ -417,7 +420,8 @@ number.
 
 `w` watches the open thread, or the selected one in a catalog. The "Watched" entry at the
 top of the Sites view lists watched threads from all sites with their post counts and how
-many posts are new; threads that 404 stay listed as "archived/deleted". "History" lists the
+many posts are new (posts you've hidden, or your filters and hidden words hide, aren't
+counted, nor notified about); threads that 404 stay listed as "archived/deleted". "History" lists the
 last 100 threads you opened. `x` removes an entry from either list.
 
 The open thread refreshes in the background every 10 seconds and watched threads every
@@ -554,6 +558,9 @@ it's one (desuarchive, palanq, b4k), or the archive configured for it with `arch
 thread; `enter` opens the thread on the archive with the post selected, `esc` goes back.
 Each page of 25 results is one request; going down past the last one (or `n`) loads the
 next. Archives limit how often you can search; when they say no, ck shows their message.
+Posts your filters or hidden words hide, or that you've hidden, are left out of the
+results (the title says how many) until `Z` shows them, marked "hidden"; this goes for
+`:saved` searches too.
 
 ## Images
 

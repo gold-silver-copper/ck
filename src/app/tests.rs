@@ -371,6 +371,34 @@ fn filters_and_hiding() {
 }
 
 #[test]
+fn hidden_posts_are_not_new_in_watched_threads() {
+    let mut app = local_app();
+    let key = ThreadKey { site: "a".into(), board: "x".into(), no: 1 };
+    let post = |no, quotes: Vec<u64>, text: &str| Post { no, quotes, body: vec![Line::raw(text.to_string())], ..Default::default() };
+    app.filters = crate::filter::tests::filters("[[filter]]\npattern = \"spam\"\n\n[[filter]]\npattern = \"rust\"\naction = \"highlight\"\nnotify = true\n").unwrap();
+    app.recursive_hiding = true;
+    app.store.toggle_watch(key.clone(), "One".into(), 2, 5);
+    app.store.watched_mut(&key).unwrap().mine.push(5);
+    let start = vec![post(1, vec![], ""), post(5, vec![], "")];
+    app.refreshed(key.clone(), Ok(start.clone()));
+    // A hidden reply to yours, a reply to that (hidden with it), and one you can see.
+    let mut posts = start;
+    posts.extend([post(6, vec![5], "buy spam"), post(7, vec![6, 5], "agreed"), post(8, vec![5], "hello")]);
+    app.refreshed(key.clone(), Ok(posts.clone()));
+    app.flush_notes(Instant::now());
+    assert_eq!(app.notified, ["New reply to your post in /x/ One"]);
+    let w = app.store.watched(&key).unwrap();
+    assert_eq!((w.unread, w.replies), (1, 1));
+    // A `notify` filter still tells about what it catches, hidden or not.
+    app.notified.clear();
+    posts.push(post(9, vec![], "rust spam"));
+    app.refreshed(key.clone(), Ok(posts));
+    app.flush_notes(Instant::now());
+    assert_eq!(app.notified, ["A new post caught by \"rust\" in /x/ One"]);
+    assert_eq!(app.store.watched(&key).unwrap().unread, 1);
+}
+
+#[test]
 fn notifies_about_new_posts_and_replies_to_yours() {
     let mut app = local_app();
     let key = |no| ThreadKey { site: "a".into(), board: "x".into(), no };
@@ -616,6 +644,49 @@ fn grid_moves_in_two_dimensions() {
 }
 
 #[test]
+fn the_gallery_leaves_out_hidden_posts() {
+    let mut app = local_app();
+    app.images = crate::images::Images::offline();
+    app.tab.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
+    let file = |name: &str| Attachment { filename: name.into(), url: format!("http://127.0.0.1:3/x/src/{name}"), ..Default::default() };
+    let post = |no, files: Vec<Attachment>| Post { no, files, ..Default::default() };
+    app.tab.thread = Some(ThreadView::new("x".into(), 1, vec![post(1, vec![file("a.png")]), post(2, vec![file("hidden.png")]), post(3, vec![file("b.jpg")])]));
+    app.tab.view = View::Thread;
+    let site = app.current_site().cfg.name.clone();
+    app.store.toggle_hidden(&site, "x", 2);
+    app.remark_thread();
+    let names = |app: &App| app.tab.gallery.as_ref().unwrap().files.iter().map(|(_, f)| f.filename.clone()).collect::<Vec<_>>();
+    app.act(Action::Gallery);
+    assert_eq!(names(&app), ["a.png", "b.jpg"]);
+    // Z shows it again, and its file.
+    app.tab.gallery = None;
+    app.act(Action::ShowHidden);
+    app.act(Action::Gallery);
+    assert_eq!(names(&app), ["a.png", "hidden.png", "b.jpg"]);
+}
+
+#[test]
+fn searching_a_thread_passes_hidden_posts_over() {
+    let mut app = local_app();
+    let post = |no, text: &str| Post { no, body: vec![Line::raw(text.to_string())], ..Default::default() };
+    app.hidden_words = vec!["crypto".into()];
+    app.filters = crate::filter::Filters::new(&[]).unwrap().with_words(&app.hidden_words).unwrap();
+    app.tab.thread = Some(ThreadView::new("x".into(), 1, vec![post(1, "a thread"), post(2, "buy crypto"), post(3, "crypto is bad, says a post you can read")]));
+    app.tab.view = View::Thread;
+    let site = app.current_site().cfg.name.clone();
+    app.store.toggle_hidden(&site, "x", 3);
+    app.remark_thread();
+    let matches = |app: &App| app.tab.thread.as_ref().unwrap().matches.clone();
+    app.tab.thread.as_mut().unwrap().set_search("crypto".into());
+    assert!(matches(&app).is_empty());
+    // Z shows them, and they're found; hidden again, they aren't.
+    app.act(Action::ShowHidden);
+    assert_eq!(matches(&app), [1, 2]);
+    app.act(Action::ShowHidden);
+    assert!(matches(&app).is_empty());
+}
+
+#[test]
 fn gallery_of_the_threads_files() {
     let dir = tempfile::tempdir().unwrap();
     let mut app = local_app();
@@ -689,6 +760,47 @@ fn archive_search_and_back() {
     app.sites[0].cfg.archive = None;
     app.act(Action::ArchiveSearch);
     assert!(app.typing.is_none() && app.status.as_ref().unwrap().text.contains("no archive"));
+}
+
+#[test]
+fn search_results_leave_out_hidden_posts() {
+    let mut app = app_with(
+        "[[site]]\nname = \"chan\"\nkind = \"vichan\"\nurl = \"http://127.0.0.1:3\"\nboards = [\"g\"]\narchive = \"arch\"\n\
+         [[site]]\nname = \"arch\"\nkind = \"foolfuuka\"\nurl = \"http://localhost:3\"\nboards = [\"g\"]",
+    );
+    app.tab.board = Some(Board { uri: "g".into(), title: String::new(), nsfw: None });
+    app.tab.view = View::Catalog;
+    app.act(Action::ArchiveSearch);
+    app.on_key(KeyEvent::from(KeyCode::Char('x')));
+    app.on_key(KeyEvent::from(KeyCode::Enter));
+    let page = crate::backend::foolfuuka::parse_search(&crate::backend::fixture("foolfuuka_search.json")).unwrap();
+    let nos: Vec<u64> = page.hits.iter().map(|(_, p)| p.no).collect();
+    // One hidden by hand, one by a hidden word (the longest word in it, and in no other).
+    app.store.toggle_hidden("arch", "g", nos[0]);
+    let text = |k: usize| page.hits[k].1.plain_text().to_lowercase();
+    let word = text(2)
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| (0..4).all(|k| k == 2 || !text(k).contains(w)))
+        .max_by_key(|w| w.len())
+        .unwrap()
+        .to_string();
+    app.hidden_words = vec![word];
+    app.filters = crate::filter::Filters::new(&[]).unwrap().with_words(&app.hidden_words).unwrap();
+    app.handle(answer(app.tab.req.unwrap(), |a, (page, r)| a.search_results(page, r), (1, Ok(page))));
+    let shown = |app: &App| app.visible_hits().iter().map(|&k| app.tab.search.as_ref().unwrap().hits[k].1.no).collect::<Vec<_>>();
+    assert_eq!(shown(&app), [nos[1], nos[3]]);
+    // Enter opens the one selected among those shown.
+    app.tab.search_list.state.select(Some(1));
+    app.enter();
+    assert_eq!(app.tab.pending_post, Some(nos[3]));
+    app.back();
+    // Z shows them all; unhiding by hand marks the results again.
+    app.act(Action::ShowHidden);
+    assert_eq!(shown(&app), nos);
+    app.act(Action::ShowHidden);
+    app.store.toggle_hidden("arch", "g", nos[0]);
+    app.remark_search();
+    assert_eq!(shown(&app), [nos[0], nos[1], nos[3]]);
 }
 
 #[test]
@@ -2417,6 +2529,29 @@ fn searching_inside_saved_threads() {
 }
 
 #[test]
+fn searching_saved_threads_leaves_out_hidden_posts() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = saving_app(dir.path(), 1000);
+    let key = |board: &str, no| ThreadKey { site: "a".into(), board: board.into(), no };
+    app.store.keep_thread(&key("x", 1), "one", "u", &posts_saying(&[(1, "about rust"), (2, "nothing here"), (3, "Rust again")]), 900);
+    app.store.keep_thread(&key("xy", 7), "seven", "u", &posts_saying(&[(7, "no match"), (8, "a crab: RUST")]), 950);
+    app.flush_writes();
+    // A hidden word, and a post hidden by hand on its own board.
+    app.hidden_words = vec!["crab".into()];
+    app.filters = crate::filter::Filters::new(&[]).unwrap().with_words(&app.hidden_words).unwrap();
+    app.store.toggle_hidden("a", "x", 3);
+    app.goto_str("saved rust");
+    settle_until(&mut app, |a| a.tab.search.as_ref().unwrap().saved.as_ref().unwrap().finished);
+    let shown = |app: &App| app.visible_hits().iter().map(|&k| app.tab.search.as_ref().unwrap().hits[k].1.no).collect::<Vec<_>>();
+    assert_eq!(shown(&app), [1]);
+    // Everything found hidden: said, with how to see it.
+    app.goto_str("saved crab");
+    settle_until(&mut app, |a| a.tab.search.as_ref().unwrap().saved.as_ref().unwrap().finished);
+    assert!(shown(&app).is_empty());
+    assert_eq!(app.status.as_ref().unwrap().text, "1 result, all hidden (Z shows them)");
+}
+
+#[test]
 fn searching_saved_threads_with_none_saved() {
     let dir = tempfile::tempdir().unwrap();
     let mut app = saving_app(dir.path(), 1000);
@@ -2859,7 +2994,7 @@ fn replies_to_hidden_posts_hide_with_them() {
     app.tab.view = View::Thread;
     assert_eq!(hidden(&app), [None, Some(Hidden::ByHand), r(2), r(3), None, deep.clone(), r(6)]);
     let screen: String = draw_at(&mut app, 100, 40).content.iter().map(|c| c.symbol()).collect();
-    assert!(screen.contains("No.3  hidden: a reply to hidden No.2"), "{screen}");
+    assert!(screen.contains("No.3  hidden") && !screen.contains("reply to hidden"), "{screen}");
     // H on a reply says where it comes from; unhiding the post it replies to shows it.
     app.tab.thread.as_mut().unwrap().selected = 3;
     app.act(Action::Hide);

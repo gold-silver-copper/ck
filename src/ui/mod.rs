@@ -23,7 +23,7 @@ use crate::http;
 use crate::images::{Images, Kind, State};
 use crate::keys::{self, Action, KeyMap};
 use crate::config::CatalogLayout;
-use crate::filter::{Hidden, Mark};
+use crate::filter::Mark;
 use crate::markup;
 use crate::model::{Attachment, Post};
 use crate::theme::{self, ROLES, Theme, theme};
@@ -390,6 +390,10 @@ fn location(app: &App) -> (Vec<String>, Vec<Span<'static>>) {
             match s.total {
                 Some(t) => meta.push(format!("{} of {}", s.hits.len(), plural(t as usize, "result"))),
                 None => meta.push(plural(s.hits.len(), "result")),
+            }
+            let hidden = s.hidden.iter().filter(|&&h| h).count();
+            if hidden > 0 {
+                meta.push(format!("{hidden} hidden"));
             }
             if s.saved.is_some() {
                 vec!["Saved".into(), format!("Search: {}", truncate(&s.query, 40))]

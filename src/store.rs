@@ -331,6 +331,11 @@ impl Store {
         self.hidden.get(&board_key(site, board)).into_iter().flatten().copied().collect()
     }
 
+    /// Whether a thread or post is hidden by hand.
+    pub fn is_hidden(&self, site: &str, board: &str, no: u64) -> bool {
+        self.hidden.get(&board_key(site, board)).is_some_and(|l| l.contains(&no))
+    }
+
     /// Hide a thread or post, or unhide it; returns whether it's hidden now.
     pub fn toggle_hidden(&mut self, site: &str, board: &str, no: u64) -> bool {
         let key = board_key(site, board);
