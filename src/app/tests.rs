@@ -644,6 +644,28 @@ fn grid_moves_in_two_dimensions() {
 }
 
 #[test]
+fn the_gallery_leaves_out_hidden_posts() {
+    let mut app = local_app();
+    app.images = crate::images::Images::offline();
+    app.tab.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
+    let file = |name: &str| Attachment { filename: name.into(), url: format!("http://127.0.0.1:3/x/src/{name}"), ..Default::default() };
+    let post = |no, files: Vec<Attachment>| Post { no, files, ..Default::default() };
+    app.tab.thread = Some(ThreadView::new("x".into(), 1, vec![post(1, vec![file("a.png")]), post(2, vec![file("hidden.png")]), post(3, vec![file("b.jpg")])]));
+    app.tab.view = View::Thread;
+    let site = app.current_site().cfg.name.clone();
+    app.store.toggle_hidden(&site, "x", 2);
+    app.remark_thread();
+    let names = |app: &App| app.tab.gallery.as_ref().unwrap().files.iter().map(|(_, f)| f.filename.clone()).collect::<Vec<_>>();
+    app.act(Action::Gallery);
+    assert_eq!(names(&app), ["a.png", "b.jpg"]);
+    // Z shows it again, and its file.
+    app.tab.gallery = None;
+    app.act(Action::ShowHidden);
+    app.act(Action::Gallery);
+    assert_eq!(names(&app), ["a.png", "hidden.png", "b.jpg"]);
+}
+
+#[test]
 fn gallery_of_the_threads_files() {
     let dir = tempfile::tempdir().unwrap();
     let mut app = local_app();
