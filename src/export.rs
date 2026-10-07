@@ -172,8 +172,10 @@ pre {{ background: {code_bg}; color: {code}; padding: 8px; overflow-x: auto; whi
         if !files.is_empty() {
             out.push_str(r#"<div class="files">"#);
             for (f, name, saved) in &files {
-                let href = if *saved { name.clone() } else { f.url.clone() };
-                let img = if *saved && f.is_image() { Some(name.clone()) } else { f.thumb.clone() };
+                // A saved file's name is a relative address: `#`, `%` and spaces mean something there.
+                let local = crate::http::encode_segment(name);
+                let href = if *saved { local.clone() } else { f.url.clone() };
+                let img = if *saved && f.is_image() { Some(local) } else { f.thumb.clone() };
                 let _ = write!(out, r#"<a href="{}">"#, attr(&href));
                 if let Some(src) = img {
                     let _ = write!(out, r#"<img src="{}" alt="{}" loading="lazy">"#, attr(&src), attr(&f.filename));
@@ -304,6 +306,19 @@ mod tests {
         assert_eq!(v["posts"][0]["files"][0]["saved_as"], "1_cat.png");
         assert_eq!(v["posts"][0]["text"], "Hello world & secret\n>green");
         assert!(!dir.path().join("thread.html.tmp").exists());
+    }
+
+    #[test]
+    fn saved_file_names_are_addresses() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut p = Post { no: 1, ..Default::default() };
+        p.files = vec![Attachment { filename: "a#b 100%.png".into(), url: "https://i.example/1.png".into(), ..Default::default() }];
+        std::fs::write(dir.path().join("1_a#b 100%.png"), b"x").unwrap();
+        let about = About { site: "4chan", board: "g", thread: 1, url: "https://x/", saved: 0 };
+        let html = html(&[p], &about, &crate::theme::theme(), dir.path());
+        assert!(html.contains(r#"<a href="1_a%23b%20100%25.png"><img src="1_a%23b%20100%25.png""#), "{html}");
+        // The name shown is the file's own.
+        assert!(html.contains(r#"<div class="file">a#b 100%.png</div>"#), "{html}");
     }
 
     #[test]
