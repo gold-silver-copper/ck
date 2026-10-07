@@ -666,6 +666,27 @@ fn the_gallery_leaves_out_hidden_posts() {
 }
 
 #[test]
+fn searching_a_thread_passes_hidden_posts_over() {
+    let mut app = local_app();
+    let post = |no, text: &str| Post { no, body: vec![Line::raw(text.to_string())], ..Default::default() };
+    app.hidden_words = vec!["crypto".into()];
+    app.filters = crate::filter::Filters::new(&[]).unwrap().with_words(&app.hidden_words).unwrap();
+    app.tab.thread = Some(ThreadView::new("x".into(), 1, vec![post(1, "a thread"), post(2, "buy crypto"), post(3, "crypto is bad, says a post you can read")]));
+    app.tab.view = View::Thread;
+    let site = app.current_site().cfg.name.clone();
+    app.store.toggle_hidden(&site, "x", 3);
+    app.remark_thread();
+    let matches = |app: &App| app.tab.thread.as_ref().unwrap().matches.clone();
+    app.tab.thread.as_mut().unwrap().set_search("crypto".into());
+    assert!(matches(&app).is_empty());
+    // Z shows them, and they're found; hidden again, they aren't.
+    app.act(Action::ShowHidden);
+    assert_eq!(matches(&app), [1, 2]);
+    app.act(Action::ShowHidden);
+    assert!(matches(&app).is_empty());
+}
+
+#[test]
 fn gallery_of_the_threads_files() {
     let dir = tempfile::tempdir().unwrap();
     let mut app = local_app();

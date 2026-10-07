@@ -1066,6 +1066,10 @@ impl App {
             t.mine = mine;
             t.show_hidden = show;
             t.layout = None;
+            // What's hidden changed, so what a search finds may have.
+            if !t.search.is_empty() {
+                t.set_search(t.search.clone());
+            }
             // A post just collapsed (hidden) has no parts to focus.
             if t.focus.as_ref().is_some_and(|f| !t.parts_of(t.entry()).contains(f)) {
                 t.focus = None;

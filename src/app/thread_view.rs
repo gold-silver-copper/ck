@@ -383,7 +383,8 @@ impl ThreadView {
                 }
                 text.get_or_insert_with(|| self.post_text(i)).contains(&needle)
             };
-            let m = texts.iter_mut().enumerate().filter_map(|(i, text)| (self.in_view(i) && found(i, text)).then_some(i)).collect();
+            // Not in hidden posts (unless shown): a match would say what they hide.
+            let m = texts.iter_mut().enumerate().filter_map(|(i, text)| (self.in_view(i) && !self.is_collapsed(i) && found(i, text)).then_some(i)).collect();
             self.search_texts = texts;
             m
         };
