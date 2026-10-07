@@ -2042,7 +2042,7 @@ fn saving_needs_a_target_or_asks_first() {
     run_menu_row(&mut app, "save all the thread's files…");
     let c = app.confirm().unwrap();
     assert_eq!(c.lines[0], "3 files (3.0 MB in all)");
-    assert!(c.lines[1].starts_with("to ") && c.lines[1].ends_with(&dir.path().display().to_string()));
+    assert!(c.lines[1].starts_with("to ") && c.lines[1].ends_with(&super::settings::tilde(&dir.path().display().to_string())));
     // Anything but enter cancels.
     press(&mut app, 'j');
     assert!(app.confirm().is_none() && total(&app) == 1);
