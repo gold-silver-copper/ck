@@ -64,6 +64,15 @@ impl Search {
         Self { saved: None, board: board.into(), query: query.into(), hits: page.hits, hidden: Vec::new(), total: page.total, pages: 1, back: (0, View::Catalog) }
     }
 
+    /// The thread hit `k` is in: its saved copy, or the archive's thread on `site`.
+    pub(super) fn thread_of(&self, k: usize, site: &str) -> Option<ThreadKey> {
+        let (no, p) = self.hits.get(k)?;
+        match &self.saved {
+            Some(saved) => saved.keys.get(k).cloned(),
+            None => Some(ThreadKey { site: site.to_string(), board: p.board.clone().unwrap_or_else(|| self.board.clone()), no: *no }),
+        }
+    }
+
     fn is_hidden(&self, k: usize) -> bool {
         self.hidden.get(k).copied().unwrap_or(false)
     }
@@ -260,15 +269,8 @@ impl App {
     pub(super) fn remark_search(&mut self) {
         let site = self.current_site().cfg.name.clone();
         let Some(s) = &mut self.tab.search else { return };
-        let keys = s.saved.as_ref().map(|x| &x.keys);
-        s.hidden = s
-            .hits
-            .iter()
-            .enumerate()
-            .map(|(k, (thread, p))| match keys.and_then(|keys| keys.get(k)) {
-                Some(key) => hit_hidden(&self.filters, &self.store, (&key.site, &key.board), *thread, p),
-                None => hit_hidden(&self.filters, &self.store, (&site, p.board.as_deref().unwrap_or(&s.board)), *thread, p),
-            })
+        s.hidden = (s.hits.iter().enumerate())
+            .map(|(k, (thread, p))| s.thread_of(k, &site).is_some_and(|key| hit_hidden(&self.filters, &self.store, (&key.site, &key.board), *thread, p)))
             .collect();
     }
 

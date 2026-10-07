@@ -129,7 +129,7 @@ impl App {
             self.tab.catalog_cached = Some(tabs::Offline { saved: fetched, dead: false });
             self.show_catalog(posts);
             if let Some(no) = self.tab.pending_catalog
-                && let Some(i) = self.catalog_row(no)
+                && let Some(i) = self.row_of(View::Catalog, &RowKey::Thread(no))
             {
                 self.tab.catalog_list.state.select(Some(i));
             }
@@ -142,7 +142,7 @@ impl App {
         self.tab.catalog_cached = None;
         let keep = self.tab.pending_catalog.or_else(|| self.selected_catalog_no());
         self.show_catalog(posts);
-        self.tab.pending_catalog = keep.filter(|&no| self.catalog_row(no).is_none());
+        self.tab.pending_catalog = keep.filter(|&no| self.row_of(View::Catalog, &RowKey::Thread(no)).is_none());
     }
 
     pub(super) fn catalog_arrived(&mut self, res: Result<Vec<Post>>) {
@@ -153,7 +153,7 @@ impl App {
                 self.show_catalog(posts);
                 self.catalog_seen();
                 if let Some(no) = self.tab.pending_catalog.take()
-                    && let Some(i) = self.catalog_row(no)
+                    && let Some(i) = self.row_of(View::Catalog, &RowKey::Thread(no))
                 {
                     self.tab.catalog_list.state.select(Some(i));
                 }
@@ -292,11 +292,6 @@ impl App {
         self.spawn(format!("Loading thread {no}"), job, App::thread_arrived);
     }
 
-    /// Where thread `no` is among the catalog's rows shown.
-    fn catalog_row(&self, no: u64) -> Option<usize> {
-        self.visible_catalog().iter().position(|&k| self.tab.catalog.get(k).is_some_and(|p| p.no == no))
-    }
-
     /// The selected catalog thread's number, when the catalog is shown.
     fn selected_catalog_no(&self) -> Option<u64> {
         self.selected_index().filter(|_| self.tab.view == View::Catalog).and_then(|i| self.tab.catalog.get(i)).map(|p| p.no)
@@ -308,7 +303,7 @@ impl App {
         let selected = self.tab.pending_catalog.or_else(|| self.selected_catalog_no());
         self.tab.catalog = posts;
         self.remark_catalog();
-        if let Some(i) = selected.and_then(|no| self.catalog_row(no)) {
+        if let Some(i) = selected.and_then(|no| self.row_of(View::Catalog, &RowKey::Thread(no))) {
             self.tab.catalog_list.state.select(Some(i));
         }
         let len = self.visible_catalog().len();

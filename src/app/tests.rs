@@ -3512,6 +3512,35 @@ fn gallery_files_keep_their_posts_when_the_live_thread_replaces_a_cached_copy() 
 }
 
 #[test]
+fn a_thread_hint_picks_its_post_after_a_refresh_moves_it() {
+    let mut app = thread_app();
+    app.set_cached_thread(nos(&[1, 2, 3, 4, 5]), 0);
+    draw_at(&mut app, 100, 30);
+    app.on_key(KeyEvent::from(KeyCode::Char('f')));
+    let label = app.hints().unwrap().targets.iter().find(|x| matches!(x.to, HintTo::Thread(ref p, None) if p == &[4])).unwrap().label.clone();
+    // The label went up on No.4; the live thread, without No.2, arrives before it's typed.
+    app.set_thread(nos(&[1, 3, 4, 5]));
+    type_text(&mut app, &label);
+    assert_eq!(app.tab.thread.as_ref().unwrap().current().unwrap().no, 4);
+}
+
+#[test]
+fn a_catalog_hint_opens_its_thread_after_a_refresh_reorders_them() {
+    let mut app = local_app();
+    app.tab.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
+    app.tab.catalog_board = Some("x".into());
+    app.tab.view = View::Catalog;
+    app.show_catalog(nos(&[1, 2, 3]));
+    draw_at(&mut app, 100, 30);
+    app.on_key(KeyEvent::from(KeyCode::Char('f')));
+    let label = app.hints().unwrap().targets.iter().find(|x| matches!(x.to, HintTo::Row(RowKey::Thread(2)))).unwrap().label.clone();
+    // The label went up on No.2; a refresh bumps No.3 to the top before it's typed.
+    app.show_catalog(nos(&[3, 1, 2]));
+    type_text(&mut app, &label);
+    assert_eq!((app.tab.view, app.tab.pending_thread), (View::Thread, Some(2)));
+}
+
+#[test]
 fn u_skips_a_post_a_refresh_took_away() {
     let mut app = thread_app();
     app.set_cached_thread(nos(&[1, 2, 3, 4, 5]), 0);
@@ -3530,4 +3559,30 @@ fn u_skips_a_post_a_refresh_took_away() {
     assert!(t.jump_to(3) && app.can_jump_back());
     app.set_thread(nos(&[1, 3]));
     assert!(!app.can_jump_back());
+}
+
+#[test]
+fn a_recent_board_label_opens_its_board_after_another_comes_first() {
+    let mut app = local_app();
+    app.store.recent_boards = vec!["a/x".into(), "b/y".into()];
+    app.tab.view = View::Sites;
+    draw_at(&mut app, 100, 30);
+    app.on_key(KeyEvent::from(KeyCode::Char('f')));
+    let label = app.hints().unwrap().targets.iter().find(|x| matches!(x.to, HintTo::Row(RowKey::Recent(ref b)) if b == "a/x")).unwrap().label.clone();
+    // The label went up on a/x; a catalog asked for before arrives, and its board goes first.
+    app.store.board_opened("a", "xy");
+    type_text(&mut app, &label);
+    assert_eq!((app.tab.view, app.tab.board.as_ref().unwrap().uri.as_str()), (View::Catalog, "x"));
+}
+
+#[test]
+fn search_hits_with_the_same_numbers_in_two_saved_copies_are_told_apart() {
+    let mut app = local_app();
+    let key = |board: &str| ThreadKey { site: "a".into(), board: board.into(), no: 100 };
+    let op = Post { no: 100, ..Default::default() };
+    let mut s = Search::for_tests("", "q", crate::backend::SearchPage { hits: vec![(100, op.clone()), (100, op)], total: None });
+    s.saved = Some(SavedSearch::for_tests(vec![key("x"), key("xy")], 2, 2, true));
+    app.tab.search = Some(s);
+    let rows = app.row_keys(View::Search);
+    assert_eq!(rows.iter().map(|k| app.row_of(View::Search, k)).collect::<Vec<_>>(), [Some(0), Some(1)]);
 }

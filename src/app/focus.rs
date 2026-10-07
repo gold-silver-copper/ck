@@ -6,7 +6,7 @@ use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::{Position, Rect};
 use ratatui::widgets::ListState;
 
-use super::{App, Hit, Media, Part, Popup, SiteRow, TabPopup, View, Viewer, list_move};
+use super::{App, Hit, Media, Part, Popup, RowKey, SiteRow, TabPopup, View, Viewer, list_move};
 use crate::download;
 use crate::keys::{Action, Scope};
 use crate::model::{Link, Target};
@@ -42,11 +42,14 @@ pub struct HintTarget {
 
 #[derive(Debug, Clone)]
 pub enum HintTo {
-    /// An entry of the thread, or one of its parts.
-    Thread(usize, Option<Part>),
-    /// A row of the list (or a card of the grid).
-    Row(usize),
+    /// An entry of the thread (by its path of post numbers), or one of its parts.
+    Thread(Vec<u64>, Option<Part>),
+    /// A row of the list (or a card of the grid), by what it shows.
+    Row(RowKey),
 }
+
+/// A label picked for what a refresh has taken away.
+const CHANGED: &str = "That's changed since the labels went up: f labels it again";
 
 /// Hint labels: one letter while they last, then two.
 fn labels(n: usize) -> Vec<String> {
@@ -574,36 +577,33 @@ impl App {
                 for row in 0..area.height {
                     let i = t.scroll + row as usize;
                     let Some((e, _)) = l.line(i) else { break };
-                    let Some(&start) = l.starts.get(e) else { break };
+                    let (Some(&start), Some(entry)) = (l.starts.get(e), t.entries.get(e)) else { break };
                     let in_block = i - start;
-                    let x0 = area.x + INDENT * t.entries.get(e).map_or(0, |e| e.depth) as u16 + PAD;
+                    let x0 = area.x + INDENT * entry.depth as u16 + PAD;
                     let y = area.y + row;
                     // The post itself, at its header; each part just before it (where
                     // there's usually a space), so what it labels stays readable.
                     if in_block == 1 {
-                        at.push((x0.saturating_sub(2), y, HintTo::Thread(e, None)));
+                        at.push((x0.saturating_sub(2), y, HintTo::Thread(entry.path.clone(), None)));
                     }
                     for s in l.spots.get(e).into_iter().flat_map(|s| s.iter()).filter(|s| s.line == in_block) {
-                        at.push(((x0 + s.col).saturating_sub(1), y, HintTo::Thread(e, Some(s.part.clone()))));
+                        at.push(((x0 + s.col).saturating_sub(1), y, HintTo::Thread(entry.path.clone(), Some(s.part.clone()))));
                     }
                 }
             }
             Some(Hit::List { area, offset, item_height }) => {
-                let len = self.picker_len();
+                let keys = self.row_keys(self.tab.view);
                 for r in 0..(area.height / item_height.max(1)) as usize {
-                    if offset + r >= len {
-                        break;
-                    }
-                    at.push((area.x, area.y + r as u16 * item_height.max(1), HintTo::Row(offset + r)));
+                    let Some(key) = keys.get(offset + r) else { break };
+                    at.push((area.x, area.y + r as u16 * item_height.max(1), HintTo::Row(key.clone())));
                 }
             }
             Some(Hit::Grid { area, offset, cols, cell }) => {
-                let len = self.picker_len();
+                let keys = self.row_keys(self.tab.view);
                 for r in 0..(area.height / cell.1.max(1)) as usize {
                     for c in 0..cols {
-                        let i = offset + r * cols + c;
-                        if i < len {
-                            at.push((area.x + c as u16 * cell.0, area.y + r as u16 * cell.1, HintTo::Row(i)));
+                        if let Some(key) = keys.get(offset + r * cols + c) {
+                            at.push((area.x + c as u16 * cell.0, area.y + r as u16 * cell.1, HintTo::Row(key.clone())));
                         }
                     }
                 }
@@ -616,10 +616,6 @@ impl App {
         }
         let targets = labels(at.len()).into_iter().zip(at).map(|(label, (x, y, to))| HintTarget { label, x, y, to }).collect();
         self.popup = Some(Popup::Hints(Hints { targets, typed: String::new() }));
-    }
-
-    fn picker_len(&mut self) -> usize {
-        self.filtered_list().map_or(0, |(_, len)| len)
     }
 
     pub(super) fn on_hints_key(&mut self, key: KeyEvent) {
@@ -651,14 +647,13 @@ impl App {
     /// A picked hint: a part is focused and opened, a post selected, a row opened.
     fn go_hint(&mut self, to: HintTo) {
         match to {
-            HintTo::Thread(e, part) => {
+            HintTo::Thread(path, part) => {
                 let Some(t) = &mut self.tab.thread else { return };
-                // Labels put up before the thread changed (a refresh) may point at what's
-                // gone (found by fuzzing).
-                if e >= t.entries.len() || part.as_ref().is_some_and(|p| !t.parts_of(e).contains(p)) {
-                    self.info("That's changed since the labels went up: f labels it again");
+                // Labels put up before the thread changed (a refresh) may be on what's gone.
+                let Some(e) = t.entry_of(&path).filter(|&e| part.as_ref().is_none_or(|p| t.parts_of(e).contains(p))) else {
+                    self.info(CHANGED);
                     return;
-                }
+                };
                 t.set_cursor(e);
                 t.focus.clone_from(&part);
                 t.layout = None;
@@ -667,10 +662,12 @@ impl App {
                     self.activate(part);
                 }
             }
-            HintTo::Row(i) => {
-                if let Some((p, len)) = self.filtered_list()
-                    && i < len
-                {
+            HintTo::Row(key) => {
+                let Some(i) = self.row_of(self.tab.view, &key) else {
+                    self.info(CHANGED);
+                    return;
+                };
+                if let Some((p, _)) = self.filtered_list() {
                     p.state.select(Some(i));
                     self.on_key(KeyEvent::from(KeyCode::Enter));
                 }

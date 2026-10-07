@@ -55,7 +55,7 @@ ones for where you are.
 | `:`  | go to a URL or a site/board/thread, see [Going to a URL](#going-to-a-url) [`goto`] |
 | `,`  | settings: theme, colors, keys, and more [`settings`] |
 | `.`, right-click | what you can do with what's selected, with each one's key [`menu`] |
-| `f`  | label what's on screen (posts, images, links, rows); type a label to open it [`hints`] |
+| `f`  | label what's on screen (posts, images, links, rows); type a label to open it (what it was put on, even if a refresh has moved it; if it's gone, ck says so) [`hints`] |
 | `]` / `[` | next / previous tab [`next_tab`, `prev_tab`] |
 | ctrl-w | close the tab [`close_tab`] |
 | `?`  | help [`help`] |
