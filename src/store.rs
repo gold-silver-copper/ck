@@ -1034,4 +1034,84 @@ mod tests {
         s.flush(std::time::Duration::from_secs(10));
         assert!(!s.keep_thread(&key(1), "", "u", &whole(&posts(&[1, 2])), 3));
     }
+
+    /// Makes `path` unreadable (as a root-owned 0600 file left by `sudo ck` would be) and
+    /// says whether that took: as root, nothing is unreadable, so the test has nothing to show.
+    #[cfg(unix)]
+    fn lock_out(path: &Path) -> bool {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o000)).unwrap();
+        std::fs::read(path).is_err()
+    }
+
+    #[cfg(unix)]
+    fn let_in(path: &Path) {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o644)).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_watched_list_that_cant_be_read_isnt_saved_over() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("watched.json");
+        let (mut s, _) = Store::load(Some(dir.path().to_path_buf()));
+        s.watch(key(1), "one".into(), 1, 1);
+        s.watch(key(2), "two".into(), 1, 1);
+        s.save().unwrap();
+        if !lock_out(&file) {
+            return;
+        }
+        let (mut s, warnings) = Store::load(Some(dir.path().to_path_buf()));
+        assert!(!warnings.is_empty());
+        // Watching another thread this run must not replace the list it couldn't read.
+        s.watch(key(3), "three".into(), 1, 1);
+        let _ = s.save();
+        let_in(&file);
+        let (s, _) = Store::load(Some(dir.path().to_path_buf()));
+        assert!(s.watched(&key(1)).is_some() && s.watched(&key(2)).is_some(), "watched.json was saved over: {:?}", s.watched.iter().map(|w| w.key.no).collect::<Vec<_>>());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_saved_index_that_cant_be_read_doesnt_lose_the_copies() {
+        let dir = tempfile::tempdir().unwrap();
+        let index = dir.path().join("saved.json");
+        let (mut s, _) = Store::load(Some(dir.path().to_path_buf()));
+        for no in [1, 2] {
+            s.keep_thread(&key(no), "", "u", &whole(&posts(&[1, 2])), no as i64);
+        }
+        assert!(s.flush(std::time::Duration::from_secs(10)).is_empty());
+        s.save().unwrap();
+        if !lock_out(&index) {
+            return;
+        }
+        let (mut s, warnings) = Store::load(Some(dir.path().to_path_buf()));
+        assert!(!warnings.is_empty());
+        s.keep_thread(&key(3), "", "u", &whole(&posts(&[1, 2])), 3);
+        s.flush(std::time::Duration::from_secs(10));
+        let _ = s.save();
+        let_in(&index);
+        // The copies already on disk are still listed (so searched and pruned) next run.
+        let (s, _) = Store::load(Some(dir.path().to_path_buf()));
+        assert!(s.saved(&key(1)).is_some() && s.saved(&key(2)).is_some(), "copies left out of saved.json: {:?}", s.saved.iter().map(|m| m.key.no).collect::<Vec<_>>());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_copy_that_cant_be_opened_right_now_stays_listed() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("threads/4chan/g/1.json");
+        let (mut s, _) = Store::load(Some(dir.path().to_path_buf()));
+        s.keep_thread(&key(1), "one", "u", &whole(&posts(&[1, 2])), 1);
+        assert!(s.flush(std::time::Duration::from_secs(10)).is_empty());
+        if !lock_out(&file) {
+            return;
+        }
+        assert!(s.load_saved(&key(1)).is_err());
+        // Not gone and not corrupt, only unreadable for now: the entry stays.
+        assert!(s.saved(&key(1)).is_some(), "an unreadable copy was dropped from the list");
+        let_in(&file);
+        assert_eq!(s.load_saved(&key(1)).unwrap().posts.len(), 2);
+    }
 }
