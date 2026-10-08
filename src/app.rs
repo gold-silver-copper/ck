@@ -248,6 +248,9 @@ pub struct Drawn {
     pub popup: Option<Hit>,
     pub tabs: Vec<(Rect, usize)>,
     shown: Option<input::Shown>,
+    /// Whether nothing since may have moved its rows (see `forget_frame`): a click lands only
+    /// then, while a grid's columns hold until the screen changes.
+    fresh: bool,
 }
 
 /// New posts in a watched thread, for a notification.
@@ -279,8 +282,8 @@ pub enum Popup {
     AddFilter(AddFilter),
     /// Choosing a reverse image search.
     ImageSearch(ImageSearchPanel),
-    /// The key help, scrolled this far.
-    Help(u16),
+    /// The key help, scrolled this far (as last drawn).
+    Help(ListState),
 }
 
 /// What's being typed in the footer: one thing at a time.
@@ -302,7 +305,8 @@ pub struct Preview {
     pub posts: Vec<u64>,
     /// Quoted post numbers that aren't in this thread.
     pub elsewhere: Vec<u64>,
-    pub scroll: u16,
+    /// How far it's scrolled (as last drawn).
+    pub scroll: ListState,
 }
 
 /// Full-screen viewer over a post's files, or a thread's.
@@ -384,8 +388,6 @@ pub struct App {
     pub watched_first: bool,
     /// The catalog layout for boards without their own (`catalog_layout` in the config).
     pub default_layout: CatalogLayout,
-    /// Columns of the catalog grid as last drawn (0: not a grid).
-    pub grid_cols: usize,
     /// The popup over the screen, if any: one at a time.
     pub popup: Option<Popup>,
     pub settings_list: FilteredList,
@@ -550,7 +552,6 @@ impl App {
             hidden_sites: cfg.hidden_sites.iter().cloned().collect(),
             show_hidden_sites: false,
             watched_first: cfg.watched_first,
-            grid_cols: 0,
             default_layout: store.settings.catalog_layout.unwrap_or(match store.settings.compact_catalog {
                 Some(true) => CatalogLayout::Compact,
                 Some(false) => CatalogLayout::Cards,
@@ -727,21 +728,35 @@ impl App {
 
     /// What's on screen, broadly: when it changes, the screen is painted whole (and the
     /// last frame's hits are stale). The tab's moves tell one thread from the next.
-    pub fn screen(&self) -> (View, usize, bool, bool, u32) {
-        (self.tab.view(), self.active, self.tab.viewer().is_some(), self.tab.gallery.is_some(), self.tab.moves())
+    pub fn screen(&self) -> (View, usize, bool, bool, u32, CatalogLayout) {
+        (self.tab.view(), self.active, self.tab.viewer().is_some(), self.tab.gallery.is_some(), self.tab.moves(), self.layout())
     }
 
     /// A new frame's `Drawn`, stamped with what it shows: the only place one is made.
     pub(crate) fn begin_frame(&mut self) -> &mut Drawn {
-        self.drawn = Drawn { shown: Some(self.shown()), ..Drawn::default() };
+        self.drawn = Drawn { shown: Some(self.shown()), fresh: true, ..Drawn::default() };
         &mut self.drawn
     }
 
     /// What the last frame drew, while it still shows this tab and view (a popup closed since
     /// doesn't move what was under it: the menu's `hints` reads it).
     pub(super) fn drawn(&self) -> Option<&Drawn> {
+        self.drawn_here().filter(|d| d.fresh)
+    }
+
+    /// The last frame, while its screen and size still show, even if a key moved its rows.
+    fn drawn_here(&self) -> Option<&Drawn> {
         let (screen, tabs, _) = self.drawn.shown?;
         ((screen, tabs) == (self.screen(), self.tabs.len())).then_some(&self.drawn)
+    }
+
+    /// The columns of the grid (catalog or gallery) the last frame drew (`Some(None)`: none),
+    /// while its screen still shows: only the screen (layout included) and its size decide them.
+    pub(super) fn drawn_cols(&self) -> Option<Option<usize>> {
+        self.drawn_here().map(|d| match d.body {
+            Some(Hit::Grid { cols, .. }) => Some(cols),
+            _ => None,
+        })
     }
 
     /// Keep the current list's selection on a row that exists.
@@ -1001,6 +1016,8 @@ impl App {
                     Event::Key(key) if acted => self.on_key(key),
                     Event::Mouse(m) => return self.on_mouse(m, self.clock.instant()),
                     Event::Paste(text) => self.paste(&text),
+                    // Nothing the last frame drew holds at another size, a grid's columns too.
+                    Event::Resize(..) => self.drawn.shown = None,
                     _ => {}
                 }
             }
