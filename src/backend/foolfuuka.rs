@@ -1,15 +1,13 @@
 //! FoolFuuka 4chan archives (desuarchive, b4k, ...): the `/_/api/chan/` JSON API.
 #![deny(clippy::indexing_slicing, clippy::arithmetic_side_effects, clippy::cast_possible_truncation)]
 
-use std::fmt::Write as _;
-
 use anyhow::Result;
 use serde_json::Value;
 
 use super::{Backend, Partial, SearchPage, as_u32, saturate, site_error};
 use crate::http::{as_bool, as_i64, as_str, as_u64, encode_segment as enc, get_json, items, register_media_host};
 use crate::markup::{self, Flavor};
-use crate::model::{Attachment, Board, FileKind, Flag, Post};
+use crate::model::{Attachment, Board, FileKind, Flag, Post, Poster};
 
 /// Index pages fetched for the "catalog" (each is one rate-limited request).
 const INDEX_PAGES: u32 = 3;
@@ -62,9 +60,10 @@ pub fn parse_index(v: &Value) -> Vec<Post> {
         .flat_map(|m| m.values())
         .filter_map(|t| {
             let mut op = post(&t["op"])?;
-            let last = t["posts"].as_array().map_or(&[][..], Vec::as_slice);
-            let bumped = last.iter().filter_map(|p| as_i64(&p["timestamp"])).max().unwrap_or(op.time);
-            let shown_images = last.iter().filter(|p| p["media"].is_object()).count() as u64;
+            // Ghost posts aren't counted: post() leaves them out of the thread too.
+            let last: Vec<Post> = t["posts"].as_array().into_iter().flatten().filter_map(post).collect();
+            let bumped = last.iter().map(|p| p.time).max().unwrap_or(op.time);
+            let shown_images = last.iter().filter(|p| !p.files.is_empty()).count() as u64;
             op.replies = Some(saturate(as_u64(&t["omitted"]).unwrap_or(0).saturating_add(last.len() as u64)));
             op.images = Some(saturate(as_u64(&t["images_omitted"]).unwrap_or(0).saturating_add(shown_images)));
             Some((bumped, op))
@@ -105,30 +104,16 @@ fn post(v: &Value) -> Option<Post> {
         return None;
     }
     let parsed = markup::parse_html(v["comment_processed"].as_str().unwrap_or(""), Flavor::Vichan);
-    let mut name = as_str(&v["name_processed"]).or_else(|| as_str(&v["name"])).map(|n| markup::decode(&n)).unwrap_or_else(|| "Anonymous".into());
-    let trip = as_str(&v["trip"]);
-    if let Some(trip) = &trip {
-        name.push(' ');
-        name.push_str(trip);
-    }
-    let cap = match as_str(&v["capcode"]).as_deref() {
-        Some("M") => Some("Mod"),
-        Some("A") => Some("Admin"),
-        Some("D") => Some("Developer"),
-        Some("V") => Some("Verified"),
-        _ => None,
-    };
-    if let Some(cap) = cap {
-        let _ = write!(name, " ## {cap}");
-    }
+    let name = as_str(&v["name_processed"]).or_else(|| as_str(&v["name"])).map(|n| markup::decode(&n));
+    // A letter for the capcode 4chan spells out; `N` is none.
+    let letter = |c: &str| match c { "M" => "mod", "A" => "admin", "D" => "developer", "V" => "verified", "F" => "founder", "G" => "manager", c => c }.to_string();
+    let capcode = as_str(&v["capcode"]).filter(|c| c != "N").map(|c| letter(&c));
     let text = |k: &str| as_str(&v[k]).map(|s| markup::decode(&s));
     Some(Post {
         no: as_u64(&v["num"])?,
-        name,
+        poster: Poster::new(name, "Anonymous", as_str(&v["trip"]), capcode),
         id: text("poster_hash"),
         flag: Flag::new(text("poster_country"), text("poster_country_name")),
-        trip,
-        capcode: cap.map(String::from),
         subject: as_str(&v["title_processed"]).or_else(|| as_str(&v["title"])).map(|s| markup::decode(&s)),
         time: as_i64(&v["timestamp"]).unwrap_or(0),
         files: attachment(&v["media"]).into_iter().collect(),
@@ -262,7 +247,7 @@ mod tests {
         // The fixture's /g/ has none; an archived /pol/ post has them all.
         let v = fixture("foolfuuka_post.json");
         let p = super::post(&v).unwrap();
-        assert!(p.id.is_none() && p.flag.is_none() && p.trip.is_none() && p.capcode.is_none());
+        assert!(p.id.is_none() && p.flag.is_none() && p.poster.trip().is_none() && p.poster.capcode().is_none());
         let mut v = v;
         v["poster_hash"] = "Ab3dEf+g".into();
         v["poster_country"] = "FI".into();
@@ -271,7 +256,7 @@ mod tests {
         v["capcode"] = "M".into();
         let p = super::post(&v).unwrap();
         assert_eq!((p.id.as_deref(), p.flag.as_ref().map(|f| f.short())), (Some("Ab3dEf+g"), Some("FI".into())));
-        assert_eq!((p.trip.as_deref(), p.capcode.as_deref()), (Some("!!Fz3mQwerty"), Some("mod")));
+        assert_eq!((p.poster.trip(), p.poster.capcode()), (Some("!!Fz3mQwerty"), Some("mod")));
     }
 
     #[test]
@@ -281,8 +266,8 @@ mod tests {
             let mut v = fixture("foolfuuka_post.json");
             v["capcode"] = letter.into();
             let p = super::post(&v).unwrap();
-            assert!(p.capcode.is_some(), "capcode {letter:?} is dropped");
-            assert!(p.name.contains(" ## "), "capcode {letter:?} is missing from the name {:?}", p.name);
+            assert!(p.poster.capcode().is_some(), "capcode {letter:?} is dropped");
+            assert!(p.poster.name().contains(" ## "), "capcode {letter:?} is missing from the name {:?}", p.poster.name());
         }
     }
 

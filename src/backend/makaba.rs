@@ -8,7 +8,7 @@ use serde_json::Value;
 use super::{Backend, Partial, as_u32, saturate};
 use crate::http::{as_bool, as_i64, as_str, as_u64, encode_segment as enc, get_json, items, register_media_host};
 use crate::markup::{self, Flavor};
-use crate::model::{Attachment, Board, FileKind, Post};
+use crate::model::{Attachment, Board, FileKind, Post, Poster};
 
 /// The board category for adult boards.
 const ADULT_CATEGORY: &str = "Взрослым";
@@ -50,16 +50,9 @@ impl Makaba {
 
     fn post(&self, v: &Value) -> Post {
         let parsed = markup::parse_html(v["comment"].as_str().unwrap_or(""), Flavor::Makaba);
-        let mut name = as_str(&v["name"]).map(|n| strip_tags(&n)).unwrap_or_else(|| "Аноним".into());
-        let trip = as_str(&v["trip"]).map(|t| strip_tags(&t)).filter(|t| !t.is_empty());
-        if let Some(trip) = &trip {
-            name.push(' ');
-            name.push_str(trip);
-        }
         Post {
             no: as_u64(&v["num"]).unwrap_or(0),
-            name,
-            trip,
+            poster: Poster::new(as_str(&v["name"]).map(|n| strip_tags(&n)), "Аноним", as_str(&v["trip"]).map(|t| strip_tags(&t)), None),
             subject: as_str(&v["subject"]).map(|s| strip_tags(&s)).filter(|s| !s.is_empty()),
             time: as_i64(&v["timestamp"]).unwrap_or(0),
             files: items(&v["files"]).filter_map(|f| self.attachment(f)).collect(),

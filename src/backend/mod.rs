@@ -292,7 +292,7 @@ mod tests {
         let mut v = super::fixture("foolfuuka_post.json");
         v["capcode"] = "M".into();
         let archived = super::foolfuuka::parse_thread(&serde_json::json!({ "1": { "op": v } })).remove(0);
-        assert_eq!(archived.capcode, live.capcode, "the archive spells the capcode differently");
+        assert_eq!(archived.poster.capcode(), live.poster.capcode(), "the archive spells the capcode differently");
         let f = crate::filter::tests::filters("[[filter]]\npattern = \"^mod$\"\nfield = \"capcode\"\n").unwrap();
         assert!(f.check("4chan", "pol", live, false).hidden.is_some());
         assert!(f.check("desuarchive", "pol", &archived, false).hidden.is_some(), "a ^mod$ capcode filter misses the archived copy");

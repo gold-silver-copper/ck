@@ -1,15 +1,13 @@
 //! 4chan's JSON API, and the vichan family that clones it.
 #![deny(clippy::indexing_slicing, clippy::arithmetic_side_effects, clippy::cast_possible_truncation)]
 
-use std::fmt::Write as _;
-
 use anyhow::{Result, bail};
 use serde_json::Value;
 
 use super::{Backend, Partial, ThreadPages, as_u32};
 use crate::http::{as_bool, as_i64, as_str, as_u64, encode_segment as enc, get_json, items};
 use crate::markup;
-use crate::model::{Attachment, Board, FileKind, Flag, Post};
+use crate::model::{Attachment, Board, FileKind, Flag, Post, Poster};
 
 pub struct Futaba {
     api: String,
@@ -123,15 +121,7 @@ impl Futaba {
     fn post(&self, board: &str, v: &Value) -> Post {
         let flavor = if self.is_4chan { markup::Flavor::Fourchan } else { markup::Flavor::Vichan };
         let parsed = markup::parse_html(v["com"].as_str().unwrap_or(""), flavor);
-        let mut name = as_str(&v["name"]).map(|n| markup::decode(&n)).unwrap_or_else(|| "Anonymous".into());
-        let (trip, capcode) = (as_str(&v["trip"]), as_str(&v["capcode"]));
-        if let Some(trip) = &trip {
-            name.push(' ');
-            name.push_str(trip);
-        }
-        if let Some(cap) = &capcode {
-            let _ = write!(name, " ## {cap}");
-        }
+        let poster = Poster::new(as_str(&v["name"]).map(|n| markup::decode(&n)), "Anonymous", as_str(&v["trip"]), as_str(&v["capcode"]));
         // A country's flag, else a board's own (4chan's /pol/); vichan forks use `country`
         // for custom flags too.
         let text = |k: &str| as_str(&v[k]).map(|s| markup::decode(&s));
@@ -145,14 +135,12 @@ impl Futaba {
         files.extend(items(&v["files"]).filter_map(|f| self.path_attachment(f)));
         Post {
             no: as_u64(&v["no"]).unwrap_or(0),
-            name,
+            poster,
             subject: as_str(&v["sub"]).map(|s| markup::decode(&s)),
             time: as_i64(&v["time"]).unwrap_or(0),
             files,
             id: text("id"),
             flag,
-            trip,
-            capcode,
             replies: as_u32(&v["replies"]),
             images: as_u32(&v["images"]),
             sticky: as_bool(&v["sticky"]),
@@ -352,12 +340,12 @@ mod tests {
         assert_eq!(by(487211201).flag, flag("AC", "Anarcho-Capitalist"));
         // The tripcode and capcode stay in the name, and are kept apart too.
         let named = by(487211260);
-        assert_eq!((named.name.as_str(), named.trip.as_deref(), named.capcode.as_deref()), ("Kot !!Fz3mQwerty", Some("!!Fz3mQwerty"), None));
+        assert_eq!((named.poster.name(), named.poster.trip(), named.poster.capcode()), ("Kot !!Fz3mQwerty", Some("!!Fz3mQwerty"), None));
         let modpost = by(487211333);
-        assert_eq!((modpost.name.as_str(), modpost.capcode.as_deref(), modpost.flag.as_ref()), ("Anonymous ## mod", Some("mod"), None));
+        assert_eq!((modpost.poster.name(), modpost.poster.capcode(), modpost.flag.as_ref()), ("Anonymous ## mod", Some("mod"), None));
         // /g/ has none of them.
         let g = Futaba::fourchan(None).parse_thread("g", &fixture("4chan_thread.json"));
-        assert!(g.iter().all(|p| p.id.is_none() && p.flag.is_none() && p.trip.is_none()));
+        assert!(g.iter().all(|p| p.id.is_none() && p.flag.is_none() && p.poster.trip().is_none()));
 
         // vichan: 8kun's IDs, and leftypol's custom flags in `country` (its files' `id`s
         // aren't posters').

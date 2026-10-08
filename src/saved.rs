@@ -9,7 +9,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use serde::{Deserialize, Serialize};
 
-use crate::model::{Anchor, Attachment, Link, Post};
+use crate::model::{Anchor, Attachment, Link, Post, Poster};
 use crate::atomic;
 use crate::store::ThreadKey;
 use crate::theme::mark;
@@ -160,7 +160,7 @@ impl From<&Post> for SavedPost {
             .collect();
         SavedPost {
             no: p.no,
-            name: p.name.clone(),
+            name: p.poster.name().into(),
             subject: p.subject.clone(),
             time: p.time,
             body,
@@ -177,8 +177,8 @@ impl From<&Post> for SavedPost {
             board: p.board.clone(),
             id: p.id.clone(),
             flag: p.flag.clone(),
-            trip: p.trip.clone(),
-            capcode: p.capcode.clone(),
+            trip: p.poster.trip().map(Into::into),
+            capcode: p.poster.capcode().map(Into::into),
         }
     }
 }
@@ -195,7 +195,7 @@ impl From<SavedPost> for Post {
             .collect();
         Post {
             no: p.no,
-            name: p.name,
+            poster: Poster::stored(p.name, p.trip, p.capcode),
             subject: p.subject,
             time: p.time,
             body,
@@ -212,8 +212,6 @@ impl From<SavedPost> for Post {
             board: p.board,
             id: p.id,
             flag: p.flag,
-            trip: p.trip,
-            capcode: p.capcode,
             ..Default::default()
         }
     }
@@ -293,10 +291,10 @@ mod tests {
 
     fn same(a: &Post, b: &Post) {
         assert_eq!(a.body, b.body, "post {}", a.no);
-        assert_eq!((a.no, &a.name, &a.subject, a.time), (b.no, &b.name, &b.subject, b.time));
+        assert_eq!((a.no, &a.poster, &a.subject, a.time), (b.no, &b.poster, &b.subject, b.time));
         assert_eq!((&a.quotes, &a.links, &a.urls, &a.anchors, &a.files), (&b.quotes, &b.links, &b.urls, &b.anchors, &b.files));
         assert_eq!((a.replies, a.images, a.sticky, a.locked, a.bumplimit, &a.board), (b.replies, b.images, b.sticky, b.locked, b.bumplimit, &b.board));
-        assert_eq!((&a.id, &a.flag, &a.trip, &a.capcode), (&b.id, &b.flag, &b.trip, &b.capcode));
+        assert_eq!((&a.id, &a.flag), (&b.id, &b.flag));
     }
 
     fn round_trip(p: &Post) -> Post {

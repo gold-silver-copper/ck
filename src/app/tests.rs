@@ -147,7 +147,7 @@ fn the_wheel_never_answers_a_save_question() {
 fn the_wheel_moves_the_filter_choices_over_a_thread() {
     let mut app = thread_app();
     let mut posts = nos(&(1..=60).collect::<Vec<_>>());
-    posts[0].name = "Satoshi".into();
+    posts[0].poster = "Satoshi".into();
     posts[0].subject = Some("Bitcoin".into());
     app.set_thread(posts);
     draw_at(&mut app, 80, 20);
@@ -980,9 +980,9 @@ fn catalogs_mark_new_threads_and_replies() {
 
 #[test]
 fn repeated_post_numbers_keep_the_first() {
-    let post = |no, name: &str| Post { no, name: name.into(), ..Default::default() };
+    let post = |no, name: &str| Post { no, poster: name.into(), ..Default::default() };
     let t = ThreadView::new("x".into(), 1, vec![post(1, "op"), post(2, "a"), post(2, "b"), post(3, "c")]);
-    assert_eq!(t.posts.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(), ["op", "a", "c"]);
+    assert_eq!(t.posts.iter().map(|p| p.poster.name()).collect::<Vec<_>>(), ["op", "a", "c"]);
     assert_eq!((t.index[&3], t.backlinks.len(), t.entries.len()), (2, 3, 3));
 }
 
@@ -2052,7 +2052,7 @@ fn filter_app(dir: &std::path::Path) -> App {
     let mut app = app_with(FILTER_CONFIG);
     app.config_path = Some(path);
     app.goto_str("a/x/1");
-    let named = |no, name: &str| Post { no, name: name.into(), ..Default::default() };
+    let named = |no, name: &str| Post { no, poster: name.into(), ..Default::default() };
     app.handle(answer(app.tab.req().unwrap(), thread_arrived, arrived(vec![named(1, "Anonymous"), named(2, "Named !Trip"), named(3, "Anonymous"), named(4, "Named !Trip")])));
     app
 }
@@ -2118,7 +2118,7 @@ fn filters_from_a_catalog_by_subject_and_image() {
     let mut app = filter_app(dir.path());
     app.goto_str("a/x");
     let file = Attachment { filename: "cat.png".into(), md5: Some("q1w2e3==".into()), ..Default::default() };
-    let op = |no, subject: &str| Post { no, subject: Some(subject.into()), name: "Anonymous".into(), files: vec![file.clone()], ..Default::default() };
+    let op = |no, subject: &str| Post { no, subject: Some(subject.into()), poster: "Anonymous".into(), files: vec![file.clone()], ..Default::default() };
     app.handle(answer(app.tab.req().unwrap(), App::catalog_arrived, Ok(vec![op(1, "Daily (thread)"), op(2, "Other"), op(3, "Daily (thread)")])));
     app.act(Action::Filter);
     let a = app.filter_add().unwrap();
@@ -3238,7 +3238,7 @@ fn hidden_words_hide_posts_everywhere() {
     app.popup = None;
     app.tab.navigate(View::Thread);
     // From a post's X: w, the thread's search to start with; u right after takes it back.
-    app.tab.thread.as_mut().unwrap().posts[1].name = "Satoshi".into();
+    app.tab.thread.as_mut().unwrap().posts[1].poster = "Satoshi".into();
     app.tab.thread.as_mut().unwrap().set_search("free".into());
     app.tab.thread.as_mut().unwrap().select(1);
     app.open_add_filter();

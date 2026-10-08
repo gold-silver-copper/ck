@@ -6,7 +6,7 @@ use std::collections::HashSet;
 
 use serde::Deserialize;
 
-use crate::model::{Attachment, Post, search_haystack};
+use crate::model::{Attachment, Post, Poster, search_haystack};
 use crate::saved::{Run, SavedLine};
 
 /// What searching needs of a saved copy; the rest of the file is skipped.
@@ -64,7 +64,7 @@ pub fn matching(bytes: &[u8], needle: &str) -> anyhow::Result<(Vec<Post>, Vec<Po
     let post = |p: PostText| {
         let body = p.body.into_iter().map(|l| ratatui::text::Line::from(l.runs.into_iter().map(ratatui::text::Span::from).collect::<Vec<_>>())).collect();
         let (files, board, quotes) = (p.files, p.board, p.quotes);
-        Post { no: p.no, name: p.name, subject: p.subject, time: p.time, body, files, board, quotes, id: p.id, flag: p.flag, trip: p.trip, capcode: p.capcode, ..Default::default() }
+        Post { no: p.no, poster: Poster::stored(p.name, p.trip, p.capcode), subject: p.subject, time: p.time, body, files, board, quotes, id: p.id, flag: p.flag, ..Default::default() }
     };
     // Only the posts it takes are made into posts, not the whole thread.
     let taken = crate::app::ancestry(&copy.posts, |p| (p.no, &p.quotes), |p| found.contains(&p.no));
@@ -99,7 +99,7 @@ mod tests {
             let found: Vec<u64> = matching(&bytes, needle).unwrap().0.iter().map(|p| p.no).collect();
             let brute: Vec<u64> = posts
                 .iter()
-                .filter(|p| search_haystack(&p.name, p.subject.as_deref(), p.files.iter().map(|f| f.filename.as_str()), p.plain_text()).contains(needle))
+                .filter(|p| search_haystack(p.poster.name(), p.subject.as_deref(), p.files.iter().map(|f| f.filename.as_str()), p.plain_text()).contains(needle))
                 .map(|p| p.no)
                 .collect();
             assert_eq!(found, brute, "{needle}");
@@ -118,7 +118,7 @@ mod tests {
                     let (pieces, flavor) = (1 + rng.below(12), *rng.pick(&[Flavor::Vichan, Flavor::Lynxchan]));
                     let mut p: Post = parse_html(&html(&mut rng, pieces), flavor).into();
                     p.no = k as u64 + 1;
-                    p.name = rng.pick(&["Anonymous", "Ünïcödé", "", "name"]).to_string();
+                    p.poster = (*rng.pick(&["Anonymous", "Ünïcödé", "", "name"])).into();
                     if rng.chance(30) {
                         p.subject = Some(html(&mut rng, 2));
                     }
@@ -127,7 +127,7 @@ mod tests {
                 .collect();
             let file = serde_json::json!({ "posts": posts.iter().map(SavedPost::from).collect::<Vec<_>>() });
             let bytes = serde_json::to_vec(&file).unwrap();
-            let hay = |p: &Post| search_haystack(&p.name, p.subject.as_deref(), p.files.iter().map(|f| f.filename.as_str()), p.plain_text());
+            let hay = |p: &Post| search_haystack(p.poster.name(), p.subject.as_deref(), p.files.iter().map(|f| f.filename.as_str()), p.plain_text());
             // Needles: pieces of the posts' own text, and a few words.
             let mut needles: Vec<String> = ["a", "e", "spoiler", "ü", "the", " "].iter().map(|s| s.to_string()).collect();
             for p in posts.iter().take(5) {

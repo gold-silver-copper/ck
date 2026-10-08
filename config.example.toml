@@ -373,7 +373,8 @@ url = "https://arch.b4k.dev"
 # Filters hide (or highlight) threads and posts whose text matches a regex. `field` is
 # "subject", "comment", "name" (with the tripcode), "filename", "md5" (a file's base64
 # MD5, compared exactly), "id" (the poster ID), "flag" (its code or name), "tripcode",
-# "capcode", "dimensions" (a file's "1920x1080"), "filesize" (a range, not a regex:
+# "capcode" ("mod", "admin", "Board Owner", ... as the site spells it; a 4chan archive
+# spells it like 4chan), "dimensions" (a file's "1920x1080"), "filesize" (a range, not a regex:
 # ">2MB", "<=100KB", "1MB-5MB"; B, KB, MB, GB of 1024) or "postno" (the number's
 # digits), or a list; the default is subject and comment. Optional `sites` and `boards`
 # limit where a filter applies; `op = true` or `reply = true` to OPs (threads) or replies;
