@@ -228,16 +228,12 @@ pub struct Poster {
 }
 
 impl Poster {
-    /// The name (else `default`), tripcode and capcode as the site sends them, cleaned and
-    /// shown as `name !trip ## capcode`.
+    /// From the site's name (else `default`), tripcode and capcode, cleaned and joined once.
     pub fn new(name: Option<String>, default: &str, trip: Option<String>, capcode: Option<String>) -> Self {
-        let mut p = Self::stored(clean(name).unwrap_or_else(|| default.into()), trip, capcode);
-        let cap = p.capcode.as_ref().map(|c| format!("## {c}"));
-        for part in p.trip.iter().chain(&cap) {
-            p.shown.push(' ');
-            p.shown.push_str(part);
-        }
-        p
+        let p = Self::stored(clean(name).unwrap_or_else(|| default.into()), trip, capcode);
+        let trip = p.trip.as_ref().map(|t| format!(" {t}")).unwrap_or_default();
+        let cap = p.capcode.as_ref().map(|c| format!(" ## {c}")).unwrap_or_default();
+        Self { shown: format!("{}{trip}{cap}", p.shown), ..p }
     }
 
     /// Saved copies only: the name as it was shown then, its parts cleaned and spelled as now.
@@ -254,7 +250,6 @@ impl Poster {
         self.trip.as_deref()
     }
 
-    /// `mod`, `admin`, `Board Owner`: as the site spells it, without a leading `##`.
     pub fn capcode(&self) -> Option<&str> {
         self.capcode.as_deref()
     }

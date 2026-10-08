@@ -121,7 +121,6 @@ impl Futaba {
     fn post(&self, board: &str, v: &Value) -> Post {
         let flavor = if self.is_4chan { markup::Flavor::Fourchan } else { markup::Flavor::Vichan };
         let parsed = markup::parse_html(v["com"].as_str().unwrap_or(""), flavor);
-        let poster = Poster::new(as_str(&v["name"]).map(|n| markup::decode(&n)), "Anonymous", as_str(&v["trip"]), as_str(&v["capcode"]));
         // A country's flag, else a board's own (4chan's /pol/); vichan forks use `country`
         // for custom flags too.
         let text = |k: &str| as_str(&v[k]).map(|s| markup::decode(&s));
@@ -135,7 +134,7 @@ impl Futaba {
         files.extend(items(&v["files"]).filter_map(|f| self.path_attachment(f)));
         Post {
             no: as_u64(&v["no"]).unwrap_or(0),
-            poster,
+            poster: Poster::new(text("name"), "Anonymous", as_str(&v["trip"]), as_str(&v["capcode"])),
             subject: as_str(&v["sub"]).map(|s| markup::decode(&s)),
             time: as_i64(&v["time"]).unwrap_or(0),
             files,

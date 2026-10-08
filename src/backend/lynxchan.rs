@@ -153,9 +153,8 @@ fn thumb(v: &Value) -> (Option<String>, bool) {
     (thumb.filter(|t| !spoiler && t != "/genericThumb.png"), spoiler)
 }
 
-/// LynxChan sends the tripcode inside the name (`Bernd!!Fz3mQwerty`): it starts at the
-/// last run of `!` followed by nothing but a trip's characters, so a `!` earlier in the
-/// name stays in the name.
+/// LynxChan sends the tripcode inside the name (`Bernd!!Fz3mQwerty`): the last run of `!`
+/// followed only by a trip's characters, so an earlier `!` stays in the name.
 fn name_and_trip(raw: Option<String>) -> (Option<String>, Option<String>) {
     let Some(r) = raw.as_deref() else { return (None, None) };
     let hash = r.trim_end_matches(|c: char| c.is_ascii_alphanumeric() || "./+".contains(c));

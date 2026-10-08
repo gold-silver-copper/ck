@@ -60,7 +60,6 @@ pub fn parse_index(v: &Value) -> Vec<Post> {
         .flat_map(|m| m.values())
         .filter_map(|t| {
             let mut op = post(&t["op"])?;
-            // Ghost posts aren't counted: post() leaves them out of the thread too.
             let last: Vec<&Value> = t["posts"].as_array().into_iter().flatten().filter(|p| !ghost(p)).collect();
             let bumped = last.iter().filter_map(|p| as_i64(&p["timestamp"])).max().unwrap_or(op.time);
             let shown_images = last.iter().filter(|p| attachment(&p["media"]).is_some()).count() as u64;
@@ -98,7 +97,8 @@ pub fn parse_search(v: &Value) -> Result<SearchPage> {
     Ok(SearchPage { hits, total: v.get("meta").and_then(|m| as_u64(&m["total_found"])) })
 }
 
-/// A ghost post was made on the archive after the thread died; it has a subnum.
+/// A ghost post, made on the archive after the thread died (it has a subnum), is left
+/// out of the thread and its counts.
 fn ghost(v: &Value) -> bool {
     as_u64(&v["subnum"]).unwrap_or(0) != 0
 }
@@ -108,11 +108,10 @@ fn post(v: &Value) -> Option<Post> {
         return None;
     }
     let parsed = markup::parse_html(v["comment_processed"].as_str().unwrap_or(""), Flavor::Vichan);
-    let name = as_str(&v["name_processed"]).or_else(|| as_str(&v["name"])).map(|n| markup::decode(&n));
     let text = |k: &str| as_str(&v[k]).map(|s| markup::decode(&s));
     Some(Post {
         no: as_u64(&v["num"])?,
-        poster: Poster::new(name, "Anonymous", as_str(&v["trip"]), as_str(&v["capcode"])),
+        poster: Poster::new(text("name_processed").or_else(|| text("name")), "Anonymous", as_str(&v["trip"]), as_str(&v["capcode"])),
         id: text("poster_hash"),
         flag: Flag::new(text("poster_country"), text("poster_country_name")),
         subject: as_str(&v["title_processed"]).or_else(|| as_str(&v["title"])).map(|s| markup::decode(&s)),
