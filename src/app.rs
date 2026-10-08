@@ -82,7 +82,7 @@ pub use thread_view::{CONVERSATION_MAX, conversation_of};
 pub use sites::{Adding, MySites, origin as site_origin};
 #[cfg(test)]
 pub use sites::BoardsUpdate;
-pub use tab::{Opening, Tab, Then};
+pub use tab::{Catalog, Opening, Tab, Then};
 pub use tabs::{MAX_TABS, Offline, TabPopup, ThreadCopy, Trail};
 pub use settings::{SettingsPopup, key_rows, rows as setting_rows, settings, tilde};
 
@@ -706,13 +706,12 @@ impl App {
         // What a `top` filter highlights first, then (`watched_first`) the threads you watch,
         // each in the sort's order. The filters are rules written to come first whatever the
         // sort; watching is a sort of its own.
-        let top = |&(i, _): &(usize, &Post)| self.tab.catalog_marks.top(i);
-        let site = self.sites.get(self.tab.catalog_site).map_or("", |s| s.cfg.name.as_str());
+        let (c, top) = (&self.tab.catalog, |&(i, _): &(usize, &Post)| self.tab.catalog.marks.top(i));
         let watched: HashSet<(&str, u64)> = match self.watched_first {
-            true => self.store.all_watched().iter().filter(|w| w.key.site == site).map(|w| (w.key.board.as_str(), w.key.no)).collect(),
+            true => self.store.all_watched().iter().filter(|w| w.key.site == c.site()).map(|w| (w.key.board.as_str(), w.key.no)).collect(),
             false => HashSet::new(),
         };
-        let watching = |&(_, p): &(usize, &Post)| !watched.is_empty() && watched.contains(&(self.board_of(p).as_str(), p.no));
+        let watching = |&(_, p): &(usize, &Post)| !watched.is_empty() && watched.contains(&(c.board_of(p).as_str(), p.no));
         if v.iter().any(|t| top(t) || watching(t)) {
             v.sort_by_cached_key(|t| (!top(t), !watching(t)));
         }
@@ -721,8 +720,7 @@ impl App {
 
     /// Whether a thread in the tab's catalog is watched.
     pub fn catalog_watching(&self, p: &Post) -> bool {
-        let Some(site) = self.sites.get(self.tab.catalog_site) else { return false };
-        self.store.watched(&ThreadKey { site: site.cfg.name.clone(), board: self.board_of(p), no: p.no }).is_some()
+        self.store.watched(&self.tab.catalog.key(p)).is_some()
     }
 
     /// What's on screen, broadly: when it changes, the screen is painted whole (and the
@@ -772,7 +770,7 @@ impl App {
         match view {
             View::Sites => self.visible_sites().into_iter().map(|r| if let SiteRow::Recent(i) = r { RowKey::Recent(self.store.recent_boards.get(i).cloned().unwrap_or_default()) } else { RowKey::Site(r) }).collect(),
             View::Boards => self.visible_boards().into_iter().filter_map(|i| self.boards().get(i)).map(|b| RowKey::Board(b.uri.clone())).collect(),
-            View::Catalog => self.visible_catalog().into_iter().filter_map(|i| self.tab.catalog.get(i)).map(|p| RowKey::Thread(p.no)).collect(),
+            View::Catalog => self.visible_catalog().into_iter().filter_map(|i| self.tab.catalog.posts().get(i)).map(|p| RowKey::Thread(p.no)).collect(),
             View::Watched => self.visible_watched().into_iter().filter_map(|i| self.store.all_watched().get(i)).map(|w| RowKey::Listed(w.key.clone())).collect(),
             View::History => self.visible_history().into_iter().filter_map(|i| self.store.history.get(i)).map(|h| RowKey::Listed(h.key.clone())).collect(),
             View::Saved => self.visible_saved().into_iter().filter_map(|i| self.store.saved.get(i)).map(|s| RowKey::Listed(s.key.clone())).collect(),
@@ -1067,11 +1065,6 @@ impl App {
         ok
     }
 
-    /// A thread of the current site.
-    pub fn key(&self, board: &str, no: u64) -> ThreadKey {
-        ThreadKey { site: self.current_site().cfg.name.clone(), board: board.to_string(), no }
-    }
-
     /// Save soon: background changes (refreshes, visits) are written together, every few
     /// seconds and on quit.
     fn save(&mut self) {
@@ -1098,10 +1091,10 @@ impl App {
 
     /// Note which catalog threads are new since the last visit (and remember them all).
     fn catalog_seen(&mut self) {
-        let nos: Vec<u64> = self.tab.catalog.iter().map(|p| p.no).collect();
-        let site = self.current_site().cfg.name.clone();
-        let board = self.tab.catalog_board.clone().unwrap_or_default();
-        self.tab.catalog_new = self.store.catalog_seen(&site, &board, &nos, self.clock.now());
+        let c = &self.tab.catalog;
+        let nos: Vec<u64> = c.posts().iter().map(|p| p.no).collect();
+        let (site, board) = (c.site().to_string(), c.board().map_or(String::new(), |b| b.uri.clone()));
+        self.tab.catalog.new = self.store.catalog_seen(&site, &board, &nos, self.clock.now());
         self.store.board_opened(&site, &board);
         self.note_titles(self.tab.site);
         self.save();
@@ -1109,27 +1102,22 @@ impl App {
 
     /// Replies a catalog thread has gained since it was last opened.
     pub fn new_replies(&self, p: &Post) -> Option<u32> {
-        let seen = self.store.replies_seen(&self.current_site().cfg.name, &self.board_of(p), p.no)?;
+        let seen = self.store.replies_seen(self.tab.catalog.site(), &self.tab.catalog.board_of(p), p.no)?;
         p.replies.filter(|&r| r > seen).map(|r| r - seen)
-    }
-
-    /// The board a catalog thread is on (overboards mix boards).
-    pub fn board_of(&self, p: &Post) -> String {
-        p.board.clone().or_else(|| self.tab.catalog_board.clone()).or_else(|| self.tab.board.as_ref().map(|b| b.uri.clone())).unwrap_or_default()
     }
 
     /// `H`: hide or unhide the selected thread (catalog) or post (thread) by hand.
     fn toggle_hidden(&mut self) {
-        let (board, no, what, mark) = match self.tab.view() {
+        let (key, what, mark) = match self.tab.view() {
             View::Catalog => {
                 let Some(i) = self.selected_index() else { return };
-                let Some(p) = self.tab.catalog.get(i) else { return };
-                (self.board_of(p), p.no, "thread", self.tab.catalog_marks.why_hidden(i).cloned())
+                let Some(p) = self.tab.catalog.posts().get(i) else { return };
+                (self.tab.catalog.key(p), "thread", self.tab.catalog.marks.why_hidden(i).cloned())
             }
             View::Thread => {
                 let Some(t) = &self.tab.thread else { return };
-                let what = if t.selected == 0 { "thread" } else { "post" };
-                (t.board.clone(), t.current().map_or(t.no, |p| p.no), what, t.marks.why_hidden(t.selected).cloned())
+                let (what, k) = (if t.selected == 0 { "thread" } else { "post" }, t.key());
+                (ThreadKey { no: t.current().map_or(k.no, |p| p.no), ..k.clone() }, what, t.marks.why_hidden(t.selected).cloned())
             }
             _ => return,
         };
@@ -1138,8 +1126,7 @@ impl App {
             Some(Hidden::Reply(to)) => return self.info(format!("Hidden as a reply to No.{to}, which is hidden; unhiding that one shows it")),
             _ => {}
         }
-        let site = self.current_site().cfg.name.clone();
-        let hidden = self.rehide(|a| a.store.toggle_hidden(&site, &board, no));
+        let (no, hidden) = (key.no, self.rehide(|a| a.store.toggle_hidden(&key.site, &key.board, key.no)));
         self.save_now();
         let show = self.keys.key(Action::ShowHidden);
         self.info(if hidden { format!("Hid {what} {no} ({show} shows hidden ones)") } else { format!("Unhid {what} {no}") });
@@ -1164,8 +1151,8 @@ impl App {
 
     /// The open catalog's board, as `site/board` (for its own sort and layout).
     fn board_key(&self) -> String {
-        let board = self.tab.catalog_board.clone().or_else(|| self.tab.board.as_ref().map(|b| b.uri.clone()));
-        crate::store::board_key(&self.current_site().cfg.name, &board.unwrap_or_default())
+        let c = &self.tab.catalog;
+        crate::store::board_key(c.site(), c.board().map_or("", |b| b.uri.as_str()))
     }
 
     /// The catalog layout here: the board's own, or the default.
@@ -1217,11 +1204,10 @@ impl App {
     /// With a saved copy, that comes first: a thread still on screen becomes its saved copy,
     /// and otherwise `enter` opens it.
     pub(crate) fn thread_gone(&mut self, key: &ThreadKey) {
-        let archive = self.site_named(&key.site).and_then(|s| s.cfg.archive.clone());
-        self.tab.archive_offer = archive.filter(|a| self.site_index(a).is_some()).map(|a| ThreadKey { site: a, board: key.board.clone(), no: key.no });
+        self.tab.archive_offer = self.archive_of(key);
         let in_archive = self.tab.archive_offer.as_ref().map(|a| format!("{} opens it in {}", self.keys.key(Action::Archive), a.site));
         let saved = self.store.saved(key).map(|m| m.saved);
-        let shown = self.tab.thread.as_ref().is_some_and(|t| t.no == key.no && t.board == key.board);
+        let shown = self.tab.thread.as_ref().is_some_and(|t| t.key() == key);
         let text = match saved {
             Some(at) if shown => {
                 self.tab.copy = Some(ThreadCopy::Saved(Offline { saved: at, dead: true }));
@@ -1245,22 +1231,20 @@ impl App {
     }
 
     fn toggle_watch(&mut self) {
-        let (board, no, subject, posts, last_seen) = match (self.tab.view(), &self.tab.board) {
-            (View::Thread, _) => {
+        let (key, subject, posts, last_seen) = match self.tab.view() {
+            View::Thread => {
                 let Some(t) = &self.tab.thread else { return };
                 let posts = t.live_posts();
-                (t.board.clone(), t.no, thread_subject(&posts), t.known, max_no(&posts))
+                (t.key().clone(), thread_subject(&posts), t.known, max_no(&posts))
             }
-            (View::Catalog, Some(b)) => {
+            View::Catalog => {
                 let Some(op) = self.selected_post() else { return };
                 let posts = op.replies.map_or(1, |r| r as usize + 1);
-                let board = op.board.clone().unwrap_or_else(|| b.uri.clone());
                 // Unknown until the first refresh, which then counts nothing as unread.
-                (board, op.no, thread_subject(std::slice::from_ref(op)), posts, 0)
+                (self.tab.catalog.key(op), thread_subject(std::slice::from_ref(op)), posts, 0)
             }
             _ => return,
         };
-        let key = self.key(&board, no);
         // Unwatching forgets which posts are yours; watching changes nothing hidden.
         let watching = self.store.watch(key.clone(), subject, posts, last_seen);
         if !watching {
@@ -1275,7 +1259,7 @@ impl App {
             self.watched_checked.remove(&key);
         }
         self.watched_quiet.remove(&key);
-        self.info(if watching { format!("Watching thread {no}") } else { format!("Stopped watching thread {no}") });
+        self.info(if watching { format!("Watching thread {}", key.no) } else { format!("Stopped watching thread {}", key.no) });
         self.save_now();
     }
 
@@ -1336,7 +1320,7 @@ impl App {
     /// Whether the open thread's images are shown: its board's setting, unless `M` hides
     /// them here.
     pub fn thread_images_on(&self) -> bool {
-        self.tab.thread.as_ref().is_none_or(|t| t.media != Media::NoImages && self.images_on(self.tab.site, &t.board))
+        self.tab.thread.as_ref().is_none_or(|t| t.media != Media::NoImages && self.images_on(&t.key().site, &t.key().board))
     }
 
     /// Keep a copy of a thread's posts in the data directory. Unchanged posts aren't written
@@ -1354,7 +1338,7 @@ impl App {
         if self.tab.view() != View::Thread || (self.tab.saved().is_some() && self.store.saved(key).is_some()) {
             return;
         }
-        if let Some(w) = self.tab.thread.as_ref().filter(|t| self.key(&t.board, t.no) == *key).and_then(|t| self.shown_whole(key, t)) {
+        if let Some(w) = self.tab.thread.as_ref().filter(|t| t.key() == key).and_then(|t| self.shown_whole(key, t)) {
             self.keep_copy(key, &w);
         }
         if self.tab.saved().is_some_and(|o| o.dead) {
@@ -1366,7 +1350,7 @@ impl App {
     /// thread is watched if it isn't.
     fn toggle_mine(&mut self) {
         let Some(t) = &self.tab.thread else { return };
-        let key = self.key(&t.board, t.no);
+        let key = t.key().clone();
         let Some(no) = t.current().map(|p| p.no) else { return };
         if self.store.watched(&key).is_none() {
             let posts = t.live_posts();
@@ -1438,7 +1422,7 @@ impl App {
         let here = |l: &Link| l.board.as_ref().is_none_or(|b| *b == board.uri);
         let leaves = |l: &&Link| {
             let in_thread = here(l)
-                && (l.thread == Some(t.no) || (l.thread.is_none() && l.post.is_some_and(|p| t.index.contains_key(&p))));
+                && (l.thread == Some(t.key().no) || (l.thread.is_none() && l.post.is_some_and(|p| t.index.contains_key(&p))));
             !in_thread
         };
         let links = &t.current()?.links;
@@ -1455,7 +1439,8 @@ impl App {
     /// The thread shown, on `board`, and its selected post, as `u` comes back to it.
     fn trail_here(&self, board: Board) -> Option<Trail> {
         let t = self.tab.thread.as_ref()?;
-        Some((self.tab.site, board, t.no, t.current().map_or(t.no, |p| p.no)))
+        let no = t.key().no;
+        Some((self.tab.site, board, no, t.current().map_or(no, |p| p.no)))
     }
 
     /// Go where a quote link leads: a thread (remembered for `u`), a board, or a post whose
@@ -1483,7 +1468,7 @@ impl App {
                 let uri = target.uri.clone();
                 let label = format!("Looking up post {post}");
                 let (site, trail) = (self.tab.site, self.trail_here(board).filter(|_| self.tab.view() == View::Thread));
-                self.spawn(label, Then::Show, move |b, _, _| b.find_thread(&uri, post), move |app, r| app.thread_found(site, target, post, trail, r));
+                self.spawn(self.current_site().backend.clone(), label, Then::Show, move |b, _, _| b.find_thread(&uri, post), move |app, r| app.thread_found(site, target, post, trail, r));
             }
         }
     }
@@ -1514,17 +1499,18 @@ impl App {
 
     /// Open a thread on the current site, as `open` says once it arrives.
     fn open_thread_at(&mut self, board: Board, no: u64, open: Opening) {
+        let key = ThreadKey { site: self.current_site().cfg.name.clone(), board: board.uri.clone(), no };
         self.tab.board = Some(board);
         self.tab.thread = None;
         self.tab.navigate(View::Thread);
         self.tab.from_catalog = false;
-        self.load_thread(no, open);
+        self.load_thread(key, open);
     }
 
     /// The post whose files `v`, `i`, `d` act on: the selected catalog entry or thread post.
     fn selected_post(&self) -> Option<&Post> {
         match self.tab.view() {
-            View::Catalog => self.selected_index().and_then(|i| self.tab.catalog.get(i)),
+            View::Catalog => self.selected_index().and_then(|i| self.tab.catalog.posts().get(i)),
             View::Thread => self.tab.thread.as_ref().and_then(ThreadView::current),
             _ => None,
         }
@@ -1675,11 +1661,10 @@ impl App {
                 }
             }
             (View::Catalog, Some(i)) => {
-                let Some(p) = self.tab.catalog.get(i) else { return };
-                let no = p.no;
+                let Some(p) = self.tab.catalog.posts().get(i) else { return };
                 // On an overboard the thread lives on its own board.
-                let board = p.board.clone().filter(|b| Some(b) != self.tab.catalog_board.as_ref()).map(|uri| self.find_board(&uri));
-                let Some(board) = board.or_else(|| self.tab.board.clone()) else { return };
+                let (no, uri) = (p.no, self.tab.catalog.board_of(p));
+                let board = self.tab.catalog.board().filter(|b| b.uri == uri).cloned().unwrap_or_else(|| self.find_board(&uri));
                 self.open_thread_at(board, no, Opening::default());
                 self.tab.return_to = None;
                 self.tab.from_catalog = true;
@@ -1690,9 +1675,8 @@ impl App {
 
     /// Show `board`'s catalog from the top, and load it.
     fn open_catalog(&mut self, board: Board) {
+        self.tab.catalog = Catalog::new(self.current_site().cfg.name.clone(), board.clone());
         self.tab.board = Some(board);
-        self.tab.catalog.clear();
-        self.tab.catalog_cached = None;
         self.tab.catalog_list = FilteredList::top();
         self.tab.navigate(View::Catalog);
         self.load_catalog(None);
@@ -1743,12 +1727,12 @@ impl App {
         self.tab.trail.clear();
         // Back to the catalog the thread was opened from (an overboard's, maybe).
         if to == View::Catalog && from_catalog {
-            self.tab.board = self.tab.catalog_of.clone();
+            self.tab.board = self.tab.catalog.board().cloned();
         }
         // After following links to another board (or a board of the same name on another
         // site), the loaded catalog is for the old one.
         if to == View::Catalog
-            && let Some(board) = self.tab.board.clone().filter(|b| Some(&b.uri) != self.tab.catalog_board.as_ref() || self.tab.site != self.tab.catalog_site)
+            && let Some(board) = self.tab.board.clone().filter(|b| !self.tab.catalog.is(&self.current_site().cfg.name, &b.uri))
         {
             self.open_catalog(board);
         }
@@ -1773,8 +1757,8 @@ impl App {
             View::Thread if self.tab.saved().is_some() => self.refresh_saved(),
             // Not loaded yet (a failure, or another load took over): the thread asked for.
             View::Thread => {
-                if let Some(no) = self.tab.thread.as_ref().map(|t| t.no).or(self.tab.pending_thread) {
-                    self.load_thread(no, self.tab.opening());
+                if let Some(key) = self.tab.thread.as_ref().map(|t| t.key().clone()).or_else(|| self.tab.pending_thread.clone()) {
+                    self.load_thread(key, self.tab.opening());
                 }
             }
         }
@@ -1833,12 +1817,11 @@ impl App {
 
     /// The link to what's selected: a post in a thread, a catalog thread, a saved thread, a board.
     fn selected_link(&self) -> Option<String> {
-        let backend = &self.current_site().backend;
-        match (self.tab.view(), &self.tab.board) {
-            (View::Watched | View::History | View::Saved, _) => self.selected_listed().and_then(|(key, _)| self.thread_link(key, None)),
-            (View::Boards, _) => self.selected_index().and_then(|i| self.boards().get(i)).map(|board| backend.board_url(&board.uri)),
-            (View::Catalog, Some(b)) => self.selected_post().map(|p| backend.thread_url(p.board.as_deref().unwrap_or(&b.uri), p.no)),
-            (View::Thread, Some(b)) => self.tab.thread.as_ref().and_then(|t| self.thread_link(&self.key(&b.uri, t.no), Some(t.current()?.no))),
+        match self.tab.view() {
+            View::Watched | View::History | View::Saved => self.selected_listed().and_then(|(key, _)| self.thread_link(key, None)),
+            View::Boards => self.selected_index().and_then(|i| self.boards().get(i)).map(|board| self.current_site().backend.board_url(&board.uri)),
+            View::Catalog => self.selected_post().and_then(|p| self.thread_link(&self.tab.catalog.key(p), None)),
+            View::Thread => self.tab.thread.as_ref().and_then(|t| self.thread_link(t.key(), Some(t.current()?.no))),
             _ => None,
         }
     }

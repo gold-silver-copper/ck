@@ -8,12 +8,12 @@ use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 use ratatui::text::Line;
 
-use crate::app::{App, Clock, MenuItem, Whole};
+use crate::app::{App, Catalog, Clock, MenuItem, Whole};
 use crate::config::Config;
 use crate::keys::KeyMap;
 use crate::markup::{Flavor, parse_html};
 use crate::model::{Attachment, Post, Thread};
-use crate::store::Store;
+use crate::store::{Store, ThreadKey};
 
 /// 2026-09-21 14:13:20 UTC: the snapshots' clock.
 pub const NOW: i64 = 1_790_000_000;
@@ -50,6 +50,21 @@ pub fn saving_app(dir: &std::path::Path, now: i64) -> App {
     app.store = Store::load(Some(dir.to_path_buf())).0;
     app.clock = Clock { fixed: Some(now), ..Default::default() };
     app
+}
+
+/// Thread `no` of `board`, on no site in particular.
+pub fn tkey(board: &str, no: u64) -> ThreadKey {
+    ThreadKey { site: String::new(), board: board.into(), no }
+}
+
+/// Thread `no` of `board` on the site the tab is at.
+pub fn here(app: &App, board: &str, no: u64) -> ThreadKey {
+    ThreadKey { site: app.current_site().cfg.name.clone(), ..tkey(board, no) }
+}
+
+/// `posts` as the catalog of the board the tab is at, unmarked.
+pub fn catalog_here(app: &App, posts: Vec<Post>) -> Catalog {
+    Catalog::of(&app.current_site().cfg.name, app.tab.board.as_ref().map_or("", |b| b.uri.as_str()), posts)
 }
 
 // ----- posts -----

@@ -10,7 +10,7 @@ use crate::store::ThreadKey;
 use crate::backend::SearchPage;
 use crate::config::SiteKind;
 use crate::keys::Action;
-use crate::model::Post;
+use crate::model::{Board, Post};
 
 pub struct Search {
     /// Searching saved threads instead of an archive.
@@ -24,8 +24,8 @@ pub struct Search {
     pub total: Option<u64>,
     /// Pages loaded.
     pub pages: u32,
-    /// Where back goes: the site and view the search started from.
-    back: (usize, View),
+    /// Where back goes: the site, board and view the search started from.
+    back: (usize, Option<Board>, View),
 }
 
 /// A search of the saved threads, running or done.
@@ -62,7 +62,12 @@ impl Drop for SavedSearch {
 impl Search {
     #[cfg(test)]
     pub fn for_tests(board: &str, query: &str, page: SearchPage) -> Self {
-        Self { saved: None, board: board.into(), query: query.into(), hits: page.hits, marks: Marks::default(), total: page.total, pages: 1, back: (0, View::Catalog) }
+        Self { saved: None, board: board.into(), query: query.into(), hits: page.hits, marks: Marks::default(), total: page.total, pages: 1, back: (0, None, View::Catalog) }
+    }
+
+    /// Where the search started: its site, board and view.
+    pub(super) fn back_place(&self) -> (usize, Option<&Board>, View) {
+        (self.back.0, self.back.1.as_ref(), self.back.2)
     }
 
     /// The thread hit `k` is in: its saved copy, or the archive's thread on `site`.
@@ -123,8 +128,8 @@ impl App {
     fn search_archive(&mut self, query: String) {
         let (Some(archive), Some(board)) = (self.archive_site(), self.tab.board.as_ref().map(|b| b.uri.clone())) else { return };
         let back = match &self.tab.search {
-            Some(s) => s.back,
-            None => (self.tab.site, self.tab.place_view()),
+            Some(s) => s.back.clone(),
+            None => (self.tab.site, self.tab.board.clone(), self.tab.place_view()),
         };
         self.switch_site(archive);
         self.tab.search = Some(Search { saved: None, board, query, hits: Vec::new(), marks: Marks::default(), total: None, pages: 0, back });
@@ -140,8 +145,8 @@ impl App {
             return self.error("No data folder: nothing is saved");
         };
         let back = match &self.tab.search {
-            Some(s) => s.back,
-            None => (self.tab.site, if self.tab.place_view() == View::Search { View::Saved } else { self.tab.place_view() }),
+            Some(s) => s.back.clone(),
+            None => (self.tab.site, self.tab.board.clone(), if self.tab.place_view() == View::Search { View::Saved } else { self.tab.place_view() }),
         };
         self.saved_search += 1;
         let (id, stop) = (self.saved_search, Arc::new(AtomicBool::new(false)));
@@ -190,7 +195,7 @@ impl App {
         match found {
             SavedFound::Copy(key, hits, context) => {
                 saved.done += 1;
-                saved.copies.push((ThreadView::new(key.board.clone(), key.no, context), hits.len()));
+                saved.copies.push((ThreadView::new(key.clone(), context), hits.len()));
                 for p in hits {
                     saved.keys.push(key.clone());
                     s.hits.push((key.no, p));
@@ -223,7 +228,7 @@ impl App {
         }
         let (board, query, page) = (s.board.clone(), s.query.clone(), s.pages + 1);
         let label = if page == 1 { format!("Searching /{board}/ for \"{query}\"") } else { format!("Loading page {page} of results") };
-        self.spawn(label, Then::Show, move |b, _, _| b.search(&board, &query, page), move |app, r| app.search_results(page, r));
+        self.spawn(self.current_site().backend.clone(), label, Then::Show, move |b, _, _| b.search(&board, &query, page), move |app, r| app.search_results(page, r));
     }
 
     /// A page of archive search results arrived.
@@ -298,8 +303,9 @@ impl App {
     /// Leave the results for where the search started.
     pub fn close_search(&mut self) -> View {
         // A search of saved threads still running stops (as it's dropped).
-        let Some(s) = self.tab.search.take() else { return View::Sites };
-        self.switch_site(s.back.0);
-        s.back.1
+        let Some(Search { back: (site, board, view), .. }) = self.tab.search.take() else { return View::Sites };
+        self.switch_site(site);
+        self.tab.board = board;
+        view
     }
 }

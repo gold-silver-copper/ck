@@ -223,8 +223,8 @@ pub(super) fn draw_catalog(f: &mut Frame, app: &mut App, area: Rect) {
     let visible = app.visible_catalog();
     let mut build = |k: usize| -> Vec<Line<'static>> {
         let Some(&i) = visible.get(k) else { return Vec::new() };
-        let Some(p) = app.tab.catalog.get(i) else { return Vec::new() };
-        let (hidden, highlight) = (app.tab.catalog_marks.why_hidden(i).is_some(), app.tab.catalog_marks.highlight(i));
+        let Some(p) = app.tab.catalog.posts().get(i) else { return Vec::new() };
+        let (hidden, highlight) = (app.tab.catalog.marks.why_hidden(i).is_some(), app.tab.catalog.marks.highlight(i));
         let mut head = Vec::new();
         if app.catalog_watching(p) {
             head.push(Span::styled(WATCHING, bold(t.primary)));
@@ -235,7 +235,7 @@ pub(super) fn draw_catalog(f: &mut Frame, app: &mut App, area: Rect) {
         if let Some(label) = highlight {
             head.extend([chip(label.to_string(), t.on_primary_container, t.primary_container), Span::raw(" ")]);
         }
-        if app.tab.catalog_new.contains(&p.no) {
+        if app.tab.catalog.new.contains(&p.no) {
             head.extend([chip("new", t.background, t.new), Span::raw(" ")]);
         }
         if p.sticky {
@@ -312,7 +312,7 @@ pub(super) fn draw_catalog(f: &mut Frame, app: &mut App, area: Rect) {
     } else {
         (2, 1, Some(t.surface))
     };
-    let highlighted = |k: usize| visible.get(k).is_some_and(|&i| app.tab.catalog_marks.highlight(i).is_some());
+    let highlighted = |k: usize| visible.get(k).is_some_and(|&i| app.tab.catalog.marks.highlight(i).is_some());
     let mut state = app.tab.catalog_list.state;
     app.drawn.body = draw_rows(f, area, visible.len(), &mut state, (height, gap), card, &highlighted, &mut build);
     app.tab.catalog_list.state = state;
@@ -331,7 +331,7 @@ pub(super) fn draw_catalog(f: &mut Frame, app: &mut App, area: Rect) {
     let on_screen = (area.height / per) as usize + 1;
     let offset = app.tab.catalog_list.state.offset();
     for (k, &i) in visible.iter().enumerate().skip(offset).take(on_screen * 2) {
-        let Some(p) = app.tab.catalog.get(i) else { continue };
+        let Some(p) = app.tab.catalog.posts().get(i) else { continue };
         let off = !app.catalog_images_on(p);
         let Some(file) = p.files.first() else { continue };
         let row = (k - offset) as u16 * per;
@@ -466,17 +466,17 @@ fn draw_grid(f: &mut Frame, app: &mut App, area: Rect) {
         let (r, c) = (k / cols - top, k % cols);
         let (x, y) = (area.x + c as u16 * cell_w, area.y + r as u16 * cell_h);
         let card = Rect::new(x, y, GRID_CARD.width, GRID_CARD.height).intersection(area);
-        let off = app.tab.catalog.get(i).is_some_and(|p| !app.catalog_images_on(p));
+        let off = app.tab.catalog.posts().get(i).is_some_and(|p| !app.catalog_images_on(p));
         if card.is_empty() {
             // Below the screen: prefetch from media hosts.
-            if let Some(url) = app.tab.catalog.get(i).and_then(|p| p.files.first()).and_then(|f| f.thumb.as_ref()).filter(|u| !off && http::is_media_host(u)) {
+            if let Some(url) = app.tab.catalog.posts().get(i).and_then(|p| p.files.first()).and_then(|f| f.thumb.as_ref()).filter(|u| !off && http::is_media_host(u)) {
                 app.images.want(url, Kind::Thumb);
             }
             continue;
         }
-        let Some(p) = app.tab.catalog.get(i) else { continue };
-        let hidden = app.tab.catalog_marks.why_hidden(i).is_some();
-        paint_row(f, card, Some(t.surface), k == sel, app.tab.catalog_marks.highlight(i).is_some());
+        let Some(p) = app.tab.catalog.posts().get(i) else { continue };
+        let hidden = app.tab.catalog.marks.why_hidden(i).is_some();
+        paint_row(f, card, Some(t.surface), k == sel, app.tab.catalog.marks.highlight(i).is_some());
         let tile = Rect::new(x + PAD, y, THUMB.width, THUMB.height);
         match p.files.first() {
             Some(file) => draw_tile(f, &mut app.images, file, p.files.len(), off, tile, area),
@@ -490,7 +490,7 @@ fn draw_grid(f: &mut Frame, app: &mut App, area: Rect) {
         if app.catalog_watching(p) {
             head.push(Span::styled(WATCHING, bold(t.primary)));
         }
-        if app.tab.catalog_new.contains(&p.no) {
+        if app.tab.catalog.new.contains(&p.no) {
             head.extend([chip("new", t.background, t.new), Span::raw(" ")]);
         }
         if hidden {

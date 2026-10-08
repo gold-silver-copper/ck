@@ -294,20 +294,20 @@ fn location(app: &App) -> (Vec<String>, Vec<Span<'static>>) {
             vec![site(), "Boards".into()]
         }
         View::Catalog => {
-            meta.push(plural(app.tab.catalog.len(), "thread"));
-            let new = app.shown_catalog().filter(|(_, p)| app.tab.catalog_new.contains(&p.no)).count();
+            meta.push(plural(app.tab.catalog.posts().len(), "thread"));
+            let new = app.shown_catalog().filter(|(_, p)| app.tab.catalog.new.contains(&p.no)).count();
             if new > 0 {
                 meta.push(format!("{new} new"));
             }
-            let hidden = app.tab.catalog_marks.hidden_count();
+            let hidden = app.tab.catalog.marks.hidden_count();
             if hidden > 0 {
                 meta.push(if app.hiding.show() { format!("{hidden} hidden, shown") } else { format!("{hidden} hidden") });
             }
             if app.tab.catalog_sort != Sort::Bump {
                 meta.push(app.tab.catalog_sort.as_str().into());
             }
-            if let Some(board) = &app.tab.catalog_board
-                && !app.images_on(app.tab.catalog_site, board)
+            if let Some(board) = app.tab.catalog.board()
+                && !app.images_on(app.tab.catalog.site(), &board.uri)
             {
                 meta.push("images off".into());
             }
@@ -317,7 +317,7 @@ fn location(app: &App) -> (Vec<String>, Vec<Span<'static>>) {
             let mut return_crumbs = None;
             let th = app.tab.thread.as_ref();
             let subject = th.and_then(|th| th.posts.first()?.subject.clone()).unwrap_or_else(|| {
-                th.map_or_else(|| "Thread".into(), |th| format!("Thread {}", th.no))
+                th.map_or_else(|| "Thread".into(), |th| format!("Thread {}", th.key().no))
             });
             if let Some(th) = th {
                 let deleted = th.deleted.len();
@@ -335,7 +335,7 @@ fn location(app: &App) -> (Vec<String>, Vec<Span<'static>>) {
                     meta.push("spoilers shown".into());
                 }
                 // Its page in the board's index (the last one is shown with the chips).
-                if let Some((p, of)) = app.thread_page(&app.key(&th.board, th.no)).filter(|(p, of)| p < of) {
+                if let Some((p, of)) = app.thread_page(th.key()).filter(|(p, of)| p < of) {
                     meta.push(format!("p{p}/{of}"));
                 }
                 // Which screenful of a post taller than the screen.
@@ -343,10 +343,12 @@ fn location(app: &App) -> (Vec<String>, Vec<Span<'static>>) {
                     meta.insert(0, format!("No.{} ({at}/{n})", p.no));
                 }
             }
-            if th.is_some_and(|th| !app.images_on(app.tab.site, &th.board)) {
+            if th.is_some_and(|th| !app.images_on(&th.key().site, &th.key().board)) {
                 meta.push("images off".into());
             }
-            let uri = app.tab.board.as_ref().map(|b| format!("/{}/", b.uri)).unwrap_or_default();
+            // The thread's own site and board.
+            let site = || th.map_or_else(site, |th| th.key().site.clone());
+            let uri = th.map(|th| th.key().board.as_str()).or_else(|| app.tab.board.as_ref().map(|b| b.uri.as_str())).map(|b| format!("/{b}/")).unwrap_or_default();
             if let Some(c) = th.and_then(|th| th.conversation.as_ref()).filter(|_| app.tab.gallery.is_none()) {
                 // The conversation's posts instead of the thread's.
                 meta.retain(|m| !m.ends_with("posts") && !m.ends_with("post"));
@@ -414,7 +416,7 @@ fn location(app: &App) -> (Vec<String>, Vec<Span<'static>>) {
         spans.extend([chip(q, t.on_primary_container, t.primary_container), Span::raw("  ")]);
     }
     // A thread on its board's last page is next to fall off.
-    let last_page = app.tab.thread.as_ref().filter(|_| app.tab.view() == View::Thread).and_then(|th| app.thread_page(&app.key(&th.board, th.no)));
+    let last_page = app.tab.thread.as_ref().filter(|_| app.tab.view() == View::Thread).and_then(|th| app.thread_page(th.key()));
     if let Some((p, of)) = last_page.filter(|(p, of)| p >= of) {
         spans.extend([chip(format!("last page {p}/{of}"), t.background, t.warning), Span::raw("  ")]);
     }
@@ -428,7 +430,7 @@ fn location(app: &App) -> (Vec<String>, Vec<Span<'static>>) {
             ThreadCopy::Saved(o) => ("saved", o),
             ThreadCopy::Cached(o) => ("cached", o),
         }),
-        View::Catalog => app.tab.catalog_cached.map(|c| ("cached", c)),
+        View::Catalog => app.tab.catalog.cached.map(|c| ("cached", c)),
         _ => None,
     };
     if let Some((what, off)) = copy {
@@ -616,7 +618,7 @@ fn footer_hints(app: &App) -> Vec<(String, &'static str)> {
                 }
                 hints.push((k(Action::Hints), "hints"));
                 hints.push((k(Action::Search), "search"));
-                hints.push((k(Action::Watch), if app.menu_watching(t.no) { "unwatch" } else { "watch" }));
+                hints.push((k(Action::Watch), if app.store.watched(t.key()).is_some() { "unwatch" } else { "watch" }));
                 if t.gallery_files().next().is_some() {
                     hints.push((k(Action::Gallery), "gallery"));
                 }
@@ -624,12 +626,12 @@ fn footer_hints(app: &App) -> Vec<(String, &'static str)> {
             }
         },
         View::Catalog => {
-            let op = app.visible_catalog().get(app.tab.catalog_list.state.selected().unwrap_or(0)).and_then(|&i| app.tab.catalog.get(i));
+            let op = app.visible_catalog().get(app.tab.catalog_list.state.selected().unwrap_or(0)).and_then(|&i| app.tab.catalog.posts().get(i));
             let mut hints = vec![("enter".into(), "open")];
             if op.is_some_and(|p| !p.files.is_empty()) {
                 hints.push((k(Action::View), "view image"));
             }
-            hints.push((k(Action::Watch), if op.is_some_and(|p| app.menu_watching(p.no)) { "unwatch" } else { "watch" }));
+            hints.push((k(Action::Watch), if op.is_some_and(|p| app.catalog_watching(p)) { "unwatch" } else { "watch" }));
             hints.extend([
                 (k(Action::Search), "filter"),
                 (k(Action::Menu), "more"),

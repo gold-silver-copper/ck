@@ -499,8 +499,9 @@ every post of every copy, without the network, the way `/` searches inside a thr
 words as typed, in any case, in a post's name, subject, file names and text (hidden
 spoilers left out). Results come in as the copies are read, newest copy first, with where
 each is and the words highlighted; `enter` opens the copy on that post, with the search set
-so `n` / `N` go through it, and `esc` comes back. 500 MB of copies take about a second and a
-half.
+so `n` / `N` go through it, and `esc` comes back. A copy still on screen after `esc` leaves
+the results (back to where the search started) stays its own site's thread: `w`, `r`, `y`
+and the rest act on it there. 500 MB of copies take about a second and a half.
 
 When the thread you open has 404'd and there's a copy, ck offers it ("a saved copy from
 2h ago: enter opens it"), and a thread that dies while you read it becomes its copy.

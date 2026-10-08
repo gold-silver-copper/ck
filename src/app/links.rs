@@ -23,14 +23,14 @@ pub struct LinksPanel {
 impl App {
     pub fn open_links(&mut self) {
         let Some(post) = self.selected_post() else { return };
-        let here = self.tab.board.as_ref().map(|b| b.uri.clone()).unwrap_or_default();
         let thread = self.tab.thread.as_ref().filter(|_| self.tab.view() == View::Thread);
+        let here = thread.map(|t| t.key().board.clone()).or_else(|| self.tab.board.as_ref().map(|b| b.uri.clone())).unwrap_or_default();
         let mut items: Vec<LinkItem> = Vec::new();
         for l in &post.links {
             let board = l.board.clone().unwrap_or_else(|| here.clone());
             // Quotes within the open thread are what enter and p are for.
             let in_thread = thread.is_some_and(|t| {
-                board == t.board && (l.thread == Some(t.no) || (l.thread.is_none() && l.post.is_some_and(|p| t.index.contains_key(&p))))
+                board == t.key().board && (l.thread == Some(t.key().no) || (l.thread.is_none() && l.post.is_some_and(|p| t.index.contains_key(&p))))
             });
             if in_thread {
                 continue;
@@ -99,16 +99,7 @@ impl App {
         Some(match p.items.get(i)? {
             LinkItem::Url(u) => u.clone(),
             LinkItem::File(f) => f.link()?.1.to_string(),
-            LinkItem::Quote(l, _) => {
-                let backend = &self.current_site().backend;
-                let board = l.board.clone().or_else(|| self.tab.board.as_ref().map(|b| b.uri.clone()))?;
-                match (l.thread, l.post) {
-                    (Some(t), Some(p)) => backend.post_url(&board, t, p),
-                    (Some(t), None) => backend.thread_url(&board, t),
-                    (None, Some(p)) => backend.thread_url(&board, p),
-                    (None, None) => backend.board_url(&board),
-                }
-            }
+            LinkItem::Quote(l, _) => self.quote_url(l)?,
         })
     }
 }

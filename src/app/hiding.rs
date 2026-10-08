@@ -5,7 +5,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use super::{App, ThreadView};
+use super::{App, Catalog, ThreadView};
 use crate::filter::{Filters, Hidden, Mark};
 use crate::model::Post;
 use crate::store::ThreadKey;
@@ -180,23 +180,22 @@ impl App {
 
     /// A thread's posts' marks, replies to hidden ones included (`recursive_hiding`, or a
     /// `recursive` filter).
-    fn spread_marks(&self, site: &str, t: &ThreadView, is_op: impl Fn(usize, &Post) -> bool) -> Vec<Mark> {
-        let mut marks = self.post_marks(site, &t.posts, is_op, |_| t.board.clone());
+    fn spread_marks(&self, t: &ThreadView, is_op: impl Fn(usize, &Post) -> bool) -> Vec<Mark> {
+        let mut marks = self.post_marks(&t.key().site, &t.posts, is_op, |_| t.key().board.clone());
         let all = self.hiding.recursive;
         crate::filter::spread_hiding(&mut marks, &t.posts, &t.index, &t.backlinks, |m| all || m.recursive);
         marks
     }
 
-    /// A catalog's threads' marks.
-    pub(super) fn catalog_marks_for(&self, site: &str, posts: &[Post], board_of: impl Fn(&Post) -> String) -> Marks {
-        Marks { marks: self.post_marks(site, posts, |_, _| true, board_of), show_hidden: self.hiding.show, mine: HashSet::new() }
+    /// The marks of `posts`, threads of catalog `c`.
+    pub(super) fn catalog_marks(&self, c: &Catalog, posts: &[Post]) -> Marks {
+        Marks { marks: self.post_marks(c.site(), posts, |_, _| true, |p| c.board_of(p)), show_hidden: self.hiding.show, mine: HashSet::new() }
     }
 
     /// A thread's posts' marks, and which are yours.
-    pub(super) fn thread_marks(&self, site: &str, t: &ThreadView) -> Marks {
-        let key = ThreadKey { site: site.to_string(), board: t.board.clone(), no: t.no };
-        let mine = self.store.watched(&key).map(|w| w.mine().iter().copied().collect()).unwrap_or_default();
-        Marks { marks: self.spread_marks(site, t, |i, _| i == 0), show_hidden: self.hiding.show, mine }
+    pub(super) fn thread_marks(&self, t: &ThreadView) -> Marks {
+        let mine = self.store.watched(t.key()).map(|w| w.mine().iter().copied().collect()).unwrap_or_default();
+        Marks { marks: self.spread_marks(t, |i, _| i == 0), show_hidden: self.hiding.show, mine }
     }
 
     /// Mark the search's results not marked yet. An archive's each alone; a saved copy's
@@ -204,23 +203,23 @@ impl App {
     pub(super) fn mark_hits(&mut self) {
         let Some(mut s) = self.tab.search.take() else { return };
         let from = s.marks.marks.len();
-        let marks = |site: &str, t: &ThreadView| self.spread_marks(site, t, |_, p| p.no == t.no);
+        let marks = |t: &ThreadView| self.spread_marks(t, |_, p| p.no == t.key().no);
         let mark = |t: &ThreadView, marks: &[Mark], no: u64| t.index.get(&no).and_then(|&i| marks.get(i)).cloned().unwrap_or_default();
         let mut found = Vec::new();
         match &s.saved {
             None => {
                 let site = &self.current_site().cfg.name;
-                for (thread, p) in s.hits.iter().skip(from) {
-                    let t = ThreadView::new(p.board.clone().unwrap_or_else(|| s.board.clone()), *thread, vec![p.clone()]);
-                    found.push(mark(&t, &marks(site, &t), p.no));
+                for (k, (_, p)) in s.hits.iter().enumerate().skip(from) {
+                    let t = ThreadView::new(s.thread_of(k, site).unwrap_or_default(), vec![p.clone()]);
+                    found.push(mark(&t, &marks(&t), p.no));
                 }
             }
             Some(saved) => {
                 let mut first = 0;
                 for (t, n) in &saved.copies {
                     let end = first + n;
-                    if let Some(key) = saved.keys.get(first).filter(|_| end > from) {
-                        let marks = marks(&key.site, t);
+                    if end > from {
+                        let marks = marks(t);
                         found.extend(s.hits.iter().take(end).skip(from.max(first)).map(|(_, p)| mark(t, &marks, p.no)));
                     }
                     first = end;
@@ -236,8 +235,8 @@ impl App {
     /// yours, leaving out hidden ones whether `Z` shows them or not. `posts`: those new posts
     /// with all that decides their hiding (`with_ancestry`).
     pub(super) fn unread_counter(&self, key: &ThreadKey, posts: &[Post]) -> impl Fn(u64) -> (usize, usize) + use<> {
-        let t = ThreadView::new(key.board.clone(), key.no, posts.to_vec());
-        let marks = self.thread_marks(&key.site, &t);
+        let t = ThreadView::new(key.clone(), posts.to_vec());
+        let marks = self.thread_marks(&t);
         move |after| {
             let new: Vec<&Post> = t.posts.iter().enumerate().filter(|(i, p)| p.no > after && marks.why_hidden(*i).is_none()).map(|(_, p)| p).collect();
             let replies = new.iter().filter(|p| p.quotes.iter().any(|&q| marks.is_mine(q))).count();
@@ -247,7 +246,7 @@ impl App {
 
     /// The catalog's threads shown, by index.
     pub fn shown_catalog(&self) -> impl Iterator<Item = (usize, &Post)> {
-        self.tab.catalog.iter().enumerate().filter(|&(i, _)| self.tab.catalog_marks.shown(i))
+        self.tab.catalog.posts().iter().enumerate().filter(|&(i, _)| self.tab.catalog.marks.shown(i))
     }
 
     /// What's hidden changed: mark every tab's catalog, thread and search results again,
@@ -279,12 +278,9 @@ impl App {
     }
 
     fn rehide_tab(&mut self) {
-        // Each by the site it's from: a search moves the tab to the archive, leaving them.
-        let site_name = |i: usize| self.sites.get(i).map_or(String::new(), |s| s.cfg.name.clone());
-        let (catalog_site, thread_site) = (site_name(self.tab.catalog_site), site_name(self.tab.thread_site));
-        self.tab.catalog_marks = self.catalog_marks_for(&catalog_site, &self.tab.catalog, |p| self.board_of(p));
+        self.tab.catalog.marks = self.catalog_marks(&self.tab.catalog, self.tab.catalog.posts());
         if let Some(t) = &self.tab.thread {
-            let marks = self.thread_marks(&thread_site, t);
+            let marks = self.thread_marks(t);
             if let Some(t) = self.tab.thread.as_mut().filter(|t| t.marks != marks) {
                 t.marks = marks;
                 t.layout = None;

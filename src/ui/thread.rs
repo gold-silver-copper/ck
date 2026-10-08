@@ -429,7 +429,7 @@ fn post_ctx(t: &ThreadView, i: usize, clock: Clock) -> Option<PostCtx<'_>> {
         is_new: t.is_new(i),
         deleted: t.is_deleted(i),
         backlinks: t.backlinks.get(i).map_or(&[], Vec::as_slice),
-        op_no: t.no,
+        op_no: t.key().no,
         reveal: t.is_revealed(i),
         search: t.search.to_lowercase(),
         hidden: t.marks.why_hidden(i).is_some(),
@@ -616,7 +616,7 @@ pub(super) fn draw_peek(f: &mut Frame, app: &mut App, area: Rect) {
     use crate::model::Target;
     let Some(Part::Link(Target::Quote(l))) = app.focused() else { return };
     let Some(t) = &app.tab.thread else { return };
-    let Some(&i) = l.post.filter(|_| l.board.is_none() && l.thread.is_none_or(|n| n == t.no)).and_then(|n| t.index.get(&n)) else { return };
+    let Some(&i) = l.post.filter(|_| l.board.is_none() && l.thread.is_none_or(|n| n == t.key().no)).and_then(|n| t.index.get(&n)) else { return };
     let th = theme();
     let width = area.width.saturating_sub(6);
     // A hidden post peeks as it shows in the thread: one line, not what it says.

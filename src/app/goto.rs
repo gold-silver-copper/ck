@@ -93,7 +93,7 @@ impl App {
                 let board = board.unwrap_or_else(|| Board { uri: uri.clone(), title: String::new(), nsfw: None });
                 let trail = self.tab.board.clone().filter(|_| from_thread).and_then(|b| self.trail_here(b));
                 let (label, site) = (format!("Looking up post {post}"), target.site);
-                self.spawn(label, super::Then::Show, move |_, _, _| backend.find_thread(&uri, post), move |app, r| app.thread_found(site, board, post, trail, r));
+                self.spawn(backend, label, super::Then::Show, move |b, _, _| b.find_thread(&uri, post), move |app, r| app.thread_found(site, board, post, trail, r));
             }
             (None, None) => {
                 self.switch_site(target.site);

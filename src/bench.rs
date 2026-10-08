@@ -13,6 +13,7 @@ use crate::backend::fixture;
 use crate::backend::futaba::Futaba;
 use crate::images::Images;
 use crate::model::{Attachment, Board, Post};
+use crate::test_fixtures::{catalog_here, here};
 
 fn report(label: &str, per: Duration) {
     eprintln!("{label:<60} {per:>10.2?}");
@@ -56,7 +57,7 @@ fn bench_thread() {
     let posts = scale(&posts, 1000);
     let mut a = app();
     a.tab.navigate(View::Thread);
-    a.tab.thread = Some(ThreadView::new("g".into(), posts[0].no, posts.clone()));
+    a.tab.thread = Some(ThreadView::new(here(&a, "g", posts[0].no), posts.clone()));
     let mut t = term();
     eprintln!("\n== thread, {} posts ==", posts.len());
     time("frame, layout cached", 200, || draw(&mut t, &mut a));
@@ -88,7 +89,7 @@ fn bench_thread() {
     let big = scale(&posts, 10_000);
     let mut b = app();
     b.tab.navigate(View::Thread);
-    b.tab.thread = Some(ThreadView::new("g".into(), big[0].no, big.clone()));
+    b.tab.thread = Some(ThreadView::new(here(&b, "g", big[0].no), big.clone()));
     eprintln!("\n== thread, {} posts ==", big.len());
     draw(&mut t, &mut b);
     time("10k: frame, layout cached", 200, || draw(&mut t, &mut b));
@@ -155,7 +156,7 @@ fn bench_catalog() {
     let mut a = app();
     a.images = Images::offline();
     a.tab.navigate(View::Catalog);
-    a.tab.catalog = cat;
+    a.tab.catalog = catalog_here(&a, cat);
     a.tab.catalog_list.state.select(Some(0));
     let mut t = term();
     eprintln!("\n== catalog, 150 threads ==");
@@ -164,7 +165,7 @@ fn bench_catalog() {
     // Filters run once per load; frames only look the results up.
     let toml_text: String = (0..20).map(|i| format!("[[filter]]\npattern = \"(?i)word{i}|other{i}\"\n")).collect();
     a.rehide(|a| a.hiding.set_filters(crate::filter::tests::filters(&toml_text).unwrap()));
-    a.tab.catalog = scale(&a.tab.catalog, 300);
+    a.tab.catalog = catalog_here(&a, scale(a.tab.catalog.posts(), 300));
     eprintln!("\n== catalog, 300 threads, 20 filters ==");
     time("filtering (once per load)", 50, || a.remark());
     time("frame", 200, || draw(&mut t, &mut a));
@@ -258,7 +259,7 @@ fn bench_images() {
                 a.images.insert_decoded(&format!("https://x/{i}.png.thumb"), DynamicImage::new_rgb8(250, 250));
             }
             a.tab.navigate(View::Thread);
-            a.tab.thread = Some(ThreadView::new("g".into(), 100, posts.clone()));
+            a.tab.thread = Some(ThreadView::new(here(&a, "g", 100), posts.clone()));
             let mut t = term();
             let start = Instant::now();
             draw(&mut t, &mut a);
@@ -317,7 +318,7 @@ fn bench_hidden_words() {
         let mut a = app();
         a.tab.navigate(View::Thread);
         a.rehide(|a| a.hiding.set_filters(crate::filter::Filters::new(&[]).unwrap().with_words(&words).unwrap()));
-        a.tab.thread = Some(ThreadView::new("g".into(), posts[0].no, posts.clone()));
+        a.tab.thread = Some(ThreadView::new(here(&a, "g", posts[0].no), posts.clone()));
         let mut t = term();
         time(&format!("{label}: marking the thread"), 20, || a.remark());
         time(&format!("{label}: frame with full layout rebuild"), 50, || {

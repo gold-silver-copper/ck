@@ -49,7 +49,7 @@ fn thread_app(images: bool) -> App {
 fn catalog_app(images: bool) -> App {
     let mut a = app(images);
     a.tab.navigate(View::Catalog);
-    a.tab.catalog = catalog();
+    a.tab.catalog = catalog_here(&a, catalog());
     a
 }
 
@@ -87,7 +87,7 @@ fn thread() -> ThreadView {
         post(1003, 2 * HOUR, None, "<s>secret</s> and <a href=\"#p1001\" class=\"quotelink\">&gt;&gt;1001</a>"),
         post(1004, HOUR, None, "See <a href=\"/g/thread/900#p901\" class=\"quotelink\">&gt;&gt;901</a> in the old thread"),
     ];
-    let mut t = ThreadView::new("g".into(), 1000, posts);
+    let mut t = ThreadView::new(ThreadKey { site: "4chan".into(), ..tkey("g", 1000) }, posts);
     t.new_after = 1002;
     t
 }
@@ -425,7 +425,7 @@ fn poster_ids_and_flags() {
     a.tab.navigate(View::Thread);
     a.tab.board = Some(Board { uri: "pol".into(), title: "Politically Incorrect".into(), nsfw: Some(true) });
     let posts = crate::backend::futaba::Futaba::fourchan(None).parse_thread("pol", &crate::backend::fixture("4chan_pol_thread.json"));
-    a.tab.thread = Some(ThreadView::new("pol".into(), 487211034, posts));
+    a.tab.thread = Some(ThreadView::new(here(&a, "pol", 487211034), posts));
     insta::assert_snapshot!(snapshot(&mut a));
     assert_layout_exact(&mut a);
     let (text, buf) = render_at(&mut a, 100, 90);
@@ -554,7 +554,7 @@ fn long_thread_app(n: u64) -> App {
     let mut a = app(false);
     a.tab.navigate(View::Thread);
     let posts: Vec<Post> = (0..n).map(|k| post(2000 + k, HOUR, None, &format!("post {k}<br>{}", "and a line<br>".repeat((k % 7) as usize)))).collect();
-    a.tab.thread = Some(ThreadView::new("g".into(), 2000, posts));
+    a.tab.thread = Some(ThreadView::new(here(&a, "g", 2000), posts));
     a
 }
 
@@ -646,7 +646,7 @@ fn tall_app() -> App {
         post(3001, HOUR, None, &format!("<a href=\"#p3000\" class=\"quotelink\">&gt;&gt;3000</a><br>tall start<br>{lines}tall end")),
         post(3002, HOUR, None, "<a href=\"#p3001\" class=\"quotelink\">&gt;&gt;3001</a><br>after"),
     ];
-    a.tab.thread = Some(ThreadView::new("g".into(), 3000, posts));
+    a.tab.thread = Some(ThreadView::new(here(&a, "g", 3000), posts));
     a
 }
 
@@ -714,7 +714,7 @@ fn a_post_exactly_a_screen_tall_needs_no_paging() {
         let lines: String = (1..=n).map(|k| format!("line {k}<br>")).collect();
         let mut p = posts.clone();
         p[1] = post(3001, HOUR, None, &format!("{lines}end"));
-        a.tab.thread = Some(ThreadView::new("g".into(), 3000, p));
+        a.tab.thread = Some(ThreadView::new(here(&a, "g", 3000), p));
         render(&mut a);
         let l = a.tab.thread.as_ref().unwrap().layout.as_ref().unwrap();
         l.starts[2] - 1 - l.starts[1] == view
@@ -852,7 +852,7 @@ fn hint_labels_from_before_a_refresh_dont_focus_what_is_gone() {
     let label = a.hints().unwrap().targets.iter().find(|t| matches!(t.to, HintTo::Thread(_, Some(Part::Replies)))).unwrap().label.clone();
     // The thread comes back without any replies (found by fuzzing).
     let posts: Vec<Post> = thread().posts.into_iter().map(|p| Post { quotes: Vec::new(), ..p }).collect();
-    a.tab.thread = Some(ThreadView::new("g".into(), 1000, posts));
+    a.tab.thread = Some(ThreadView::new(here(&a, "g", 1000), posts));
     type_text(&mut a, &label);
     assert!(a.tab.thread.as_ref().unwrap().focus.is_none());
     assert!(a.status().unwrap().text.contains("changed since the labels went up"));
@@ -975,7 +975,7 @@ fn your_posts_and_replies() {
 #[test]
 fn catalog_new_threads_and_replies() {
     let mut a = catalog_app(false);
-    a.tab.catalog_new.insert(1100);
+    a.tab.catalog.new.insert(1100);
     a.store.opened("4chan", "g", 1000, 300, NOW);
     a.tab.catalog_list.state.select(Some(1));
     insta::assert_snapshot!(snapshot(&mut a));
@@ -1200,7 +1200,7 @@ fn thread_lines_are_cached_but_never_stale() {
     let before = blocks(&a);
     let mut posts = thread().posts;
     posts.push(crate::model::Post { no: 1005, quotes: vec![1003], time: NOW, ..Default::default() });
-    let mut t = crate::app::ThreadView::new("g".into(), 1000, posts);
+    let mut t = crate::app::ThreadView::new(here(&a, "g", 1000), posts);
     t.cache = std::mem::take(&mut a.tab.thread.as_mut().unwrap().cache);
     a.tab.thread = Some(t);
     render(&mut a);
@@ -1209,7 +1209,7 @@ fn thread_lines_are_cached_but_never_stale() {
     // A post that comes back changed (its file deleted) is laid out again (found by fuzzing).
     let mut posts = a.tab.thread.as_ref().unwrap().posts.clone();
     posts[0].files.clear();
-    let mut t = crate::app::ThreadView::new("g".into(), 1000, posts);
+    let mut t = crate::app::ThreadView::new(here(&a, "g", 1000), posts);
     t.cache = std::mem::take(&mut a.tab.thread.as_mut().unwrap().cache);
     a.tab.thread = Some(t);
     let (text, _) = render(&mut a);
@@ -1306,7 +1306,7 @@ fn link_hints() {
     c.on_key(KeyEvent::from(KeyCode::Char('f')));
     insta::assert_snapshot!("link_hints_catalog", snapshot(&mut c));
     c.on_key(KeyEvent::from(KeyCode::Char('s')));
-    assert_eq!((c.tab.view(), c.tab.pending_thread.unwrap()), (View::Thread, c.tab.catalog[1].no));
+    assert_eq!((c.tab.view(), c.tab.pending_thread.as_ref().unwrap().no), (View::Thread, c.tab.catalog.posts()[1].no));
 }
 
 #[test]
@@ -1391,7 +1391,6 @@ fn adding_a_site() {
 fn images_off_on_a_board() {
     // The board's own setting: tiles say so, nothing's asked for, and the top bar says it.
     let mut a = catalog_app(true);
-    a.tab.catalog_board = Some("g".into());
     a.store.board_prefs.entry("4chan/g".into()).or_default().images = Some(false);
     insta::assert_snapshot!("images_off_catalog", snapshot(&mut a));
     assert_eq!(a.images.queued(), 0);
@@ -1578,8 +1577,9 @@ fn thread_gone_without_a_copy_offers_the_archive() {
 #[test]
 fn counts_of_one_are_singular() {
     let mut a = catalog_app(false);
-    a.tab.catalog[0].replies = Some(1);
-    a.tab.catalog[0].images = Some(1);
+    let mut posts = catalog();
+    (posts[0].replies, posts[0].images) = (Some(1), Some(1));
+    a.tab.catalog = catalog_here(&a, posts);
     let text = render(&mut a).0;
     assert!(text.contains("1 reply · 1 image ·"), "{text}");
 }
@@ -1747,7 +1747,7 @@ fn a_quote_of_a_hidden_post_previews_only_hidden() {
 #[test]
 fn the_catalog_header_counts_no_hidden_thread_as_new() {
     let mut a = catalog_app(false);
-    a.tab.catalog_new.insert(1100);
+    a.tab.catalog.new.insert(1100);
     a.rehide(|a| a.store.toggle_hidden("4chan", "g", 1100));
     let text = render(&mut a).0;
     let top = text.lines().next().unwrap();
@@ -1814,7 +1814,9 @@ fn narrow_catalog_keeps_its_counts_under_an_arabic_subject() {
             if compact {
                 a.default_layout = crate::config::CatalogLayout::Compact;
             }
-            a.tab.catalog[1].subject = Some(lam_alef(n));
+            let mut posts = catalog();
+            posts[1].subject = Some(lam_alef(n));
+            a.tab.catalog = catalog_here(&a, posts);
             let text = narrow(&mut a);
             let row = text.lines().find(|l| l.contains("لا")).unwrap();
             // The subject gives way to the counts, as an ASCII one does.

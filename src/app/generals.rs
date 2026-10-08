@@ -3,8 +3,8 @@
 
 use std::time::{Duration, Instant};
 
-use super::{App, Note, View, thread_subject};
-use crate::model::{Post, max_no};
+use super::{App, Catalog, Note, View, thread_subject};
+use crate::model::{Board, Post, max_no};
 use crate::store::{ThreadKey, Watched};
 
 /// How often a dead (or full) general's board is checked for the next thread.
@@ -37,17 +37,17 @@ impl App {
     /// `F`: follow (or stop following) the open or selected thread as a general. Following
     /// also watches it.
     pub fn toggle_follow(&mut self) {
-        let (key, subject, posts, max_no) = match (self.tab.view(), &self.tab.board) {
-            (View::Thread, _) => {
+        let (key, subject, posts, max_no) = match self.tab.view() {
+            View::Thread => {
                 let Some(t) = &self.tab.thread else { return };
                 let posts = t.live_posts();
-                (self.key(&t.board, t.no), thread_subject(&posts), t.known, max_no(&posts))
+                (t.key().clone(), thread_subject(&posts), t.known, max_no(&posts))
             }
-            (View::Catalog, Some(_)) => {
-                let Some(op) = self.selected_index().and_then(|i| self.tab.catalog.get(i)) else { return };
-                (self.key(&self.board_of(op), op.no), thread_subject(std::slice::from_ref(op)), 1, 0)
+            View::Catalog => {
+                let Some(op) = self.selected_index().and_then(|i| self.tab.catalog.posts().get(i)) else { return };
+                (self.tab.catalog.key(op), thread_subject(std::slice::from_ref(op)), 1, 0)
             }
-            (View::Watched, _) => {
+            View::Watched => {
                 let Some(w) = self.selected_index().and_then(|i| self.store.all_watched().get(i)) else { return };
                 (w.key.clone(), w.subject.clone(), w.posts, w.last_seen)
             }
@@ -124,7 +124,7 @@ impl App {
         let Some(pattern) = w.general.clone() else { return };
         let dead = w.status.is_dead();
         // Not one that's hidden, whether hidden ones are shown or not.
-        let marks = self.catalog_marks_for(&key.site, &catalog, |_| key.board.clone());
+        let marks = self.catalog_marks(&Catalog::new(key.site.clone(), Board { uri: key.board.clone(), title: String::new(), nsfw: None }), &catalog);
         let next = catalog
             .iter()
             .enumerate()

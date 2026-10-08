@@ -59,8 +59,8 @@ impl App {
     }
 
     /// Save one file of a post into its thread's folder.
-    fn save_file(&mut self, board: &str, thread: u64, post: &Post, file: &Attachment) {
-        let dir = download::dir(self.download_dir.as_deref(), &self.current_site().cfg.name, board, thread);
+    fn save_file(&mut self, key: &ThreadKey, post: &Post, file: &Attachment) {
+        let dir = download::dir(self.download_dir.as_deref(), key);
         let jobs = download::job(post, file, &dir);
         self.start_download(jobs, dir, nothing_to_save(file));
     }
@@ -76,18 +76,14 @@ impl App {
                     Some(n) => t.posts.get(*t.index.get(&n)?)?,
                     None => t.current()?,
                 };
-                Some((t.board.clone(), t.no, p.clone()))
+                Some((t.key().clone(), p.clone()))
             })
         } else {
             // Over a catalog: the thread's OP.
-            self.selected_post().and_then(|p| {
-                let board = p.board.clone().or_else(|| self.tab.catalog_board.clone());
-                let board = board.or_else(|| self.tab.board.as_ref().map(|b| b.uri.clone()))?;
-                Some((board, p.no, p.clone()))
-            })
+            self.selected_post().map(|p| (self.tab.catalog.key(p), p.clone()))
         };
-        match from.filter(|(.., p)| p.files.iter().any(|f| f.url == file.url)) {
-            Some((board, thread, p)) => self.save_file(&board, thread, &p, &file),
+        match from.filter(|(_, p)| p.files.iter().any(|f| f.url == file.url)) {
+            Some((key, p)) => self.save_file(&key, &p, &file),
             None => self.info("Can't tell which thread this file is from; o opens it in the browser"),
         }
     }
@@ -96,7 +92,7 @@ impl App {
     /// for `enter`.
     pub(super) fn ask_to_save(&mut self, what: Saving) {
         let Some(t) = &self.tab.thread else { return };
-        let dir = download::dir(self.download_dir.as_deref(), &self.current_site().cfg.name, &t.board, t.no);
+        let dir = download::dir(self.download_dir.as_deref(), t.key());
         let at = tilde(&dir.display().to_string());
         let (title, lines) = match what {
             Saving::Files => {
@@ -182,7 +178,7 @@ impl App {
     pub(super) fn download(&mut self, whole_thread: bool) {
         let Some(t) = &self.tab.thread else { return };
         let posts: Vec<&Post> = if whole_thread { t.unhidden_posts().map(|(_, p)| p).collect() } else { t.current().into_iter().collect() };
-        let dir = download::dir(self.download_dir.as_deref(), &self.current_site().cfg.name, &t.board, t.no);
+        let dir = download::dir(self.download_dir.as_deref(), t.key());
         let jobs = download::jobs(&posts, &dir);
         let none = if whole_thread { self.no_files("Thread has no files to save", false, |f| f.url.is_some()) } else { "Post has no file to save".into() };
         self.start_download(jobs, dir, &none);
@@ -190,12 +186,10 @@ impl App {
 
     /// Save the thread as thread.html and thread.json in its download folder.
     fn export_thread(&mut self) {
-        let (Some(t), Some(b)) = (&self.tab.thread, &self.tab.board) else { return };
-        let site = self.current_site();
-        let dir = download::dir(self.download_dir.as_deref(), &site.cfg.name, &t.board, t.no);
-        let url = site.backend.thread_url(&b.uri, t.no);
-        let about = crate::export::About { site: &site.cfg.name, board: &t.board, thread: t.no, url: &url, saved: self.clock.now() };
-        let key = self.key(&t.board, t.no);
+        let Some(t) = &self.tab.thread else { return };
+        let (key, dir) = (t.key().clone(), download::dir(self.download_dir.as_deref(), t.key()));
+        let url = self.thread_link(&key, None).unwrap_or_default();
+        let about = crate::export::About { site: &key.site, board: &key.board, thread: key.no, url: &url, saved: self.clock.now() };
         // As the site has it, like the saved copy it's also kept as (unless it's cut short).
         let whole = self.shown_whole(&key, t);
         match crate::export::save(&t.live_posts(), &about, &theme::theme(), &dir) {

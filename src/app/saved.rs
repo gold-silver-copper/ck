@@ -38,13 +38,14 @@ impl App {
         self.tab.archive_offer = None;
         self.tab.saved_offer = None;
         // The live thread, if that's what's open, keeps its place in the copy.
-        let same = self.tab.thread.as_ref().is_some_and(|t| t.no == key.no && t.board == key.board);
+        let same = self.tab.thread.as_ref().is_some_and(|t| t.key() == key);
         if !same {
             self.tab.thread = None;
         }
         self.tab.navigate(View::Thread);
         self.tab.from_catalog = false;
-        self.show_thread(t, Some(ThreadCopy::Saved(Offline { saved, dead })), open);
+        // Under its OP's number: an old copy may be of the thread a site answered with.
+        self.show_thread(ThreadKey { no: t.no(), ..key.clone() }, t, Some(ThreadCopy::Saved(Offline { saved, dead })), open);
     }
 
     /// `r` on a saved copy: the live thread, unless it's known to be gone.
@@ -52,21 +53,20 @@ impl App {
         let (Some(off), Some(t)) = (self.tab.saved(), &self.tab.thread) else { return };
         if off.dead {
             let x = self.keys.key(crate::keys::Action::Archive);
-            let archive = if self.archive_of(&t.board, t.no).is_some() { format!(" ({x} looks in the archive)") } else { String::new() };
+            let archive = if self.archive_of(t.key()).is_some() { format!(" ({x} looks in the archive)") } else { String::new() };
             self.info(format!("This is a saved copy from {}; the thread is gone{archive}", crate::ui::ago(off.saved, self.clock)));
             return;
         }
-        let no = t.no;
+        let key = t.key().clone();
         // The copy stays on screen until the live thread arrives, which keeps its place.
         self.tab.copy = None;
-        self.load_thread(no, Opening::default());
+        self.load_thread(key, Opening::default());
     }
 
-    /// The thread a site's configured archive would have, if it has one.
-    pub(super) fn archive_of(&self, board: &str, no: u64) -> Option<ThreadKey> {
-        let site = self.current_site();
-        let archive = site.cfg.archive.clone().filter(|a| self.site_index(a).is_some())?;
-        Some(ThreadKey { site: archive, board: board.to_string(), no })
+    /// Thread `key` on its site's configured archive, if it has one.
+    pub(super) fn archive_of(&self, key: &ThreadKey) -> Option<ThreadKey> {
+        let archive = self.site_named(&key.site)?.cfg.archive.clone().filter(|a| self.site_index(a).is_some())?;
+        Some(ThreadKey { site: archive, ..key.clone() })
     }
 
     /// What the viewer shows for a file: the image itself, or the thumbnail for other files.
@@ -84,7 +84,7 @@ impl App {
     pub fn downloaded(&self, file: &Attachment) -> Option<PathBuf> {
         let t = self.tab.thread.as_ref()?;
         let p = t.posts.iter().find(|p| p.files.iter().any(|f| f.url.is_some() && f.url == file.url))?;
-        let dir = crate::download::dir(self.download_dir.as_deref(), &self.current_site().cfg.name, &t.board, t.no);
+        let dir = crate::download::dir(self.download_dir.as_deref(), t.key());
         let path = crate::download::job(p, file, &dir).into_iter().next()?.1;
         path.is_file().then_some(path)
     }

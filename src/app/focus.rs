@@ -99,11 +99,10 @@ impl App {
 
     /// A quote link: the post, when it's in this thread (`u` comes back); else where it leads.
     fn go_to_quote(&mut self, l: &Link) {
-        let board = self.tab.board.as_ref().map(|b| b.uri.clone());
         if let Some(t) = &mut self.tab.thread
             && let Some(n) = l.post
-            && l.board.as_ref().is_none_or(|b| Some(b) == board.as_ref())
-            && l.thread.is_none_or(|th| th == t.no)
+            && l.board.as_ref().is_none_or(|b| *b == t.key().board)
+            && l.thread.is_none_or(|th| th == t.key().no)
             && t.jump_to(n)
         {
             return;
@@ -130,17 +129,21 @@ impl App {
         self.selected_post()?.files.get(k)
     }
 
-    /// Where a quote link leads, as a web address.
-    fn quote_url(&self, l: &Link) -> Option<String> {
-        let t = self.tab.thread.as_ref()?;
-        let board = l.board.clone().or_else(|| self.tab.board.as_ref().map(|b| b.uri.clone()))?;
-        let backend = &self.current_site().backend;
-        let here = l.board.is_none() && l.post.is_some_and(|p| t.index.contains_key(&p));
-        Some(match (l.thread, l.post) {
-            (Some(th), Some(p)) => backend.post_url(&board, th, p),
-            (None, Some(p)) if here => backend.post_url(&board, t.no, p),
-            (Some(th), None) => backend.thread_url(&board, th),
-            _ => backend.board_url(&board),
+    /// Where a quote link in the selected post leads, as a web address: from the thread
+    /// shown (on its site and board), else from the tab's board.
+    pub(super) fn quote_url(&self, l: &Link) -> Option<String> {
+        let t = self.tab.thread.as_ref().filter(|_| self.tab.view() == View::Thread);
+        let (site, here) = match t {
+            Some(t) => (self.site_named(&t.key().site)?, t.key().board.clone()),
+            None => (self.current_site(), self.tab.board.as_ref()?.uri.clone()),
+        };
+        let board = l.board.clone().unwrap_or(here);
+        // A bare `>>N` of a post in the thread shown.
+        let in_thread = t.filter(|t| l.board.is_none() && l.post.is_some_and(|p| t.index.contains_key(&p))).map(|t| t.key().no);
+        Some(match (l.thread.or(in_thread), l.post) {
+            (Some(th), Some(p)) => site.backend.post_url(&board, th, p),
+            (Some(th), None) => site.backend.thread_url(&board, th),
+            _ => site.backend.board_url(&board),
         })
     }
 
@@ -150,7 +153,7 @@ impl App {
         let Some(t) = &self.tab.thread else { return false };
         let Some(p) = t.current() else { return false };
         let Some(file) = p.files.get(k) else { return false };
-        let dir = download::dir(self.download_dir.as_deref(), &self.current_site().cfg.name, &t.board, t.no);
+        let dir = download::dir(self.download_dir.as_deref(), t.key());
         let (jobs, none) = (download::job(p, file, &dir), super::saving::nothing_to_save(file));
         self.start_download(jobs, dir, none);
         true
@@ -245,12 +248,6 @@ impl App {
         (title, items)
     }
 
-    /// Whether thread `no` on the tab's board is watched.
-    /// Whether thread `no` on the tab's board is watched.
-    pub(crate) fn menu_watching(&self, no: u64) -> bool {
-        self.tab.board.as_ref().is_some_and(|b| self.store.watched(&self.key(&b.uri, no)).is_some())
-    }
-
     /// Whether `u` has somewhere to go back to: an earlier post still here, or the thread
     /// before.
     pub(crate) fn can_jump_back(&self) -> bool {
@@ -341,7 +338,7 @@ impl App {
                 Media::All => "all posts and images again",
             },
         ));
-        items.push(act(A::Watch, if self.menu_watching(t.no) { "stop watching the thread" } else { "watch the thread" }));
+        items.push(act(A::Watch, if self.store.watched(t.key()).is_some() { "stop watching the thread" } else { "watch the thread" }));
         items.push(act(A::Follow, "follow the thread as a general"));
         if t.gallery_files().next().is_some() {
             items.push(act(A::Gallery, "all the thread's files"));
@@ -385,7 +382,7 @@ impl App {
             if !p.files.is_empty() {
                 items.push(act(A::View, "view its images"));
             }
-            items.push(act(A::Watch, if self.menu_watching(p.no) { "stop watching it" } else { "watch it" }));
+            items.push(act(A::Watch, if self.catalog_watching(p) { "stop watching it" } else { "watch it" }));
             items.push(act(A::Follow, "follow it as a general"));
             items.push(act(A::Hide, "hide it (or unhide)"));
             items.push(act(A::Filter, "hide or highlight threads like it…"));

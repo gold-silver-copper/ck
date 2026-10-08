@@ -2,7 +2,7 @@
 
 use std::time::{Duration, Instant};
 
-use super::{App, FilteredList, Opening, Sort, View};
+use super::{App, Catalog, FilteredList, Opening, Sort, ThreadView, View};
 use crate::store::{Place, Session};
 
 /// How often the session is saved while ck runs (if it changed).
@@ -25,19 +25,20 @@ fn view_name(v: View) -> &'static str {
 impl App {
     /// Where this tab is.
     pub fn place(&self) -> Place {
-        // From settings or search results: the view they were opened from.
-        let view = match self.tab.place_view() {
-            View::Search => View::Catalog,
-            v => v,
+        // From settings or search results: where they were opened from.
+        let (site, board, view) = match &self.tab.search {
+            Some(s) if self.tab.place_view() == View::Search => s.back_place(),
+            _ => (self.tab.site, self.tab.board.as_ref(), self.tab.place_view()),
         };
-        let mut place = Place { view: view_name(view).into(), site: self.current_site().cfg.name.clone(), ..Default::default() };
+        let site = self.sites.get(site).map_or(String::new(), |s| s.cfg.name.clone());
+        let mut place = Place { view: view_name(view).into(), site, ..Default::default() };
         // A saved copy open: reopened as one.
         if view == View::Thread && self.tab.saved().is_some() {
             place.view = "saved".into();
         }
         match view {
             View::Catalog | View::Thread => {
-                place.board = self.tab.board.as_ref().map(|b| b.uri.clone());
+                place.board = board.map(|b| b.uri.clone());
                 place.sort = (self.tab.catalog_sort != Sort::Bump).then_some(self.tab.catalog_sort);
                 place.filter.clone_from(&self.tab.catalog_list.filter);
             }
@@ -46,13 +47,16 @@ impl App {
         match view {
             View::Thread => {
                 let t = self.tab.thread.as_ref();
-                place.thread = t.map(|t| t.no).or(self.tab.pending_thread);
+                // The thread's own site and board, shown or asked for.
+                if let Some(k) = t.map(ThreadView::key).or(self.tab.pending_thread.as_ref()) {
+                    (place.site, place.board, place.thread) = (k.site.clone(), Some(k.board.clone()), Some(k.no));
+                }
                 place.selected = t.and_then(|t| t.current()).map(|p| p.no).or_else(|| self.tab.opening().select);
                 // A poster's posts aren't kept: an ID is the thread's alone, and short-lived.
                 place.conversation = t.and_then(|t| Some(t.conversation.as_ref().filter(|c| c.poster.is_none())?.anchor)).or_else(|| self.tab.opening().conversation);
             }
             View::Catalog => {
-                place.selected = self.tab.catalog_list.state.selected().and_then(|i| self.visible_catalog().get(i).and_then(|&k| self.tab.catalog.get(k)).map(|p| p.no)).or_else(|| self.tab.catalog_selecting());
+                place.selected = self.tab.catalog_list.state.selected().and_then(|i| self.visible_catalog().get(i).and_then(|&k| self.tab.catalog.posts().get(k)).map(|p| p.no)).or_else(|| self.tab.catalog_selecting());
             }
             _ => {}
         }
@@ -116,7 +120,7 @@ impl App {
             ("boards", ..) => self.enter_site(site),
             ("catalog", Some(board), _) => {
                 self.tab.board = Some(board);
-                self.tab.catalog.clear();
+                self.tab.catalog = Catalog::default();
                 self.tab.navigate(View::Catalog);
                 self.load_catalog(p.selected);
             }
