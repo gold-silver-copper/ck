@@ -451,7 +451,7 @@ impl App {
             Action::DownloadThread => self.ask_to_save(Saving::Files),
             Action::Archive => match self.tab.archive_offer.take() {
                 Some(key) => {
-                    self.open_key(key);
+                    self.open_key(&key);
                     self.tab.return_to = None;
                 }
                 None => self.info("Nothing to open in an archive"),
@@ -572,11 +572,10 @@ impl App {
             },
             Action::JumpBack => {
                 if !t.jump_back()
-                    && let Some((site, board, no, post)) = self.tab.trail.pop()
+                    && let Some((key, post)) = self.tab.trail.pop()
                 {
                     // Back to the thread we came from by a cross-thread link.
-                    self.switch_site(site);
-                    self.open_thread_at(board, no, Opening::at(Some(post)));
+                    self.open_thread_key(&key, Opening::at(Some(post)));
                 }
             }
             Action::Unread => match (0..t.posts.len()).find(|&i| t.is_new(i)) {

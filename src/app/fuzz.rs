@@ -777,7 +777,7 @@ impl World {
                 if fresh && app.filter_cfgs.len() == before + 1 {
                     let at = match app.tab.view() {
                         View::Thread => app.tab.thread.as_ref().and_then(|t| Some((&t.marks, *t.index.get(&post)?))),
-                        _ => app.tab.catalog.iter().position(|p| p.no == post).map(|i| (&app.tab.catalog_marks, i)),
+                        _ => app.tab.catalog.posts().iter().position(|p| p.no == post).map(|i| (&app.tab.catalog.marks, i)),
                     };
                     let caught = at.is_some_and(|(m, i)| m.why_hidden(i).is_some() || m.highlight(i).is_some());
                     assert!(caught, "the filter {:?} added from post {post} doesn't catch it", app.filter_cfgs.last());
@@ -944,8 +944,8 @@ fn replay(seed: u64, acts: &[Act]) -> Result<(), (String, String)> {
             if std::env::var_os("FUZZ_TRACE").is_some() {
                 let a = &world.app;
                 let hid = a.store.hidden_count();
-                let m = a.tab.catalog_marks.hidden_count();
-                eprintln!("TRACE {step} {act}: tab {} view {:?} site {} board {:?} cat_board {} cat {} hidden-marks {m} store {hid:?} filters {}", a.active, a.tab.view(), a.current_site().cfg.name, a.tab.board.as_ref().map(|b| &b.uri), a.tab.catalog_board.as_deref().unwrap_or_default(), a.tab.catalog.len(), a.filter_cfgs.len());
+                let m = a.tab.catalog.marks.hidden_count();
+                eprintln!("TRACE {step} {act}: tab {} view {:?} site {} board {:?} cat_board {} cat {} hidden-marks {m} store {hid:?} filters {}", a.active, a.tab.view(), a.current_site().cfg.name, a.tab.board.as_ref().map(|b| &b.uri), a.tab.catalog.board().map_or("", |b| b.uri.as_str()), a.tab.catalog.posts().len(), a.filter_cfgs.len());
                 let w: Vec<String> = a.store.all_watched().iter().map(|w| format!("{}/{}/{} dead={} seen={}", w.key.site, w.key.board, w.key.no, w.status.is_dead(), w.last_seen)).collect();
                 let sv: Vec<String> = a.store.saved.iter().map(|m| format!("{}/{}/{}", m.key.site, m.key.board, m.key.no)).collect();
                 eprintln!("TRACE   watched {w:?} saved {sv:?} status {:?}", a.footer.get().map(|s| &s.text));
@@ -1071,7 +1071,7 @@ fn check(app: &App) {
         if tab.cached().is_some() && tab.thread.is_none() {
             fail(format!("tab {i}: marked cached with no thread"));
         }
-        if tab.catalog_cached.is_some() && tab.catalog.is_empty() {
+        if tab.catalog.cached.is_some() && tab.catalog.posts().is_empty() {
             fail(format!("tab {i}: catalog marked cached with nothing in it"));
         }
         if let Some(v) = tab.viewer()
@@ -1090,8 +1090,8 @@ fn check(app: &App) {
             fail(format!("tab {i}: links selection {:?} of {}", l.list.selected(), l.items.len()));
         }
         // Marks left from an emptied catalog are harmless; a catalog's own must line up.
-        if !tab.catalog.is_empty() && tab.catalog_marks.len() != tab.catalog.len() {
-            fail(format!("tab {i}: {} catalog marks for {} threads", tab.catalog_marks.len(), tab.catalog.len()));
+        if !tab.catalog.posts().is_empty() && tab.catalog.marks.len() != tab.catalog.posts().len() {
+            fail(format!("tab {i}: {} catalog marks for {} threads", tab.catalog.marks.len(), tab.catalog.posts().len()));
         }
     }
     if let Some(m) = app.menu()
@@ -1236,21 +1236,21 @@ impl Before {
         let saved = app.store.saved.iter().map(|m| (m.key.clone(), m.dead && app.store.watched(&m.key).is_none())).collect();
         let offline_dead = match (app.tab.saved(), &app.tab.thread) {
             (Some(o), Some(t)) if o.dead && app.tab.view() == View::Thread => {
-                Some(app.key(&t.board, t.no)).filter(|k| !watched_alive(k)).map(|k| (app.active, k))
+                Some(t.key().clone()).filter(|k| !watched_alive(k)).map(|k| (app.active, k))
             }
             _ => None,
         };
         let shown = app.tab.view() == View::Thread && app.tab.gallery.is_none() && app.tab.viewer().is_none();
         let reading = app.tab.thread.as_ref().filter(|_| shown).and_then(|t| {
             let top = t.posts[t.entries.get(t.layout.as_ref()?.entry_at(t.scroll))?.post].no;
-            Some((app.active, t.board.clone(), t.no, t.posts.len(), t.at_end(), top))
+            Some((app.active, t.key().board.clone(), t.key().no, t.posts.len(), t.at_end(), top))
         });
         let live = app
             .tab
             .thread
             .as_ref()
             .filter(|_| app.tab.copy.is_none())
-            .map(|t| ((app.active, app.tabs.len()), t.board.clone(), t.no, t.posts.iter().map(|p| p.no).collect()));
+            .map(|t| ((app.active, app.tabs.len()), t.key().board.clone(), t.key().no, t.posts.iter().map(|p| p.no).collect()));
         Before { saved, in_saved_view: app.tab.view() == View::Saved, offline_dead, log: gate.log_len(), filters: app.filter_cfgs.clone(), recursive_hiding: app.hiding.recursive(), reading, live }
     }
 }
@@ -1270,12 +1270,12 @@ fn check_images(app: &App, before: &[String]) {
             .filter(|_| !app.thread_images_on())
             .map(|t| t.posts.iter().flat_map(|p| p.files.iter().filter_map(|f| f.thumb.as_deref())).collect())
             .unwrap_or_default(),
-        View::Catalog => app.tab.catalog.iter().filter(|p| !app.catalog_images_on(p)).flat_map(|p| p.files.iter().filter_map(|f| f.thumb.as_deref())).collect(),
+        View::Catalog => app.tab.catalog.posts().iter().filter(|p| !app.catalog_images_on(p)).flat_map(|p| p.files.iter().filter_map(|f| f.thumb.as_deref())).collect(),
         _ => Vec::new(),
     };
     // A thumbnail shared with a post on a board that shows images can be asked for.
     let shared = |u: &str| match app.tab.view() {
-        View::Catalog => app.tab.catalog.iter().filter(|p| app.catalog_images_on(p)).any(|p| p.files.iter().any(|f| f.thumb.as_deref() == Some(u))),
+        View::Catalog => app.tab.catalog.posts().iter().filter(|p| app.catalog_images_on(p)).any(|p| p.files.iter().any(|f| f.thumb.as_deref() == Some(u))),
         _ => false,
     };
     for u in asked {
@@ -1288,7 +1288,7 @@ fn check_images(app: &App, before: &[String]) {
 fn check_follow(app: &App, before: &Before) {
     let Some((tab, board, no, posts, at_end, top)) = &before.reading else { return };
     let shown = app.tab.view() == View::Thread && app.tab.gallery.is_none() && app.tab.viewer().is_none();
-    let Some(t) = app.tab.thread.as_ref().filter(|t| shown && app.active == *tab && t.board == *board && t.no == *no && t.posts.len() > *posts) else { return };
+    let Some(t) = app.tab.thread.as_ref().filter(|t| shown && app.active == *tab && t.key().board == *board && t.key().no == *no && t.posts.len() > *posts) else { return };
     let Some(l) = &t.layout else { return };
     let e = t.entry();
     if *at_end && app.follow_new_posts {
@@ -1350,12 +1350,12 @@ fn check_deleted(app: &App, before: &Before) {
     if let Some(i) = (0..t.posts.len()).find(|&i| t.is_deleted(i) && t.is_new(i)) {
         panic!("No.{} is deleted and new", t.posts[i].no);
     }
-    if t.deleted.iter().any(|no| !t.index.contains_key(no)) || t.deleted.contains(&t.no) {
+    if t.deleted.iter().any(|no| !t.index.contains_key(no)) || t.deleted.contains(&t.key().no) {
         panic!("deleted posts {:?} aren't (reply) posts of the thread", t.deleted);
     }
     let Some((tab, board, no, nos)) = &before.live else { return };
     // (An answer cut short is shown as it came.)
-    if (app.active, app.tabs.len()) != *tab || app.tab.copy.is_some() || t.board != *board || t.no != *no || crate::model::shrank(t.known, t.live_posts().len()) {
+    if (app.active, app.tabs.len()) != *tab || app.tab.copy.is_some() || t.key().board != *board || t.key().no != *no || crate::model::shrank(t.known, t.live_posts().len()) {
         return;
     }
     if let Some(lost) = nos.iter().find(|n| !t.index.contains_key(n)) {
@@ -1367,11 +1367,11 @@ fn check_deleted(app: &App, before: &Before) {
 fn check_marks(app: &App, before: &Before) {
     // Threads a `top` filter highlights come first, whatever the sort; then (`watched_first`)
     // the watched ones.
-    if app.tab.catalog_marks.len() == app.tab.catalog.len() {
+    if app.tab.catalog.marks.len() == app.tab.catalog.posts().len() {
         let firsts: Vec<(bool, bool)> = app
             .visible_catalog()
             .iter()
-            .map(|&i| (app.tab.catalog_marks.top(i), app.watched_first && app.catalog_watching(&app.tab.catalog[i])))
+            .map(|&i| (app.tab.catalog.marks.top(i), app.watched_first && app.catalog_watching(&app.tab.catalog.posts()[i])))
             .collect();
         assert!(firsts.windows(2).all(|w| w[0] >= w[1]), "a top or watched thread after another (top, watched): {firsts:?}");
     }
@@ -1380,13 +1380,12 @@ fn check_marks(app: &App, before: &Before) {
     }
     let tab = &app.tab;
     // Each marked for the site it's from (a search moves the tab to the archive).
-    if !tab.catalog.is_empty() {
-        let site = &app.sites[tab.catalog_site].cfg.name;
-        let want = app.catalog_marks_for(site, &tab.catalog, |p| app.board_of(p));
-        assert!(want == tab.catalog_marks, "catalog marks don't match the filters on {site:?}: {:?}, not {:?}", tab.catalog_marks, want);
+    if !tab.catalog.posts().is_empty() {
+        let want = app.catalog_marks(&tab.catalog, tab.catalog.posts());
+        assert!(want == tab.catalog.marks, "catalog marks don't match the filters on {:?}: {:?}, not {:?}", tab.catalog.site(), tab.catalog.marks, want);
     }
     if let Some(t) = &tab.thread {
-        assert!(app.thread_marks(&app.sites[tab.thread_site].cfg.name, t) == t.marks, "thread marks don't match the filters");
+        assert!(app.thread_marks(t) == t.marks, "thread marks don't match the filters");
     }
     // And they're what's in the config file.
     if let Some(path) = &app.config_path {

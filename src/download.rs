@@ -3,6 +3,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::model::{Attachment, Post};
+use crate::store::ThreadKey;
 
 /// Default for `download_dir`. `{downloads}` is the system's Downloads folder.
 const DEFAULT_DIR: &str = "{downloads}/ck/{site}/{board}/{thread}";
@@ -35,8 +36,8 @@ pub fn default_root() -> PathBuf {
     downloads().join("ck")
 }
 
-/// The directory for a thread's files, from the `download_dir` template.
-pub fn dir(template: Option<&str>, site: &str, board: &str, thread: u64) -> PathBuf {
+/// The directory for thread `key`'s files, from the `download_dir` template.
+pub fn dir(template: Option<&str>, key: &ThreadKey) -> PathBuf {
     let home = dirs::home_dir().unwrap_or_default();
     let downloads = downloads();
     let t = template.unwrap_or(DEFAULT_DIR);
@@ -46,9 +47,9 @@ pub fn dir(template: Option<&str>, site: &str, board: &str, thread: u64) -> Path
     };
     let path = t
         .replace("{downloads}", &downloads.display().to_string())
-        .replace("{site}", &sanitize(site))
-        .replace("{board}", &sanitize(board))
-        .replace("{thread}", &thread.to_string());
+        .replace("{site}", &sanitize(&key.site))
+        .replace("{board}", &sanitize(&key.board))
+        .replace("{thread}", &key.no.to_string());
     PathBuf::from(path)
 }
 
@@ -116,8 +117,8 @@ mod tests {
 
     #[test]
     fn dir_template() {
-        let d = dir(Some("/tmp/x/{site}/{board}/{thread}"), "4chan", "g/../", 5);
+        let d = dir(Some("/tmp/x/{site}/{board}/{thread}"), &ThreadKey { site: "4chan".into(), board: "g/../".into(), no: 5 });
         assert_eq!(d, PathBuf::from("/tmp/x/4chan/g_.._/5"));
-        assert!(dir(None, "s", "b", 1).ends_with("ck/s/b/1"));
+        assert!(dir(None, &ThreadKey { site: "s".into(), board: "b".into(), no: 1 }).ends_with("ck/s/b/1"));
     }
 }

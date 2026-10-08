@@ -5,8 +5,8 @@ use super::{App, LinksPanel, Opening, Preview, Tab, View, Viewer, thread_subject
 use crate::model::Board;
 use crate::store::ThreadKey;
 
-/// A thread left for another, for `u` to come back to: (site, board, thread, selected post).
-pub type Trail = (usize, Board, u64, u64);
+/// A thread left for another, for `u` to come back to, and its selected post.
+pub type Trail = (ThreadKey, u64);
 
 /// Tabs open at once, at most.
 pub const MAX_TABS: usize = 9;
@@ -88,7 +88,7 @@ impl App {
             return;
         }
         let open = match self.tab.view() {
-            View::Catalog => self.selected_index().and_then(|i| self.tab.catalog.get(i)).map(|p| Open::Thread(self.find_board(&self.board_of(p)), p.no)),
+            View::Catalog => self.selected_index().and_then(|i| self.tab.catalog.posts().get(i)).map(|p| Open::Thread(self.find_board(&self.tab.catalog.board_of(p)), p.no)),
             View::Watched | View::History => self.selected_listed().map(|(key, _)| Open::Key(key.clone())),
             View::Saved => self.selected_listed().map(|(key, _)| Open::Saved(key.clone())),
             View::Thread => match self.outgoing_link() {
@@ -108,7 +108,7 @@ impl App {
         self.tab.board = board;
         match open {
             Open::Thread(board, no) => self.open_thread_at(board, no, Opening::default()),
-            Open::Key(key) => self.open_key(key),
+            Open::Key(key) => self.open_key(&key),
             Open::Saved(key) => self.open_saved(&key, Opening::default()),
             Open::Link(link) => self.follow(&link),
         }
@@ -162,8 +162,7 @@ impl App {
     pub fn tab_unread(&self, i: usize) -> Option<usize> {
         let t = self.tab_at(i);
         let th = t.thread.as_ref().filter(|_| t.view() == View::Thread)?;
-        let site = self.sites.get(t.site)?.cfg.name.clone();
-        let w = self.store.watched(&ThreadKey { site, board: th.board.clone(), no: th.no })?;
+        let w = self.store.watched(th.key())?;
         Some(w.status.counts().0).filter(|&n| n > 0)
     }
 
@@ -181,7 +180,7 @@ impl App {
         let new = if new > 0 { format!("({new}) ") } else { String::new() };
         let yours = if yours > 0 { "(You) " } else { "" };
         let place = match self.tab.thread.as_ref().filter(|_| self.tab.view() == View::Thread) {
-            Some(th) => format!("/{}/ {}", th.board, thread_subject(&th.posts)),
+            Some(th) => format!("/{}/ {}", th.key().board, thread_subject(&th.posts)),
             None => self.tab_label(self.active),
         };
         Some(crate::title::clean(&format!("ck: {new}{yours}{place}")))
@@ -213,7 +212,7 @@ impl App {
         match t.view() {
             View::Thread => match &t.thread {
                 Some(th) => thread_subject(&th.posts),
-                None => format!("/{board}/{}", t.pending_thread.unwrap_or_default()),
+                None => format!("/{board}/{}", t.pending_thread.as_ref().map_or(0, |k| k.no)),
             },
             View::Catalog => format!("/{board}/"),
             View::Boards => self.sites.get(t.site).map_or(String::new(), |s| s.cfg.name.clone()),

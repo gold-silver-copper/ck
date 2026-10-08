@@ -67,8 +67,8 @@ impl App {
     pub(super) fn go(&mut self, target: Target) {
         let from_thread = self.tab.place_view() == View::Thread;
         // `u` comes back to the thread this was opened from.
-        if let Some(b) = self.tab.board.clone().filter(|_| from_thread && target.thread.is_some()) {
-            self.leave_trail(b);
+        if from_thread && target.thread.is_some() {
+            self.leave_trail();
         }
         let back_to = self.tab.place_view();
         let Some(uri) = target.board else {
@@ -91,9 +91,9 @@ impl App {
                 self.tab.close_settings();
                 let board = self.known_boards(target.site).and_then(|b| b.into_iter().find(|b| b.uri == uri));
                 let board = board.unwrap_or_else(|| Board { uri: uri.clone(), title: String::new(), nsfw: None });
-                let trail = self.tab.board.clone().filter(|_| from_thread).and_then(|b| self.trail_here(b));
+                let trail = self.trail_here().filter(|_| from_thread);
                 let (label, site) = (format!("Looking up post {post}"), target.site);
-                self.spawn(label, super::Then::Show, move |_, _, _| backend.find_thread(&uri, post), move |app, r| app.thread_found(site, board, post, trail, r));
+                self.spawn(backend, label, super::Then::Show, move |b, _, _| b.find_thread(&uri, post), move |app, r| app.thread_found(site, board, post, trail, r));
             }
             (None, None) => {
                 self.switch_site(target.site);

@@ -144,22 +144,21 @@ impl App {
 
     /// The link to the post the viewer's file is from, when it knows.
     pub(super) fn viewer_post_link(&self) -> Option<String> {
-        let (v, t, b) = (self.tab.viewer()?, self.tab.thread.as_ref()?, self.tab.board.as_ref()?);
-        let no = *v.posts.get(v.index)?;
-        self.thread_link(&self.key(&b.uri, t.no), Some(no))
+        let (v, t) = (self.tab.viewer()?, self.tab.thread.as_ref()?);
+        self.thread_link(t.key(), Some(*v.posts.get(v.index)?))
     }
 
     /// The link to the post a gallery file is from.
     pub fn gallery_link(&self, k: usize) -> Option<String> {
-        let (g, t, b) = (self.tab.gallery.as_ref()?, self.tab.thread.as_ref()?, self.tab.board.as_ref()?);
-        self.thread_link(&self.key(&b.uri, t.no), Some(g.files.get(k)?.0))
+        let (g, t) = (self.tab.gallery.as_ref()?, self.tab.thread.as_ref()?);
+        self.thread_link(t.key(), Some(g.files.get(k)?.0))
     }
 
     fn download_file(&mut self, k: usize) {
         let (Some(g), Some(t)) = (&self.tab.gallery, &self.tab.thread) else { return };
         // A refresh may have taken the post away since the gallery opened.
         let Some(((_, file), p)) = g.files.get(k).and_then(|f| Some((f, t.posts.get(*t.index.get(&f.0)?)?))) else { return };
-        let dir = download::dir(self.download_dir.as_deref(), &self.current_site().cfg.name, &t.board, t.no);
+        let dir = download::dir(self.download_dir.as_deref(), t.key());
         let (jobs, none) = (download::job(p, file, &dir), super::saving::nothing_to_save(file));
         self.start_download(jobs, dir, none);
     }

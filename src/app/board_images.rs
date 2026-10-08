@@ -6,14 +6,10 @@ use super::*;
 use crate::config::NsfwImages;
 
 impl App {
-    /// The key of a board's preferences: `site/board`.
-    pub(super) fn prefs_key(&self, site: usize, board: &str) -> String {
-        crate::store::board_key(self.sites.get(site).map_or("", |s| s.cfg.name.as_str()), board)
-    }
-
     /// Whether the site marks a board NSFW, as far as its board list says (`None`: it doesn't
     /// say, or the list isn't known).
-    fn nsfw(&self, site: usize, board: &str) -> Option<bool> {
+    fn nsfw(&self, site: &str, board: &str) -> Option<bool> {
+        let site = self.site_index(site)?;
         match self.sites.get(site)?.boards.as_ref() {
             Some(boards) => boards.iter().find(|b| b.uri == board)?.nsfw,
             None => self.nsfw_saved.get(&site).map(|n| n.contains(board)),
@@ -21,13 +17,13 @@ impl App {
     }
 
     /// What images on a board are without its own setting.
-    fn images_by_default(&self, site: usize, board: &str) -> bool {
+    fn images_by_default(&self, site: &str, board: &str) -> bool {
         self.nsfw_images == NsfwImages::Show || self.nsfw(site, board) != Some(true)
     }
 
     /// Whether a board's images are shown: its own setting, else the default.
-    pub fn images_on(&self, site: usize, board: &str) -> bool {
-        match self.store.board_prefs.get(&self.prefs_key(site, board)).and_then(|p| p.images) {
+    pub fn images_on(&self, site: &str, board: &str) -> bool {
+        match self.store.board_prefs.get(&crate::store::board_key(site, board)).and_then(|p| p.images) {
             Some(on) => on,
             None => self.images_by_default(site, board),
         }
@@ -36,11 +32,10 @@ impl App {
     /// Images on a catalog's thread: the catalog's own setting if it has one (an overboard
     /// as a whole), else the thread's board's.
     pub fn catalog_images_on(&self, p: &Post) -> bool {
-        let (site, catalog) = (self.tab.catalog_site, self.tab.catalog_board.as_deref().unwrap_or_default());
-        if let Some(on) = self.store.board_prefs.get(&self.prefs_key(site, catalog)).and_then(|p| p.images) {
+        if let Some(on) = self.store.board_prefs.get(&self.board_key()).and_then(|p| p.images) {
             return on;
         }
-        self.images_on(site, p.board.as_deref().unwrap_or(catalog))
+        self.images_on(self.tab.catalog.site(), &self.tab.catalog.board_of(p))
     }
 
     /// With `nsfw_images = "off"`, know which of a site's boards are NSFW: from its saved
@@ -61,11 +56,11 @@ impl App {
 
     /// The board the `.` menu's image switch is for: the selected board in the Boards list,
     /// the catalog's, or the thread's.
-    pub(super) fn images_target(&self) -> Option<(usize, String)> {
+    pub(super) fn images_target(&self) -> Option<(String, String)> {
         match self.tab.view() {
-            View::Boards => self.selected_index().and_then(|i| self.boards().get(i).map(|b| (self.tab.site, b.uri.clone()))),
-            View::Catalog => self.tab.catalog_board.clone().map(|b| (self.tab.catalog_site, b)),
-            View::Thread => self.tab.thread.as_ref().map(|t| (self.tab.site, t.board.clone())),
+            View::Boards => self.selected_index().and_then(|i| self.boards().get(i).map(|b| (self.current_site().cfg.name.clone(), b.uri.clone()))),
+            View::Catalog => self.tab.catalog.board().map(|b| (self.tab.catalog.site().to_string(), b.uri.clone())),
+            View::Thread => self.tab.thread.as_ref().map(|t| (t.key().site.clone(), t.key().board.clone())),
             _ => None,
         }
     }
@@ -73,7 +68,7 @@ impl App {
     /// The `.` menu's row for the image switch, when there's a board to switch.
     pub(super) fn board_images_row(&self) -> Option<String> {
         let (site, board) = self.images_target()?;
-        Some(if self.images_on(site, &board) { "images on this board: on → off" } else { "images on this board: off → on" }.into())
+        Some(if self.images_on(&site, &board) { "images on this board: on → off" } else { "images on this board: off → on" }.into())
     }
 
     /// The boards with their own image setting, `site/board` and on or off, in order.
@@ -94,10 +89,9 @@ impl App {
     /// setting goes.
     pub(super) fn toggle_board_images(&mut self) {
         let Some((site, board)) = self.images_target() else { return };
-        let on = !self.images_on(site, board.as_str());
-        let key = self.prefs_key(site, &board);
-        let own = (on != self.images_by_default(site, &board)).then_some(on);
-        self.store.board_prefs.entry(key).or_default().images = own;
+        let on = !self.images_on(&site, &board);
+        let own = (on != self.images_by_default(&site, &board)).then_some(on);
+        self.store.board_prefs.entry(crate::store::board_key(&site, &board)).or_default().images = own;
         self.save_now();
         self.info(if on { format!("Images on /{board}/") } else { format!("Images off on /{board}/: none are asked for") });
     }
@@ -107,17 +101,17 @@ impl App {
         let (on, board) = match self.tab.view() {
             View::Catalog => {
                 let Some(p) = self.selected_post() else { return false };
-                (self.catalog_images_on(p), p.board.clone().or_else(|| self.tab.catalog_board.clone()).unwrap_or_default())
+                (self.catalog_images_on(p), self.tab.catalog.board_of(p))
             }
             View::Thread => {
                 let Some(t) = &self.tab.thread else { return false };
-                let on = self.images_on(self.tab.site, &t.board);
+                let on = self.images_on(&t.key().site, &t.key().board);
                 if on && !self.thread_images_on() {
                     let key = self.keys.key(Action::Media);
                     self.info(format!("Images are hidden in this thread ({key} shows them); i opens the file"));
                     return true;
                 }
-                (on, t.board.clone())
+                (on, t.key().board.clone())
             }
             _ => return false,
         };

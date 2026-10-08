@@ -10,6 +10,7 @@ use super::{App, Part, Popup, View, edit_text, list_move};
 use crate::config::FilterEdit;
 use crate::filter::{Field, FilterAction, FilterConfig, Filters};
 use crate::model::Post;
+use crate::store::ThreadKey;
 
 /// Where a filter applies.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -275,7 +276,7 @@ pub fn problem(f: &FilterConfig) -> Option<String> {
 /// The post `X` makes a filter from.
 struct Source<'a> {
     post: &'a Post,
-    board: String,
+    key: ThreadKey,
     /// The focused file.
     file: Option<usize>,
     is_op: bool,
@@ -295,11 +296,11 @@ impl App {
                     Some(Part::File(k)) => Some(*k),
                     _ => None,
                 };
-                Some(Source { post: p, board: t.board.clone(), file, is_op: t.selected == 0, usual: usual_name(&t.posts) })
+                Some(Source { post: p, key: t.key().clone(), file, is_op: t.selected == 0, usual: usual_name(&t.posts) })
             }
             View::Catalog => {
                 let p = self.selected_post()?;
-                Some(Source { post: p, board: self.board_of(p), file: None, is_op: true, usual: usual_name(&self.tab.catalog) })
+                Some(Source { post: p, key: self.tab.catalog.key(p), file: None, is_op: true, usual: usual_name(self.tab.catalog.posts()) })
             }
             _ => None,
         }
@@ -307,7 +308,7 @@ impl App {
 
     /// `X`: hide or highlight posts like the selected one.
     pub fn open_add_filter(&mut self) {
-        let Some(Source { post: p, board, file, is_op, usual }) = self.filter_source() else { return };
+        let Some(Source { post: p, key, file, is_op, usual }) = self.filter_source() else { return };
         let candidates = candidates(p, file, is_op, usual.as_deref());
         // Nothing else to go by: a word from it, straight away.
         let word = candidates.is_empty().then(|| self.tab.thread.as_ref().map(|t| t.search.clone()).unwrap_or_default());
@@ -315,8 +316,8 @@ impl App {
         let first = if file.is_some() { candidates.iter().position(|c| c.field == Field::Md5).unwrap_or(0) } else { 0 };
         self.popup = Some(Popup::AddFilter(AddFilter {
             post: p.no,
-            site: self.current_site().cfg.name.clone(),
-            board,
+            site: key.site,
+            board: key.board,
             candidates,
             list: ListState::default().with_selected(Some(first)),
             action: FilterAction::Hide,
@@ -423,7 +424,7 @@ impl App {
         self.apply_filters();
         let label = format!("hidden word: {word}");
         let posts = self.tab.thread.as_ref().map_or(0, |t| t.marks.hidden_by(&label));
-        let threads = self.tab.catalog_marks.hidden_by(&label);
+        let threads = self.tab.catalog.marks.hidden_by(&label);
         let here = match (posts, threads) {
             (0, 0) => String::new(),
             (p, 0) => format!(" ({p} here)"),
@@ -492,13 +493,13 @@ impl App {
     /// (whether it's on or not).
     pub fn filter_counts(&self, f: &FilterConfig) -> (usize, usize) {
         let Ok(one) = Filters::new(std::slice::from_ref(&FilterConfig { enabled: true, ..f.clone() })) else { return (0, 0) };
-        let site = &self.current_site().cfg.name;
-        let caught = |board: &str, p: &Post, is_op: bool| {
+        let caught = |site: &str, board: &str, p: &Post, is_op: bool| {
             let m = one.check(site, board, p, is_op);
             m.hidden.is_some() || m.highlight.is_some()
         };
-        let posts = self.tab.thread.as_ref().map_or(0, |t| t.posts.iter().enumerate().filter(|&(i, p)| caught(&t.board, p, i == 0)).count());
-        let threads = self.tab.catalog.iter().filter(|p| caught(&self.board_of(p), p, true)).count();
+        let posts = self.tab.thread.as_ref().map_or(0, |t| t.posts.iter().enumerate().filter(|&(i, p)| caught(&t.key().site, &t.key().board, p, i == 0)).count());
+        let c = &self.tab.catalog;
+        let threads = c.posts().iter().filter(|p| caught(c.site(), &c.board_of(p), p, true)).count();
         (posts, threads)
     }
 

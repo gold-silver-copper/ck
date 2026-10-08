@@ -43,6 +43,68 @@ struct Load {
     then: Then,
 }
 
+/// A board's catalog as shown: the site and board it was loaded from, which only a new
+/// `Catalog` sets, with its threads and what's known about them. `Default`: none loaded.
+#[derive(Default)]
+pub struct Catalog {
+    site: String,
+    board: Option<Board>,
+    posts: Vec<Post>,
+    /// What filters and hiding say about each thread.
+    pub marks: Marks,
+    /// Threads that weren't there on the previous visit.
+    pub new: HashSet<u64>,
+    /// It's the last copy kept, shown while the board is fetched.
+    pub cached: Option<Offline>,
+}
+
+impl Catalog {
+    /// `board` on `site`, with nothing loaded yet.
+    pub fn new(site: String, board: Board) -> Self {
+        Catalog { site, board: Some(board), ..Catalog::default() }
+    }
+
+    pub fn site(&self) -> &str {
+        &self.site
+    }
+
+    pub fn board(&self) -> Option<&Board> {
+        self.board.as_ref()
+    }
+
+    /// Whether it's board `uri` on `site`.
+    pub fn is(&self, site: &str, uri: &str) -> bool {
+        self.site == site && self.board.as_ref().is_some_and(|b| b.uri == uri)
+    }
+
+    pub fn posts(&self) -> &[Post] {
+        &self.posts
+    }
+
+    /// The board thread `p` is on: its own (an overboard's threads are on theirs), else this.
+    pub fn board_of(&self, p: &Post) -> String {
+        p.board.clone().or_else(|| self.board.as_ref().map(|b| b.uri.clone())).unwrap_or_default()
+    }
+
+    /// Thread `p`'s key.
+    pub fn key(&self, p: &Post) -> ThreadKey {
+        ThreadKey { site: self.site.clone(), board: self.board_of(p), no: p.no }
+    }
+
+    /// Show `posts`, marked `marks`.
+    pub(super) fn show(&mut self, posts: Vec<Post>, marks: Marks) {
+        self.posts = posts;
+        self.marks = marks;
+    }
+
+    /// Tests' shorthand: `posts` shown on `board` of `site`, unmarked.
+    #[cfg(test)]
+    pub fn of(site: &str, board: &str, posts: Vec<Post>) -> Self {
+        let board = Board { uri: board.to_string(), title: String::new(), nsfw: None };
+        Catalog { posts, ..Catalog::new(site.to_string(), board) }
+    }
+}
+
 /// One tab's place: the active one is `App::tab`. Only `navigate` moves it, and moving it
 /// ends the load that was going to land there.
 pub struct Tab {
@@ -66,11 +128,7 @@ pub struct Tab {
     pub thread_quiet: u32,
     pub site: usize,
     pub board: Option<Board>,
-    pub catalog: Vec<Post>,
-    /// What filters and hiding say about each catalog thread.
-    pub catalog_marks: Marks,
-    /// Catalog threads that weren't there on the previous visit.
-    pub catalog_new: HashSet<u64>,
+    pub catalog: Catalog,
     pub thread: Option<ThreadView>,
     /// The tab's own popup, if any: one at a time.
     pub popup: Option<TabPopup>,
@@ -78,15 +136,6 @@ pub struct Tab {
     pub gallery: Option<Gallery>,
     /// Threads left by following cross-thread links, for `u`.
     pub trail: Vec<Trail>,
-    /// Board the loaded catalog belongs to.
-    pub catalog_board: Option<String>,
-    /// The site the loaded catalog is from.
-    pub catalog_site: usize,
-    /// The site the open thread is from (an archive search moves the tab to the archive).
-    pub thread_site: usize,
-    /// The board whose catalog is loaded, to return to from a thread opened on another board
-    /// (an overboard's threads live on their own boards).
-    pub catalog_of: Option<Board>,
     /// The open thread was opened from the catalog (not by following a link).
     pub from_catalog: bool,
     /// After a thread 404'd: the same thread on the site's configured archive.
@@ -95,12 +144,10 @@ pub struct Tab {
     pub saved_offer: Option<ThreadKey>,
     /// The thread shown is a copy, not the live thread.
     pub copy: Option<ThreadCopy>,
-    /// The same for the catalog.
-    pub catalog_cached: Option<Offline>,
     /// Why the tab's last load failed, shown where what it loads would be (until the next).
     pub failed: Option<String>,
-    /// The thread number of the last thread load, for 404 handling.
-    pub pending_thread: Option<u64>,
+    /// The thread last asked for.
+    pub pending_thread: Option<ThreadKey>,
     /// Archive search: its results and the list over them.
     pub search: Option<Search>,
     pub search_list: FilteredList,
@@ -224,22 +271,15 @@ impl Tab {
             thread_quiet: 0,
             site,
             board: None,
-            catalog: Vec::new(),
-            catalog_marks: Marks::default(),
-            catalog_new: HashSet::new(),
+            catalog: Catalog::default(),
             thread: None,
             popup: None,
             gallery: None,
             trail: Vec::new(),
-            catalog_board: None,
-            catalog_site: site,
-            thread_site: site,
-            catalog_of: None,
             from_catalog: false,
             archive_offer: None,
             saved_offer: None,
             copy: None,
-            catalog_cached: None,
             failed: None,
             pending_thread: None,
             search: None,

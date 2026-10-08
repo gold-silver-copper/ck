@@ -129,8 +129,8 @@ pub fn keep_deleted(old: Option<&ThreadView>, fetched: super::Whole) -> (Vec<Pos
 
 #[derive(Default)]
 pub struct ThreadView {
-    pub board: String,
-    pub no: u64,
+    /// The thread it is, which only `new` sets.
+    key: ThreadKey,
     pub posts: Vec<Post>,
     pub index: HashMap<u64, usize>,
     /// For each post, the posts that quote it.
@@ -322,7 +322,7 @@ impl ThreadLayout {
 pub type LineCache = HashMap<(u64, u16, bool), (u64, Rc<[Line<'static>]>, Rc<[Spot]>)>;
 
 impl ThreadView {
-    pub fn new(board: String, no: u64, mut posts: Vec<Post>) -> Self {
+    pub fn new(key: ThreadKey, mut posts: Vec<Post>) -> Self {
         // A post number once: a site that repeats one (or a broken answer) keeps the first.
         let mut seen = HashSet::new();
         posts.retain(|p| seen.insert(p.no));
@@ -343,7 +343,11 @@ impl ThreadView {
         for id in posts.iter().filter_map(|p| p.id.as_ref()) {
             *ids.entry(id.clone()).or_default() += 1;
         }
-        Self { entries, board, no, known: posts.len(), posts, index, backlinks, ids, ..Default::default() }
+        Self { entries, key, known: posts.len(), posts, index, backlinks, ids, ..Default::default() }
+    }
+
+    pub fn key(&self) -> &ThreadKey {
+        &self.key
     }
 
     /// The post is collapsed to a line: hidden, not shown anyway, and not the OP.
@@ -523,7 +527,7 @@ impl ThreadView {
 
     /// The thread as the site has it (`live_posts`), as an answer for it.
     pub fn live(&self) -> Option<Thread> {
-        Thread::answer(self.no, self.live_posts().into_owned()).ok()
+        Thread::answer(self.key.no, self.live_posts().into_owned()).ok()
     }
 
     /// The posts as the site has them, without the deleted ones kept: what's counted,
