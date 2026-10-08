@@ -422,9 +422,9 @@ impl ThreadView {
                 text.extend(line.spans.iter().map(|s| s.content.as_ref()));
                 text.push(' ');
             }
-            crate::model::search_haystack(&p.name, p.subject.as_deref(), files, &text)
+            crate::model::search_haystack(p.poster.name(), p.subject.as_deref(), files, &text)
         } else {
-            crate::model::search_haystack(&p.name, p.subject.as_deref(), files, p.plain_text())
+            crate::model::search_haystack(p.poster.name(), p.subject.as_deref(), files, p.plain_text())
         }
     }
 

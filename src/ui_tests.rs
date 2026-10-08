@@ -286,7 +286,7 @@ fn add_filter_popup() {
     use ratatui::crossterm::event::{KeyCode, KeyEvent};
     let mut a = thread_app(false);
     let t = a.tab.thread.as_mut().unwrap();
-    t.posts[0].name = "Named !Trip".into();
+    t.posts[0].poster = "Named !Trip".into();
     t.posts[0].files[0].md5 = Some("u8Vh17KxaDvUJ6bBcmE/eg==".into());
     a.on_key(KeyEvent::from(KeyCode::Char('X')));
     a.on_key(KeyEvent::from(KeyCode::Char('s')));
@@ -308,7 +308,7 @@ fn some_filters() -> Vec<crate::filter::FilterConfig> {
 fn filter_list() {
     let mut a = thread_app(false);
     a.filter_cfgs = some_filters();
-    a.tab.thread.as_mut().unwrap().posts[2].name = "Named !Trip".into();
+    a.tab.thread.as_mut().unwrap().posts[2].poster = "Named !Trip".into();
     a.tab.navigate(View::Settings);
     a.popup = Some(Popup::Settings(a.filter_list(1)));
     insta::assert_snapshot!(snapshot(&mut a));
@@ -1418,7 +1418,7 @@ fn saved_search_results() {
     use crate::app::{SavedSearch, Search};
     let mut a = app(false);
     let key = |board: &str, no| ThreadKey { site: "4chan".into(), board: board.into(), no };
-    let hit = |no, text: &str| Post { no, name: "Anonymous".into(), time: NOW - HOUR, body: vec![ratatui::text::Line::from(text.to_string())], ..Default::default() };
+    let hit = |no, text: &str| Post { no, poster: "Anonymous".into(), time: NOW - HOUR, body: vec![ratatui::text::Line::from(text.to_string())], ..Default::default() };
     let hits = vec![(1000, hit(1002, "we were talking about rust and the borrow checker today")), (900, hit(900, "Rust or C++?"))];
     let mut s = Search::for_tests("", "rust", crate::backend::SearchPage { hits, total: None });
     s.saved = Some(SavedSearch::for_tests(vec![key("g", 1000), key("g", 900)], 2, 5, false));

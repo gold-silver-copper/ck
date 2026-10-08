@@ -115,17 +115,17 @@ pub fn candidates(p: &Post, file: Option<usize>, is_op: bool, default_name: Opti
             label: format!("ID:{}", crate::ui::truncate(id, 30)),
         });
     }
-    let name = p.name.trim();
-    let anonymous = name.is_empty() || ANONYMOUS.contains(&name.to_lowercase().as_str()) || default_name == Some(p.name.as_str());
+    let name = p.poster.name().trim();
+    let anonymous = name.is_empty() || ANONYMOUS.contains(&name.to_lowercase().as_str()) || default_name == Some(p.poster.name());
     if !anonymous {
         out.push(Candidate {
             what: format!("posts by {}", crate::ui::truncate(name, 40)),
             field: Field::Name,
-            pattern: format!("^{}$", regex::escape(&p.name)),
+            pattern: format!("^{}$", regex::escape(p.poster.name())),
             label: name.to_string(),
         });
     }
-    if let Some(trip) = p.trip.as_deref().filter(|t| !t.trim().is_empty()) {
+    if let Some(trip) = p.poster.trip() {
         out.push(Candidate {
             what: format!("posts with the tripcode {}", crate::ui::truncate(trip, 40)),
             field: Field::Tripcode,
@@ -173,7 +173,7 @@ pub fn candidates(p: &Post, file: Option<usize>, is_op: bool, default_name: Opti
 fn usual_name(posts: &[Post]) -> Option<String> {
     let mut counts: std::collections::HashMap<&str, usize> = Default::default();
     for p in posts {
-        *counts.entry(p.name.as_str()).or_default() += 1;
+        *counts.entry(p.poster.name()).or_default() += 1;
     }
     let (name, n) = counts.into_iter().max_by_key(|&(name, n)| (n, std::cmp::Reverse(name)))?;
     (posts.len() >= 4 && n * 2 > posts.len()).then(|| name.to_string())
@@ -674,7 +674,7 @@ mod tests {
         let file = |name: &str, md5: Option<&str>| Attachment { filename: name.into(), md5: md5.map(String::from), ..Default::default() };
         Post {
             no: 7,
-            name: name.into(),
+            poster: name.into(),
             subject: Some("Rust (general) [42]".into()),
             files: vec![file("cat.v2.png", None), file("dog.jpg", Some("abc+/def=="))],
             ..Default::default()
@@ -713,9 +713,9 @@ mod tests {
         use crate::model::Flag;
         let p = Post {
             id: Some("Ab3d+f".into()),
-            trip: Some("!!Tr1p".into()),
             flag: Some(Flag { code: "AC".into(), name: "Anarcho-Capitalist".into() }),
-            ..post("Anonymous !!Tr1p")
+            poster: crate::model::Poster::new(None, "Anonymous", Some("!!Tr1p".into()), None),
+            ..post("x")
         };
         let c = candidates(&p, None, false, None);
         // The ID first: on a board with them, that's who it is.

@@ -377,7 +377,7 @@ pub(super) fn draw_search(f: &mut Frame, app: &mut App, area: Rect) {
         if hidden {
             head.extend([chip("hidden", t.text_dim, t.surface_high), Span::raw(" ")]);
         }
-        head.extend([Span::styled(p.name.clone(), if hidden { dim() } else { bold(t.name) }), Span::raw("  ")]);
+        head.extend([Span::styled(p.poster.name().to_string(), if hidden { dim() } else { bold(t.name) }), Span::raw("  ")]);
         let key = s.saved.as_ref().and_then(|x| x.keys.get(k));
         if let Some(key) = key {
             head.push(Span::styled(format!("{}/{}/{}  ", key.site, key.board, key.no), dim()));

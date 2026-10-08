@@ -4,12 +4,12 @@
 
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use serde::{Deserialize, Serialize};
 
-use crate::model::{Anchor, Attachment, Link, Post};
+use crate::model::{Anchor, Attachment, Link, Post, Poster};
 use crate::atomic;
 use crate::store::ThreadKey;
 use crate::theme::mark;
@@ -160,7 +160,7 @@ impl From<&Post> for SavedPost {
             .collect();
         SavedPost {
             no: p.no,
-            name: p.name.clone(),
+            name: p.poster.name().into(),
             subject: p.subject.clone(),
             time: p.time,
             body,
@@ -177,8 +177,8 @@ impl From<&Post> for SavedPost {
             board: p.board.clone(),
             id: p.id.clone(),
             flag: p.flag.clone(),
-            trip: p.trip.clone(),
-            capcode: p.capcode.clone(),
+            trip: p.poster.trip().map(Into::into),
+            capcode: p.poster.capcode().map(Into::into),
         }
     }
 }
@@ -195,7 +195,7 @@ impl From<SavedPost> for Post {
             .collect();
         Post {
             no: p.no,
-            name: p.name,
+            poster: Poster::stored(p.name, p.trip, p.capcode),
             subject: p.subject,
             time: p.time,
             body,
@@ -212,8 +212,6 @@ impl From<SavedPost> for Post {
             board: p.board,
             id: p.id,
             flag: p.flag,
-            trip: p.trip,
-            capcode: p.capcode,
             ..Default::default()
         }
     }
@@ -247,42 +245,41 @@ pub fn write(dir: &Path, t: &SavedThread) -> Result<u64> {
     Ok(bytes.len() as u64)
 }
 
-/// Read a thread's copy. One that won't load is moved aside (like the other data files)
-/// rather than lost.
-pub fn read(dir: &Path, key: &ThreadKey) -> Result<SavedThread> {
-    let file = path(dir, key);
-    let bytes = std::fs::read(&file).with_context(|| format!("reading {}", file.display()))?;
-    match serde_json::from_slice::<SavedThread>(&bytes) {
-        Ok(t) => Ok(t),
-        Err(e) => {
-            let moved = match atomic::set_aside(&file) {
-                Ok(_) => "moved it aside".to_string(),
-                Err(r) => format!("couldn't move it aside: {r}"),
-            };
-            Err(e).with_context(|| format!("{} was corrupt; {moved}", file.display()))
-        }
-    }
-}
-
-/// The list of saved threads, from their files (when `saved.json` is missing or broken).
-pub fn scan(dir: &Path) -> Vec<SavedMeta> {
-    let mut out = Vec::new();
-    for file in atomic::files(&dir.join("threads"), 2).into_iter().filter(|f| f.extension().is_some_and(|e| e == "json")) {
-        let Ok(bytes) = std::fs::read(&file) else { continue };
-        let Ok(t) = serde_json::from_slice::<SavedThread>(&bytes) else { continue };
+/// The list of saved threads, from their files (when `saved.json` is missing, broken or
+/// can't be read), telling what was wrong with the others; and whether every one could be
+/// listed and read, so that a list written from this leaves none out.
+pub fn scan(dir: &Path, warnings: &mut Vec<String>) -> (Vec<SavedMeta>, bool) {
+    let (files, unlisted) = atomic::files(&dir.join("threads"), 2);
+    let (mut out, mut whole) = (Vec::new(), unlisted.is_empty());
+    warnings.extend(unlisted);
+    for file in files.into_iter().filter(|f| f.extension().is_some_and(|e| e == "json")) {
+        let t = match atomic::read::<SavedThread>(&file) {
+            atomic::Read::Loaded(t, _) => t,
+            // Removed since it was listed.
+            atomic::Read::Missing(_) => continue,
+            atomic::Read::Corrupt(problem, _) => {
+                warnings.push(problem);
+                continue;
+            }
+            atomic::Read::Unreadable(problem) => {
+                whole = false;
+                warnings.push(problem);
+                continue;
+            }
+        };
         out.push(SavedMeta {
             key: ThreadKey { site: t.site, board: t.board, no: t.no },
             subject: t.subject,
             saved: t.saved,
             dead: t.dead,
-            bytes: bytes.len() as u64,
+            bytes: std::fs::metadata(&file).map_or(0, |m| m.len()),
             posts: t.posts.len(),
             newest: t.posts.iter().map(|p| p.no).max().unwrap_or(0),
             hash: 0,
         });
     }
     out.sort_by_key(|m| std::cmp::Reverse(m.saved));
-    out
+    (out, whole)
 }
 
 #[cfg(test)]
@@ -293,10 +290,10 @@ mod tests {
 
     fn same(a: &Post, b: &Post) {
         assert_eq!(a.body, b.body, "post {}", a.no);
-        assert_eq!((a.no, &a.name, &a.subject, a.time), (b.no, &b.name, &b.subject, b.time));
+        assert_eq!((a.no, &a.poster, &a.subject, a.time), (b.no, &b.poster, &b.subject, b.time));
         assert_eq!((&a.quotes, &a.links, &a.urls, &a.anchors, &a.files), (&b.quotes, &b.links, &b.urls, &b.anchors, &b.files));
         assert_eq!((a.replies, a.images, a.sticky, a.locked, a.bumplimit, &a.board), (b.replies, b.images, b.sticky, b.locked, b.bumplimit, &b.board));
-        assert_eq!((&a.id, &a.flag, &a.trip, &a.capcode), (&b.id, &b.flag, &b.trip, &b.capcode));
+        assert_eq!((&a.id, &a.flag), (&b.id, &b.flag));
     }
 
     fn round_trip(p: &Post) -> Post {
@@ -384,8 +381,9 @@ mod tests {
         let size = write(dir.path(), &t).unwrap();
         let key = ThreadKey { site: "4chan".into(), board: "g".into(), no: 1 };
         assert_eq!(path(dir.path(), &key), dir.path().join("threads/4chan/g/1.json"));
-        assert_eq!(read(dir.path(), &key).unwrap().posts, t.posts);
-        let listed = scan(dir.path());
+        let atomic::Read::Loaded(back, _) = atomic::read::<SavedThread>(&path(dir.path(), &key)) else { panic!("not read") };
+        assert_eq!(back.posts, t.posts);
+        let (listed, _) = scan(dir.path(), &mut Vec::new());
         assert_eq!(listed.len(), 1);
         assert_eq!((listed[0].bytes, listed[0].posts, &listed[0].key), (size, t.posts.len(), &key));
         // A board name can't climb out of the directory, and only plain characters reach the
@@ -398,7 +396,7 @@ mod tests {
         assert!(p.to_str().unwrap().is_ascii(), "{p:?}");
         let t = SavedThread { site: odd.site.clone(), board: odd.board.clone(), no: 3, ..t };
         write(dir.path(), &t).unwrap();
-        assert_eq!(read(dir.path(), &odd).unwrap().board, odd.board);
+        assert!(matches!(atomic::read::<SavedThread>(&path(dir.path(), &odd)), atomic::Read::Loaded(t, _) if t.board == odd.board));
         // Unicode boards stay readable; different odd names stay apart.
         assert!(path(dir.path(), &ThreadKey { site: "lainchan".into(), board: "λ".into(), no: 1 }).ends_with("lainchan/λ/1.json"));
         let a = ThreadKey { board: "a?b".into(), ..odd.clone() };
@@ -406,8 +404,10 @@ mod tests {
         assert_ne!(path(dir.path(), &a), path(dir.path(), &b));
 
         std::fs::write(path(dir.path(), &key), b"{ not json").unwrap();
-        assert!(read(dir.path(), &key).is_err());
+        assert!(matches!(atomic::read::<SavedThread>(&path(dir.path(), &key)), atomic::Read::Corrupt(..)));
         assert!(dir.path().join("threads/4chan/g/1.json.corrupt").exists());
-        assert_eq!(scan(dir.path()).iter().map(|m| m.key.no).collect::<Vec<_>>(), [3]);
+        let mut problems = Vec::new();
+        let (listed, whole) = scan(dir.path(), &mut problems);
+        assert_eq!((listed.iter().map(|m| m.key.no).collect::<Vec<_>>(), problems.len(), whole), (vec![3], 0, true));
     }
 }

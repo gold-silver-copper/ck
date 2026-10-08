@@ -1,15 +1,13 @@
 //! jschan engine JSON API (zzzchan, ...).
 #![deny(clippy::indexing_slicing, clippy::arithmetic_side_effects, clippy::cast_possible_truncation)]
 
-use std::fmt::Write as _;
-
 use anyhow::Result;
 use serde_json::Value;
 
 use super::{Backend, Partial, as_u32};
 use crate::http::{as_bool, as_i64, as_str, as_u64, encode_segment as enc, get_json, items};
 use crate::markup::{self, Flavor};
-use crate::model::{Attachment, Board, FileKind, Flag, Post};
+use crate::model::{Attachment, Board, FileKind, Flag, Post, Poster};
 
 /// The board list is paginated, local boards first, then webring boards from other sites.
 const MAX_BOARD_PAGES: u64 = 5;
@@ -60,16 +58,6 @@ pub fn parse_thread(base: &str, v: &Value) -> Vec<Post> {
 
 pub fn post(base: &str, v: &Value) -> Post {
     let parsed = markup::parse_html(v["message"].as_str().unwrap_or(""), Flavor::Jschan);
-    let mut name = as_str(&v["name"]).unwrap_or_else(|| "Anonymous".into());
-    let trip = as_str(&v["tripcode"]);
-    let capcode = as_str(&v["capcode"]).map(|c| c.trim().to_string()).filter(|c| !c.is_empty());
-    if let Some(trip) = &trip {
-        name.push(' ');
-        name.push_str(trip);
-    }
-    if let Some(cap) = &capcode {
-        let _ = write!(name, " {cap}");
-    }
     let time = as_i64(&v["u"])
         .map(|ms| ms / 1000)
         .or_else(|| v["date"].as_str().and_then(|d| chrono::DateTime::parse_from_rfc3339(d).ok()).map(|t| t.timestamp()))
@@ -78,12 +66,10 @@ pub fn post(base: &str, v: &Value) -> Post {
     let country = |k: &str| v.get("country").and_then(|c| c.get(k)).and_then(as_str);
     Post {
         no: as_u64(&v["postId"]).unwrap_or(0),
-        name,
+        poster: Poster::new(as_str(&v["name"]), "Anonymous", as_str(&v["tripcode"]), as_str(&v["capcode"])),
         id: as_str(&v["userId"]),
         // `{ "code": "US", "name": "United States", ... }` where the board shows flags.
         flag: Flag::new(country("code"), country("name")),
-        trip,
-        capcode,
         subject: as_str(&v["subject"]),
         time,
         files,
@@ -205,15 +191,17 @@ mod tests {
         let posts = super::parse_thread(BASE, &v);
         let ids: Vec<_> = posts.iter().map(|p| p.id.as_deref()).collect();
         assert_eq!(ids, [Some("a82851"), Some("a82851"), Some("51f52f")]);
-        assert!(posts.iter().all(|p| p.flag.is_none() && p.trip.is_none() && p.capcode.is_none()));
+        assert!(posts.iter().all(|p| p.flag.is_none() && p.poster.trip().is_none() && p.poster.capcode().is_none()));
         // On a board with flags (none in the fixture): `country` is an object.
         v["country"] = serde_json::json!({ "code": "DE", "name": "Germany", "src": "DE.png", "custom": false });
         v["tripcode"] = "!Ep8pui8Vw2".into();
         v["capcode"] = " ##Board Owner".into();
         let op = super::post(BASE, &v);
         assert_eq!(op.flag.as_ref().map(|f| (f.code.as_str(), f.name.as_str())), Some(("DE", "Germany")));
-        assert_eq!((op.trip.as_deref(), op.capcode.as_deref()), (Some("!Ep8pui8Vw2"), Some("##Board Owner")));
-        assert!(op.name.ends_with(" !Ep8pui8Vw2 ##Board Owner"), "{}", op.name);
+        // jschan's capcode comes as " ##Board Owner": the role is stored bare, like every
+        // other engine's, and shown as " ## Board Owner".
+        assert_eq!((op.poster.trip(), op.poster.capcode()), (Some("!Ep8pui8Vw2"), Some("Board Owner")));
+        assert!(op.poster.name().ends_with(" !Ep8pui8Vw2 ## Board Owner"), "{}", op.poster.name());
     }
 
     #[test]

@@ -380,7 +380,7 @@ fn shown_with(t: &ThreadView, i: usize, ctx: &PostCtx) -> u64 {
     let highlighted = t.matches.binary_search(&i).is_ok() || (quotes_marked && in_added);
     (ago(p.time, ctx.clock), ctx.is_op, ctx.is_new, ctx.deleted, ctx.reveal, ctx.hidden, ctx.highlight, ctx.mine.contains(&p.no), &marked, ctx.backlinks).hash(&mut h);
     // The post itself, which a refresh may bring changed (a file deleted, say).
-    (&p.name, &p.subject, p.plain_text(), p.body.len(), &p.id, &p.flag, ctx.id_count).hash(&mut h);
+    (&p.poster, &p.subject, p.plain_text(), p.body.len(), &p.id, &p.flag, ctx.id_count).hash(&mut h);
     for f in &p.files {
         (&f.url, f.kind, &f.filename, f.width, f.height, f.size).hash(&mut h);
     }
@@ -481,7 +481,7 @@ fn post_lines(ctx: &PostCtx, width: usize) -> (Vec<Line<'static>>, Vec<Spot>) {
     let parts = crate::app::parts(p, ctx.backlinks);
     let index = |part: &Part| parts.iter().position(|x| x == part);
     let tag = |style: Style, k: usize| Style { underline_color: Some(Color::Rgb(0xfe, (k >> 8) as u8, k as u8)), ..style };
-    let mut head = vec![Span::styled(p.name.clone(), bold(t.name)), Span::raw("  ")];
+    let mut head = vec![Span::styled(p.poster.name().to_string(), bold(t.name)), Span::raw("  ")];
     if let Some(id) = &p.id {
         let k = index(&Part::Poster).unwrap_or(usize::MAX);
         let (fg, bg) = id_colors(id);
