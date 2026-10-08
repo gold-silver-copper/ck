@@ -2028,9 +2028,8 @@ fn the_add_filter_popup_draws_only_inside_its_panel_on_a_short_screen() {
     use ratatui::crossterm::event::{KeyCode, KeyEvent};
     let mut a = thread_app(false);
     let p = &mut a.tab.thread.as_mut().unwrap().posts[0];
-    p.name = "Named".into();
+    p.poster = crate::model::Poster::new(Some("Named".into()), "Anonymous", Some("!Trip".into()), None);
     p.id = Some("abcd1234".into());
-    p.trip = Some("!Trip".into());
     p.flag = Some(crate::model::Flag { code: "US".into(), name: "United States".into() });
     p.files[0].md5 = Some("u8Vh17KxaDvUJ6bBcmE/eg==".into());
     a.on_key(KeyEvent::from(KeyCode::Char('X')));
