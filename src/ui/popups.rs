@@ -91,10 +91,7 @@ pub(super) fn draw_adding(f: &mut Frame, app: &App) {
         }
     };
     let w = lines.iter().map(|l| markup::spans_columns(&l.spans)).max().unwrap_or(0).max(markup::columns(&title) + markup::columns(hint) + 8).max(60) + 6;
-    let inner = panel(f, w.min(100) as u16, cells(lines.len()).saturating_add(3), &title, hint);
-    for (i, line) in lines.into_iter().enumerate() {
-        put(f, inner.x, inner.y + i as u16, inner.width, line);
-    }
+    text_panel(f, (w.min(100) as u16, &title, hint), &lines);
 }
 
 /// A big save asking first: what it will write, and where (a long folder wraps at its
@@ -104,11 +101,8 @@ pub(super) fn draw_confirm(f: &mut Frame, app: &App) {
     let t = theme();
     let w = (c.lines.iter().map(|l| markup::columns(l)).max().unwrap_or(0).max(markup::columns(c.title) + 24) + 6).min(100) as u16;
     let width = (w.min(f.area().width.saturating_sub(4)).saturating_sub(4) as usize).max(10);
-    let lines: Vec<String> = c.lines.iter().flat_map(|l| wrap_path(l, width)).collect();
-    let inner = panel(f, w, cells(lines.len()).saturating_add(3), c.title, "enter save · esc cancel");
-    for (i, line) in lines.into_iter().enumerate() {
-        put(f, inner.x, inner.y + i as u16, inner.width, Line::styled(line, Style::new().fg(t.text)));
-    }
+    let lines: Vec<_> = c.lines.iter().flat_map(|l| wrap_path(l, width)).map(|l| Line::styled(l, Style::new().fg(t.text))).collect();
+    text_panel(f, (w, c.title, "enter save · esc cancel"), &lines);
 }
 
 /// `text` in lines of at most `width` columns, broken after a `/` where it can be.
@@ -151,16 +145,11 @@ pub(super) fn draw_menu(f: &mut Frame, app: &mut App) {
     };
     let w = (m.items.iter().map(|i| markup::columns(&label(i))).max().unwrap_or(10) + key_w + 8).max(markup::columns(&m.title) + 24) as u16;
     let title = if m.title.is_empty() { "Actions".to_string() } else { m.title.clone() };
-    let inner = panel(f, w.min(90), cells(m.items.len()).saturating_add(3), &title, "enter run · esc close");
-    let rows = inner.height as usize;
-    let sel = m.list.selected().unwrap_or(0);
-    let off = scroll_to(m.list.offset(), sel, rows);
-    *m.list.offset_mut() = off;
-    app.drawn.popup = Some(Hit::List { area: inner, offset: off, item_height: 1 });
-    list_rows(f, Rect { height: rows as u16, ..inner }, off, m.items.len(), Some(sel), |k| {
+    let hit = list_panel(f, (w.min(90), &title, "enter run · esc close"), &mut m.list, &m.items, ("", true), |_| Vec::new(), |k, item, _| {
         let key = keys.get(k).cloned().unwrap_or_default();
-        Line::from(vec![Span::styled(format!("{}  ", pad(&key, key_w)), bold(t.primary)), Span::styled(m.items.get(k).map(label).unwrap_or_default(), Style::new().fg(t.text))])
+        Line::from(vec![Span::styled(format!("{}  ", pad(&key, key_w)), bold(t.primary)), Span::styled(label(item), Style::new().fg(t.text))])
     });
+    app.drawn.popup = Some(hit);
 }
 
 /// Link hints: each label where its target is; typed letters dim, the rest bright.
@@ -182,7 +171,7 @@ pub(super) fn draw_hints(f: &mut Frame, app: &App) {
 }
 
 pub(super) fn draw_preview(f: &mut Frame, app: &mut App) {
-    let (Some(TabPopup::Preview(p)), Some(t)) = (&app.tab.popup, &app.tab.thread) else { return };
+    let (Some(TabPopup::Preview(p)), Some(t)) = (&mut app.tab.popup, &app.tab.thread) else { return };
     let w = f.area().width.saturating_sub(8).clamp(20, 110);
     let width = w.saturating_sub(4) as usize;
     let mut lines = Vec::new();
@@ -197,12 +186,8 @@ pub(super) fn draw_preview(f: &mut Frame, app: &mut App) {
     while lines.last().is_some_and(|l| markup::spans_columns(&l.spans) == 0) {
         lines.pop();
     }
-    let inner = panel(f, w, cells(lines.len()).saturating_add(3), "Quoted posts", "j/k scroll · enter jump · esc close");
-    let scroll = (p.scroll as usize).min(lines.len().saturating_sub(inner.height as usize));
-    for (row, line) in lines.into_iter().skip(scroll).take(inner.height as usize).enumerate() {
-        put(f, inner.x, inner.y + row as u16, inner.width, line);
-    }
-    cover_tabs(&mut app.drawn.tabs, inner);
+    let hit = list_panel(f, (w, "Quoted posts", "j/k scroll · enter jump · esc close"), &mut p.scroll, &lines, ("", false), |_| Vec::new(), |_, line, _| line.clone());
+    cover_tabs(&mut app.drawn.tabs, hit);
 }
 
 /// The selected post's links: quotes leading elsewhere, web links, files.
@@ -210,21 +195,13 @@ pub(super) fn draw_links(f: &mut Frame, app: &mut App) {
     let t = theme();
     let Some(TabPopup::Links(p)) = &mut app.tab.popup else { return };
     let w = f.area().width.saturating_sub(8).clamp(20, 110);
-    let inner = panel(f, w, cells(p.items.len()).saturating_add(3), "Links", "enter open · y copy · esc close");
-    let rows = inner.height as usize;
-    let sel = p.list.selected().unwrap_or(0);
-    let off = scroll_to(p.list.offset(), sel, rows);
-    *p.list.offset_mut() = off;
-    app.drawn.popup = Some(Hit::List { area: inner, offset: off, item_height: 1 });
-    cover_tabs(&mut app.drawn.tabs, inner);
-    list_rows(f, Rect { height: rows as u16, ..inner }, off, p.items.len(), Some(sel), |k| {
-        let Some(item) = p.items.get(k) else { return Line::default() };
+    let hit = list_panel(f, (w, "Links", "enter open · y copy · esc close"), &mut p.list, &p.items, ("", true), |_| Vec::new(), |_, item, width| {
         let (kind, text, extra) = match item {
             LinkItem::Quote(_, label) => ("quote", label.clone(), String::new()),
             LinkItem::Url(u) => ("web", u.clone(), String::new()),
             LinkItem::File(f) => (if f.url.is_some() { "file" } else { "thumb" }, f.filename.clone(), f.link().map(|(_, u)| format!("  {u}")).unwrap_or_default()),
         };
-        let room = (inner.width as usize).saturating_sub(9);
+        let room = (width as usize).saturating_sub(9);
         let text = truncate(&text, room);
         let extra = truncate(&extra, room.saturating_sub(markup::columns(&text)));
         Line::from(vec![
@@ -234,6 +211,8 @@ pub(super) fn draw_links(f: &mut Frame, app: &mut App) {
             Span::styled(extra, dim()),
         ])
     });
+    app.drawn.popup = Some(hit);
+    cover_tabs(&mut app.drawn.tabs, hit);
 }
 
 /// `R`: the reverse image search engines, per file.
@@ -241,18 +220,12 @@ pub(super) fn draw_image_search(f: &mut Frame, app: &mut App) {
     let t = theme();
     let names: Vec<String> = app.image_search.iter().map(|e| e.name.clone()).collect();
     let Some(Popup::ImageSearch(p)) = &mut app.popup else { return };
-    let inner = panel(f, 64, cells(p.rows.len()).saturating_add(3), "Search for this image", "enter open · y copy · esc close");
-    let rows = inner.height as usize;
-    let sel = p.list.selected().unwrap_or(0);
-    let off = scroll_to(p.list.offset(), sel, rows);
-    *p.list.offset_mut() = off;
-    app.drawn.popup = Some(Hit::List { area: inner, offset: off, item_height: 1 });
     // File headers are never selected, so never painted.
-    list_rows(f, Rect { height: rows as u16, ..inner }, off, p.rows.len(), Some(sel), |k| match p.rows.get(k) {
-        Some(Err(file)) => Line::styled(truncate(file, inner.width as usize), bold(t.primary)),
-        Some(Ok((_, e))) => Line::styled(format!("  {}", names.get(*e).map_or("", String::as_str)), Style::new().fg(t.text)),
-        None => Line::default(),
+    let hit = list_panel(f, (64, "Search for this image", "enter open · y copy · esc close"), &mut p.list, &p.rows, ("", true), |_| Vec::new(), |_, row, width| match row {
+        Err(file) => Line::styled(truncate(file, width as usize), bold(t.primary)),
+        Ok((_, e)) => Line::styled(format!("  {}", names.get(*e).map_or("", String::as_str)), Style::new().fg(t.text)),
     });
+    app.drawn.popup = Some(hit);
 }
 
 /// Key help, by section, with the configured keys. Keep in sync with the manual (docs/manual.md).
@@ -366,7 +339,7 @@ fn help_here(app: &App) -> &'static str {
     }
 }
 
-pub(super) fn draw_help(f: &mut Frame, app: &App) {
+pub(super) fn draw_help(f: &mut Frame, app: &mut App) {
     const COL: u16 = 50;
     // Keys take this many columns; what they do wraps in the rest.
     const KEYS: usize = 21;
@@ -376,13 +349,17 @@ pub(super) fn draw_help(f: &mut Frame, app: &App) {
         let here = sections.remove(i);
         sections.insert(1.min(sections.len()), here);
     }
+    // What they do wraps to the column, or a narrow screen's panel (two columns always fit).
+    let col = usize::from(COL.min(room(f, COL + 4, 0).0.saturating_sub(4)));
     let sections: Vec<Vec<Line>> = sections
         .into_iter()
         .map(|(title, rows)| {
-            let mut lines = vec![Line::styled(title, bold(t.primary))];
+            let mut lines = vec![Line::from(Span::styled(title, bold(t.primary)))];
             for (k, v) in rows {
-                for (i, part) in wrap_words(v, usize::from(COL).saturating_sub(KEYS)).into_iter().enumerate() {
-                    let keys = if i == 0 { format!("  {} ", pad(&k, 18)) } else { " ".repeat(KEYS) };
+                // A word too long for the column is cut, so the right column starts where it should.
+                for (i, part) in wrap_words(v, col.saturating_sub(KEYS)).into_iter().enumerate() {
+                    let keys = if i == 0 { format!("  {} ", pad(&truncate(&k, 18), 18)) } else { " ".repeat(KEYS) };
+                    let part = truncate(&part, col.saturating_sub(KEYS));
                     lines.push(Line::from(vec![Span::styled(keys, bold(t.text)), Span::styled(part, Style::new().fg(t.text_dim))]));
                 }
             }
@@ -392,84 +369,77 @@ pub(super) fn draw_help(f: &mut Frame, app: &App) {
         .collect();
     let total: usize = sections.iter().map(Vec::len).sum();
     let area = f.area();
-    // Two columns when one doesn't fit, split at the section boundary nearest the middle.
-    let two = cells(total).saturating_add(4) > area.height && area.width >= 2 * COL + 8;
+    // Two columns when one doesn't fit and both do, split at the section boundary nearest the middle.
+    let two = cells(total).saturating_add(4) > area.height && area.width >= 2 * COL + 10;
     let (mut left, mut right) = (Vec::new(), Vec::new());
     for s in sections {
         if two && left.len() + s.len() / 2 >= total / 2 { right.extend(s) } else { left.extend(s) }
     }
-    let mut cols = [left, right];
-    for c in &mut cols {
+    for c in [&mut left, &mut right] {
         while c.last().is_some_and(|l| markup::spans_columns(&l.spans) == 0) {
             c.pop();
         }
     }
-    let rows = cells(cols.iter().map(Vec::len).max().unwrap_or(0));
-    let w = if two { 2 * COL + 6 } else { COL + 4 };
-    // How it fits is known once the panel is placed: measure with the scroll hint's room.
-    let height = rows.saturating_add(3).min(f.area().height.saturating_sub(2));
-    let scrolls = rows > height.saturating_sub(3);
-    let hint = format!("{}images: {} · esc close", if scrolls { "j/k scroll · " } else { "" }, app.images.protocol_name());
-    let inner = panel(f, w, rows.saturating_add(3), "Keys", &hint);
-    // In small terminals the help scrolls (j/k).
-    let scrolled = if let Some(Popup::Help(s)) = app.popup { s } else { 0 };
-    let scroll = scrolled.min(rows.saturating_sub(inner.height));
-    let more = rows.saturating_sub(scroll) > inner.height;
-    for (c, lines) in cols.into_iter().enumerate() {
-        let x = inner.x + c as u16 * (COL + 2);
-        for (row, line) in lines.into_iter().skip(usize::from(scroll)).take(inner.height as usize).enumerate() {
-            put(f, x, inner.y + row as u16, COL, line);
-        }
+    // A row is the left column's line, then the right's.
+    left.resize(left.len().max(right.len()), Line::default());
+    for (l, r) in left.iter_mut().zip(right) {
+        l.spans.push(Span::raw(" ".repeat(usize::from(COL + 2).saturating_sub(markup::spans_columns(&l.spans)))));
+        l.spans.extend(r.spans);
     }
-    if more && inner.height > 0 {
-        let more = Line::styled("↓ more (j)", bold(t.primary)).right_aligned();
-        put(f, inner.x, inner.y + inner.height - 1, inner.width, more);
+    let w = if two { 2 * COL + 6 } else { COL + 4 };
+    let scrolls = cells(left.len()).saturating_add(3) > room(f, 0, cells(left.len()).saturating_add(3)).1;
+    let hint = format!("{}images: {} · esc close", if scrolls { "j/k scroll · " } else { "" }, app.images.protocol_name());
+    // In small terminals the help scrolls (j/k).
+    let Some(Popup::Help(scroll)) = &mut app.popup else { return };
+    let hit = list_panel(f, (w, "Keys", &hint), scroll, &left, ("", false), |_| Vec::new(), |_, line, _| line.clone());
+    if let Hit::List { area, offset, .. } = hit
+        && left.len() > offset + area.height as usize
+        && area.height > 0
+    {
+        put(f, area.x, area.bottom() - 1, area.width, Line::styled("↓ more (j)", bold(t.primary)).right_aligned());
     }
 }
 
 // ----- settings -----
 
 /// `X`: a filter like the selected post.
-pub(super) fn draw_add_filter(f: &mut Frame, app: &App) {
+pub(super) fn draw_add_filter(f: &mut Frame, app: &mut App) {
     use crate::filter::FilterAction;
     let t = theme();
-    let Some(Popup::AddFilter(a)) = &app.popup else { return };
-    let h = cells(a.candidates.len()).saturating_add(9);
-    let inner = panel(f, 72, h, &format!("Filter like No.{}", a.post), "enter add · esc cancel");
-    let sel = a.list.selected().unwrap_or(0);
-    for (k, c) in a.candidates.iter().enumerate().take(inner.height as usize) {
-        let y = inner.y + k as u16;
-        paint_row(f, Rect::new(inner.x - 2, y, inner.width + 4, 1), None, k == sel, false);
-        let room = (inner.width as usize).saturating_sub(c.field.as_str().len() + 2);
-        let left = vec![Span::styled(truncate(&c.what, room), Style::new().fg(t.text))];
-        put(f, inner.x, y, inner.width, spread(left, vec![Span::styled(c.field.as_str(), dim())], inner.width as usize));
-    }
-    let y = inner.y + cells(a.candidates.len()).saturating_add(1);
-    let row = |f: &mut Frame, k: u16, name: &str, value: Vec<Span<'static>>, key: &str| {
-        let mut spans = vec![Span::styled(pad(name, 8), dim())];
-        spans.extend(value);
-        put(f, inner.x, y + k, inner.width, spread(spans, vec![Span::styled(key.to_string(), dim())], inner.width as usize));
-    };
+    let Some(Popup::AddFilter(a)) = &mut app.popup else { return };
     let (verb, other) = match a.action {
         FilterAction::Hide => ("hide them", "a: highlight instead"),
         FilterAction::Highlight => ("highlight them", "a: hide instead"),
     };
-    row(f, 0, "Do", vec![Span::styled(verb, bold(t.text))], other);
-    row(f, 1, "Where", vec![Span::styled(a.reach_text(), bold(t.text))], "s: change");
-    match &a.typing {
-        Some(text) => row(f, 2, "Label", vec![Span::styled(text.clone(), bold(t.text)), Span::styled("▏", Style::new().fg(t.primary))], "enter: keep"),
-        None => row(f, 2, "Label", vec![Span::styled(a.label(), bold(t.text))], "e: edit"),
-    }
-    let note = match &a.word {
-        // `w`: a word to hide everywhere instead.
-        Some(word) => {
-            row(f, 3, "Word", vec![Span::styled(word.clone(), bold(t.text)), Span::styled("▏", Style::new().fg(t.primary))], "enter: hide it everywhere");
-            "Any post with it is hidden, on every board (Settings › Filters › Hidden words)."
-        }
-        None => {
-            row(f, 3, "", Vec::new(), "w: a word from it…");
-            "Saved in the config as a [[filter]]; u right after takes it back."
-        }
+    let (reach, label) = (a.reach_text(), a.label());
+    // Under the candidates: what it does, where, its label, and a word instead.
+    let foot = |width: u16| {
+        let row = |name: &str, mut value: Vec<Span<'static>>, key: &str| {
+            value.insert(0, Span::styled(pad(name, 8), dim()));
+            spread(value, vec![Span::styled(key.to_string(), dim())], width as usize)
+        };
+        let typed = |text: &String| vec![Span::styled(text.clone(), bold(t.text)), Span::styled("▏", Style::new().fg(t.primary))];
+        vec![
+            row("Do", vec![Span::styled(verb, bold(t.text))], other),
+            row("Where", vec![Span::styled(reach, bold(t.text))], "s: change"),
+            match &a.typing {
+                Some(text) => row("Label", typed(text), "enter: keep"),
+                None => row("Label", vec![Span::styled(label, bold(t.text))], "e: edit"),
+            },
+            // `w`: a word to hide everywhere instead.
+            match &a.word {
+                Some(word) => row("Word", typed(word), "enter: hide it everywhere"),
+                None => row("", Vec::new(), "w: a word from it…"),
+            },
+            match &a.word {
+                Some(_) => Line::styled("Any post with it is hidden, on every board (Settings › Filters › Hidden words).", dim()),
+                None => Line::styled("Saved in the config as a [[filter]]; u right after takes it back.", dim()),
+            },
+        ]
     };
-    put(f, inner.x, y + 4, inner.width, Line::styled(note, dim()));
+    list_panel(f, (72, &format!("Filter like No.{}", a.post), "enter add · esc cancel"), &mut a.list, &a.candidates, ("", true), foot, |_, c, width| {
+        let room = (width as usize).saturating_sub(c.field.as_str().len() + 2);
+        let left = vec![Span::styled(truncate(&c.what, room), Style::new().fg(t.text))];
+        spread(left, vec![Span::styled(c.field.as_str(), dim())], width as usize)
+    });
 }

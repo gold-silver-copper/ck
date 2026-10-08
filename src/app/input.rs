@@ -272,8 +272,8 @@ impl App {
             Modal::Menu => self.on_menu_key(key),
             Modal::Hints => self.on_hints_key(key),
             Modal::Help => match (&mut self.popup, key.code) {
-                (Some(Popup::Help(scroll)), KeyCode::Char('j') | KeyCode::Down) => *scroll = scroll.saturating_add(1),
-                (Some(Popup::Help(scroll)), KeyCode::Char('k') | KeyCode::Up) => *scroll = scroll.saturating_sub(1),
+                (Some(Popup::Help(s)), KeyCode::Char('j') | KeyCode::Down) => scroll_by(s, 1),
+                (Some(Popup::Help(s)), KeyCode::Char('k') | KeyCode::Up) => scroll_by(s, -1),
                 _ => self.popup = None,
             },
             Modal::ImageSearch => self.on_image_search_key(key.code),
@@ -380,7 +380,7 @@ impl App {
     pub(super) fn act(&mut self, action: Action) {
         match action {
             Action::Quit => self.quit = true,
-            Action::Help => self.popup = Some(Popup::Help(0)),
+            Action::Help => self.popup = Some(Popup::Help(ListState::default())),
             Action::Settings => self.tab.navigate(View::Settings),
             Action::Search if self.tab.view() == View::Settings => {}
             Action::Search if self.tab.view() == View::Thread => {
@@ -647,17 +647,18 @@ impl App {
             self.info("Post quotes nothing");
             return;
         }
-        self.tab.popup = Some(TabPopup::Preview(Preview { posts, elsewhere, scroll: 0 }));
+        self.tab.popup = Some(TabPopup::Preview(Preview { posts, elsewhere, scroll: ListState::default() }));
     }
 
     fn on_preview_key(&mut self, code: KeyCode) {
         let Some(TabPopup::Preview(p)) = &mut self.tab.popup else { return };
+        let s = &mut p.scroll;
         match code {
-            KeyCode::Char('j') | KeyCode::Down => p.scroll = p.scroll.saturating_add(1),
-            KeyCode::Char('k') | KeyCode::Up => p.scroll = p.scroll.saturating_sub(1),
-            KeyCode::Char(' ') | KeyCode::PageDown => p.scroll = p.scroll.saturating_add(10),
-            KeyCode::PageUp => p.scroll = p.scroll.saturating_sub(10),
-            KeyCode::Char('g') => p.scroll = 0,
+            KeyCode::Char('j') | KeyCode::Down => scroll_by(s, 1),
+            KeyCode::Char('k') | KeyCode::Up => scroll_by(s, -1),
+            KeyCode::Char(' ') | KeyCode::PageDown => scroll_by(s, 10),
+            KeyCode::PageUp => scroll_by(s, -10),
+            KeyCode::Char('g') => scroll_by(s, isize::MIN),
             // Jump to the (first) quoted post.
             KeyCode::Enter => {
                 let first = p.posts.first().copied();
@@ -721,6 +722,13 @@ impl App {
             _ => {}
         }
     }
+}
+
+/// Scroll a popup whose rows aren't selected by `by` rows: the next frame's `ui::window`
+/// clamps it to what it shows and keeps that, so a key back always moves the view.
+#[allow(clippy::disallowed_methods)]
+fn scroll_by(s: &mut ListState, by: isize) {
+    *s.offset_mut() = s.offset().saturating_add_signed(by);
 }
 
 /// The arrow key a wheel notch moves rows by.

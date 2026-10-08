@@ -188,7 +188,7 @@ fn thread_view() {
 #[test]
 fn help() {
     let mut a = app(false);
-    a.popup = Some(Popup::Help(0));
+    a.popup = Some(Popup::Help(Default::default()));
     insta::assert_snapshot!(snapshot(&mut a));
 }
 
@@ -197,7 +197,7 @@ fn quote_preview() {
     let mut a = thread_app(false);
     let t = a.tab.thread.as_mut().unwrap();
     t.selected = 3;
-    a.tab.popup = Some(crate::app::TabPopup::Preview(Preview { posts: vec![1001], elsewhere: vec![], scroll: 0 }));
+    a.tab.popup = Some(crate::app::TabPopup::Preview(Preview { posts: vec![1001], elsewhere: vec![], scroll: Default::default() }));
     insta::assert_snapshot!(snapshot(&mut a));
 }
 
@@ -1098,7 +1098,7 @@ fn tab_chips_hidden_under_the_viewer_cant_be_clicked() {
 #[test]
 fn help_fits_at_110x36_and_scrolls_when_small() {
     let mut a = app(false);
-    a.popup = Some(Popup::Help(0));
+    a.popup = Some(Popup::Help(Default::default()));
     let (text, _) = render_at(&mut a, 110, 36);
     assert!(!text.contains("↓ more"), "{text}");
     // Two columns, everything on screen.
@@ -1107,9 +1107,21 @@ fn help_fits_at_110x36_and_scrolls_when_small() {
     }
     let (text, _) = render_at(&mut a, 60, 20);
     assert!(text.contains("Everywhere") && !text.contains("mark as yours") && text.contains("↓ more (j)"), "{text}");
-    a.popup = Some(Popup::Help(100));
+    a.popup = Some(Popup::Help(ratatui::widgets::ListState::default().with_offset(100)));
     let (text, _) = render_at(&mut a, 60, 20);
     assert!(text.contains("copy text / link"), "{text}");
+}
+
+#[test]
+fn help_shows_its_descriptions_whole_just_above_two_columns_width() {
+    let mut a = app(false);
+    for w in [108, 109, 110] {
+        a.popup = Some(Popup::Help(Default::default()));
+        let (text, _) = render_at(&mut a, w, 30);
+        for (cut, whole) in [("focus images, links, repli", "focus images, links, replies"), ("posts with files / no imag", "posts with files / no images")] {
+            assert!(!text.contains(cut) || text.contains(whole), "{whole} is cut at {w} columns:\n{text}");
+        }
+    }
 }
 
 #[test]
@@ -1488,7 +1500,7 @@ fn popups_with_more_rows_than_a_screen_can_hold() {
         let t = a.tab.thread.as_mut().unwrap();
         t.posts[1].body = (0..n).map(|_| ratatui::text::Line::from("x")).collect();
         t.selected = 3;
-        a.tab.popup = Some(crate::app::TabPopup::Preview(Preview { posts: vec![1001], elsewhere: vec![], scroll: 0 }));
+        a.tab.popup = Some(crate::app::TabPopup::Preview(Preview { posts: vec![1001], elsewhere: vec![], scroll: Default::default() }));
         render(&mut a);
     }
 }
@@ -1517,7 +1529,7 @@ fn every_view_draws_on_tiny_screens() {
         ("thread", || thread_app(true)),
         ("quote preview", || {
             let mut a = thread_app(false);
-            a.tab.popup = Some(crate::app::TabPopup::Preview(Preview { posts: vec![1001], elsewhere: vec![7], scroll: 0 }));
+            a.tab.popup = Some(crate::app::TabPopup::Preview(Preview { posts: vec![1001], elsewhere: vec![7], scroll: Default::default() }));
             a
         }),
         ("links", || {
@@ -1532,7 +1544,7 @@ fn every_view_draws_on_tiny_screens() {
         }),
         ("help", || {
             let mut a = app(false);
-            a.popup = Some(Popup::Help(0));
+            a.popup = Some(Popup::Help(Default::default()));
             a
         }),
         ("watched", || {
@@ -1587,7 +1599,7 @@ fn counts_of_one_are_singular() {
 #[test]
 fn help_opens_on_the_keys_for_where_you_are() {
     let mut a = thread_app(false);
-    a.popup = Some(Popup::Help(0));
+    a.popup = Some(Popup::Help(Default::default()));
     let (text, _) = render_at(&mut a, 60, 40);
     let at = |title| text.find(&format!("  {title}\n")).unwrap_or(usize::MAX);
     assert!(at("Everywhere") < at("Thread") && at("Thread") < at("Home screen"), "{text}");
@@ -1677,7 +1689,7 @@ fn narrow_tall_post_markers_leave_the_text() {
 fn narrow_home_and_help() {
     let mut a = app(false);
     insta::assert_snapshot!("narrow_home", narrow(&mut a));
-    a.popup = Some(Popup::Help(0));
+    a.popup = Some(Popup::Help(Default::default()));
     insta::assert_snapshot!("narrow_help", narrow(&mut a));
 }
 
@@ -1947,5 +1959,90 @@ fn the_footer_message_is_drawn_exactly_when_the_app_counts_it_seen() {
         }
         let (text, _) = render(&mut app);
         assert_eq!(text.contains("Boom"), app.status_on_screen(), "typing {typing:?}, loading {loading:?}");
+    }
+}
+
+// A panel that scrolls keeps its scroll where the screen shows it: k right after
+// overscrolling moves the view, the selection stays in view, and rows stay in the panel.
+
+#[test]
+fn k_after_overscrolling_help_scrolls_back_at_once() {
+    use ratatui::crossterm::event::{KeyCode, KeyEvent};
+    let mut a = app(false);
+    a.popup = Some(Popup::Help(Default::default()));
+    render_at(&mut a, 60, 20);
+    for _ in 0..100 {
+        a.on_key(KeyEvent::from(KeyCode::Char('j')));
+        render_at(&mut a, 60, 20);
+    }
+    let bottom = render_at(&mut a, 60, 20).0;
+    a.on_key(KeyEvent::from(KeyCode::Char('k')));
+    let after = render_at(&mut a, 60, 20).0;
+    assert_ne!(bottom, after, "k at the end of the help didn't scroll:\n{after}");
+}
+
+#[test]
+fn k_after_paging_past_a_quote_preview_scrolls_back_at_once() {
+    use ratatui::crossterm::event::{KeyCode, KeyEvent};
+    let mut a = tall_app();
+    a.tab.thread.as_mut().unwrap().selected = 2;
+    a.on_key(KeyEvent::from(KeyCode::Char('p')));
+    assert!(matches!(a.tab.popup, Some(crate::app::TabPopup::Preview(_))));
+    render_at(&mut a, 100, 30);
+    for _ in 0..20 {
+        a.on_key(KeyEvent::from(KeyCode::PageDown));
+        render_at(&mut a, 100, 30);
+    }
+    let bottom = render_at(&mut a, 100, 30).0;
+    assert!(bottom.contains("tall end"), "{bottom}");
+    a.on_key(KeyEvent::from(KeyCode::Char('k')));
+    let after = render_at(&mut a, 100, 30).0;
+    assert_ne!(bottom, after, "k at the end of the preview didn't scroll:\n{after}");
+}
+
+#[test]
+fn the_selected_theme_stays_in_view_on_a_short_screen() {
+    use ratatui::crossterm::event::{KeyCode, KeyEvent};
+    let mut a = app(false);
+    // The built-in themes and a config's own: more than a 20-row screen's panel holds.
+    for k in 0..10 {
+        a.themes.insert(format!("custom-{k}"), crate::theme::ThemeDef::default());
+    }
+    a.tab.navigate(View::Settings);
+    a.activate_setting();
+    let Some(SettingsPopup::Themes { names, .. }) = a.settings_popup() else { panic!("no theme picker") };
+    let names = names.clone();
+    assert!(names.len() > 16, "{names:?}");
+    render_at(&mut a, 100, 20);
+    for (k, name) in names.iter().enumerate().skip(1) {
+        a.on_key(KeyEvent::from(KeyCode::Char('j')));
+        let text = render_at(&mut a, 100, 20).0;
+        let Some(SettingsPopup::Themes { list, .. }) = a.settings_popup() else { panic!("no theme picker") };
+        assert_eq!(list.selected(), Some(k));
+        assert!(text.contains(name.as_str()), "theme {k} ({name}) is selected but not shown:\n{text}");
+    }
+}
+
+#[test]
+fn the_add_filter_popup_draws_only_inside_its_panel_on_a_short_screen() {
+    use ratatui::crossterm::event::{KeyCode, KeyEvent};
+    let mut a = thread_app(false);
+    let p = &mut a.tab.thread.as_mut().unwrap().posts[0];
+    p.name = "Named".into();
+    p.id = Some("abcd1234".into());
+    p.trip = Some("!Trip".into());
+    p.flag = Some(crate::model::Flag { code: "US".into(), name: "United States".into() });
+    p.files[0].md5 = Some("u8Vh17KxaDvUJ6bBcmE/eg==".into());
+    a.on_key(KeyEvent::from(KeyCode::Char('X')));
+    let Some(Popup::AddFilter(f)) = &a.popup else { panic!("no add-filter popup") };
+    assert_eq!(f.candidates.len(), 7);
+    let (text, buf) = render_at(&mut a, 100, 15);
+    let panel = theme().surface_highest;
+    // Whatever of the popup's own rows shows sits on the panel, not over the thread.
+    let shown: Vec<_> = ["hide them", "all of 4chan", "w: a word from it", "Saved in the config"].into_iter().filter_map(|n| Some((n, row_of(&text, n)?))).collect();
+    assert!(!shown.is_empty(), "none of the popup's rows is drawn:\n{text}");
+    for (needle, y) in shown {
+        let x = text.lines().nth(y).and_then(|l| l.split(needle).next()).unwrap().chars().count();
+        assert_eq!(buf[(x as u16, y as u16)].bg, panel, "{needle:?} is drawn outside the panel, on row {y}:\n{text}");
     }
 }

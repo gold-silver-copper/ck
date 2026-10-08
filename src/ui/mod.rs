@@ -691,10 +691,19 @@ fn current_filter(app: &App) -> &str {
 
 // ----- lists and cards -----
 
-/// The first row to show so that row `sel` is among the `fit` shown, moving as little as
-/// possible from `offset`.
-fn scroll_to(offset: usize, sel: usize, fit: usize) -> usize {
-    offset.min(sel).max((sel + 1).saturating_sub(fit))
+/// The first of `n` items to show, `per` to a row, with `fit` rows shown: from `state`'s
+/// offset, moved as little as keeps the selection (if any) in view and never past where
+/// the last row reaches the bottom. Saved back, so what's stored is what's shown.
+#[allow(clippy::disallowed_methods)]
+fn window(state: &mut ListState, n: usize, fit: usize, per: usize) -> usize {
+    let per = per.max(1);
+    let mut top = (state.offset() / per).min(n.div_ceil(per).saturating_sub(fit));
+    if let Some(sel) = state.selected() {
+        let sel = sel.min(n.saturating_sub(1)) / per;
+        top = top.min(sel).max((sel + 1).saturating_sub(fit));
+    }
+    *state.offset_mut() = top * per;
+    top * per
 }
 
 /// A row's background (the selection's when selected, else `bg` if any), and the accent
@@ -714,41 +723,42 @@ fn paint_row(f: &mut Frame, row: Rect, bg: Option<Color>, selected: bool, marked
     }
 }
 
-/// The rows of a list in `area`, from `first`, a line each; the selected one is painted
-/// (out into the panel's padding).
-pub(super) fn list_rows(f: &mut Frame, area: Rect, first: usize, n: usize, sel: Option<usize>, mut row: impl FnMut(usize) -> Line<'static>) {
-    for k in (first..n).take(area.height as usize) {
-        let y = area.y + (k - first) as u16;
-        paint_row(f, Rect::new(area.x - 2, y, area.width + 4, 1), None, Some(k) == sel, false);
-        put(f, area.x, y, area.width, row(k));
-    }
-}
-
-/// A list in a panel, as Settings' lists are: `n` rows (made by `row`, given the width)
-/// scrolled to the selected one (painted unless not `painted`), `empty` when there are none,
-/// and `note` on the last line.
-/// The panel is `extra` rows taller than the list needs; `input` of them, above the note,
-/// are left for a field. Returns the panel's inner area.
-#[allow(clippy::too_many_arguments)]
-pub(super) fn list_panel(
+/// A list in a panel `width` wide: `items` (each made a row by `row`, given the width) through
+/// `state`'s `window`, the selected one painted (out into the panel's padding) when
+/// `painted`, and `empty` when there are none. Under them, after a blank row, the `foot`
+/// lines (made for the width), drawn from the bottom up so they stay inside the panel
+/// however short. Returns where the rows went.
+pub(super) fn list_panel<T>(
     f: &mut Frame,
     (width, title, hint): (u16, &str, &str),
-    n: usize,
-    (sel, painted): (usize, bool),
-    (empty, note): (&str, &str),
-    (extra, input): (u16, u16),
-    mut row: impl FnMut(usize, u16) -> Line<'static>,
-) -> Rect {
-    let h = (n.max(1) as u16 + 5 + extra).min(f.area().height.saturating_sub(4));
-    let inner = panel(f, width, h, title, hint);
-    let view = inner.height.saturating_sub(2 + input);
-    let first = (sel + 1).saturating_sub(view as usize);
-    if n == 0 {
-        put(f, inner.x, inner.y, inner.width, Line::styled(empty.to_string(), dim()));
+    state: &mut ListState,
+    items: &[T],
+    (empty, painted): (&str, bool),
+    foot: impl FnOnce(u16) -> Vec<Line<'static>>,
+    mut row: impl FnMut(usize, &T, u16) -> Line<'static>,
+) -> Hit {
+    let foot = foot(room(f, width, 0).0.saturating_sub(4));
+    let below = if foot.is_empty() { 0 } else { cells(foot.len() + 1) };
+    let inner = panel(f, width, cells(items.len().max(1)).saturating_add(below).saturating_add(3), title, hint);
+    for (line, y) in foot.into_iter().rev().zip((inner.y..inner.bottom()).rev()) {
+        put(f, inner.x, y, inner.width, line);
     }
-    list_rows(f, Rect { height: view, ..inner }, first, n, painted.then_some(sel), |k| row(k, inner.width));
-    put(f, inner.x, inner.bottom().saturating_sub(1), inner.width, Line::styled(note.to_string(), dim()));
-    inner
+    let area = Rect { height: inner.height.saturating_sub(below), ..inner };
+    let first = window(state, items.len(), area.height as usize, 1);
+    if items.is_empty() && area.height > 0 {
+        put(f, area.x, area.y, area.width, Line::styled(empty.to_string(), dim()));
+    }
+    let sel = state.selected().filter(|_| painted);
+    for ((k, item), y) in items.iter().enumerate().skip(first).zip(area.y..area.bottom()) {
+        paint_row(f, Rect::new(area.x - 2, y, area.width + 4, 1), None, Some(k) == sel, false);
+        put(f, area.x, y, area.width, row(k, item, area.width));
+    }
+    Hit::List { area, offset: first, item_height: 1 }
+}
+
+/// Lines that don't scroll in a panel `width` wide: on a screen too short, the last are cut.
+pub(super) fn text_panel(f: &mut Frame, head: (u16, &str, &str), lines: &[Line<'static>]) {
+    list_panel(f, head, &mut ListState::default(), lines, ("", false), |_| Vec::new(), |_, line, _| line.clone());
 }
 
 /// Draw `count` items `height` rows tall with `gap` rows of background between them;
@@ -772,8 +782,7 @@ fn draw_rows(
     let per = height + gap;
     let fit = ((area.height + gap) / per).max(1) as usize;
     let sel = state.selected().unwrap_or(0).min(count - 1);
-    let off = scroll_to(state.offset(), sel, fit);
-    *state.offset_mut() = off;
+    let off = window(state, count, fit, 1);
     for k in off..count {
         let y = area.y + (k - off) as u16 * per;
         if y >= area.bottom() {
@@ -801,16 +810,23 @@ fn spread(mut left: Vec<Span<'static>>, right: Vec<Span<'static>>, width: usize)
 
 /// The tab chips under a panel that stays open over them (a tall preview reaches the tab
 /// row) can't be clicked.
-fn cover_tabs(tabs: &mut Vec<(Rect, usize)>, inner: Rect) {
-    let over = inner.outer(Margin::new(2, 2));
+fn cover_tabs(tabs: &mut Vec<(Rect, usize)>, rows: Hit) {
+    let Hit::List { area, .. } = rows else { return };
+    let over = area.outer(Margin::new(2, 2));
     tabs.retain(|(r, _)| !r.intersects(over));
+}
+
+/// How wide and tall a panel asked to be `width` by `height` is: what the frame has room for,
+/// leaving the footer (where messages show) in sight.
+fn room(f: &Frame, width: u16, height: u16) -> (u16, u16) {
+    (width.min(f.area().width.saturating_sub(4)), height.min(f.area().height.saturating_sub(2)))
 }
 
 /// A raised panel centered in the frame, with a title bar; returns the area inside.
 fn panel(f: &mut Frame, width: u16, height: u16, title: &str, hint: &str) -> Rect {
     let t = theme();
     let area = f.area();
-    let (w, h) = (width.min(area.width.saturating_sub(4)), height.min(area.height.saturating_sub(2)));
+    let (w, h) = room(f, width, height);
     let r = Rect::new(area.x + (area.width - w) / 2, area.y + (area.height - h) / 2, w, h);
     f.render_widget(Clear, r);
     fill(f, r, t.surface_highest);

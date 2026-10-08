@@ -6,19 +6,19 @@ expression: narrow(&mut a)
     Keys  j/k scroll · images: off · esc close
 
     Everywhere
-      j k g G ^d ^u      move, top/bottom, page
+      j k g G ^d ^u      move, top/bottom,
+                         page
       enter l / esc h    open / back
-      ., right-click     menu: what you can do her
-      f                  label on-screen items to
-      /                  filter (thread: search)
-      r / o              reload / open in browser
-      :                  go to a URL or site/board
-      ,                  settings: theme, keys, …
-      [ / ] / ctrl-w     previous / next / close t
-      q, ctrl-c          quit (mouse works too)
-
-    Home screen
-      1-9 / *            open / favorite a board
-      x                  unfavorite,↓ more (j)te
+      ., right-click     menu: what you can do
+                         here
+      f                  label on-screen items
+                         to open
+      /                  filter (thread:
+                         search)
+      r / o              reload / open in
+                         browser
+      :                  go to a URL or
+                         site/board
+      ,                  settings: t↓ more (j)
 
  enter open   . more   / filter   ? help

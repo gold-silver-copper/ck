@@ -279,8 +279,8 @@ pub enum Popup {
     AddFilter(AddFilter),
     /// Choosing a reverse image search.
     ImageSearch(ImageSearchPanel),
-    /// The key help, scrolled this far.
-    Help(u16),
+    /// The key help, scrolled this far (as last drawn).
+    Help(ListState),
 }
 
 /// What's being typed in the footer: one thing at a time.
@@ -302,7 +302,8 @@ pub struct Preview {
     pub posts: Vec<u64>,
     /// Quoted post numbers that aren't in this thread.
     pub elsewhere: Vec<u64>,
-    pub scroll: u16,
+    /// How far it's scrolled (as last drawn).
+    pub scroll: ListState,
 }
 
 /// Full-screen viewer over a post's files, or a thread's.

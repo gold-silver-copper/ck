@@ -14,8 +14,7 @@ pub(super) fn draw_gallery(f: &mut Frame, app: &mut App, area: Rect) {
     g.cols = cols;
     let n = g.files.len();
     let sel = g.state.selected().unwrap_or(0).min(n - 1);
-    let top = scroll_to(g.state.offset() / cols, sel / cols, rows);
-    *g.state.offset_mut() = top * cols;
+    let top = window(&mut g.state, n, rows, cols) / cols;
     for (k, (no, file)) in g.files.iter().enumerate().skip(top * cols).take((rows + 1) * cols) {
         let (r, c) = (k / cols - top, k % cols);
         let (x, y) = (area.x + c as u16 * cell_w, area.y + r as u16 * cell_h);

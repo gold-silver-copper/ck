@@ -460,8 +460,7 @@ fn draw_grid(f: &mut Frame, app: &mut App, area: Rect) {
     app.grid_cols = cols;
     let state = &mut app.tab.catalog_list.state;
     let sel = state.selected().unwrap_or(0).min(visible.len() - 1);
-    let top = scroll_to(state.offset() / cols, sel / cols, rows);
-    *state.offset_mut() = top * cols;
+    let top = window(state, visible.len(), rows, cols) / cols;
     for (k, &i) in visible.iter().enumerate().skip(top * cols).take((rows + 1) * cols) {
         let (r, c) = (k / cols - top, k % cols);
         let (x, y) = (area.x + c as u16 * cell_w, area.y + r as u16 * cell_h);
