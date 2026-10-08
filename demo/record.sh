@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Record a tour of ck on 4chan's /g/ to a .webm, without touching your screen: ck runs in
 # foot on a virtual Hyprland monitor that's never shown, captured frame by frame with grim,
-# then captioned (what's shown, and the keys pressed) and encoded.
+# then captioned (what's shown, and the keys pressed) and encoded. Only the mouse pointer is
+# hidden while it captures (Hyprland would draw it in the middle of the virtual monitor),
+# and comes back when the recording ends.
 #
 #   demo/record.sh [out.webm]        (default: ck-demo.webm here, and ck-demo.avif beside it)
 #
@@ -45,7 +47,7 @@ cat > "$work/config/ck/config.toml" <<'EOF'
 notify = "off"
 
 [[filter]]
-pattern = '(?i)nigg|fag|kike|tranny|troon|retard|jeet|saar|chink|gook|spic\b|goy|\(\(\(|loli|oppai|megamilk|lewd|nsfw|porn|hentai|cock|boob|tits|\bcum'
+pattern = '(?i)nigg|fag|kike|tranny|troon|retard|jeet|saar|chink|gook|spic\b|goy|\(\(\(|loli|oppai|megamilk|lewd|nsfw|porn|hentai|cock|boob|tits|\bcum|fuck|shit|bing bong|omarchy|remigration|nationalis|israel|jew|zionis|in common|fa/g/|attractive|female'
 field = ["subject", "comment", "filename"]
 label = "not for a README"
 
@@ -56,7 +58,10 @@ label = "AI image generals"
 EOF
 
 capture=
+# The pointer as it was, put back on the way out.
+pointer=$(hyprctl getoption cursor:invisible -j | python3 -c 'import json,sys;print(str(json.load(sys.stdin)["bool"]).lower())')
 cleanup() {
+    hyprctl eval "hl.config({ cursor = { invisible = $pointer } })" >/dev/null 2>&1 || true
     if [[ -n $capture ]]; then
         kill "$capture" 2>/dev/null || true
         wait "$capture" 2>/dev/null || true
@@ -78,7 +83,8 @@ sleep 1
 # Opened on the workspace that monitor shows, without focusing it.
 ws=$(hyprctl monitors -j | python3 -c "import json,sys;print([m for m in json.load(sys.stdin) if m['name']=='$output'][0]['activeWorkspace']['name'])")
 
-echo "Recording; the tour takes a few minutes, and nothing shows on your screen…"
+echo "Recording; the tour takes a few minutes, and nothing shows on your screen (the pointer hides until it's done)…"
+hyprctl eval "hl.config({ cursor = { invisible = true } })" >/dev/null
 python3 "$here/capture.py" "$output" "$fps" "$work/raw.mkv" "$work/start" &
 capture=$!
 shots=
@@ -105,6 +111,7 @@ sleep 1
 kill "$capture"
 wait "$capture" || true
 capture=
+hyprctl eval "hl.config({ cursor = { invisible = $pointer } })" >/dev/null
 touch "$work/done"
 for _ in $(seq 50); do
     hyprctl clients -j | grep -q '"ck-demo"' || break
