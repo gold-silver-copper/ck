@@ -1,15 +1,13 @@
 //! LynxChan engine JSON API (endchan, kohlchan, ...).
 #![deny(clippy::indexing_slicing, clippy::arithmetic_side_effects, clippy::cast_possible_truncation)]
 
-use std::fmt::Write as _;
-
 use anyhow::Result;
 use serde_json::Value;
 
 use super::{Backend, Partial, as_u32, saturate, site_error};
 use crate::http::{as_bool, as_str, as_u64, encode_segment as enc, get_json, items, is_not_found};
 use crate::markup;
-use crate::model::{Attachment, Board, FileKind, Flag, Post};
+use crate::model::{Attachment, Board, FileKind, Flag, Post, Poster};
 
 /// Board list is paginated; don't hammer huge sites at startup.
 const MAX_BOARD_PAGES: u64 = 5;
@@ -69,11 +67,7 @@ impl Lynxchan {
             Some(md) => markup::parse_html(md, markup::Flavor::Lynxchan),
             None => markup::parse_plain(v["message"].as_str().unwrap_or("")),
         };
-        let mut name = as_str(&v["name"]).unwrap_or_else(|| "Anonymous".into());
-        let capcode = as_str(&v["signedRole"]);
-        if let Some(role) = &capcode {
-            let _ = write!(name, " ## {role}");
-        }
+        let (name, trip) = name_and_trip(as_str(&v["name"]));
         // `flagCode` is `-us` for a country; a board's custom flag has only its name.
         let code = as_str(&v["flagCode"]).map(|c| c.trim_start_matches('-').to_string());
         let flag = Flag::new(code, as_str(&v["flagName"]));
@@ -104,10 +98,9 @@ impl Lynxchan {
         }
         Post {
             no: as_u64(&v[no_key]).unwrap_or(0),
-            name,
+            poster: Poster::new(name, "Anonymous", trip, as_str(&v["signedRole"])),
             id: as_str(&v["id"]),
             flag,
-            capcode,
             subject: as_str(&v["subject"]),
             time: parse_time(&v["creation"]).or_else(|| parse_time(&v["lastBump"])).unwrap_or(0),
             files,
@@ -158,6 +151,18 @@ fn thumb(v: &Value) -> (Option<String>, bool) {
     let thumb = as_str(v);
     let spoiler = thumb.as_deref() == Some("/spoiler.png");
     (thumb.filter(|t| !spoiler && t != "/genericThumb.png"), spoiler)
+}
+
+/// LynxChan sends the tripcode inside the name (`Bernd!!Fz3mQwerty`): the last run of `!`
+/// followed only by a trip's characters, so an earlier `!` stays in the name.
+fn name_and_trip(raw: Option<String>) -> (Option<String>, Option<String>) {
+    let Some(r) = raw.as_deref() else { return (None, None) };
+    let hash = r.trim_end_matches(|c: char| c.is_ascii_alphanumeric() || "./+".contains(c));
+    let name = hash.trim_end_matches('!');
+    match r.strip_prefix(name) {
+        Some(trip) if hash.len() < r.len() && name.len() < hash.len() => (Some(name.into()), Some(trip.into())),
+        _ => (raw, None),
+    }
 }
 
 fn parse_time(v: &Value) -> Option<i64> {
@@ -320,6 +325,18 @@ mod tests {
         assert!(jobs.iter().all(|(url, _)| url != thumb), "the catalog thumbnail is downloaded as a file: {jobs:?}");
         let f = crate::filter::tests::filters("[[filter]]\npattern = \"(?i)thumbnail\"\nfield = \"filename\"\n").unwrap();
         assert!(f.check("endchan", "b", &p, true).hidden.is_none(), "a filename filter matched ck's placeholder text");
+    }
+
+    #[test]
+    fn a_tripcode_in_the_name_is_the_posts_tripcode() {
+        // LynxChan has no tripcode field: it appends the trip to `name` ("Bernd!!Fz3mQwerty").
+        let end = Lynxchan::new("https://endchan.net".into(), None);
+        let p = end.post(&serde_json::json!({"threadId": 1, "name": "Bernd!!Fz3mQwerty"}), "threadId");
+        assert_eq!(p.poster.trip(), Some("!!Fz3mQwerty"), "name {:?}", p.poster.name());
+        let f = crate::filter::tests::filters("[[filter]]\npattern = \"^!!Fz3m\"\nfield = \"tripcode\"\n").unwrap();
+        assert!(f.check("endchan", "b", &p, false).hidden.is_some(), "a tripcode filter misses the post");
+        let p = end.post(&serde_json::json!({"threadId": 1, "name": "Hi!there!!Fz3mQwerty"}), "threadId");
+        assert_eq!((p.poster.name(), p.poster.trip()), ("Hi!there !!Fz3mQwerty", Some("!!Fz3mQwerty")));
     }
 
     #[test]

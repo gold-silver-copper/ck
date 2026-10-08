@@ -433,7 +433,7 @@ impl Filters {
                 let re = |s: &str| f.re.as_ref().is_some_and(|re| re.is_match(s));
                 match field {
                     Field::Subject => p.subject.as_deref().is_some_and(re),
-                    Field::Name => re(&p.name),
+                    Field::Name => re(p.poster.name()),
                     Field::Filename => p.files.iter().any(|file| re(&file.filename)),
                     Field::Md5 => p.files.iter().any(|file| file.md5.as_deref() == Some(f.pattern.as_str())),
                     // The whole comment, spoilers included, a line per line.
@@ -442,8 +442,8 @@ impl Filters {
                     })),
                     Field::Id => p.id.as_deref().is_some_and(re),
                     Field::Flag => p.flag.as_ref().is_some_and(|fl| (!fl.code.is_empty() && re(&fl.code)) || (!fl.name.is_empty() && re(&fl.name))),
-                    Field::Tripcode => p.trip.as_deref().is_some_and(re),
-                    Field::Capcode => p.capcode.as_deref().is_some_and(re),
+                    Field::Tripcode => p.poster.trip().is_some_and(re),
+                    Field::Capcode => p.poster.capcode().is_some_and(re),
                     Field::Dimensions => p.files.iter().any(|file| file.width.zip(file.height).is_some_and(|(w, h)| re(&format!("{w}x{h}")))),
                     Field::Filesize => p.files.iter().any(|file| file.size.zip(f.sizes).is_some_and(|(s, (lo, hi))| (lo..=hi).contains(&s))),
                     Field::Postno => re(&p.no.to_string()),
@@ -464,7 +464,7 @@ impl Filters {
             let comment = comment.get_or_insert_with(|| {
                 p.body.iter().map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect::<String>()).collect::<Vec<_>>().join("\n")
             });
-            let texts = p.subject.iter().map(String::as_str).chain([p.name.as_str(), comment.as_str()]).chain(p.files.iter().map(|f| f.filename.as_str()));
+            let texts = p.subject.iter().map(String::as_str).chain([p.poster.name(), comment.as_str()]).chain(p.files.iter().map(|f| f.filename.as_str()));
             // Which word: the group that matched (asked only of a text that matches).
             for text in texts.filter(|t| w.re.is_match(t)) {
                 if let Some(c) = w.re.captures(text)
@@ -522,7 +522,7 @@ pub mod tests {
     fn post(subject: &str, body: &str) -> Post {
         Post {
             no: 1,
-            name: "Anonymous".into(),
+            poster: "Anonymous".into(),
             subject: Some(subject.into()).filter(|s: &String| !s.is_empty()),
             body: body.lines().map(|l| Line::raw(l.to_string())).collect(),
             files: vec![Attachment { filename: "cat.png".into(), md5: Some("u8Vh17KxaDvUJ6bBcmE/eg==".into()), ..Default::default() }],
@@ -576,8 +576,7 @@ pub mod tests {
             no: 487211260,
             id: Some("Ab3dEf+g".into()),
             flag: Some(Flag { code: "PL".into(), name: "Poland".into() }),
-            trip: Some("!!Fz3mQwerty".into()),
-            capcode: Some("mod".into()),
+            poster: crate::model::Poster::new(None, "Anonymous", Some("!!Fz3mQwerty".into()), Some("mod".into())),
             files: vec![Attachment { width: Some(1920), height: Some(1080), size: Some(3 << 20), ..Default::default() }],
             ..post("", "")
         };
@@ -788,7 +787,7 @@ mod word_tests {
     }
 
     fn says(body: &str) -> Post {
-        Post { no: 1, name: "Anonymous".into(), body: body.lines().map(|l| Line::raw(l.to_string())).collect(), ..Default::default() }
+        Post { no: 1, poster: "Anonymous".into(), body: body.lines().map(|l| Line::raw(l.to_string())).collect(), ..Default::default() }
     }
 
     fn hidden(f: &Filters, p: &Post) -> Option<String> {
@@ -811,7 +810,7 @@ mod word_tests {
         // Each field: subject, name, file names.
         let p = Post { subject: Some("about CAT".into()), ..says("x") };
         assert_eq!(hidden(&f, &p), label("cat"));
-        let p = Post { name: "cat !trip".into(), ..says("x") };
+        let p = Post { poster: "cat !trip".into(), ..says("x") };
         assert_eq!(hidden(&f, &p), label("cat"));
         let p = Post { files: vec![Attachment { filename: "my cat.png".into(), ..Default::default() }], ..says("x") };
         assert_eq!(hidden(&f, &p), label("cat"));

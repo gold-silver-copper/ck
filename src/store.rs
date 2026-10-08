@@ -261,7 +261,7 @@ pub fn signature(posts: &[Post]) -> u64 {
     posts.len().hash(&mut h);
     for p in posts {
         let text: usize = p.body.iter().map(|l| l.spans.iter().map(|s| s.content.len()).sum::<usize>() + 1).sum();
-        (p.no, p.name.len(), p.subject.as_ref().map(String::len), p.files.len(), p.body.len(), text).hash(&mut h);
+        (p.no, p.poster.name().len(), p.subject.as_ref().map(String::len), p.files.len(), p.body.len(), text).hash(&mut h);
         for f in &p.files {
             (&f.url, f.kind).hash(&mut h);
         }
