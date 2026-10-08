@@ -1,5 +1,11 @@
 # ck
 
+## Install
+
+    cargo install ck
+
+Run `ck`, or `ck 4chan/g` (or any thread or board URL) to start there.
+
 [![A two-minute tour of ck](ck-demo.avif)](ck-demo.webm)
 
 A read-only terminal browser for imageboards, built with [ratatui](https://ratatui.rs): 4chan,
@@ -21,12 +27,6 @@ terminal. (Click the tour for [the video](ck-demo.webm), with controls.)
 
 ck follows 4chan's API rules on every site: at most one request a second per host, and
 no refetching what hasn't changed.
-
-## Install
-
-    cargo install ck
-
-Run `ck`, or `ck 4chan/g` (or any thread or board URL) to start there.
 
 ## Sites
 
