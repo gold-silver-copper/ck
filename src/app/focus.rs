@@ -26,6 +26,8 @@ pub struct Menu {
     pub title: String,
     pub items: Vec<MenuItem>,
     pub list: ListState,
+    /// What was selected when it opened, and how many first items act on it: only on that.
+    on: Option<(RowKey, usize)>,
 }
 
 /// Labels on what's on screen; typing one picks it.
@@ -186,11 +188,12 @@ impl App {
     // ----- the menu -----
 
     pub(super) fn open_menu(&mut self) {
-        let (title, items) = self.menu_items();
+        let (title, items, rows) = self.menu_items();
         if items.is_empty() {
             return;
         }
-        self.popup = Some(Popup::Menu(Menu { title, items, list: ListState::default().with_selected(Some(0)) }));
+        let on = self.selected_key(self.tab.view()).map(|k| (k, rows));
+        self.popup = Some(Popup::Menu(Menu { title, items, list: ListState::default().with_selected(Some(0)), on }));
     }
 
     /// `enter` here, in a few words, when it does something.
@@ -219,16 +222,17 @@ impl App {
         })
     }
 
-    /// Everything that can be done with what's selected, most specific first.
-    fn menu_items(&self) -> (String, Vec<MenuItem>) {
+    /// Everything that can be done with what's selected, most specific first, and how many
+    /// of the first act on the selected row.
+    fn menu_items(&self) -> (String, Vec<MenuItem>, usize) {
         let mut items: Vec<MenuItem> = Vec::new();
-        let title = if let Some(v) = self.tab.viewer() {
-            viewer_menu(v, &mut items)
+        let (title, rows) = if let Some(v) = self.tab.viewer() {
+            (viewer_menu(v, &mut items), 0)
         } else if self.tab.view() == View::Thread && self.tab.gallery.is_some() {
-            gallery_menu(&mut items)
+            (gallery_menu(&mut items), 0)
         } else {
             match self.tab.view() {
-                View::Thread => self.thread_menu(&mut items),
+                View::Thread => (self.thread_menu(&mut items), 0),
                 View::Catalog => self.catalog_menu(&mut items),
                 View::Sites => self.sites_menu(&mut items),
                 View::Boards => self.boards_menu(&mut items),
@@ -237,12 +241,12 @@ impl App {
                 View::Search => self.search_menu(&mut items),
                 View::Settings => {
                     items.push(MenuItem::Enter("change it".into()));
-                    String::new()
+                    (String::new(), 1)
                 }
             }
         };
         self.everywhere_menu(&mut items);
-        (title, items)
+        (title, items, rows)
     }
 
     /// Whether thread `no` on the tab's board is watched.
@@ -375,7 +379,7 @@ impl App {
         title
     }
 
-    fn catalog_menu(&self, items: &mut Vec<MenuItem>) -> String {
+    fn catalog_menu(&self, items: &mut Vec<MenuItem>) -> (String, usize) {
         use Action as A;
         let mut title = String::new();
         if let Some(p) = self.selected_post() {
@@ -396,6 +400,7 @@ impl App {
             items.push(act(A::CopyLink, "copy its link"));
             items.push(act(A::Browser, "open it in the browser"));
         }
+        let rows = items.len();
         items.push(act(A::ShowHidden, if self.hiding.show() { "leave out hidden threads" } else { "show hidden threads" }));
         let sort = self.tab.catalog_sort;
         items.push(MenuItem::Act(A::Sort, format!("sort by {} (now {})", sort.next().as_str(), sort.as_str())));
@@ -411,10 +416,10 @@ impl App {
         items.push(act(A::Search, "filter the threads"));
         items.push(act(A::Hints, "pick a thread by its label"));
         items.push(act(A::Reload, "reload"));
-        title
+        (title, rows)
     }
 
-    fn sites_menu(&self, items: &mut Vec<MenuItem>) -> String {
+    fn sites_menu(&self, items: &mut Vec<MenuItem>) -> (String, usize) {
         use Action as A;
         match self.selected_site_row() {
             Some(SiteRow::Watched) => items.push(MenuItem::Enter("open Watched".into())),
@@ -440,13 +445,14 @@ impl App {
             }
             None => {}
         }
+        let rows = items.len();
         items.push(act(A::Search, "filter"));
         items.push(act(A::Hints, "pick a row by its label"));
         items.push(act(A::AddSite, "add a site…"));
-        String::new()
+        (String::new(), rows)
     }
 
-    fn boards_menu(&self, items: &mut Vec<MenuItem>) -> String {
+    fn boards_menu(&self, items: &mut Vec<MenuItem>) -> (String, usize) {
         use Action as A;
         let mut title = String::new();
         if let Some(i) = self.selected_index() {
@@ -459,6 +465,7 @@ impl App {
                 items.push(MenuItem::Act(A::BoardImages, row));
             }
         }
+        let rows = items.len();
         items.push(act(A::Search, "filter the boards"));
         items.push(act(A::Hints, "pick a board by its label"));
         let site = &self.current_site().cfg;
@@ -466,11 +473,11 @@ impl App {
             items.push(act(A::UpdateBoards, "update the board list…"));
         }
         items.push(act(A::Reload, "reload"));
-        title
+        (title, rows)
     }
 
     /// Watched and History.
-    fn watched_menu(&self, items: &mut Vec<MenuItem>) -> String {
+    fn watched_menu(&self, items: &mut Vec<MenuItem>) -> (String, usize) {
         use Action as A;
         if self.selected_index().is_some() {
             items.push(MenuItem::Enter("open the thread".into()));
@@ -481,12 +488,13 @@ impl App {
             items.push(act(A::Browser, "open it in the browser"));
             items.push(act(A::Follow, "follow it as a general"));
         }
+        let rows = items.len();
         items.push(act(A::Search, "filter"));
         items.push(act(A::Hints, "pick a thread by its label"));
-        String::new()
+        (String::new(), rows)
     }
 
-    fn saved_menu(&self, items: &mut Vec<MenuItem>) -> String {
+    fn saved_menu(&self, items: &mut Vec<MenuItem>) -> (String, usize) {
         use Action as A;
         let mut title = String::new();
         if let Some(s) = self.selected_index().and_then(|i| self.store.saved.get(i)) {
@@ -497,20 +505,22 @@ impl App {
             items.push(act(A::CopyLink, "copy its link"));
             items.push(act(A::Browser, "open it in the browser"));
         }
+        let rows = items.len();
         items.push(act(A::Search, "filter"));
         items.push(act(A::SearchSaved, "search inside the saved threads…"));
         items.push(act(A::Hints, "pick a thread by its label"));
-        title
+        (title, rows)
     }
 
-    fn search_menu(&self, items: &mut Vec<MenuItem>) -> String {
+    fn search_menu(&self, items: &mut Vec<MenuItem>) -> (String, usize) {
         if self.selected_index().is_some() {
             items.push(MenuItem::Enter("open the thread".into()));
         }
+        let rows = items.len();
         if self.more_results() {
             items.push(MenuItem::Act(Action::NextMatch, "more results".into()));
         }
-        String::new()
+        (String::new(), rows)
     }
 
     /// What every menu ends with: the tabs, and the ways out.
@@ -562,6 +572,12 @@ impl App {
     /// Run row `i`, as its key would with the menu closed (also when it has none).
     fn run_menu_item(&mut self, i: usize) {
         let Some(m) = take_popup!(self, Menu) else { return };
+        if let Some((on, rows)) = &m.on
+            && !self.select_key(self.tab.view(), on)
+            && i < *rows
+        {
+            return self.info("That's gone since the menu opened");
+        }
         match m.items.get(i) {
             Some(MenuItem::Enter(_)) => self.on_key(KeyEvent::from(KeyCode::Enter)),
             Some(&MenuItem::Act(a, _)) => self.run_action(a),
@@ -676,16 +692,8 @@ impl App {
                     self.activate(part);
                 }
             }
-            HintTo::Row(key) => {
-                let Some(i) = self.row_of(self.tab.view(), &key) else {
-                    self.info(CHANGED);
-                    return;
-                };
-                if let Some((p, _)) = self.filtered_list() {
-                    p.state.select(Some(i));
-                    self.on_key(KeyEvent::from(KeyCode::Enter));
-                }
-            }
+            HintTo::Row(key) if self.select_key(self.tab.view(), &key) => self.on_key(KeyEvent::from(KeyCode::Enter)),
+            HintTo::Row(_) => self.info(CHANGED),
         }
     }
 }

@@ -84,7 +84,7 @@ impl App {
     }
 
     pub fn selected_site_row(&self) -> Option<SiteRow> {
-        self.site_list.state.selected().and_then(|i| self.visible_sites().get(i).copied())
+        self.selected_row(View::Sites).and_then(|i| self.visible_sites().get(i).copied())
     }
 
     /// `*`: add the board to the favorites, or take it off. They're kept in the config.
@@ -111,7 +111,6 @@ impl App {
     pub fn save_favorites(&mut self, what: &str) {
         let list: toml_edit::Array = self.favorites.iter().map(|f| f.key()).collect();
         self.save_config(what, |d| d["favorites"] = toml_edit::value(list));
-        self.clamp_home();
     }
 
     /// 1-9 on the home screen: open that favorite.
@@ -144,12 +143,6 @@ impl App {
         let list: toml_edit::Array = self.hidden_sites.iter().map(String::as_str).collect();
         let what = if hidden { format!("{name} as hidden (the last row shows hidden sites)") } else { format!("{name} as shown") };
         self.save_config(&what, |d| d["hidden_sites"] = toml_edit::value(list));
-        self.clamp_home();
-    }
-
-    pub(super) fn clamp_home(&mut self) {
-        let len = self.visible_sites().len();
-        self.site_list.clamp(len);
     }
 }
 

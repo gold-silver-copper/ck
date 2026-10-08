@@ -9,7 +9,7 @@ pub(super) fn draw_sites(f: &mut Frame, app: &mut App, area: Rect) {
     let t = theme();
     let width = area.width.saturating_sub(PAD + 1) as usize;
     let rows = app.visible_sites();
-    let mut state = app.site_list.state;
+    let mut state = app.list_state(View::Sites);
     app.drawn.body = draw_rows(f, area, rows.len(), &mut state, (1, 0), None, &|_| false, &mut |k| {
         let Some(&row) = rows.get(k) else { return Vec::new() };
         match row {
@@ -84,7 +84,7 @@ pub(super) fn draw_sites(f: &mut Frame, app: &mut App, area: Rect) {
             }
         }
     });
-    app.site_list.state = state;
+    app.list_scrolled(View::Sites, state.offset());
     if app.drawn.body.is_none() {
         empty(f, area, "No sites match");
     }
@@ -104,7 +104,7 @@ pub(super) fn draw_watched(f: &mut Frame, app: &mut App, area: Rect) {
     let t = theme();
     let width = area.width.saturating_sub(PAD + 1) as usize;
     let rows = app.visible_watched();
-    let mut state = app.watched_list.state;
+    let mut state = app.list_state(View::Watched);
     app.drawn.body = draw_rows(f, area, rows.len(), &mut state, (1, 0), None, &|_| false, &mut |k| {
         let Some(w) = rows.get(k).and_then(|&i| app.store.all_watched().get(i)) else { return Vec::new() };
         let mut right = Vec::new();
@@ -135,7 +135,7 @@ pub(super) fn draw_watched(f: &mut Frame, app: &mut App, area: Rect) {
         right.push(Span::styled(plural(w.posts, "post"), dim()));
         vec![spread(thread_row(&w.key, &w.subject), right, width)]
     });
-    app.watched_list.state = state;
+    app.list_scrolled(View::Watched, state.offset());
     if app.drawn.body.is_none() {
         let msg = format!("No watched threads. Press {} in a catalog or thread to watch one.", app.keys.key(Action::Watch));
         empty(f, area, &msg);
@@ -145,12 +145,12 @@ pub(super) fn draw_watched(f: &mut Frame, app: &mut App, area: Rect) {
 pub(super) fn draw_history(f: &mut Frame, app: &mut App, area: Rect) {
     let width = area.width.saturating_sub(PAD + 1) as usize;
     let rows = app.visible_history();
-    let mut state = app.history_list.state;
+    let mut state = app.list_state(View::History);
     app.drawn.body = draw_rows(f, area, rows.len(), &mut state, (1, 0), None, &|_| false, &mut |k| {
         let Some(v) = rows.get(k).and_then(|&i| app.store.history.get(i)) else { return Vec::new() };
         vec![spread(thread_row(&v.key, &v.subject), vec![Span::styled(ago(v.opened, app.clock), dim())], width)]
     });
-    app.history_list.state = state;
+    app.list_scrolled(View::History, state.offset());
     if app.drawn.body.is_none() {
         empty(f, area, "No history yet");
     }
@@ -160,7 +160,7 @@ pub(super) fn draw_saved(f: &mut Frame, app: &mut App, area: Rect) {
     let t = theme();
     let width = area.width.saturating_sub(PAD + 1) as usize;
     let rows = app.visible_saved();
-    let mut state = app.saved_list.state;
+    let mut state = app.list_state(View::Saved);
     app.drawn.body = draw_rows(f, area, rows.len(), &mut state, (1, 0), None, &|_| false, &mut |k| {
         let Some(m) = rows.get(k).and_then(|&i| app.store.saved.get(i)) else { return Vec::new() };
         let mut right = Vec::new();
@@ -174,7 +174,7 @@ pub(super) fn draw_saved(f: &mut Frame, app: &mut App, area: Rect) {
         left.push(Span::styled(format!("  No.{}", m.key.no), dim()));
         vec![spread(left, right, width)]
     });
-    app.saved_list.state = state;
+    app.list_scrolled(View::Saved, state.offset());
     if app.drawn.body.is_none() {
         let msg = format!(
             "No saved threads. Watched threads are saved as they refresh ({} watches one), and so is one you save as a page ({}).",
@@ -189,7 +189,7 @@ pub(super) fn draw_boards(f: &mut Frame, app: &mut App, area: Rect) {
     let t = theme();
     let width = app.boards().iter().map(|b| markup::columns(&b.uri)).max().unwrap_or(1) + 4;
     let rows = app.visible_boards();
-    let mut state = app.tab.board_list.state;
+    let mut state = app.list_state(View::Boards);
     app.drawn.body = draw_rows(f, area, rows.len(), &mut state, (1, 0), None, &|_| false, &mut |k| {
         let Some(b) = rows.get(k).and_then(|&i| app.boards().get(i)) else { return Vec::new() };
         let mut spans = vec![
@@ -201,7 +201,7 @@ pub(super) fn draw_boards(f: &mut Frame, app: &mut App, area: Rect) {
         }
         vec![Line::from(spans)]
     });
-    app.tab.board_list.state = state;
+    app.list_scrolled(View::Boards, state.offset());
     if app.drawn.body.is_none() && app.tab.loading().is_none() {
         empty(f, area, app.tab.failed.as_deref().unwrap_or("No boards"));
     }
@@ -220,6 +220,7 @@ pub(super) fn draw_catalog(f: &mut Frame, app: &mut App, area: Rect) {
     let thumbs = images && !compact;
     let width = area.width.saturating_sub(PAD + 2) as usize;
     let visible = app.visible_catalog();
+    let mut state = app.list_state(View::Catalog);
     let mut build = |k: usize| -> Vec<Line<'static>> {
         let Some(&i) = visible.get(k) else { return Vec::new() };
         let Some(p) = app.tab.catalog.get(i) else { return Vec::new() };
@@ -312,9 +313,8 @@ pub(super) fn draw_catalog(f: &mut Frame, app: &mut App, area: Rect) {
         (2, 1, Some(t.surface))
     };
     let highlighted = |k: usize| visible.get(k).is_some_and(|&i| app.tab.catalog_marks.highlight(i).is_some());
-    let mut state = app.tab.catalog_list.state;
     app.drawn.body = draw_rows(f, area, visible.len(), &mut state, (height, gap), card, &highlighted, &mut build);
-    app.tab.catalog_list.state = state;
+    app.list_scrolled(View::Catalog, state.offset());
     if app.drawn.body.is_none() {
         if app.tab.loading().is_none() {
             empty(f, area, app.tab.failed.as_deref().unwrap_or("No threads"));
@@ -328,7 +328,7 @@ pub(super) fn draw_catalog(f: &mut Frame, app: &mut App, area: Rect) {
     // (on rate-limited hosts that would delay visible ones).
     let per = height + gap;
     let on_screen = (area.height / per) as usize + 1;
-    let offset = app.tab.catalog_list.state.offset();
+    let offset = state.offset();
     for (k, &i) in visible.iter().enumerate().skip(offset).take(on_screen * 2) {
         let Some(p) = app.tab.catalog.get(i) else { continue };
         let off = !app.catalog_images_on(p);
@@ -350,6 +350,7 @@ const WATCHING: &str = "◉ ";
 /// Archive search results: each post with its thread, as cards.
 pub(super) fn draw_search(f: &mut Frame, app: &mut App, area: Rect) {
     let t = theme();
+    let mut state = app.list_state(View::Search);
     let Some(s) = &app.tab.search else { return };
     // Saved threads: how far the search has got, above the results.
     let area = match &s.saved {
@@ -399,9 +400,7 @@ pub(super) fn draw_search(f: &mut Frame, app: &mut App, area: Rect) {
         }
         lines
     };
-    let mut state = app.tab.search_list.state;
     let hit = draw_rows(f, area, visible.len(), &mut state, (3, 1), Some(t.surface), &|_| false, &mut build);
-    app.tab.search_list.state = state;
     if hit.is_none() && app.tab.loading().is_none() {
         empty(f, area, if s.hits.is_empty() { "No results".to_string() } else { format!("All hidden ({} shows them)", app.keys.key(Action::ShowHidden)) }.as_str());
     }
@@ -414,6 +413,7 @@ pub(super) fn draw_search(f: &mut Frame, app: &mut App, area: Rect) {
         }
     }
     app.drawn.body = hit;
+    app.list_scrolled(View::Search, state.offset());
 }
 
 /// A line of `text` around the first place `needle` (lowercase) is, with it highlighted; the
@@ -456,9 +456,10 @@ fn draw_grid(f: &mut Frame, app: &mut App, area: Rect) {
     let (cell_w, cell_h) = (GRID_CARD.width + 2, GRID_CARD.height + 1);
     let cols = ((area.width + 2) / cell_w).max(1) as usize;
     let rows = ((area.height + 1) / cell_h).max(1) as usize;
-    let state = &mut app.tab.catalog_list.state;
+    let mut state = app.list_state(View::Catalog);
     let sel = state.selected().unwrap_or(0).min(visible.len() - 1);
-    let top = window(state, visible.len(), rows, cols) / cols;
+    let top = window(&mut state, visible.len(), rows, cols) / cols;
+    app.list_scrolled(View::Catalog, top * cols);
     for (k, &i) in visible.iter().enumerate().skip(top * cols).take((rows + 1) * cols) {
         let (r, c) = (k / cols - top, k % cols);
         let (x, y) = (area.x + c as u16 * cell_w, area.y + r as u16 * cell_h);

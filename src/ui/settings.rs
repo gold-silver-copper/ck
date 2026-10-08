@@ -4,7 +4,7 @@ use super::*;
 
 pub(super) fn draw_settings(f: &mut Frame, app: &mut App, area: Rect) {
     let t = theme();
-    let selected = app.settings_list.state.selected().unwrap_or(0);
+    let selected = app.list_state(View::Settings).selected().unwrap_or(0);
     let rows = setting_rows();
     // Scroll so the selected setting (and the note under the list, at the end) shows.
     let at = rows.iter().position(|r| *r == Ok(selected)).unwrap_or(0);

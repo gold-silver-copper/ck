@@ -408,7 +408,7 @@ fn location(app: &App) -> (Vec<String>, Vec<Span<'static>>) {
             let k = th.matches.len();
             format!("/{}  {}", th.search, count(k, "match", "matches"))
         }),
-        _ => Some(current_filter(app)).filter(|q| !q.is_empty() && app.typing != Some(Typing::ListFilter)).map(|q| format!("/{q}")),
+        _ => Some(app.filter(app.tab.view())).filter(|q| !q.is_empty() && app.typing != Some(Typing::ListFilter)).map(|q| format!("/{q}")),
     };
     if let Some(q) = query {
         spans.extend([chip(q, t.on_primary_container, t.primary_container), Span::raw("  ")]);
@@ -459,7 +459,7 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
         Typing::Goto(g) => ("go to", g.as_str()),
         Typing::ArchiveQuery(q) => ("search the archive", q.as_str()),
         Typing::ThreadSearch => ("search", app.tab.thread.as_ref().map_or("", |th| th.search.as_str())),
-        Typing::ListFilter => ("filter", current_filter(app)),
+        Typing::ListFilter => ("filter", app.filter(app.tab.view())),
     });
     let line = if let Some((what, q)) = typing {
         Line::from(vec![
@@ -624,7 +624,7 @@ fn footer_hints(app: &App) -> Vec<(String, &'static str)> {
             }
         },
         View::Catalog => {
-            let op = app.visible_catalog().get(app.tab.catalog_list.state.selected().unwrap_or(0)).and_then(|&i| app.tab.catalog.get(i));
+            let op = app.selected_post();
             let mut hints = vec![("enter".into(), "open")];
             if op.is_some_and(|p| !p.files.is_empty()) {
                 hints.push((k(Action::View), "view image"));
@@ -675,18 +675,6 @@ fn footer_hints(app: &App) -> Vec<(String, &'static str)> {
     }
     hints.push((k(Action::Help), "help"));
     hints
-}
-
-fn current_filter(app: &App) -> &str {
-    match app.tab.view() {
-        View::Sites => &app.site_list.filter,
-        View::Boards => &app.tab.board_list.filter,
-        View::Catalog => &app.tab.catalog_list.filter,
-        View::Watched => &app.watched_list.filter,
-        View::History => &app.history_list.filter,
-        View::Saved => &app.saved_list.filter,
-        View::Thread | View::Settings | View::Search => "",
-    }
 }
 
 // ----- lists and cards -----

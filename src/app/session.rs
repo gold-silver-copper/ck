@@ -2,7 +2,7 @@
 
 use std::time::{Duration, Instant};
 
-use super::{App, FilteredList, Opening, Sort, View};
+use super::{App, FilteredList, Opening, RowKey, Sort, View};
 use crate::store::{Place, Session};
 
 /// How often the session is saved while ck runs (if it changed).
@@ -52,7 +52,7 @@ impl App {
                 place.conversation = t.and_then(|t| Some(t.conversation.as_ref().filter(|c| c.poster.is_none())?.anchor)).or_else(|| self.tab.opening().conversation);
             }
             View::Catalog => {
-                place.selected = self.tab.catalog_list.state.selected().and_then(|i| self.visible_catalog().get(i).and_then(|&k| self.tab.catalog.get(k)).map(|p| p.no)).or_else(|| self.tab.catalog_selecting());
+                place.selected = self.tab.catalog_list.key().and_then(|k| if let RowKey::Thread(no) = k { Some(*no) } else { None });
             }
             _ => {}
         }
@@ -97,7 +97,7 @@ impl App {
         let Some(site) = self.site_index(&p.site) else { return };
         self.switch_site(site);
         self.tab.catalog_sort = p.sort.unwrap_or_default();
-        self.tab.catalog_list = FilteredList { filter: p.filter.clone(), ..FilteredList::top() };
+        self.tab.catalog_list = FilteredList::on(p.selected.filter(|_| p.view == "catalog").map(RowKey::Thread), p.filter.clone());
         let board = p.board.as_ref().map(|b| self.find_board(b));
         match (p.view.as_str(), board, p.thread) {
             ("watched", ..) => self.tab.navigate(View::Watched),
@@ -112,7 +112,7 @@ impl App {
                 self.tab.board = Some(board);
                 self.tab.catalog.clear();
                 self.tab.navigate(View::Catalog);
-                self.load_catalog(p.selected);
+                self.load_catalog();
             }
             ("thread", Some(board), Some(no)) => {
                 self.open_thread_at(board, no, Opening { select: p.selected, conversation: p.conversation, restoring: true });

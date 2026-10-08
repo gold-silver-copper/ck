@@ -55,6 +55,8 @@ pub use goto::start_error;
 pub use loading::Whole;
 mod home;
 mod links;
+mod list;
+pub use list::FilteredList;
 mod saved;
 mod saving;
 mod board_images;
@@ -134,14 +136,15 @@ pub enum SiteRow {
     HiddenSites,
 }
 
-/// What a list row shows, wherever it's moved to: hint labels keep this, so a label opens
-/// what it was put on after the list changes.
+/// What a list row shows, wherever it's moved to: a selection, a menu and a hint label keep
+/// this, so they stay on what they were put on after the list changes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RowKey {
-    /// A home screen row other than a recent board: those move only by the user's own keys.
+    /// A home screen row other than a board: those move only by the user's own keys.
     Site(SiteRow),
-    /// A recent board on the home screen, by its key (`site/board`).
-    Recent(String),
+    /// A favorite or recent board on the home screen, by its key (`site/board`): a board is
+    /// one or the other, so starring one keeps it selected.
+    HomeBoard(String),
     Board(String),
     /// A catalog thread.
     Thread(u64),
@@ -149,39 +152,14 @@ pub enum RowKey {
     Listed(ThreadKey),
     /// A search hit: its thread (the saved copy's, or the archive's) and post.
     Hit(ThreadKey, u64),
+    /// A setting, by its place in the fixed list.
+    Setting(usize),
 }
 
 pub struct Site {
     pub cfg: SiteConfig,
     pub backend: Arc<dyn Backend>,
     pub boards: Option<Vec<Board>>,
-}
-
-/// A filterable list with a selection.
-#[derive(Default)]
-pub struct FilteredList {
-    pub state: ListState,
-    pub filter: String,
-}
-
-impl FilteredList {
-    /// An empty filter, with the first row selected.
-    fn top() -> Self {
-        Self { state: ListState::default().with_selected(Some(0)), filter: String::new() }
-    }
-
-    fn move_by(&mut self, delta: isize, len: usize) {
-        if len == 0 {
-            self.state.select(None);
-            return;
-        }
-        let cur = self.state.selected().unwrap_or(0) as isize;
-        self.state.select(Some((cur + delta).clamp(0, len as isize - 1) as usize));
-    }
-
-    fn clamp(&mut self, len: usize) {
-        self.move_by(0, len);
-    }
 }
 
 
@@ -546,7 +524,7 @@ impl App {
         let (tx, rx) = channel();
         let mut app = Self {
             sites,
-            site_list: FilteredList::top(),
+            site_list: FilteredList::fresh(),
             favorites: cfg.favorites.iter().filter_map(|f| BoardRef::parse(f)).collect(),
             home_titles: HashMap::new(),
             hidden_sites: cfg.hidden_sites.iter().cloned().collect(),
@@ -557,15 +535,15 @@ impl App {
                 Some(false) => CatalogLayout::Cards,
                 None => layout,
             }),
-            settings_list: FilteredList::top(),
+            settings_list: FilteredList::fresh(),
             theme_name,
             themes,
             color_mode: cfg.color,
             truecolor: cfg.color.truecolor(),
             images_mode: cfg.images,
-            watched_list: FilteredList::top(),
-            history_list: FilteredList::top(),
-            saved_list: FilteredList::top(),
+            watched_list: FilteredList::fresh(),
+            history_list: FilteredList::fresh(),
+            saved_list: FilteredList::fresh(),
             saved_confirm: None,
             saved_search: 0,
             removed_sites: Default::default(),
@@ -759,33 +737,14 @@ impl App {
         })
     }
 
-    /// Keep the current list's selection on a row that exists.
-    fn clamp_list(&mut self) {
-        if let Some((p, len)) = self.filtered_list() {
-            p.clamp(len);
-        }
-    }
-
-    /// The current view's list, and how many rows it has.
-    fn filtered_list(&mut self) -> Option<(&mut FilteredList, usize)> {
-        Some(match self.tab.view() {
-            View::Sites => (self.visible_sites().len(), &mut self.site_list),
-            View::Boards => (self.visible_boards().len(), &mut self.tab.board_list),
-            View::Catalog => (self.visible_catalog().len(), &mut self.tab.catalog_list),
-            View::Watched => (self.visible_watched().len(), &mut self.watched_list),
-            View::History => (self.visible_history().len(), &mut self.history_list),
-            View::Saved => (self.visible_saved().len(), &mut self.saved_list),
-            View::Settings => (settings::settings().count(), &mut self.settings_list),
-            View::Search => (self.visible_hits().len(), &mut self.tab.search_list),
-            View::Thread => return None,
-        })
-        .map(|(len, p)| (p, len))
-    }
-
     /// What each row of the list `view` shows is (none in a thread).
     pub(super) fn row_keys(&self, view: View) -> Vec<RowKey> {
         match view {
-            View::Sites => self.visible_sites().into_iter().map(|r| if let SiteRow::Recent(i) = r { RowKey::Recent(self.store.recent_boards.get(i).cloned().unwrap_or_default()) } else { RowKey::Site(r) }).collect(),
+            View::Sites => self.visible_sites().into_iter().map(|r| match r {
+                SiteRow::Favorite(i) => RowKey::HomeBoard(self.favorites.get(i).map(BoardRef::key).unwrap_or_default()),
+                SiteRow::Recent(i) => RowKey::HomeBoard(self.store.recent_boards.get(i).cloned().unwrap_or_default()),
+                r => RowKey::Site(r),
+            }).collect(),
             View::Boards => self.visible_boards().into_iter().filter_map(|i| self.boards().get(i)).map(|b| RowKey::Board(b.uri.clone())).collect(),
             View::Catalog => self.visible_catalog().into_iter().filter_map(|i| self.tab.catalog.get(i)).map(|p| RowKey::Thread(p.no)).collect(),
             View::Watched => self.visible_watched().into_iter().filter_map(|i| self.store.all_watched().get(i)).map(|w| RowKey::Listed(w.key.clone())).collect(),
@@ -795,14 +754,9 @@ impl App {
                 let (Some(s), site) = (&self.tab.search, &self.current_site().cfg.name) else { return Vec::new() };
                 self.visible_hits().into_iter().filter_map(|k| Some(RowKey::Hit(s.thread_of(k, site)?, s.hits.get(k)?.1.no))).collect()
             }
-            // Settings rows get no labels (they're `Hit::Settings`), nor do posts.
-            View::Settings | View::Thread => Vec::new(),
+            View::Settings => (0..settings::settings().count()).map(RowKey::Setting).collect(),
+            View::Thread => Vec::new(),
         }
-    }
-
-    /// Where the row showing `key` is now in `view`'s list.
-    pub(super) fn row_of(&self, view: View, key: &RowKey) -> Option<usize> {
-        self.row_keys(view).iter().position(|k| k == key)
     }
 
     /// To send what background work finds back to this thread.
@@ -1160,20 +1114,11 @@ impl App {
         self.save_now();
         let show = self.keys.key(Action::ShowHidden);
         self.info(if hidden { format!("Hid {what} {no} ({show} shows hidden ones)") } else { format!("Unhid {what} {no}") });
-        self.clamp_list();
     }
 
     /// `Z`: show hidden threads and posts (dimmed), or leave them out again.
     fn toggle_show_hidden(&mut self) {
-        // Keep the same thread selected in the catalog.
-        let keep = self.selected_index().filter(|_| self.tab.view() == View::Catalog);
         let shown = self.rehide(|a| a.hiding.toggle_show());
-        if let Some(i) = keep
-            && let Some(pos) = self.visible_catalog().iter().position(|&v| v == i)
-        {
-            self.tab.catalog_list.state.select(Some(pos));
-        }
-        self.clamp_list();
         self.info(if shown { "Showing hidden threads and posts" } else { "Leaving out hidden threads and posts" });
     }
 
@@ -1413,7 +1358,7 @@ impl App {
     /// background), so going back to Boards shows it.
     fn switch_site(&mut self, site: usize) {
         if site != self.tab.site {
-            self.tab.board_list = FilteredList::top();
+            self.tab.board_list = FilteredList::fresh();
             self.tab.site = site;
         }
         // Also for the site it's on already (the first, at startup: `ck 4chan` showed none).
@@ -1539,7 +1484,7 @@ impl App {
     }
 
     /// The post whose files `v`, `i`, `d` act on: the selected catalog entry or thread post.
-    fn selected_post(&self) -> Option<&Post> {
+    pub(crate) fn selected_post(&self) -> Option<&Post> {
         match self.tab.view() {
             View::Catalog => self.selected_index().and_then(|i| self.tab.catalog.get(i)),
             View::Thread => self.tab.thread.as_ref().and_then(ThreadView::current),
@@ -1600,7 +1545,6 @@ impl App {
                 Some(SiteRow::Recent(i)) => {
                     self.store.recent_boards.remove(i);
                     self.save_now();
-                    self.clamp_home();
                 }
                 Some(SiteRow::Site(i)) => self.toggle_site_hidden(i),
                 _ => {}
@@ -1635,18 +1579,18 @@ impl App {
             _ => return,
         }
         self.save_now();
-        self.clamp_list();
     }
 
-    /// Index of the selected item in the current list's underlying data (not for Sites).
+    /// Index of the selected item in the current list's underlying data, found by its key.
     fn selected_index(&self) -> Option<usize> {
-        match self.tab.view() {
-            View::Sites | View::Thread | View::Settings | View::Search => None,
-            View::Boards => self.tab.board_list.state.selected().and_then(|i| self.visible_boards().get(i).copied()),
-            View::Catalog => self.tab.catalog_list.state.selected().and_then(|i| self.visible_catalog().get(i).copied()),
-            View::Watched => self.watched_list.state.selected().and_then(|i| self.visible_watched().get(i).copied()),
-            View::History => self.history_list.state.selected().and_then(|i| self.visible_history().get(i).copied()),
-            View::Saved => self.saved_list.state.selected().and_then(|i| self.visible_saved().get(i).copied()),
+        let view = self.tab.view();
+        match (view, self.selected_key(view)?) {
+            (View::Boards, RowKey::Board(uri)) => self.boards().iter().position(|b| b.uri == uri),
+            (View::Catalog, RowKey::Thread(no)) => self.tab.catalog.iter().position(|p| p.no == no),
+            (View::Watched, RowKey::Listed(k)) => self.store.all_watched().iter().position(|w| w.key == k),
+            (View::History, RowKey::Listed(k)) => self.store.history.iter().position(|h| h.key == k),
+            (View::Saved, RowKey::Listed(k)) => self.store.saved.iter().position(|s| s.key == k),
+            _ => None,
         }
     }
 
@@ -1678,7 +1622,6 @@ impl App {
                 Some(SiteRow::Site(i)) => self.enter_site(i),
                 Some(SiteRow::HiddenSites) => {
                     self.show_hidden_sites = !self.show_hidden_sites;
-                    self.clamp_home();
                 }
                 None => {}
             },
@@ -1710,20 +1653,17 @@ impl App {
         self.tab.board = Some(board);
         self.tab.catalog.clear();
         self.tab.catalog_cached = None;
-        self.tab.catalog_list = FilteredList::top();
+        self.tab.catalog_list = FilteredList::fresh();
         self.tab.navigate(View::Catalog);
-        self.load_catalog(None);
+        self.load_catalog();
     }
 
     fn enter_site(&mut self, i: usize) {
         if i != self.tab.site {
-            self.tab.board_list = FilteredList::default();
+            self.tab.board_list = FilteredList::fresh();
         }
         self.tab.site = i;
         self.tab.navigate(View::Boards);
-        if self.tab.board_list.state.selected().is_none() {
-            self.tab.board_list.state.select(Some(0));
-        }
         if self.current_site().boards.is_some() {
             return;
         }
@@ -1783,10 +1723,7 @@ impl App {
                 self.load_search_page();
             }
             View::Boards => self.load_boards(),
-            View::Catalog => {
-                let select = self.tab.catalog_selecting();
-                self.load_catalog(select);
-            }
+            View::Catalog => self.load_catalog(),
             View::Thread if self.tab.saved().is_some() => self.refresh_saved(),
             // Not loaded yet (a failure, or another load took over): the thread asked for.
             View::Thread => {

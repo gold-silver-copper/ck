@@ -20,7 +20,6 @@ impl App {
             Ok(t) => t,
             Err(e) => {
                 self.error(e.context("Couldn't open the saved copy"));
-                self.clamp_list();
                 self.save();
                 return;
             }
