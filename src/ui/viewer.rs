@@ -11,7 +11,6 @@ pub(super) fn draw_gallery(f: &mut Frame, app: &mut App, area: Rect) {
     let (cell_w, cell_h) = (card_w + 2, card_h + 1);
     let cols = ((area.width + 2) / cell_w).max(1) as usize;
     let rows = ((area.height + 1) / cell_h).max(1) as usize;
-    g.cols = cols;
     let n = g.files.len();
     let sel = g.state.selected().unwrap_or(0).min(n - 1);
     let top = window(&mut g.state, n, rows, cols) / cols;

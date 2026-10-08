@@ -27,7 +27,7 @@ pub(super) enum Modal {
 
 /// What a frame showed: the screen (its view, tab and place), how many tabs, and what's on
 /// top.
-pub(super) type Shown = ((View, usize, bool, bool, u32), usize, Option<Modal>);
+pub(super) type Shown = ((View, usize, bool, bool, u32, CatalogLayout), usize, Option<Modal>);
 
 /// What the mouse does with one gesture.
 type Handler = fn(&mut App, MouseEvent, Instant);
@@ -70,7 +70,7 @@ impl App {
         let (before, top) = (self.shown(), self.modal());
         let (wheel, left, right, tabs) = self.mouse(top);
         let pos = Position::new(ev.column, ev.row);
-        let fresh = self.drawn.shown == Some(before);
+        let fresh = self.drawn.fresh && self.drawn.shown == Some(before);
         let clicked = match ev.kind {
             ScrollDown | ScrollUp => {
                 wheel(self, ev, now);
@@ -160,7 +160,7 @@ impl App {
     /// What the last frame drew may have moved: no click lands until the next frame, and
     /// none before pairs with one after into a double click.
     pub(super) fn forget_frame(&mut self) {
-        self.drawn.shown = None;
+        self.drawn.fresh = false;
         self.last_click = None;
     }
 
@@ -332,7 +332,7 @@ impl App {
                     self.back();
                 }
             }
-            _ if self.tab.view() == View::Catalog && self.grid_cols > 0 && self.on_grid_key(key.code) => {}
+            _ if self.tab.view() == View::Catalog && self.on_grid_key(key.code) => {}
             KeyCode::Char(c @ '1'..='9') if self.tab.view() == View::Sites => self.open_favorite(c as usize - '1' as usize),
             KeyCode::Char('h') | KeyCode::Left | KeyCode::Backspace => self.back(),
             _ if self.tab.view() == View::Thread => self.on_thread_key(key.code, ctrl),
@@ -492,17 +492,22 @@ impl App {
     }
 
     /// Moving in the catalog grid: j/k by rows, h/l by columns (h in the first column goes
-    /// back, as in lists). Returns whether the key was one of those.
+    /// back, as in lists), as the grid was last drawn; before a grid's first frame, by one card.
+    /// Returns whether the key was one of those.
     fn on_grid_key(&mut self, code: KeyCode) -> bool {
-        let cols = self.grid_cols as isize;
+        let (cols, edges) = match self.drawn_cols() {
+            Some(Some(cols)) => (cols as isize, true),
+            None if self.layout() == CatalogLayout::Grid => (1, false),
+            _ => return false,
+        };
         let len = self.visible_catalog().len();
         let cur = self.tab.catalog_list.state.selected().unwrap_or(0) as isize;
         let delta = match code {
             KeyCode::Char('j') | KeyCode::Down => cols,
             KeyCode::Char('k') | KeyCode::Up => -cols,
-            KeyCode::Char('l') | KeyCode::Right if (cur + 1) % cols != 0 => 1,
+            KeyCode::Char('l') | KeyCode::Right if !edges || (cur + 1) % cols != 0 => 1,
             KeyCode::Char('l') | KeyCode::Right => 0,
-            KeyCode::Char('h') | KeyCode::Left if cur % cols != 0 => -1,
+            KeyCode::Char('h') | KeyCode::Left if !edges || cur % cols != 0 => -1,
             _ => return false,
         };
         // Down from the last full row goes to the last thread.

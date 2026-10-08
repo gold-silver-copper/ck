@@ -2,7 +2,7 @@
 
 use ratatui::buffer::Buffer;
 
-use crate::app::{App, Clock, Part, Popup, Preview, SettingsPopup, ThreadView, View, Viewer};
+use crate::app::{App, Clock, Hit, Part, Popup, Preview, SettingsPopup, ThreadView, View, Viewer};
 use crate::images::Images;
 use crate::model::{Board, Post};
 use crate::store::{Status, ThreadKey, Visit};
@@ -998,12 +998,12 @@ fn catalog_grid() {
     a.tab.catalog_list.state.select(Some(1));
     insta::assert_snapshot!(snapshot(&mut a));
     insta::assert_snapshot!("catalog_grid_backgrounds", bg_map(&mut a));
-    assert_eq!(a.grid_cols, 4);
+    assert!(matches!(a.drawn.body, Some(Hit::Grid { cols: 4, .. })));
     // Without images, the grid is drawn as cards.
     let mut b = catalog_app(false);
     b.default_layout = crate::config::CatalogLayout::Grid;
     let text = snapshot(&mut b);
-    assert!(text.contains("312 replies") && b.grid_cols == 0, "{text}");
+    assert!(text.contains("312 replies") && matches!(b.drawn.body, Some(Hit::List { .. })), "{text}");
 }
 
 #[test]
