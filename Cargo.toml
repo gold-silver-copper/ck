@@ -9,7 +9,7 @@ readme = "README.md"
 keywords = ["imageboard", "tui", "terminal", "4chan", "ratatui"]
 categories = ["command-line-utilities"]
 # Test data (real scraped posts), UI snapshots and the demo stay in the repository only.
-exclude = ["tests/fixtures", "src/snapshots", "demo", "ck-demo.webm", "ck-demo.avif"]
+exclude = ["tests/fixtures", "src/snapshots", "demo", "ck-demo.webm", "ck-demo-small.webm", "ck-demo.avif"]
 
 [dependencies]
 anyhow = "1.0.104"
