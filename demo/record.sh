@@ -12,7 +12,8 @@
 # and history are neither used nor shown. It browses live /g/: watch the result before
 # publishing it.
 #
-# CK_DEMO_PACE (0.7) scales the tour's pauses (1 is slower); CK_DEMO_FPS (20) is the frame
+# CK_DEMO_PACE (0.7) scales the tour's pauses (1 is slower); CK_DEMO_SPEED (1.2) speeds up
+# the video, captions and all, to keep it under two minutes; CK_DEMO_FPS (20) is the frame
 # rate; CK_DEMO_CRF (38) the quality: lower is better and bigger, and 38 keeps the four minutes
 # under GitHub's 10 MB for a video in a README. CK_DEMO_SHOTS=1 keeps a screenshot of the
 # end of each scene, for checking the tour. The working directory (~/.cache/ck-demo) is
@@ -125,7 +126,7 @@ read -r from to < "$work/trim"
 # The stretches to keep (waits on the network cut), as one select expression.
 keep=$(tail -n +2 "$work/trim" | awk '{printf "%sbetween(t,%s,%s)", (NR > 1 ? "+" : ""), $1, $2}')
 ffmpeg -loglevel error -stats -y -ss "$from" -to "$to" -i "$work/raw.mkv" \
-    -vf "select='$keep',setpts=N/FRAME_RATE/TB,pad=1920:1080:0:0:color=0x$band,ass=$work/captions.ass" \
+    -vf "select='$keep',setpts=N/FRAME_RATE/TB,pad=1920:1080:0:0:color=0x$band,ass=$work/captions.ass,setpts=PTS/${CK_DEMO_SPEED:-1.2},fps=$fps" \
     -c:v libvpx-vp9 -crf "${CK_DEMO_CRF:-38}" -b:v 0 -row-mt 1 -deadline good -cpu-used 2 -pix_fmt yuv420p "$out"
 echo "Wrote $out ($(du -h "$out" | cut -f1))"
 # The same as an animated AVIF: GitHub shows images in a README, but not videos from the
