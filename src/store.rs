@@ -691,7 +691,8 @@ impl Store {
     /// (a thread that's still up is only known to be once it's refetched, which an unwatched
     /// one isn't). Never a watched thread's.
     fn prune_saved(&mut self) {
-        if self.saved_max == 0 {
+        // With a watched list that couldn't be read, which copies are watched isn't known.
+        if self.saved_max == 0 || self.dir.is_some() && !self.owned.contains_key("watched.json") {
             return;
         }
         let mut total = self.saved.iter().fold(0u64, |sum, m| sum.saturating_add(m.bytes));
@@ -1041,14 +1042,15 @@ mod tests {
     #[cfg(unix)]
     fn lock_out(path: &Path) -> bool {
         use std::os::unix::fs::PermissionsExt;
+        let folder = path.is_dir();
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o000)).unwrap();
-        std::fs::read(path).is_err()
+        if folder { std::fs::read_dir(path).is_err() } else { std::fs::read(path).is_err() }
     }
 
     #[cfg(unix)]
     fn let_in(path: &Path) {
         use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
     }
 
     #[cfg(unix)]
@@ -1101,26 +1103,57 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn an_index_rebuilt_without_a_copy_that_cant_be_read_isnt_written() {
-        // saved.json is gone, and one of the copies can't be read (as after `sudo ck`).
+        // saved.json is gone, and one of the copies, or the folder it's in, can't be read
+        // (as after `sudo ck`).
+        let other = |no| ThreadKey { board: "a".into(), ..key(no) };
+        for folder in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let (mut s, _) = Store::load(Some(dir.path().to_path_buf()));
+            for k in [key(1), other(2)] {
+                s.keep_thread(&k, "", "u", &whole(&posts(&[1, 2])), k.no as i64);
+            }
+            assert!(s.flush(std::time::Duration::from_secs(10)).is_empty());
+            s.save().unwrap();
+            std::fs::remove_file(dir.path().join("saved.json")).unwrap();
+            let copy = saved::path(dir.path(), &key(1));
+            let locked = if folder { copy.parent().unwrap().to_path_buf() } else { copy };
+            if !lock_out(&locked) {
+                return;
+            }
+            let (mut s, warnings) = Store::load(Some(dir.path().to_path_buf()));
+            assert!(!warnings.is_empty(), "no warning with {locked:?} locked");
+            s.keep_thread(&other(3), "", "u", &whole(&posts(&[1, 2])), 3);
+            s.flush(std::time::Duration::from_secs(10));
+            let _ = s.save();
+            let_in(&locked);
+            let (s, _) = Store::load(Some(dir.path().to_path_buf()));
+            assert!(s.saved(&key(1)).is_some(), "the copy that couldn't be read was dropped from saved.json, with {locked:?} locked");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn copies_of_threads_on_a_watched_list_that_cant_be_read_arent_pruned() {
         let dir = tempfile::tempdir().unwrap();
         let (mut s, _) = Store::load(Some(dir.path().to_path_buf()));
         for no in [1, 2] {
+            s.watch(key(no), String::new(), 0, 0);
             s.keep_thread(&key(no), "", "u", &whole(&posts(&[1, 2])), no as i64);
         }
         assert!(s.flush(std::time::Duration::from_secs(10)).is_empty());
         s.save().unwrap();
-        std::fs::remove_file(dir.path().join("saved.json")).unwrap();
-        let copy = saved::path(dir.path(), &key(1));
-        if !lock_out(&copy) {
+        let one = s.saved[0].bytes;
+        if !lock_out(&dir.path().join("watched.json")) {
             return;
         }
+        // Over the limit, with nothing known to be watched: none of the copies goes.
         let (mut s, _) = Store::load(Some(dir.path().to_path_buf()));
+        s.saved_max = one * 2;
         s.keep_thread(&key(3), "", "u", &whole(&posts(&[1, 2])), 3);
         s.flush(std::time::Duration::from_secs(10));
-        let _ = s.save();
-        let_in(&copy);
-        let (s, _) = Store::load(Some(dir.path().to_path_buf()));
-        assert!(s.saved(&key(1)).is_some(), "the copy that couldn't be read was dropped from saved.json");
+        for no in [1, 2] {
+            assert!(saved::path(dir.path(), &key(no)).exists(), "the copy of watched thread {no} was pruned");
+        }
     }
 
     #[cfg(unix)]

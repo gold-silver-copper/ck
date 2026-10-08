@@ -249,10 +249,12 @@ pub fn write(dir: &Path, t: &SavedThread) -> Result<u64> {
 
 /// The list of saved threads, from their files (when `saved.json` is missing, broken or
 /// can't be read), telling what was wrong with the others; and whether every one could be
-/// read, so that a list written from this leaves none out.
+/// listed and read, so that a list written from this leaves none out.
 pub fn scan(dir: &Path, warnings: &mut Vec<String>) -> (Vec<SavedMeta>, bool) {
-    let (mut out, mut whole) = (Vec::new(), true);
-    for file in atomic::files(&dir.join("threads"), 2).into_iter().filter(|f| f.extension().is_some_and(|e| e == "json")) {
+    let (files, unlisted) = atomic::files(&dir.join("threads"), 2);
+    let (mut out, mut whole) = (Vec::new(), unlisted.is_empty());
+    warnings.extend(unlisted);
+    for file in files.into_iter().filter(|f| f.extension().is_some_and(|e| e == "json")) {
         let t = match atomic::read::<SavedThread>(&file) {
             atomic::Read::Loaded(t, _) => t,
             // Removed since it was listed.

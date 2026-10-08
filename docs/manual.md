@@ -507,7 +507,7 @@ When the thread you open has 404'd and there's a copy, ck offers it ("a saved co
 Copies take at most `saved_max_mb` (500 MB by default; 0 for no limit): past that, the
 oldest copies of threads you don't watch are removed, dead or not (one you saved as a page,
 or stopped watching, counts too). A watched thread's copy is never removed, even when
-watched threads alone take more.
+watched threads alone take more; and in a run where `watched.json` couldn't be read, none is.
 
 ### Following a general
 
