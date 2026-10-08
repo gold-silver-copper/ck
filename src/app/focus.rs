@@ -129,21 +129,18 @@ impl App {
         self.selected_post()?.files.get(k)
     }
 
-    /// Where a quote link in the selected post leads, as a web address: from the thread
-    /// shown (on its site and board), else from the tab's board.
+    /// Where a quote link in the selected post leads, as a web address, from where the tab
+    /// is (a thread shown is where the tab is, so it's that thread's site and board).
     pub(super) fn quote_url(&self, l: &Link) -> Option<String> {
         let t = self.tab.thread.as_ref().filter(|_| self.tab.view() == View::Thread);
-        let (site, here) = match t {
-            Some(t) => (self.site_named(&t.key().site)?, t.key().board.clone()),
-            None => (self.current_site(), self.tab.board.as_ref()?.uri.clone()),
-        };
-        let board = l.board.clone().unwrap_or(here);
+        let board = l.board.clone().or_else(|| self.tab.board.as_ref().map(|b| b.uri.clone()))?;
+        let backend = &self.current_site().backend;
         // A bare `>>N` of a post in the thread shown.
         let in_thread = t.filter(|t| l.board.is_none() && l.post.is_some_and(|p| t.index.contains_key(&p))).map(|t| t.key().no);
         Some(match (l.thread.or(in_thread), l.post) {
-            (Some(th), Some(p)) => site.backend.post_url(&board, th, p),
-            (Some(th), None) => site.backend.thread_url(&board, th),
-            _ => site.backend.board_url(&board),
+            (Some(th), Some(p)) => backend.post_url(&board, th, p),
+            (Some(th), None) => backend.thread_url(&board, th),
+            _ => backend.board_url(&board),
         })
     }
 

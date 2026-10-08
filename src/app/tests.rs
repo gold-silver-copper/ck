@@ -688,8 +688,7 @@ fn a_post_on_another_site_moves_the_tab_once_found() {
     assert_eq!(app.tab.site, 0);
     settle_until(&mut app, |a| a.tab.pending_thread.as_ref().is_some_and(|k| k.no == 3));
     assert_eq!((app.tab.site, app.tab.board.as_ref().unwrap().uri.as_str(), app.tab.opening().select), (1, "b", Some(77)));
-    let trail: Vec<_> = app.tab.trail.iter().map(|(site, b, no, post)| (*site, b.uri.as_str(), *no, *post)).collect();
-    assert_eq!(trail, [(0, "x", 1, 2)]);
+    assert_eq!(app.tab.trail, [(ThreadKey { site: "a".into(), ..tkey("x", 1) }, 2)]);
     crate::http::serve_test_host(host, None);
 }
 
@@ -4283,7 +4282,7 @@ fn a_post_to_select_from_a_dropped_load_isnt_used_by_the_next_thread() {
     // Esc before it loads, then a watched thread that also has a No.12.
     app.back();
     app.tab.navigate(View::Watched);
-    app.open_key(ThreadKey { site: "a".into(), board: "x".into(), no: 9 });
+    app.open_key(&ThreadKey { site: "a".into(), board: "x".into(), no: 9 });
     // While it loads the session doesn't remember No.12 as its selected post...
     assert_eq!(app.place().selected, None);
     // ...and it opens at the top, not at No.12.
@@ -4818,6 +4817,8 @@ fn a_thread_answered_after_its_tab_changed_site_isnt_taken_for_that_sites() {
     let shown = asked.clone();
     app.handle(Msg::answer(req, arrived(nos(&[1, 2, 3])), move |app, r| app.thread_arrived(&asked, r)));
     assert_eq!(app.tab.thread.as_ref().map(ThreadView::key), Some(&shown), "a/x/1 shown as b/x/1");
+    // The tab is back where the thread it shows is.
+    assert_eq!(app.tab.site, 0);
     assert_eq!((app.store.watched(&other).unwrap().posts, app.store.last_seen(&other)), before);
 }
 
@@ -4948,16 +4949,22 @@ fn a_saved_thread_of_another_site_left_on_screen_by_closing_its_search_is_still_
     settle_until(&mut app, |a| a.tab.search.as_ref().and_then(|s| s.saved.as_ref()).is_some_and(|s| s.finished));
     app.tab.search_list.state.select(Some(0));
     app.on_key(KeyEvent::from(KeyCode::Enter));
-    // esc (the thread's search), esc (the results), esc: back in the thread view, on a and
-    // /x/, with b's copy still shown.
+    // esc (the thread's search), esc (the results), esc: back in the thread view with b's
+    // copy still shown, and the tab where it is: on b and /y/.
     for _ in 0..3 {
         app.on_key(KeyEvent::from(KeyCode::Esc));
     }
     let board = app.tab.board.as_ref().map(|b| b.uri.as_str());
-    assert_eq!((app.tab.view(), app.tab.site, board, app.tab.thread.as_ref().map(|t| t.key())), (View::Thread, 0, Some("x"), Some(&theirs)));
+    assert_eq!((app.tab.view(), app.tab.site, board, app.tab.thread.as_ref().map(|t| t.key())), (View::Thread, 1, Some("y"), Some(&theirs)));
     app.on_key(KeyEvent::from(KeyCode::Char('w')));
     let watched: Vec<&ThreadKey> = app.store.all_watched().iter().map(|w| &w.key).collect();
     assert_eq!(watched, [&theirs]);
+    // `u` would come back to it, and `X` makes a filter for b's /y/.
+    assert_eq!(app.trail_here(), Some((theirs.clone(), 7)));
+    app.open_add_filter();
+    let Some(Popup::AddFilter(a)) = &app.popup else { panic!("no filter popup") };
+    assert_eq!((a.site.as_str(), a.board.as_str()), ("b", "y"));
+    app.popup = None;
     // Its session place is b's copy too.
     let place = app.place();
     assert_eq!((place.site.as_str(), place.board.as_deref(), place.thread), ("b", Some("y"), Some(7)));

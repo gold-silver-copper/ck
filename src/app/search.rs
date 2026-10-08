@@ -306,6 +306,10 @@ impl App {
         let Some(Search { back: (site, board, view), .. }) = self.tab.search.take() else { return View::Sites };
         self.switch_site(site);
         self.tab.board = board;
+        // A thread still shown (a saved copy opened from the results) is where the tab is.
+        if let Some(key) = self.tab.thread.as_ref().filter(|_| view == View::Thread).map(|t| t.key().clone()) {
+            self.place_on(&key);
+        }
         view
     }
 }

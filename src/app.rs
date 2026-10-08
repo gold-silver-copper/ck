@@ -1364,16 +1364,32 @@ impl App {
     }
 
     /// Open a thread from Watched or History, switching site and board as needed.
-    fn open_key(&mut self, key: ThreadKey) {
+    fn open_key(&mut self, key: &ThreadKey) {
+        let back = Some(self.tab.place_view());
+        if self.open_thread_key(key, Opening::default()) {
+            self.tab.return_to = back;
+        }
+    }
+
+    /// Open thread `key` on its site, as `open` says: whether that site is still in the config.
+    fn open_thread_key(&mut self, key: &ThreadKey, open: Opening) -> bool {
         let Some(site) = self.site_index(&key.site) else {
             self.error(format!("No site named {} in the config", key.site));
-            return;
+            return false;
         };
         self.switch_site(site);
-        let board = self.boards().iter().find(|b| b.uri == key.board).cloned();
-        let board = board.unwrap_or(Board { uri: key.board, title: String::new(), nsfw: None });
-        self.tab.return_to = Some(self.tab.place_view());
-        self.open_thread_at(board, key.no, Opening::default());
+        self.open_thread_at(self.find_board(&key.board), key.no, open);
+        true
+    }
+
+    /// Put the tab on `key`'s site and board, where the thread it shows is.
+    fn place_on(&mut self, key: &ThreadKey) {
+        if let Some(site) = self.site_index(&key.site).filter(|&s| s != self.tab.site) {
+            self.switch_site(site);
+        }
+        if self.tab.board.as_ref().is_none_or(|b| b.uri != key.board) {
+            self.tab.board = Some(self.find_board(&key.board));
+        }
     }
 
     /// Make `site` the current one, with its board list if it's saved (else fetched in the
@@ -1429,32 +1445,31 @@ impl App {
         links.iter().filter(leaves).find(|l| l.post.is_some()).or_else(|| links.iter().find(leaves)).cloned()
     }
 
-    /// Remember the thread shown, on `board`, and its selected post, for `u` to come back to.
-    fn leave_trail(&mut self, board: Board) {
-        if let Some(here) = self.trail_here(board) {
+    /// Remember the thread shown and its selected post, for `u` to come back to.
+    fn leave_trail(&mut self) {
+        if let Some(here) = self.trail_here() {
             self.tab.trail.push(here);
         }
     }
 
-    /// The thread shown, on `board`, and its selected post, as `u` comes back to it.
-    fn trail_here(&self, board: Board) -> Option<Trail> {
+    /// The thread shown and its selected post, as `u` comes back to it.
+    fn trail_here(&self) -> Option<Trail> {
         let t = self.tab.thread.as_ref()?;
-        let no = t.key().no;
-        Some((self.tab.site, board, no, t.current().map_or(no, |p| p.no)))
+        Some((t.key().clone(), t.current().map_or_else(|| t.key().no, |p| p.no)))
     }
 
     /// Go where a quote link leads: a thread (remembered for `u`), a board, or a post whose
     /// thread the engine is asked for.
     fn follow(&mut self, link: &Link) {
-        let Some(board) = self.tab.board.clone() else { return };
+        let Some(here) = &self.tab.board else { return };
         let target = match &link.board {
-            Some(uri) if *uri != board.uri => self.find_board(uri),
-            _ => board.clone(),
+            Some(uri) if *uri != here.uri => self.find_board(uri),
+            _ => here.clone(),
         };
         match (link.thread, link.post) {
             (Some(no), post) => {
                 if self.tab.view() == View::Thread {
-                    self.leave_trail(board);
+                    self.leave_trail();
                 }
                 self.open_thread_at(target, no, Opening::at(post));
             }
@@ -1467,7 +1482,7 @@ impl App {
                 // Ask the engine which thread the post is in (only some can).
                 let uri = target.uri.clone();
                 let label = format!("Looking up post {post}");
-                let (site, trail) = (self.tab.site, self.trail_here(board).filter(|_| self.tab.view() == View::Thread));
+                let (site, trail) = (self.tab.site, self.trail_here().filter(|_| self.tab.view() == View::Thread));
                 self.spawn(self.current_site().backend.clone(), label, Then::Show, move |b, _, _| b.find_thread(&uri, post), move |app, r| app.thread_found(site, target, post, trail, r));
             }
         }
@@ -1653,7 +1668,7 @@ impl App {
             },
             (View::Watched | View::History | View::Saved, Some(_)) => {
                 let Some(key) = self.selected_listed().map(|(k, _)| k.clone()) else { return };
-                if self.tab.view() == View::Saved { self.open_saved(&key, Opening::default()) } else { self.open_key(key) }
+                if self.tab.view() == View::Saved { self.open_saved(&key, Opening::default()) } else { self.open_key(&key) }
             }
             (View::Boards, Some(i)) => {
                 if let Some(b) = self.boards().get(i).cloned() {

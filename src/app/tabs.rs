@@ -5,8 +5,8 @@ use super::{App, LinksPanel, Opening, Preview, Tab, View, Viewer, thread_subject
 use crate::model::Board;
 use crate::store::ThreadKey;
 
-/// A thread left for another, for `u` to come back to: (site, board, thread, selected post).
-pub type Trail = (usize, Board, u64, u64);
+/// A thread left for another, for `u` to come back to, and its selected post.
+pub type Trail = (ThreadKey, u64);
 
 /// Tabs open at once, at most.
 pub const MAX_TABS: usize = 9;
@@ -108,7 +108,7 @@ impl App {
         self.tab.board = board;
         match open {
             Open::Thread(board, no) => self.open_thread_at(board, no, Opening::default()),
-            Open::Key(key) => self.open_key(key),
+            Open::Key(key) => self.open_key(&key),
             Open::Saved(key) => self.open_saved(&key, Opening::default()),
             Open::Link(link) => self.follow(&link),
         }

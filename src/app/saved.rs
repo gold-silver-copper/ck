@@ -12,10 +12,10 @@ use crate::store::ThreadKey;
 impl App {
     /// Open a thread's saved copy. It's read offline: nothing in it is fetched.
     pub fn open_saved(&mut self, key: &ThreadKey, open: Opening) {
-        let Some(site) = self.site_index(&key.site) else {
+        if self.site_index(&key.site).is_none() {
             self.error(format!("No site named {} in the config", key.site));
             return;
-        };
+        }
         let copy = match self.store.load_saved(key) {
             Ok(t) => t,
             Err(e) => {
@@ -33,8 +33,6 @@ impl App {
         if self.tab.place_view() != View::Thread {
             self.tab.return_to = Some(self.tab.place_view());
         }
-        self.switch_site(site);
-        self.tab.board = Some(self.find_board(&key.board));
         self.tab.archive_offer = None;
         self.tab.saved_offer = None;
         // The live thread, if that's what's open, keeps its place in the copy.
@@ -44,8 +42,7 @@ impl App {
         }
         self.tab.navigate(View::Thread);
         self.tab.from_catalog = false;
-        // Under its OP's number: an old copy may be of the thread a site answered with.
-        self.show_thread(ThreadKey { no: t.no(), ..key.clone() }, t, Some(ThreadCopy::Saved(Offline { saved, dead })), open);
+        self.show_thread(key.clone(), t, Some(ThreadCopy::Saved(Offline { saved, dead })), open);
     }
 
     /// `r` on a saved copy: the live thread, unless it's known to be gone.

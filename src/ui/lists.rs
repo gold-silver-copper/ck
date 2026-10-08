@@ -245,7 +245,7 @@ pub(super) fn draw_catalog(f: &mut Frame, app: &mut App, area: Rect) {
             head.extend([chip("locked", t.text_dim, t.surface_high), Span::raw(" ")]);
         }
         // Overboards show where each thread lives.
-        if let Some(b) = p.board.as_ref().filter(|b| app.tab.board.as_ref().is_some_and(|cur| cur.uri != **b)) {
+        if let Some(b) = p.board.as_ref().filter(|b| app.tab.catalog.board().is_some_and(|cur| cur.uri != **b)) {
             head.extend([chip(format!("/{b}/"), t.on_primary_container, t.primary_container), Span::raw(" ")]);
         }
         let subject_style = if hidden { dim() } else { bold(t.text) };

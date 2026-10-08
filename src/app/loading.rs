@@ -356,8 +356,11 @@ impl App {
     }
 
     /// Show thread `key`: fetched (`None`), or a copy. Opening it (not refreshing what's
-    /// shown), as `open` says.
+    /// shown), as `open` says. It's under its OP's number (an old saved copy may be of the
+    /// thread a site answered with), and the tab is on its site and board.
     pub(super) fn show_thread(&mut self, key: ThreadKey, t: Thread, copy: Option<ThreadCopy>, open: Opening) {
+        let key = ThreadKey { no: t.no(), ..key };
+        self.place_on(&key);
         // Posts replacing the copy shown while they loaded (fetched ones, or a saved copy): a
         // first open, as far as visits go (the copy wasn't one).
         let replacing = self.tab.cached().is_some() && !matches!(copy, Some(ThreadCopy::Cached(_)));
