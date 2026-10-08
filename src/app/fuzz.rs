@@ -751,9 +751,8 @@ impl World {
                 self.app.clock = Clock { fixed: Some(START + self.elapsed.as_secs() as i64), instant: Some(now) };
             }
             Act::Pick(k) => {
-                if let Some((p, len)) = app.filtered_list() {
-                    p.state.select(Some(k % (len + 1)));
-                }
+                let view = app.tab.view();
+                app.pick_row(view, k % (app.row_keys(view).len() + 1));
                 app.on_key(KeyEvent::from(KeyCode::Enter));
             }
             Act::Filter(k, opts) => {
@@ -822,7 +821,7 @@ impl World {
                 if app.tab.view() != View::Settings || app.settings_popup().is_some() {
                     return;
                 }
-                app.settings_list.state.select(settings::position("Filters"));
+                app.pick_row(View::Settings, settings::position("Filters").unwrap());
                 app.on_key(KeyEvent::from(KeyCode::Enter));
                 let keys = [' ', 'x', 'a', 'j', 'k', 'l', 'h', '(', 'w', '|', '日'];
                 for _ in 0..rng.below(16) {
@@ -836,9 +835,9 @@ impl World {
                     app.paste("saved");
                     app.on_key(KeyEvent::from(KeyCode::Enter));
                 }
-                let in_saved = app.tab.view() == View::Saved;
-                if let Some((p, len)) = app.filtered_list().filter(|(_, len)| *len > 0 && in_saved) {
-                    p.state.select(Some(k % len));
+                let len = app.row_keys(View::Saved).len();
+                if app.tab.view() == View::Saved && len > 0 {
+                    app.pick_row(View::Saved, k % len);
                     app.on_key(KeyEvent::from(KeyCode::Enter));
                 }
             }

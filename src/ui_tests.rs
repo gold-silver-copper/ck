@@ -156,14 +156,14 @@ fn sites() {
 fn boards() {
     let mut a = app(false);
     a.tab.navigate(View::Boards);
-    a.tab.board_list.state.select(Some(2));
+    a.pick_row(View::Boards, 2);
     insta::assert_snapshot!(snapshot(&mut a));
 }
 
 #[test]
 fn catalog_with_thumbnail_placeholders() {
     let mut a = catalog_app(true);
-    a.tab.catalog_list.state.select(Some(1));
+    a.pick_row(View::Catalog, 1);
     insta::assert_snapshot!(snapshot(&mut a));
     insta::assert_snapshot!("catalog_backgrounds", bg_map(&mut a));
     // Only what's on screen is asked for.
@@ -174,7 +174,7 @@ fn catalog_with_thumbnail_placeholders() {
 fn catalog_compact() {
     let mut a = catalog_app(true);
     a.default_layout = crate::config::CatalogLayout::Compact;
-    a.tab.catalog_list.state.select(Some(0));
+    a.pick_row(View::Catalog, 0);
     insta::assert_snapshot!(snapshot(&mut a));
 }
 
@@ -533,7 +533,7 @@ fn the_unread_line_keeps_long_threads_exact() {
 #[test]
 fn a_tab_counts_its_watched_threads_new_posts() {
     let mut a = catalog_app(false);
-    a.tab.catalog_list.state.select(Some(1));
+    a.pick_row(View::Catalog, 1);
     a.new_tab();
     a.tab.thread = Some(thread());
     a.switch_tab(0);
@@ -897,7 +897,7 @@ fn theme_picker() {
 fn color_editor() {
     let mut a = app(false);
     a.tab.navigate(View::Settings);
-    a.settings_list.state.select(Some(1));
+    a.pick_row(View::Settings, 1);
     a.activate_setting();
     assert!(matches!(a.settings_popup(), Some(SettingsPopup::Colors { .. })));
     insta::assert_snapshot!(snapshot(&mut a));
@@ -921,7 +921,7 @@ fn key_editor() {
     let mut a = app(false);
     a.tab.navigate(View::Settings);
     let keys = crate::app::settings().count() - 1;
-    a.settings_list.state.select(Some(keys));
+    a.pick_row(View::Settings, keys);
     a.activate_setting();
     insta::assert_snapshot!(snapshot(&mut a));
     a.on_key(ratatui::crossterm::event::KeyEvent::from(ratatui::crossterm::event::KeyCode::Enter));
@@ -949,7 +949,7 @@ fn filtered_catalog_and_thread() {
     let mut a = catalog_app(true);
     with_filters(&mut a);
     a.rehide(|a| a.store.toggle_hidden("4chan", "g", 1100));
-    a.tab.catalog_list.state.select(Some(0));
+    a.pick_row(View::Catalog, 0);
     insta::assert_snapshot!(snapshot(&mut a));
     // Z: hidden ones shown, marked.
     a.rehide(|a| a.hiding.toggle_show());
@@ -977,7 +977,7 @@ fn catalog_new_threads_and_replies() {
     let mut a = catalog_app(false);
     a.tab.catalog_new.insert(1100);
     a.store.opened("4chan", "g", 1000, 300, NOW);
-    a.tab.catalog_list.state.select(Some(1));
+    a.pick_row(View::Catalog, 1);
     insta::assert_snapshot!(snapshot(&mut a));
 }
 
@@ -995,7 +995,7 @@ fn replies_inline() {
 fn catalog_grid() {
     let mut a = catalog_app(true);
     a.default_layout = crate::config::CatalogLayout::Grid;
-    a.tab.catalog_list.state.select(Some(1));
+    a.pick_row(View::Catalog, 1);
     insta::assert_snapshot!(snapshot(&mut a));
     insta::assert_snapshot!("catalog_grid_backgrounds", bg_map(&mut a));
     assert_eq!(a.grid_cols, 4);
@@ -1028,7 +1028,7 @@ fn archive_search_results() {
     a.tab.navigate(View::Search);
     let page = crate::backend::foolfuuka::parse_search(&v).unwrap();
     a.tab.search = Some(crate::app::Search::for_tests("g", "rust borrow checker", page));
-    a.tab.search_list.state.select(Some(0));
+    a.pick_row(View::Search, 0);
     insta::assert_snapshot!(snapshot(&mut a));
 }
 
@@ -1042,7 +1042,7 @@ fn hidden_search_results() {
     let nos: Vec<u64> = page.hits.iter().map(|(_, p)| p.no).collect();
     a.tab.search = Some(crate::app::Search::for_tests("g", "rust borrow checker", page));
     a.rehide(|a| a.store.toggle_hidden("desuarchive", "g", first));
-    a.tab.search_list.state.select(Some(0));
+    a.pick_row(View::Search, 0);
     let text = render(&mut a).0;
     assert!(!text.contains(&format!("No.{first}")) && text.contains("1 hidden"), "{text}");
     // Z: shown, marked.
@@ -1070,7 +1070,7 @@ fn image_search_panel() {
 #[test]
 fn tabs_row() {
     let mut a = catalog_app(false);
-    a.tab.catalog_list.state.select(Some(1));
+    a.pick_row(View::Catalog, 1);
     a.new_tab();
     a.tab.thread = Some(thread());
     insta::assert_snapshot!(snapshot(&mut a));
@@ -1081,7 +1081,7 @@ fn tabs_row() {
 fn tab_chips_hidden_under_the_viewer_cant_be_clicked() {
     use ratatui::crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
     let mut a = catalog_app(false);
-    a.tab.catalog_list.state.select(Some(1));
+    a.pick_row(View::Catalog, 1);
     a.new_tab();
     snapshot(&mut a);
     let (chip, other) = a.drawn.tabs.iter().find(|&&(_, i)| i != a.active).copied().unwrap();
@@ -1118,7 +1118,7 @@ fn narrow_screens() {
     // Settings scroll to the selected one.
     a.tab.navigate(View::Settings);
     let last = crate::app::settings().count() - 1;
-    a.settings_list.state.select(Some(last));
+    a.pick_row(View::Settings, last);
     let (text, _) = render_at(&mut a, 60, 20);
     assert!(text.contains("Key bindings"), "{text}");
     // Long crumbs give way with an ellipsis, before the counts.
@@ -1151,10 +1151,10 @@ fn home_with_favorites() {
     for name in ["wizchan", "uboachan", "endchan", "kohlchan", "zzzchan", "2ch", "smuglo.li", "kissu", "tvch", "sushigirl"] {
         a.hidden_sites.insert(name.into());
     }
-    a.site_list.state.select(Some(2));
+    a.pick_row(View::Sites, 2);
     insta::assert_snapshot!(snapshot(&mut a));
     a.show_hidden_sites = true;
-    a.site_list.state.select(Some(8));
+    a.pick_row(View::Sites, 8);
     insta::assert_snapshot!("home_showing_hidden_sites", snapshot(&mut a));
 }
 

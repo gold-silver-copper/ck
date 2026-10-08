@@ -225,9 +225,7 @@ impl App {
             return Some(e);
         }
         let target = at?;
-        let (p, _) = self.filtered_list().filter(|&(_, len)| target < len)?;
-        p.state.select(Some(target));
-        Some(target)
+        self.pick_row(self.tab.view(), target).then_some(target)
     }
 
     /// The list row or grid cell drawn at a screen position.
@@ -324,33 +322,28 @@ impl App {
                     t.leave_conversation();
                 }
             }
-            KeyCode::Esc => {
-                if let Some((p, _)) = self.filtered_list().filter(|(p, _)| !p.filter.is_empty()) {
-                    p.filter.clear();
-                    p.state.select(Some(0));
-                } else {
-                    self.back();
-                }
-            }
+            KeyCode::Esc if !self.filter(self.tab.view()).is_empty() => self.edit_filter(self.tab.view(), String::clear),
+            KeyCode::Esc => self.back(),
             _ if self.tab.view() == View::Catalog && self.grid_cols > 0 && self.on_grid_key(key.code) => {}
             KeyCode::Char(c @ '1'..='9') if self.tab.view() == View::Sites => self.open_favorite(c as usize - '1' as usize),
             KeyCode::Char('h') | KeyCode::Left | KeyCode::Backspace => self.back(),
             _ if self.tab.view() == View::Thread => self.on_thread_key(key.code, ctrl),
             KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right => self.enter(),
             code => {
-                let Some((p, len)) = self.filtered_list() else { return };
-                match code {
-                    KeyCode::Char('j') | KeyCode::Down => p.move_by(1, len),
-                    KeyCode::Char('k') | KeyCode::Up => p.move_by(-1, len),
-                    KeyCode::Char('d') if ctrl => p.move_by(10, len),
-                    KeyCode::Char('u') if ctrl => p.move_by(-10, len),
-                    KeyCode::PageDown => p.move_by(10, len),
-                    KeyCode::PageUp => p.move_by(-10, len),
-                    KeyCode::Char('g') | KeyCode::Home => p.state.select(Some(0)),
-                    KeyCode::Char('G') | KeyCode::End => p.move_by(isize::MAX / 2, len),
-                    _ => {}
-                }
-                if self.tab.view() == View::Search {
+                let view = self.tab.view();
+                let delta = match code {
+                    KeyCode::Char('j') | KeyCode::Down => 1,
+                    KeyCode::Char('k') | KeyCode::Up => -1,
+                    KeyCode::Char('d') if ctrl => 10,
+                    KeyCode::Char('u') if ctrl => -10,
+                    KeyCode::PageDown => 10,
+                    KeyCode::PageUp => -10,
+                    KeyCode::Char('g') | KeyCode::Home => isize::MIN / 2,
+                    KeyCode::Char('G') | KeyCode::End => isize::MAX / 2,
+                    _ => return,
+                };
+                self.move_selection(view, delta);
+                if view == View::Search {
                     self.search_moved();
                 }
             }
@@ -382,7 +375,7 @@ impl App {
             Action::Quit => self.quit = true,
             Action::Help => self.popup = Some(Popup::Help(0)),
             Action::Settings => self.tab.navigate(View::Settings),
-            Action::Search if self.tab.view() == View::Settings => {}
+            Action::Search if matches!(self.tab.view(), View::Settings | View::Search) => {}
             Action::Search if self.tab.view() == View::Thread => {
                 if let Some(t) = &mut self.tab.thread {
                     t.set_search(String::new());
@@ -445,7 +438,7 @@ impl App {
             Action::CopyLink => self.copy(true),
             Action::Sort => {
                 self.tab.catalog_sort = self.tab.catalog_sort.next();
-                self.tab.catalog_list.state.select(Some(0));
+                self.tab.catalog_list = FilteredList::on(None, std::mem::take(&mut self.tab.catalog_list.filter));
                 // Remembered for this board.
                 let key = self.board_key();
                 self.store.board_prefs.entry(key).or_default().sort = (self.tab.catalog_sort != Sort::Bump).then_some(self.tab.catalog_sort);
@@ -476,19 +469,10 @@ impl App {
     }
 
     fn on_filter_key(&mut self, key: KeyEvent) {
-        let Some((p, _)) = self.filtered_list() else {
-            self.typing = None;
-            return;
-        };
-        match key.code {
-            KeyCode::Esc => p.filter.clear(),
-            code => edit_text(&mut p.filter, code),
-        }
-        p.state.select(Some(0));
-        if matches!(key.code, KeyCode::Esc | KeyCode::Enter) {
+        self.edit_filter(self.tab.view(), |f| if key.code == KeyCode::Esc { f.clear() } else { edit_text(f, key.code) });
+        if matches!(key.code, KeyCode::Esc | KeyCode::Enter) || self.tab.view() == View::Thread {
             self.typing = None;
         }
-        self.clamp_list();
     }
 
     /// Moving in the catalog grid: j/k by rows, h/l by columns (h in the first column goes
@@ -496,7 +480,7 @@ impl App {
     fn on_grid_key(&mut self, code: KeyCode) -> bool {
         let cols = self.grid_cols as isize;
         let len = self.visible_catalog().len();
-        let cur = self.tab.catalog_list.state.selected().unwrap_or(0) as isize;
+        let cur = self.selected_row(View::Catalog).unwrap_or(0) as isize;
         let delta = match code {
             KeyCode::Char('j') | KeyCode::Down => cols,
             KeyCode::Char('k') | KeyCode::Up => -cols,
@@ -505,11 +489,10 @@ impl App {
             KeyCode::Char('h') | KeyCode::Left if cur % cols != 0 => -1,
             _ => return false,
         };
-        // Down from the last full row goes to the last thread.
-        if delta == cols && cur + cols >= len as isize && cur / cols < (len as isize - 1) / cols {
-            self.tab.catalog_list.state.select(Some(len - 1));
-        } else if (0..len as isize).contains(&(cur + delta)) {
-            self.tab.catalog_list.state.select(Some((cur + delta) as usize));
+        // Down from the last full row goes to the last thread; past either end, nowhere.
+        let last_row = delta == cols && cur + cols >= len as isize && cur / cols < (len as isize - 1) / cols;
+        if let Ok(to) = usize::try_from(if last_row { len as isize - 1 } else { cur + delta }) {
+            self.pick_row(View::Catalog, to);
         }
         true
     }
