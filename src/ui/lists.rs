@@ -216,7 +216,6 @@ pub(super) fn draw_catalog(f: &mut Frame, app: &mut App, area: Rect) {
         draw_grid(f, app, area);
         return;
     }
-    app.grid_cols = 0;
     let compact = layout == CatalogLayout::Compact;
     let thumbs = images && !compact;
     let width = area.width.saturating_sub(PAD + 2) as usize;
@@ -457,10 +456,9 @@ fn draw_grid(f: &mut Frame, app: &mut App, area: Rect) {
     let (cell_w, cell_h) = (GRID_CARD.width + 2, GRID_CARD.height + 1);
     let cols = ((area.width + 2) / cell_w).max(1) as usize;
     let rows = ((area.height + 1) / cell_h).max(1) as usize;
-    app.grid_cols = cols;
-    let state = app.list_state(View::Catalog);
-    let sel = state.selected().unwrap_or(0);
-    let top = scroll_to(state.offset() / cols, sel / cols, rows);
+    let mut state = app.list_state(View::Catalog);
+    let sel = state.selected().unwrap_or(0).min(visible.len() - 1);
+    let top = window(&mut state, visible.len(), rows, cols) / cols;
     app.list_scrolled(View::Catalog, top * cols);
     for (k, &i) in visible.iter().enumerate().skip(top * cols).take((rows + 1) * cols) {
         let (r, c) = (k / cols - top, k % cols);

@@ -3,7 +3,6 @@ source: src/ui_tests.rs
 expression: snapshot(&mut a)
 ---
  ck  Settings
-
     Keys                                                                press a key · esc cancel
 
     Everywhere
@@ -27,8 +26,9 @@ expression: snapshot(&mut a)
       menu            board_images     images on this board: on / off       lists, catalog, thr…
 
     Catalog
+      v               view             view the post's images               catalog, thread
+      w               watch            watch / unwatch the thread           catalog, thread
 
     Press the new key for quit   esc cancels
 
-  There's no config file to save to (no home directory); changes last until ck quits.
  enter change   esc back   ? help

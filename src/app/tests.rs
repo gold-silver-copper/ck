@@ -1042,9 +1042,11 @@ fn grid_moves_in_two_dimensions() {
     app.tab.catalog = (1..=7).map(|no| Post { no, ..Default::default() }).collect();
     app.tab.navigate(View::Catalog);
     app.default_layout = CatalogLayout::Grid;
-    app.grid_cols = 3;
+    app.images = crate::images::Images::offline();
     app.pick_row(View::Catalog, 0);
-    let press = |app: &mut App, c| app.on_key(KeyEvent::from(KeyCode::Char(c)));
+    // Drawn three cards wide; the keys come as from the terminal, all before the next frame.
+    draw_at(&mut app, 70, 30);
+    let press = |app: &mut App, c| app.handle(Msg::Input(Event::Key(KeyEvent::from(KeyCode::Char(c)))));
     let at = |app: &App| app.selected_row(View::Catalog).unwrap();
     press(&mut app, 'j');
     assert_eq!(at(&app), 3);
@@ -1069,6 +1071,51 @@ fn grid_moves_in_two_dimensions() {
     // c cycles this board's layout.
     app.act(Action::Compact);
     assert_eq!(app.layout(), CatalogLayout::Cards);
+}
+
+#[test]
+fn keys_before_a_changed_grid_is_drawn_move_by_one_card() {
+    let mut app = test_app();
+    app.tab.catalog = (1..=7).map(|no| Post { no, ..Default::default() }).collect();
+    app.tab.navigate(View::Catalog);
+    app.default_layout = CatalogLayout::Grid;
+    app.images = crate::images::Images::offline();
+    app.pick_row(View::Catalog, 0);
+    draw_at(&mut app, 70, 30);
+    let press = |app: &mut App, c| app.handle(Msg::Input(Event::Key(KeyEvent::from(KeyCode::Char(c)))));
+    let at = |app: &App| app.selected_row(View::Catalog).unwrap();
+    // A resize and keys in one batch: the three columns drawn no longer hold, and h/l move
+    // a card rather than open a thread or leave the catalog.
+    app.handle(Msg::Input(Event::Resize(50, 30)));
+    press(&mut app, 'j');
+    assert_eq!(at(&app), 1);
+    press(&mut app, 'l');
+    assert_eq!(at(&app), 2);
+    press(&mut app, 'h');
+    assert_eq!((app.tab.view(), at(&app)), (View::Catalog, 1));
+    // Out of the grid (c) and a key in one batch: the cards step one by one.
+    draw_at(&mut app, 70, 30);
+    press(&mut app, 'c');
+    assert_ne!(app.layout(), CatalogLayout::Grid);
+    press(&mut app, 'j');
+    assert_eq!(at(&app), 2);
+}
+
+#[test]
+fn h_in_a_gallery_not_yet_redrawn_moves_a_card_instead_of_closing_it() {
+    let mut app = local_app();
+    app.images = crate::images::Images::offline();
+    app.tab.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
+    let file = |name: &str| Attachment { filename: name.into(), ..Attachment::at(format!("http://127.0.0.1:3/x/src/{name}")) };
+    app.tab.thread = Some(ThreadView::new("x".into(), 1, vec![Post { no: 1, files: vec![file("a.png"), file("b.png"), file("c.png")], ..Default::default() }]));
+    app.tab.navigate(View::Thread);
+    app.act(Action::Gallery);
+    draw_at(&mut app, 60, 30);
+    app.tab.gallery.as_mut().unwrap().state.select(Some(1));
+    // A resize and h in one batch, before the next frame.
+    app.handle(Msg::Input(Event::Resize(61, 30)));
+    app.handle(Msg::Input(Event::Key(KeyEvent::from(KeyCode::Char('h')))));
+    assert_eq!(app.tab.gallery.as_ref().map(|g| g.state.selected()), Some(Some(0)));
 }
 
 #[test]
@@ -1165,7 +1212,6 @@ fn gallery_of_the_threads_files() {
     app.act(Action::Gallery);
     // It starts at the selected post's file, or the next.
     assert_eq!(app.tab.gallery.as_ref().unwrap().state.selected(), Some(1));
-    app.tab.gallery.as_mut().unwrap().cols = 2;
     let press = |app: &mut App, code| app.on_key(KeyEvent::from(code));
     press(&mut app, KeyCode::Char('l'));
     assert_eq!(app.tab.gallery.as_ref().unwrap().state.selected(), Some(2));
@@ -1178,7 +1224,9 @@ fn gallery_of_the_threads_files() {
     press(&mut app, KeyCode::Esc);
     assert!(app.tab.viewer().is_none());
     assert_eq!(app.tab.gallery.as_ref().unwrap().state.selected(), Some(1));
-    // The wheel moves through the grid a row at a time, not the thread behind it.
+    // Drawn two cards wide, the wheel moves through the grid a row at a time, not the
+    // thread behind it.
+    draw_at(&mut app, 60, 30);
     let scroll = app.tab.thread.as_ref().unwrap().scroll;
     app.on_mouse(mouse(MouseEventKind::ScrollUp, 5, 5), Instant::now());
     assert_eq!(app.tab.gallery.as_ref().unwrap().state.selected(), Some(0));

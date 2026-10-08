@@ -3,7 +3,6 @@ source: src/ui_tests.rs
 expression: snapshot(&mut a)
 ---
  ck  Settings
-
     Colors · material                                           enter edit · x reset · esc close
 
   ▌       background            #141218   Base of the screen, and the gaps between cards
@@ -27,8 +26,9 @@ expression: snapshot(&mut a)
           code_bg               #0f0d13   Background of code blocks
           name                  #9cd67d   Poster names
           new                   #9fe0a8   New posts and unread counts
+          error                 #f2b8b5   Errors
+          success               #9fe0a8   Confirmations
 
     Changing a color of a built-in theme saves it as a copy: NAME-custom.
 
-    Your sites        only the built-in ones            The ones you added, or built-in ones you…
  enter change   esc back   ? help

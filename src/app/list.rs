@@ -135,7 +135,8 @@ impl App {
         l.state.with_selected(row)
     }
 
-    /// After drawing `view`'s list: where it's scrolled to.
+    /// After drawing `view`'s list: where it's scrolled to, as `ui::window` worked it out.
+    #[allow(clippy::disallowed_methods)]
     pub(crate) fn list_scrolled(&mut self, view: View, offset: usize) {
         if let Some(l) = self.list_mut(view) {
             *l.state.offset_mut() = offset;
