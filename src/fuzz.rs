@@ -659,7 +659,7 @@ fn data_dir_once(seed: u64) {
     assert!(store.flush(Duration::from_secs(10)).is_empty());
     store.save().unwrap();
     let place = |view: &str| Place { view: view.into(), site: "4chan".into(), board: Some("g".into()), thread: Some(100), ..Default::default() };
-    store.save_session(&Session { tabs: vec![place("thread"), place("catalog"), place("watched"), place("saved")], active: rng.below(5) }).unwrap();
+    store.save_session(Session { tabs: vec![place("thread"), place("catalog"), place("watched"), place("saved")], active: rng.below(5) }).unwrap();
     store.save_boards("4chan", &[crate::model::Board { uri: "g".into(), title: "Technology".into(), nsfw: Some(false) }], START).unwrap();
     // Then break some of it.
     let mut files: Vec<std::path::PathBuf> = std::fs::read_dir(&data).unwrap().filter_map(|e| Some(e.ok()?.path())).filter(|p| p.is_file()).collect();

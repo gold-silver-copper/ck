@@ -1353,6 +1353,23 @@ fn reverse_image_search() {
 }
 
 #[test]
+fn a_session_not_restored_is_left_as_it_was() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("session.json");
+    let mut app = saving_app(dir.path(), 1000);
+    app.goto_str("a/x");
+    app.save_session(None);
+    let before = std::fs::read(&file).unwrap();
+    // A run with restore_session off saves everything else, never the session.
+    let mut next = saving_app(dir.path(), 1000);
+    next.restore_session = false;
+    next.goto_str("b/y/5");
+    next.save_session(None);
+    next.store.save().unwrap();
+    assert_eq!(std::fs::read(&file).unwrap(), before);
+}
+
+#[test]
 fn sessions_save_and_restore() {
     let dir = tempfile::tempdir().unwrap();
     let mut app = local_app();
@@ -1363,7 +1380,7 @@ fn sessions_save_and_restore() {
     app.tab.thread.as_mut().unwrap().selected = 1;
     app.tab.catalog_sort = Sort::Newest;
     app.save_session(None);
-    let saved = app.store.load_session().unwrap();
+    let saved = app.store.session.clone();
     assert_eq!(saved.tabs[0], crate::store::Place {
         view: "thread".into(),
         site: "b".into(),
@@ -1463,7 +1480,7 @@ fn new_tabs_switching_closing_and_the_session() {
     assert_eq!((app.active, app.tab.view()), (1, View::Thread));
     // The session has both.
     app.save_session(None);
-    let s = app.store.load_session().unwrap();
+    let s = app.store.session.clone();
     assert_eq!((s.tabs.len(), s.active, s.tabs[1].thread), (2, 1, Some(2)));
     // ctrl-w closes; the last tab stays.
     app.on_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL));
@@ -2313,7 +2330,7 @@ fn i_shows_a_posters_posts_until_esc() {
     assert_eq!(shown(&app), [2, 5, 6]);
     // It isn't kept in the session (a conversation is).
     app.save_session(None);
-    assert_eq!(app.store.load_session().map(|s| s.tabs[0].conversation), Some(None));
+    assert_eq!(app.store.session.tabs[0].conversation, None);
     // esc: the whole thread, scrolled where it was.
     app.on_key(KeyEvent::from(KeyCode::Esc));
     let t = app.tab.thread.as_ref().unwrap();
@@ -2355,7 +2372,7 @@ fn a_conversation_is_remembered_in_the_session() {
     app.act(Action::Conversation);
     app.tab.thread.as_mut().unwrap().select(2);
     app.save_session(None);
-    let place = app.store.load_session().unwrap().tabs[0].clone();
+    let place = app.store.session.clone().tabs[0].clone();
     assert_eq!((place.conversation, place.selected), (Some(2), Some(3)));
     // An old session without it still loads.
     let old: crate::store::Place = serde_json::from_str(r#"{"view":"thread","site":"a","board":"x","thread":1}"#).unwrap();
