@@ -507,7 +507,7 @@ When the thread you open has 404'd and there's a copy, ck offers it ("a saved co
 Copies take at most `saved_max_mb` (500 MB by default; 0 for no limit): past that, the
 oldest copies of threads you don't watch are removed, dead or not (one you saved as a page,
 or stopped watching, counts too). A watched thread's copy is never removed, even when
-watched threads alone take more.
+watched threads alone take more; and in a run where `watched.json` couldn't be read, none is.
 
 ### Following a general
 
@@ -567,7 +567,9 @@ ck keeps its state as JSON in `$XDG_DATA_HOME/ck` (default `~/.local/share/ck`):
 `watched.json`, `history.json`, `recent_boards.json`, `board_prefs.json` (each board's
 sort and layout), `hidden.json` (what you hid with `H`), `seen.json` (catalog threads
 seen, for "new" and `+N`), `session.json` (your tabs, for the next start), and `saved.json`
-with `threads/` (saved threads). Board
+with `threads/` (saved threads). A file ck can't read (say, permissions) is left alone,
+and ck warns at start that changes to it won't be saved that run; a corrupt one is moved
+to `<name>.json.corrupt`. Board
 lists fetched from sites are saved there too (`boards/`), so a site's boards show up
 instantly next time; they're refreshed quietly in the background once a day, and `r` in
 the Boards view refreshes them now. Lists that come in several pages (LynxChan and

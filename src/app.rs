@@ -477,8 +477,8 @@ pub struct App {
     /// The data directory has changes to write, and when it was last written.
     save_pending: bool,
     saved_at: Instant,
-    /// The session as last saved, and when that was checked.
-    session_saved: (Option<crate::store::Session>, Instant),
+    /// When the session was last checked for saving.
+    session_saved: Instant,
     /// What's being typed, if anything.
     pub typing: Option<Typing>,
     pub keys: KeyMap,
@@ -617,7 +617,7 @@ impl App {
             nsfw_asked: HashSet::new(),
             save_pending: false,
             saved_at: Instant::now(),
-            session_saved: (None, Instant::now()),
+            session_saved: Instant::now(),
             typing: None,
             keys,
             copied: None,

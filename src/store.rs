@@ -6,6 +6,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 use crate::app::{Changed, Whole};
+use crate::atomic::{Owned, Read};
 use crate::model::{Board, Post, max_no};
 use crate::saved::{self, SavedMeta, SavedPost, SavedThread};
 
@@ -233,13 +234,14 @@ pub struct Store {
     pub seen: std::collections::BTreeMap<String, std::collections::BTreeMap<u64, SeenThread>>,
     /// Threads kept in `threads/` (see `saved`), newest first.
     pub saved: Vec<SavedMeta>,
+    /// Where you were, as last saved (`save_session`).
+    pub session: Session,
     /// Past this many bytes, the oldest unwatched copies are removed.
     pub saved_max: u64,
     /// Writes saved copies in the background (with a data directory).
     writer: Option<crate::writer::Writer<Wrote>>,
-    /// A hash of each file's content as last read or written, so unchanged files aren't
-    /// written again.
-    written: std::cell::RefCell<std::collections::HashMap<&'static str, u64>>,
+    /// The permission to write each file, which one that couldn't be read hasn't got.
+    owned: std::collections::HashMap<&'static str, Owned>,
 }
 
 /// What a background write of a saved copy came to.
@@ -293,34 +295,46 @@ impl Store {
     }
 
     /// Load everything from `dir`. Problems are returned as messages, never fatal: a corrupt
-    /// file is moved aside and ck starts with an empty list.
+    /// file is moved aside and ck starts with an empty list; one that can't be read starts
+    /// empty too, and isn't saved over.
     pub fn load(dir: Option<PathBuf>) -> (Self, Vec<String>) {
         let mut warnings = Vec::new();
         let writer = dir.is_some().then(|| crate::writer::Writer::new(|what| Wrote::Failed(format!("Couldn't save a copy: ck hit a bug ({what})"))));
         let mut store = Store { dir, writer, ..Default::default() };
         if let Some(dir) = &store.dir {
-            store.watched = load_file(&dir.join("watched.json"), &mut warnings);
-            store.history = load_file(&dir.join("history.json"), &mut warnings);
-            store.settings = load_file(&dir.join("settings.json"), &mut warnings);
-            store.hidden = load_file(&dir.join("hidden.json"), &mut warnings);
-            store.seen = load_file(&dir.join("seen.json"), &mut warnings);
-            store.recent_boards = load_file(&dir.join("recent_boards.json"), &mut warnings);
-            store.board_prefs = load_file(&dir.join("board_prefs.json"), &mut warnings);
-            store.saved = load_file::<SavedIndex>(&dir.join("saved.json"), &mut warnings).threads;
-            // No index (or a broken one): rebuild it from the copies themselves.
-            if !dir.join("saved.json").exists() {
-                store.saved = saved::scan(dir);
-            }
+            store.watched = load_file(dir, "watched.json", &mut store.owned, &mut warnings);
+            store.history = load_file(dir, "history.json", &mut store.owned, &mut warnings);
+            store.settings = load_file(dir, "settings.json", &mut store.owned, &mut warnings);
+            store.hidden = load_file(dir, "hidden.json", &mut store.owned, &mut warnings);
+            store.seen = load_file(dir, "seen.json", &mut store.owned, &mut warnings);
+            store.recent_boards = load_file(dir, "recent_boards.json", &mut store.owned, &mut warnings);
+            store.board_prefs = load_file(dir, "board_prefs.json", &mut store.owned, &mut warnings);
+            store.session = load_file(dir, "session.json", &mut store.owned, &mut warnings);
+            let index: Option<SavedIndex> = load_file(dir, "saved.json", &mut store.owned, &mut warnings);
+            store.saved = match index {
+                Some(index) => index.threads,
+                // No index (or one that's broken or can't be read): rebuild it from the
+                // copies themselves, but don't write one that leaves out a copy it couldn't read.
+                None => {
+                    let (found, whole) = saved::scan(dir, &mut warnings);
+                    if !whole && store.owned.remove("saved.json").is_some() {
+                        warnings.push("Some saved threads couldn't be read: ck won't save changes to saved.json this run".into());
+                    }
+                    found
+                }
+            };
         }
         // What was just read counts as written.
-        if let Ok(files) = store.files() {
-            store.written.replace(files.iter().map(|(name, bytes)| (*name, hash(bytes))).collect());
+        for (name, bytes) in store.files().into_iter().flatten() {
+            if let Some(o) = store.owned.get(name) {
+                o.mark(&bytes);
+            }
         }
         (store, warnings)
     }
 
     /// Every file with its content.
-    fn files(&self) -> Result<[(&'static str, Vec<u8>); 8]> {
+    fn files(&self) -> Result<[(&'static str, Vec<u8>); 9]> {
         Ok([
             ("watched.json", serde_json::to_vec_pretty(&self.watched)?),
             ("history.json", serde_json::to_vec_pretty(&self.history)?),
@@ -330,20 +344,19 @@ impl Store {
             ("seen.json", serde_json::to_vec(&self.seen)?),
             ("settings.json", serde_json::to_vec_pretty(&self.settings)?),
             ("saved.json", serde_json::to_vec_pretty(&SavedIndex { version: saved::VERSION, threads: self.saved.clone() })?),
+            ("session.json", serde_json::to_vec_pretty(&self.session)?),
         ])
     }
 
-    /// Write the files whose content changed.
+    /// Write the files whose content changed, but none that couldn't be read. Each is
+    /// tried; the first failure is told, with how many more there were.
     pub fn save(&self) -> Result<()> {
-        let Some(dir) = &self.dir else { return Ok(()) };
-        for (name, bytes) in self.files()? {
-            let h = hash(&bytes);
-            if self.written.borrow().get(name) != Some(&h) {
-                crate::atomic::write(&dir.join(name), &bytes)?;
-                self.written.borrow_mut().insert(name, h);
-            }
+        let mut failed = self.files()?.into_iter().filter_map(|(name, bytes)| self.owned.get(name)?.write(&bytes).err());
+        let Some(first) = failed.next() else { return Ok(()) };
+        match failed.count() {
+            0 => Err(first),
+            more => Err(anyhow::anyhow!("{first:#} (and {more} more files)")),
         }
-        Ok(())
     }
 
     fn boards_path(&self, site: &str) -> Option<PathBuf> {
@@ -407,14 +420,11 @@ impl Store {
         self.seen.get(&board_key(site, board))?.get(&no)?.replies
     }
 
-    pub fn load_session(&self) -> Option<Session> {
-        let path = self.dir.as_ref()?.join("session.json");
-        serde_json::from_slice(&std::fs::read(path).ok()?).ok()
-    }
-
-    pub fn save_session(&self, session: &Session) -> Result<()> {
-        let Some(dir) = &self.dir else { return Ok(()) };
-        crate::atomic::write(&dir.join("session.json"), &serde_json::to_vec_pretty(session)?)
+    /// Remember where you are, and write it now (if it changed).
+    pub fn save_session(&mut self, session: Session) -> Result<()> {
+        self.session = session;
+        let Some(owned) = self.owned.get("session.json") else { return Ok(()) };
+        owned.write(&serde_json::to_vec_pretty(&self.session)?)
     }
 
     /// What's hidden by hand on a board.
@@ -632,12 +642,10 @@ impl Store {
         }
         m.dead = true;
         let key = key.clone();
-        writer.run(move || match saved::read(&dir, &key) {
-            Ok(mut t) => {
-                t.dead = true;
-                saved::write(&dir, &t).map_or(Wrote::Nothing, |bytes| Wrote::Saved(key, bytes, None))
-            }
-            Err(_) => Wrote::Nothing,
+        writer.run(move || {
+            let Read::Loaded(mut t, _) = crate::atomic::read::<SavedThread>(&saved::path(&dir, &key)) else { return Wrote::Nothing };
+            t.dead = true;
+            saved::write(&dir, &t).map_or(Wrote::Nothing, |bytes| Wrote::Saved(key, bytes, None))
         });
     }
 
@@ -654,12 +662,17 @@ impl Store {
         if let Some(w) = &self.writer {
             w.flush(std::time::Duration::from_secs(5));
         }
-        let t = saved::read(&dir, key);
+        let file = saved::path(&dir, key);
+        let gone = match crate::atomic::read(&file) {
+            Read::Loaded(t, _) => return Ok(t),
+            Read::Missing(_) => anyhow::anyhow!("{} is gone", file.display()),
+            Read::Corrupt(problem, _) => anyhow::anyhow!(problem),
+            // Only unreadable for now: it stays listed.
+            Read::Unreadable(problem) => anyhow::bail!(problem),
+        };
         // A copy that's gone (or was set aside) leaves the list.
-        if t.is_err() {
-            self.saved.retain(|m| &m.key != key);
-        }
-        t
+        self.saved.retain(|m| &m.key != key);
+        Err(gone)
     }
 
     /// Remove a thread's copy (after any write of it still going).
@@ -678,7 +691,8 @@ impl Store {
     /// (a thread that's still up is only known to be once it's refetched, which an unwatched
     /// one isn't). Never a watched thread's.
     fn prune_saved(&mut self) {
-        if self.saved_max == 0 {
+        // With a watched list that couldn't be read, which copies are watched isn't known.
+        if self.saved_max == 0 || self.dir.is_some() && !self.owned.contains_key("watched.json") {
             return;
         }
         let mut total = self.saved.iter().fold(0u64, |sum, m| sum.saturating_add(m.bytes));
@@ -692,35 +706,23 @@ impl Store {
     }
 }
 
-fn load_file<T: DeserializeOwned + Default>(path: &Path, warnings: &mut Vec<String>) -> T {
-    let bytes = match std::fs::read(path) {
-        Ok(b) => b,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return T::default(),
-        Err(e) => {
-            warnings.push(format!("Couldn't read {}: {e}", path.display()));
+/// A data file's content, or the default when there's none to load; with the permission to
+/// write it, unless it couldn't be read.
+fn load_file<T: DeserializeOwned + Default>(dir: &Path, name: &'static str, owned: &mut std::collections::HashMap<&'static str, Owned>, warnings: &mut Vec<String>) -> T {
+    let (v, o) = match crate::atomic::read(&dir.join(name)) {
+        Read::Loaded(v, o) => (v, o),
+        Read::Missing(o) => (T::default(), o),
+        Read::Corrupt(problem, o) => {
+            warnings.push(problem);
+            (T::default(), o)
+        }
+        Read::Unreadable(problem) => {
+            warnings.push(format!("{problem}: ck won't save changes to it this run"));
             return T::default();
         }
     };
-    // Not UTF-8 counts as corrupt too, rather than being overwritten later.
-    match serde_json::from_slice(&bytes) {
-        Ok(v) => v,
-        Err(e) => {
-            // Keep the broken file for the user instead of overwriting it on the next save.
-            warnings.push(match crate::atomic::set_aside(path) {
-                Ok(aside) => format!("{} was corrupt ({e}); moved it to {}", path.display(), aside.display()),
-                Err(r) => format!("{} was corrupt ({e}), and couldn't be moved aside ({r}): it will be overwritten", path.display()),
-            });
-            T::default()
-        }
-    }
-}
-
-/// A content hash, to tell whether a file changed.
-fn hash(bytes: &[u8]) -> u64 {
-    use std::hash::{Hash, Hasher};
-    let mut h = std::collections::hash_map::DefaultHasher::new();
-    bytes.hash(&mut h);
-    h.finish()
+    owned.insert(name, o);
+    v
 }
 
 #[cfg(test)]
@@ -1033,5 +1035,142 @@ mod tests {
         // Once it's done, it does.
         s.flush(std::time::Duration::from_secs(10));
         assert!(!s.keep_thread(&key(1), "", "u", &whole(&posts(&[1, 2])), 3));
+    }
+
+    /// Makes `path` unreadable (as a root-owned 0600 file left by `sudo ck` would be) and
+    /// says whether that took: as root, nothing is unreadable, so the test has nothing to show.
+    #[cfg(unix)]
+    fn lock_out(path: &Path) -> bool {
+        use std::os::unix::fs::PermissionsExt;
+        let folder = path.is_dir();
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o000)).unwrap();
+        if folder { std::fs::read_dir(path).is_err() } else { std::fs::read(path).is_err() }
+    }
+
+    #[cfg(unix)]
+    fn let_in(path: &Path) {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_watched_list_that_cant_be_read_isnt_saved_over() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("watched.json");
+        let (mut s, _) = Store::load(Some(dir.path().to_path_buf()));
+        s.watch(key(1), "one".into(), 1, 1);
+        s.watch(key(2), "two".into(), 1, 1);
+        s.save().unwrap();
+        if !lock_out(&file) {
+            return;
+        }
+        let (mut s, warnings) = Store::load(Some(dir.path().to_path_buf()));
+        assert!(!warnings.is_empty());
+        // Watching another thread this run must not replace the list it couldn't read.
+        s.watch(key(3), "three".into(), 1, 1);
+        let _ = s.save();
+        let_in(&file);
+        let (s, _) = Store::load(Some(dir.path().to_path_buf()));
+        assert!(s.watched(&key(1)).is_some() && s.watched(&key(2)).is_some(), "watched.json was saved over: {:?}", s.watched.iter().map(|w| w.key.no).collect::<Vec<_>>());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_saved_index_that_cant_be_read_doesnt_lose_the_copies() {
+        let dir = tempfile::tempdir().unwrap();
+        let index = dir.path().join("saved.json");
+        let (mut s, _) = Store::load(Some(dir.path().to_path_buf()));
+        for no in [1, 2] {
+            s.keep_thread(&key(no), "", "u", &whole(&posts(&[1, 2])), no as i64);
+        }
+        assert!(s.flush(std::time::Duration::from_secs(10)).is_empty());
+        s.save().unwrap();
+        if !lock_out(&index) {
+            return;
+        }
+        let (mut s, warnings) = Store::load(Some(dir.path().to_path_buf()));
+        assert!(!warnings.is_empty());
+        s.keep_thread(&key(3), "", "u", &whole(&posts(&[1, 2])), 3);
+        s.flush(std::time::Duration::from_secs(10));
+        let _ = s.save();
+        let_in(&index);
+        // The copies already on disk are still listed (so searched and pruned) next run.
+        let (s, _) = Store::load(Some(dir.path().to_path_buf()));
+        assert!(s.saved(&key(1)).is_some() && s.saved(&key(2)).is_some(), "copies left out of saved.json: {:?}", s.saved.iter().map(|m| m.key.no).collect::<Vec<_>>());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_index_rebuilt_without_a_copy_that_cant_be_read_isnt_written() {
+        // saved.json is gone, and one of the copies, or the folder it's in, can't be read
+        // (as after `sudo ck`).
+        let other = |no| ThreadKey { board: "a".into(), ..key(no) };
+        for folder in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let (mut s, _) = Store::load(Some(dir.path().to_path_buf()));
+            for k in [key(1), other(2)] {
+                s.keep_thread(&k, "", "u", &whole(&posts(&[1, 2])), k.no as i64);
+            }
+            assert!(s.flush(std::time::Duration::from_secs(10)).is_empty());
+            s.save().unwrap();
+            std::fs::remove_file(dir.path().join("saved.json")).unwrap();
+            let copy = saved::path(dir.path(), &key(1));
+            let locked = if folder { copy.parent().unwrap().to_path_buf() } else { copy };
+            if !lock_out(&locked) {
+                return;
+            }
+            let (mut s, warnings) = Store::load(Some(dir.path().to_path_buf()));
+            assert!(!warnings.is_empty(), "no warning with {locked:?} locked");
+            s.keep_thread(&other(3), "", "u", &whole(&posts(&[1, 2])), 3);
+            s.flush(std::time::Duration::from_secs(10));
+            let _ = s.save();
+            let_in(&locked);
+            let (s, _) = Store::load(Some(dir.path().to_path_buf()));
+            assert!(s.saved(&key(1)).is_some(), "the copy that couldn't be read was dropped from saved.json, with {locked:?} locked");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn copies_of_threads_on_a_watched_list_that_cant_be_read_arent_pruned() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut s, _) = Store::load(Some(dir.path().to_path_buf()));
+        for no in [1, 2] {
+            s.watch(key(no), String::new(), 0, 0);
+            s.keep_thread(&key(no), "", "u", &whole(&posts(&[1, 2])), no as i64);
+        }
+        assert!(s.flush(std::time::Duration::from_secs(10)).is_empty());
+        s.save().unwrap();
+        let one = s.saved[0].bytes;
+        if !lock_out(&dir.path().join("watched.json")) {
+            return;
+        }
+        // Over the limit, with nothing known to be watched: none of the copies goes.
+        let (mut s, _) = Store::load(Some(dir.path().to_path_buf()));
+        s.saved_max = one * 2;
+        s.keep_thread(&key(3), "", "u", &whole(&posts(&[1, 2])), 3);
+        s.flush(std::time::Duration::from_secs(10));
+        for no in [1, 2] {
+            assert!(saved::path(dir.path(), &key(no)).exists(), "the copy of watched thread {no} was pruned");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_copy_that_cant_be_opened_right_now_stays_listed() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("threads/4chan/g/1.json");
+        let (mut s, _) = Store::load(Some(dir.path().to_path_buf()));
+        s.keep_thread(&key(1), "one", "u", &whole(&posts(&[1, 2])), 1);
+        assert!(s.flush(std::time::Duration::from_secs(10)).is_empty());
+        if !lock_out(&file) {
+            return;
+        }
+        assert!(s.load_saved(&key(1)).is_err());
+        // Not gone and not corrupt, only unreadable for now: the entry stays.
+        assert!(s.saved(&key(1)).is_some(), "an unreadable copy was dropped from the list");
+        let_in(&file);
+        assert_eq!(s.load_saved(&key(1)).unwrap().posts.len(), 2);
     }
 }
