@@ -4971,6 +4971,26 @@ fn a_saved_thread_of_another_site_left_on_screen_by_closing_its_search_is_still_
 }
 
 #[test]
+fn a_saved_copy_of_another_sites_board_of_the_same_name_is_on_that_sites_board() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = saving_app(dir.path(), 1000);
+    app.sites[0].boards = Some(vec![Board { uri: "x".into(), title: "a's x".into(), nsfw: Some(true) }]);
+    let theirs = ThreadKey { site: "b".into(), board: "x".into(), no: 5 };
+    app.store.keep_thread(&theirs, "five", "u", &whole(&posts_saying(&[(5, "a crab")])), 900);
+    app.flush_writes();
+    // In a's /x/1, enter on b's saved /x/5: the tab is on b's /x/, not a's.
+    app.goto_str("a/x/1");
+    app.handle(answer(app.tab.req().unwrap(), thread_arrived, arrived(nos(&[1, 2]))));
+    assert_eq!(app.tab.board.as_ref().map(|b| b.title.as_str()), Some("a's x"));
+    app.goto_str("saved crab");
+    settle_until(&mut app, |a| a.tab.search.as_ref().and_then(|s| s.saved.as_ref()).is_some_and(|s| s.finished));
+    app.tab.search_list.state.select(Some(0));
+    app.enter();
+    assert_eq!((app.tab.site, app.tab.thread.as_ref().map(|t| t.key())), (1, Some(&theirs)));
+    assert_eq!(app.tab.board.as_ref().map(|b| (b.uri.as_str(), b.title.as_str(), b.nsfw)), Some(("x", "", None)));
+}
+
+#[test]
 fn a_thread_on_a_site_no_longer_configured_says_so() {
     let mut app = local_app();
     app.load_thread(ThreadKey { site: "gone".into(), board: "x".into(), no: 1 }, Opening::default());

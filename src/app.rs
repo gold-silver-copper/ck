@@ -1383,10 +1383,10 @@ impl App {
 
     /// Put the tab on `key`'s site and board, where the thread it shows is.
     fn place_on(&mut self, key: &ThreadKey) {
-        if let Some(site) = self.site_index(&key.site).filter(|&s| s != self.tab.site) {
+        // Another site's board of the same name is still another board.
+        let site = self.site_index(&key.site).unwrap_or(self.tab.site);
+        if site != self.tab.site || self.tab.board.as_ref().is_none_or(|b| b.uri != key.board) {
             self.switch_site(site);
-        }
-        if self.tab.board.as_ref().is_none_or(|b| b.uri != key.board) {
             self.tab.board = Some(self.find_board(&key.board));
         }
     }
