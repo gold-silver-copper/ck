@@ -284,6 +284,21 @@ mod tests {
     }
 
     #[test]
+    fn a_mod_post_keeps_its_capcode_in_the_archive() {
+        // The same 4chan mod post, live and in its FoolFuuka copy (capcode "M"): a capcode
+        // filter made from the live post catches the archived one too.
+        let live = super::futaba::Futaba::fourchan(None).parse_thread("pol", &super::fixture("4chan_pol_thread.json"));
+        let live = live.iter().find(|p| p.no == 487211333).unwrap();
+        let mut v = super::fixture("foolfuuka_post.json");
+        v["capcode"] = "M".into();
+        let archived = super::foolfuuka::parse_thread(&serde_json::json!({ "1": { "op": v } })).remove(0);
+        assert_eq!(archived.capcode, live.capcode, "the archive spells the capcode differently");
+        let f = crate::filter::tests::filters("[[filter]]\npattern = \"^mod$\"\nfield = \"capcode\"\n").unwrap();
+        assert!(f.check("4chan", "pol", live, false).hidden.is_some());
+        assert!(f.check("desuarchive", "pol", &archived, false).hidden.is_some(), "a ^mod$ capcode filter misses the archived copy");
+    }
+
+    #[test]
     fn a_foolfuuka_error_answer_is_not_found() {
         // FoolFuuka answers a thread it doesn't have with `{"error": ...}` (as search does).
         let ff = super::foolfuuka::Foolfuuka::new("https://arch.example".into(), None);

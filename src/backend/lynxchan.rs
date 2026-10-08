@@ -323,6 +323,16 @@ mod tests {
     }
 
     #[test]
+    fn a_tripcode_in_the_name_is_the_posts_tripcode() {
+        // LynxChan has no tripcode field: it appends the trip to `name` ("Bernd!!Fz3mQwerty").
+        let end = Lynxchan::new("https://endchan.net".into(), None);
+        let p = end.post(&serde_json::json!({"threadId": 1, "name": "Bernd!!Fz3mQwerty"}), "threadId");
+        assert_eq!(p.trip.as_deref(), Some("!!Fz3mQwerty"), "name {:?}", p.name);
+        let f = crate::filter::tests::filters("[[filter]]\npattern = \"^!!Fz3m\"\nfield = \"tripcode\"\n").unwrap();
+        assert!(f.check("endchan", "b", &p, false).hidden.is_some(), "a tripcode filter misses the post");
+    }
+
+    #[test]
     fn file_kind_comes_from_the_mime() {
         // LynxChan says what each file is; a path without an extension is still a video.
         let end = Lynxchan::new("https://endchan.net".into(), None);

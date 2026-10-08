@@ -271,7 +271,31 @@ mod tests {
         v["capcode"] = "M".into();
         let p = super::post(&v).unwrap();
         assert_eq!((p.id.as_deref(), p.flag.as_ref().map(|f| f.short())), (Some("Ab3dEf+g"), Some("FI".into())));
-        assert_eq!((p.trip.as_deref(), p.capcode.as_deref()), (Some("!!Fz3mQwerty"), Some("Mod")));
+        assert_eq!((p.trip.as_deref(), p.capcode.as_deref()), (Some("!!Fz3mQwerty"), Some("mod")));
+    }
+
+    #[test]
+    fn founder_and_manager_posts_keep_their_capcode() {
+        // FoolFuuka stores 4chan's founder and manager capcodes as "F" and "G".
+        for letter in ["F", "G"] {
+            let mut v = fixture("foolfuuka_post.json");
+            v["capcode"] = letter.into();
+            let p = super::post(&v).unwrap();
+            assert!(p.capcode.is_some(), "capcode {letter:?} is dropped");
+            assert!(p.name.contains(" ## "), "capcode {letter:?} is missing from the name {:?}", p.name);
+        }
+    }
+
+    #[test]
+    fn index_reply_counts_leave_out_ghost_posts() {
+        // A ghost reply (made on the archive after the thread died) isn't in the thread,
+        // so the index's reply count doesn't count it either.
+        let mut v = fixture("foolfuuka_index.json");
+        let mut ghost = v["109960109"]["posts"][0].clone();
+        ghost["subnum"] = "1".into();
+        v["109960109"]["posts"].as_array_mut().unwrap().push(ghost);
+        let op = super::parse_index(&v).into_iter().find(|t| t.no == 109960109).unwrap();
+        assert_eq!(op.replies, Some(2), "the ghost reply is counted");
     }
 
     #[test]

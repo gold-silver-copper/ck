@@ -212,8 +212,10 @@ mod tests {
         v["capcode"] = " ##Board Owner".into();
         let op = super::post(BASE, &v);
         assert_eq!(op.flag.as_ref().map(|f| (f.code.as_str(), f.name.as_str())), Some(("DE", "Germany")));
-        assert_eq!((op.trip.as_deref(), op.capcode.as_deref()), (Some("!Ep8pui8Vw2"), Some("##Board Owner")));
-        assert!(op.name.ends_with(" !Ep8pui8Vw2 ##Board Owner"), "{}", op.name);
+        // jschan's capcode comes as " ##Board Owner": the role is stored bare, like every
+        // other engine's, and shown as " ## Board Owner".
+        assert_eq!((op.trip.as_deref(), op.capcode.as_deref()), (Some("!Ep8pui8Vw2"), Some("Board Owner")));
+        assert!(op.name.ends_with(" !Ep8pui8Vw2 ## Board Owner"), "{}", op.name);
     }
 
     #[test]
