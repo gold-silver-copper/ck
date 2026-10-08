@@ -6,7 +6,7 @@ use std::time::Duration;
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 use ratatui::widgets::ListState;
 
-use super::{App, Popup, edit_text, list_move};
+use super::{App, Popup, View, edit_text, list_move};
 use crate::config::{self, ColorMode, ImagesMode};
 use crate::keys::{ACTIONS, Key, Scope};
 use crate::theme::{self, ROLES, Theme, ThemeDef};
@@ -327,7 +327,7 @@ pub fn key_rows() -> Vec<Result<usize, &'static str>> {
 impl App {
     /// Enter on a setting.
     pub fn activate_setting(&mut self) {
-        if let Some(s) = self.settings_list.state.selected().and_then(|i| settings().nth(i)) {
+        if let Some(s) = self.selected_row(View::Settings).and_then(|i| settings().nth(i)) {
             (s.activate)(self);
         }
     }

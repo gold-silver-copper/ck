@@ -74,10 +74,6 @@ impl App {
         if let Some(s) = self.sites.get_mut(site) {
             s.boards = Some(boards);
         }
-        if site == self.tab.site {
-            let len = self.visible_boards().len();
-            self.tab.board_list.clamp(len);
-        }
         if complete {
             self.note_titles(site);
         }
@@ -143,28 +139,15 @@ impl App {
     /// before anything fetched has arrived.
     fn cached_catalog_arrived(&mut self, posts: Vec<Post>, fetched: i64) {
         if self.tab.catalog.posts().is_empty() && self.tab.place_view() == View::Catalog {
-            let select = self.tab.catalog_selecting();
-            self.show_catalog(posts, select, Some(tabs::Offline { saved: fetched, dead: false }));
-        }
-    }
-
-    /// The catalog's pages loaded so far; more are coming. The selected thread, if it isn't
-    /// among them yet, is selected once it comes (not the one the selection is moved to).
-    pub(super) fn catalog_partial(&mut self, posts: Vec<Post>) {
-        let keep = self.tab.catalog_selecting().or_else(|| self.selected_catalog_no());
-        self.show_catalog(posts, keep, None);
-        let waiting = keep.filter(|&no| self.row_of(View::Catalog, &RowKey::Thread(no)).is_none());
-        if let Some(select) = self.tab.catalog_select() {
-            *select = waiting;
+            self.show_catalog(posts);
+            self.tab.catalog.cached = Some(tabs::Offline { saved: fetched, dead: false });
         }
     }
 
     pub(super) fn catalog_arrived(&mut self, res: Result<Vec<Post>>) {
         match res {
             Ok(posts) => {
-                // A failed load keeps it, for `r` and the session.
-                let select = self.tab.catalog_select().and_then(Option::take);
-                self.show_catalog(posts, select, None);
+                self.show_catalog(posts);
                 self.catalog_seen();
             }
             Err(e) if http::is_not_found(&e) => {
@@ -198,7 +181,7 @@ impl App {
                 if open.restoring {
                     // Last session's thread is gone: its catalog instead.
                     self.tab.navigate(View::Catalog);
-                    self.load_catalog(None);
+                    self.load_catalog();
                     self.info("The thread you had open last time is gone (archived or deleted)");
                 } else {
                     self.thread_gone(key);
@@ -208,7 +191,7 @@ impl App {
         }
     }
 
-    pub(super) fn load_catalog(&mut self, select: Option<u64>) {
+    pub(super) fn load_catalog(&mut self) {
         let Some(board) = self.tab.board.clone() else { return };
         let (site, backend, now) = (self.current_site().cfg.name.clone(), self.current_site().backend.clone(), self.clock.now());
         // Another board's catalog goes, with all that's known about it.
@@ -234,7 +217,7 @@ impl App {
             let (res, copies) = http::recording(|| {
                 b.catalog(&board.uri, &|so_far| {
                     let so_far = so_far.to_vec();
-                    let _ = tx.send(Msg::request(id, move |app| app.catalog_partial(so_far)));
+                    let _ = tx.send(Msg::request(id, move |app| app.show_catalog(so_far)));
                 })
             });
             if let (Ok(posts), Some(p)) = (&res, &pages)
@@ -244,7 +227,7 @@ impl App {
             }
             res
         };
-        self.spawn(backend, label, Then::Catalog { select }, job, App::catalog_arrived);
+        self.spawn(backend, label, Then::Show, job, App::catalog_arrived);
     }
 
     pub(super) fn load_thread(&mut self, key: ThreadKey, open: Opening) {
@@ -291,23 +274,11 @@ impl App {
         }
     }
 
-    /// The selected catalog thread's number, when the catalog is shown.
-    fn selected_catalog_no(&self) -> Option<u64> {
-        self.selected_index().filter(|_| self.tab.view() == View::Catalog).and_then(|i| self.tab.catalog.posts().get(i)).map(|p| p.no)
-    }
-
-    /// Show catalog threads (`cached`: the last copy kept), selecting `select` if it's among
-    /// them, else keeping the selected thread selected (by number).
-    pub(super) fn show_catalog(&mut self, posts: Vec<Post>, select: Option<u64>, cached: Option<tabs::Offline>) {
-        let selected = select.or_else(|| self.selected_catalog_no());
+    /// Show catalog threads as fetched (all, or the pages so far; a kept copy is marked after).
+    pub(super) fn show_catalog(&mut self, posts: Vec<Post>) {
         let marks = self.catalog_marks(&self.tab.catalog, &posts);
         self.tab.catalog.show(posts, marks);
-        self.tab.catalog.cached = cached;
-        if let Some(i) = selected.and_then(|no| self.row_of(View::Catalog, &RowKey::Thread(no))) {
-            self.tab.catalog_list.state.select(Some(i));
-        }
-        let len = self.visible_catalog().len();
-        self.tab.catalog_list.clamp(len);
+        self.tab.catalog.cached = None;
     }
 
     /// Show posts as thread fetched, opened plainly (tests' shorthand for an answer of the

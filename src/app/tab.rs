@@ -11,10 +11,8 @@ use crate::store::ThreadKey;
 /// What a load is to do once it's answered, beyond showing what came. Its answer's handler
 /// is handed what the load was asked for (a thread's key) by the closure that started it.
 pub enum Then {
-    /// Just show it (a board list, search results, the thread a post is in).
+    /// Just show it (a board list, a catalog, search results, the thread a post is in).
     Show,
-    /// Select the catalog thread `select` once it's there.
-    Catalog { select: Option<u64> },
     /// Open the thread as `open` says.
     Thread { open: Opening },
 }
@@ -253,22 +251,6 @@ impl Tab {
         }
     }
 
-    /// The thread the catalog being loaded is to select, if it's still to come.
-    pub fn catalog_selecting(&self) -> Option<u64> {
-        match self.load.as_ref().map(|l| &l.then) {
-            Some(Then::Catalog { select }) => *select,
-            _ => None,
-        }
-    }
-
-    /// The same, to change.
-    pub(super) fn catalog_select(&mut self) -> Option<&mut Option<u64>> {
-        match self.load.as_mut().map(|l| &mut l.then) {
-            Some(Then::Catalog { select }) => Some(select),
-            _ => None,
-        }
-    }
-
     /// A load in flight, as `begin` starts it (without a request to answer it).
     #[cfg(test)]
     pub fn fake_load(&mut self, id: u64, label: &str, then: Then) {
@@ -281,8 +263,8 @@ impl Tab {
             settings: false,
             moves: 0,
             load: None,
-            board_list: FilteredList::top(),
-            catalog_list: FilteredList::default(),
+            board_list: FilteredList::fresh(),
+            catalog_list: FilteredList::fresh(),
             catalog_sort: Sort::default(),
             return_to: None,
             thread_checked: now,
@@ -301,7 +283,7 @@ impl Tab {
             failed: None,
             pending_thread: None,
             search: None,
-            search_list: FilteredList::default(),
+            search_list: FilteredList::fresh(),
         }
     }
 }

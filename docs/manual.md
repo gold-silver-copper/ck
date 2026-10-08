@@ -30,6 +30,13 @@ You don't need to know many. Select something, then:
 `y` copies and `o` opens in the browser whatever is selected or focused: a post, a file, a
 link. `d` saves it.
 
+A list's selection stays on what it's on when the list changes behind it (a refresh,
+something hidden in another tab, `w` with watched threads first); if that goes, what's now
+in its place is selected. While the list is still loading (or failed to load), it goes back
+to the one that went if the list brings it back. A `.` menu runs on what it opened on: what
+it would do to that does nothing (saying so) if that has gone. Sorting (`s`) and typing or
+clearing a filter go back to the top.
+
 Navigation (fixed):
 
 | key                     | action                                        |

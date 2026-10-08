@@ -128,7 +128,7 @@ impl App {
         };
         self.switch_site(archive);
         self.tab.search = Some(Search { saved: None, board, query, hits: Vec::new(), marks: Marks::default(), total: None, pages: 0, back });
-        self.tab.search_list = FilteredList::top();
+        self.tab.search_list = FilteredList::fresh();
         self.tab.navigate(View::Search);
         self.load_search_page();
     }
@@ -151,7 +151,7 @@ impl App {
         }
         let saved = SavedSearch { keys: Vec::new(), copies: Vec::new(), done: 0, of, skipped: 0, finished: of == 0, id, stop: stop.clone() };
         self.tab.search = Some(Search { saved: Some(saved), board: String::new(), query: query.to_string(), hits: Vec::new(), marks: Marks::default(), total: None, pages: 0, back });
-        self.tab.search_list = FilteredList::top();
+        self.tab.search_list = FilteredList::fresh();
         self.tab.navigate(View::Search);
         // Saving waits for nothing: copies being written are read as they were.
         let later = self.later();
@@ -266,7 +266,7 @@ impl App {
 
     /// Reaching the end of the results loads the next page.
     pub fn search_moved(&mut self) {
-        let at_end = self.tab.search_list.state.selected().is_some_and(|i| i + 1 >= self.visible_hits().len());
+        let at_end = self.selected_row(View::Search).is_some_and(|i| i + 1 >= self.visible_hits().len());
         if at_end && self.more_results() && self.tab.loading().is_none() {
             self.load_search_page();
         }
@@ -274,7 +274,7 @@ impl App {
 
     /// Enter on a result: its thread on the archive, with the post selected.
     pub fn open_search_hit(&mut self) {
-        let Some(k) = self.tab.search_list.state.selected().and_then(|i| self.visible_hits().get(i).copied()) else { return };
+        let Some(k) = self.selected_row(View::Search).and_then(|i| self.visible_hits().get(i).copied()) else { return };
         let Some(s) = &self.tab.search else { return };
         // A saved copy: opened offline, on the post, with the search set for n / N.
         if let Some(saved) = &s.saved {

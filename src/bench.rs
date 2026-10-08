@@ -157,7 +157,7 @@ fn bench_catalog() {
     a.images = Images::offline();
     a.tab.navigate(View::Catalog);
     a.tab.catalog = catalog_here(&a, cat);
-    a.tab.catalog_list.state.select(Some(0));
+    a.pick_row(View::Catalog, 0);
     let mut t = term();
     eprintln!("\n== catalog, 150 threads ==");
     time("frame with thumbnail placeholders", 200, || draw(&mut t, &mut a));

@@ -298,9 +298,6 @@ impl App {
             s.marks = Marks::default();
         }
         self.mark_hits();
-        let (catalog, hits) = (self.visible_catalog().len(), self.visible_hits().len());
-        self.tab.catalog_list.clamp(catalog);
-        self.tab.search_list.clamp(hits);
     }
 }
 
