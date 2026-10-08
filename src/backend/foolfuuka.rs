@@ -1,15 +1,13 @@
 //! FoolFuuka 4chan archives (desuarchive, b4k, ...): the `/_/api/chan/` JSON API.
 #![deny(clippy::indexing_slicing, clippy::arithmetic_side_effects, clippy::cast_possible_truncation)]
 
-use std::fmt::Write as _;
-
 use anyhow::Result;
 use serde_json::Value;
 
 use super::{Backend, Partial, SearchPage, as_u32, saturate, site_error};
 use crate::http::{as_bool, as_i64, as_str, as_u64, encode_segment as enc, get_json, items, register_media_host};
 use crate::markup::{self, Flavor};
-use crate::model::{Attachment, Board, FileKind, Flag, Post};
+use crate::model::{Attachment, Board, FileKind, Flag, Post, Poster};
 
 /// Index pages fetched for the "catalog" (each is one rate-limited request).
 const INDEX_PAGES: u32 = 3;
@@ -62,9 +60,9 @@ pub fn parse_index(v: &Value) -> Vec<Post> {
         .flat_map(|m| m.values())
         .filter_map(|t| {
             let mut op = post(&t["op"])?;
-            let last = t["posts"].as_array().map_or(&[][..], Vec::as_slice);
+            let last: Vec<&Value> = t["posts"].as_array().into_iter().flatten().filter(|p| !ghost(p)).collect();
             let bumped = last.iter().filter_map(|p| as_i64(&p["timestamp"])).max().unwrap_or(op.time);
-            let shown_images = last.iter().filter(|p| p["media"].is_object()).count() as u64;
+            let shown_images = last.iter().filter(|p| attachment(&p["media"]).is_some()).count() as u64;
             op.replies = Some(saturate(as_u64(&t["omitted"]).unwrap_or(0).saturating_add(last.len() as u64)));
             op.images = Some(saturate(as_u64(&t["images_omitted"]).unwrap_or(0).saturating_add(shown_images)));
             Some((bumped, op))
@@ -99,36 +97,23 @@ pub fn parse_search(v: &Value) -> Result<SearchPage> {
     Ok(SearchPage { hits, total: v.get("meta").and_then(|m| as_u64(&m["total_found"])) })
 }
 
+/// A ghost post, made on the archive after the thread died (it has a subnum), is left
+/// out of the thread and its counts.
+fn ghost(v: &Value) -> bool {
+    as_u64(&v["subnum"]).unwrap_or(0) != 0
+}
+
 fn post(v: &Value) -> Option<Post> {
-    // Ghost posts (made on the archive after the thread died) have a subnum; skip them.
-    if as_u64(&v["subnum"]).unwrap_or(0) != 0 {
+    if ghost(v) {
         return None;
     }
     let parsed = markup::parse_html(v["comment_processed"].as_str().unwrap_or(""), Flavor::Vichan);
-    let mut name = as_str(&v["name_processed"]).or_else(|| as_str(&v["name"])).map(|n| markup::decode(&n)).unwrap_or_else(|| "Anonymous".into());
-    let trip = as_str(&v["trip"]);
-    if let Some(trip) = &trip {
-        name.push(' ');
-        name.push_str(trip);
-    }
-    let cap = match as_str(&v["capcode"]).as_deref() {
-        Some("M") => Some("Mod"),
-        Some("A") => Some("Admin"),
-        Some("D") => Some("Developer"),
-        Some("V") => Some("Verified"),
-        _ => None,
-    };
-    if let Some(cap) = cap {
-        let _ = write!(name, " ## {cap}");
-    }
     let text = |k: &str| as_str(&v[k]).map(|s| markup::decode(&s));
     Some(Post {
         no: as_u64(&v["num"])?,
-        name,
+        poster: Poster::new(text("name_processed").or_else(|| text("name")), "Anonymous", as_str(&v["trip"]), as_str(&v["capcode"])),
         id: text("poster_hash"),
         flag: Flag::new(text("poster_country"), text("poster_country_name")),
-        trip,
-        capcode: cap.map(String::from),
         subject: as_str(&v["title_processed"]).or_else(|| as_str(&v["title"])).map(|s| markup::decode(&s)),
         time: as_i64(&v["timestamp"]).unwrap_or(0),
         files: attachment(&v["media"]).into_iter().collect(),
@@ -262,7 +247,7 @@ mod tests {
         // The fixture's /g/ has none; an archived /pol/ post has them all.
         let v = fixture("foolfuuka_post.json");
         let p = super::post(&v).unwrap();
-        assert!(p.id.is_none() && p.flag.is_none() && p.trip.is_none() && p.capcode.is_none());
+        assert!(p.id.is_none() && p.flag.is_none() && p.poster.trip().is_none() && p.poster.capcode().is_none());
         let mut v = v;
         v["poster_hash"] = "Ab3dEf+g".into();
         v["poster_country"] = "FI".into();
@@ -271,7 +256,31 @@ mod tests {
         v["capcode"] = "M".into();
         let p = super::post(&v).unwrap();
         assert_eq!((p.id.as_deref(), p.flag.as_ref().map(|f| f.short())), (Some("Ab3dEf+g"), Some("FI".into())));
-        assert_eq!((p.trip.as_deref(), p.capcode.as_deref()), (Some("!!Fz3mQwerty"), Some("Mod")));
+        assert_eq!((p.poster.trip(), p.poster.capcode()), (Some("!!Fz3mQwerty"), Some("mod")));
+    }
+
+    #[test]
+    fn founder_and_manager_posts_keep_their_capcode() {
+        // FoolFuuka stores 4chan's founder and manager capcodes as "F" and "G".
+        for letter in ["F", "G"] {
+            let mut v = fixture("foolfuuka_post.json");
+            v["capcode"] = letter.into();
+            let p = super::post(&v).unwrap();
+            assert!(p.poster.capcode().is_some(), "capcode {letter:?} is dropped");
+            assert!(p.poster.name().contains(" ## "), "capcode {letter:?} is missing from the name {:?}", p.poster.name());
+        }
+    }
+
+    #[test]
+    fn index_reply_counts_leave_out_ghost_posts() {
+        // A ghost reply (made on the archive after the thread died) isn't in the thread,
+        // so the index's reply count doesn't count it either.
+        let mut v = fixture("foolfuuka_index.json");
+        let mut ghost = v["109960109"]["posts"][0].clone();
+        ghost["subnum"] = "1".into();
+        v["109960109"]["posts"].as_array_mut().unwrap().push(ghost);
+        let op = super::parse_index(&v).into_iter().find(|t| t.no == 109960109).unwrap();
+        assert_eq!(op.replies, Some(2), "the ghost reply is counted");
     }
 
     #[test]

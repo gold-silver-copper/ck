@@ -12,8 +12,6 @@ pub struct Gallery {
     /// Each file with its post's number.
     pub files: Vec<(u64, Attachment)>,
     pub state: ListState,
-    /// Columns as last drawn.
-    pub cols: usize,
 }
 
 impl App {
@@ -33,7 +31,7 @@ impl App {
             return self.info(msg);
         }
         let state = ListState::default().with_selected(Some(start.unwrap_or(0)));
-        self.tab.gallery = Some(Gallery { files, state, cols: 1 });
+        self.tab.gallery = Some(Gallery { files, state });
     }
 
     /// `none`, or that only hidden posts (of those in view, `in_view`) have files that are `wanted`.
@@ -43,15 +41,17 @@ impl App {
     }
 
     pub fn on_gallery_key(&mut self, key: KeyEvent) {
+        // Before a changed gallery is drawn, it steps one card, with no edge to leave by.
+        let (cols, edges) = self.drawn_cols().map_or((1, false), |c| (c.unwrap_or(1), true));
         let Some(g) = &mut self.tab.gallery else { return };
-        let (n, cols) = (g.files.len(), g.cols.max(1));
+        let n = g.files.len();
         let cur = g.state.selected().unwrap_or(0);
         let action = self.keys.action(Scope::Thread, &key);
         let to = match key.code {
             KeyCode::Char('j') | KeyCode::Down => Some((cur + cols).min(n - 1)),
             KeyCode::Char('k') | KeyCode::Up => Some(cur.saturating_sub(cols)),
             KeyCode::Char('l') | KeyCode::Right => Some((cur + 1).min(n - 1)),
-            KeyCode::Char('h') | KeyCode::Left if cur % cols != 0 => Some(cur - 1),
+            KeyCode::Char('h') | KeyCode::Left if !edges || cur % cols != 0 => Some(cur.saturating_sub(1)),
             KeyCode::Char('g') | KeyCode::Home => Some(0),
             KeyCode::Char('G') | KeyCode::End => Some(n - 1),
             KeyCode::PageDown => Some((cur + cols * 3).min(n - 1)),

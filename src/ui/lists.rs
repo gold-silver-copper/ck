@@ -216,7 +216,6 @@ pub(super) fn draw_catalog(f: &mut Frame, app: &mut App, area: Rect) {
         draw_grid(f, app, area);
         return;
     }
-    app.grid_cols = 0;
     let compact = layout == CatalogLayout::Compact;
     let thumbs = images && !compact;
     let width = area.width.saturating_sub(PAD + 2) as usize;
@@ -378,7 +377,7 @@ pub(super) fn draw_search(f: &mut Frame, app: &mut App, area: Rect) {
         if hidden {
             head.extend([chip("hidden", t.text_dim, t.surface_high), Span::raw(" ")]);
         }
-        head.extend([Span::styled(p.name.clone(), if hidden { dim() } else { bold(t.name) }), Span::raw("  ")]);
+        head.extend([Span::styled(p.poster.name().to_string(), if hidden { dim() } else { bold(t.name) }), Span::raw("  ")]);
         let key = s.saved.as_ref().and_then(|x| x.keys.get(k));
         if let Some(key) = key {
             head.push(Span::styled(format!("{}/{}/{}  ", key.site, key.board, key.no), dim()));
@@ -457,11 +456,9 @@ fn draw_grid(f: &mut Frame, app: &mut App, area: Rect) {
     let (cell_w, cell_h) = (GRID_CARD.width + 2, GRID_CARD.height + 1);
     let cols = ((area.width + 2) / cell_w).max(1) as usize;
     let rows = ((area.height + 1) / cell_h).max(1) as usize;
-    app.grid_cols = cols;
     let state = &mut app.tab.catalog_list.state;
     let sel = state.selected().unwrap_or(0).min(visible.len() - 1);
-    let top = scroll_to(state.offset() / cols, sel / cols, rows);
-    *state.offset_mut() = top * cols;
+    let top = window(state, visible.len(), rows, cols) / cols;
     for (k, &i) in visible.iter().enumerate().skip(top * cols).take((rows + 1) * cols) {
         let (r, c) = (k / cols - top, k % cols);
         let (x, y) = (area.x + c as u16 * cell_w, area.y + r as u16 * cell_h);

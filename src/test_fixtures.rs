@@ -87,7 +87,7 @@ pub fn posts_upto(n: u64) -> Vec<Post> {
 
 /// Posts by Anonymous, each one line.
 pub fn posts_saying(list: &[(u64, &str)]) -> Vec<Post> {
-    list.iter().map(|&(no, text)| Post { no, name: "Anonymous".into(), body: vec![Line::from(text.to_string())], ..Default::default() }).collect()
+    list.iter().map(|&(no, text)| Post { no, poster: "Anonymous".into(), body: vec![Line::from(text.to_string())], ..Default::default() }).collect()
 }
 
 /// A post with one PNG on the local app's first site.
@@ -101,7 +101,7 @@ pub fn post(no: u64, age: i64, subject: Option<&str>, html: &str) -> Post {
     let p = parse_html(html, Flavor::Fourchan);
     Post {
         no,
-        name: "Anonymous".into(),
+        poster: "Anonymous".into(),
         subject: subject.map(String::from),
         time: NOW - age,
         ..p.into()

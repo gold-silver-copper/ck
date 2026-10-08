@@ -186,8 +186,7 @@ pub struct Flag {
 impl Flag {
     /// A flag from what the site says, if it says anything.
     pub fn new(code: Option<String>, name: Option<String>) -> Option<Self> {
-        let clean = |s: Option<String>| s.map(|s| s.trim().to_string()).unwrap_or_default();
-        let (code, name) = (clean(code), clean(name));
+        let (code, name) = (clean(code).unwrap_or_default(), clean(name).unwrap_or_default());
         (!code.is_empty() || !name.is_empty()).then_some(Self { code, name })
     }
 
@@ -198,10 +197,75 @@ impl Flag {
     }
 }
 
+/// Trimmed, and none when nothing is left.
+fn clean(s: Option<String>) -> Option<String> {
+    s.map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
+}
+
+/// A capcode spelled 4chan's way whatever the engine sends: FoolFuuka's letters (`M`, and
+/// `N` for none) and capitalised words (`Mod`) become `mod`. Other roles stay as sent.
+fn role(c: &str) -> Option<String> {
+    let word = match c.to_ascii_lowercase().as_str() {
+        "" | "n" => return None,
+        "m" | "mod" | "moderator" => "mod",
+        "a" | "admin" | "administrator" => "admin",
+        "d" | "developer" => "developer",
+        "v" | "verified" => "verified",
+        "f" | "founder" => "founder",
+        "g" | "manager" => "manager",
+        _ => c,
+    };
+    Some(word.into())
+}
+
+/// Who posted: the name as shown, and its tripcode and capcode apart for filters. Every
+/// engine builds it through [`Poster::new`], so each part is spelled one way.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
+pub struct Poster {
+    shown: String,
+    trip: Option<String>,
+    capcode: Option<String>,
+}
+
+impl Poster {
+    /// From the site's name (else `default`), tripcode and capcode, cleaned and joined once.
+    pub fn new(name: Option<String>, default: &str, trip: Option<String>, capcode: Option<String>) -> Self {
+        let p = Self::stored(clean(name).unwrap_or_else(|| default.into()), trip, capcode);
+        let trip = p.trip.as_ref().map(|t| format!(" {t}")).unwrap_or_default();
+        let cap = p.capcode.as_ref().map(|c| format!(" ## {c}")).unwrap_or_default();
+        Self { shown: format!("{}{trip}{cap}", p.shown), ..p }
+    }
+
+    /// Saved copies only: the name as it was shown then, its parts cleaned and spelled as now.
+    pub fn stored(shown: String, trip: Option<String>, capcode: Option<String>) -> Self {
+        Self { shown, trip: clean(trip), capcode: clean(capcode).and_then(|c| role(c.trim_start_matches(['#', ' ']))) }
+    }
+
+    /// The name as shown, tripcode and capcode included.
+    pub fn name(&self) -> &str {
+        &self.shown
+    }
+
+    pub fn trip(&self) -> Option<&str> {
+        self.trip.as_deref()
+    }
+
+    pub fn capcode(&self) -> Option<&str> {
+        self.capcode.as_deref()
+    }
+}
+
+#[cfg(test)]
+impl From<&str> for Poster {
+    fn from(name: &str) -> Self {
+        Self { shown: name.into(), ..Self::default() }
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct Post {
     pub no: u64,
-    pub name: String,
+    pub poster: Poster,
     pub subject: Option<String>,
     /// Unix timestamp (seconds).
     pub time: i64,
@@ -219,9 +283,6 @@ pub struct Post {
     /// The poster's ID in this thread, on boards that give them (4chan's /pol/, /b/).
     pub id: Option<String>,
     pub flag: Option<Flag>,
-    /// The tripcode and capcode, also in `name` as shown, apart for filters.
-    pub trip: Option<String>,
-    pub capcode: Option<String>,
     // Catalog-only fields.
     pub replies: Option<u32>,
     pub images: Option<u32>,
@@ -336,6 +397,19 @@ impl Post {
 #[cfg(test)]
 mod tests {
     use crate::markup::{Flavor, parse_html};
+
+    #[test]
+    fn a_poster_is_cleaned_and_joined_once() {
+        use super::Poster;
+        let p = Poster::new(Some("  Kot ".into()), "Anonymous", Some("!!Fz3m".into()), Some(" ##Board Owner".into()));
+        assert_eq!((p.name(), p.trip(), p.capcode()), ("Kot !!Fz3m ## Board Owner", Some("!!Fz3m"), Some("Board Owner")));
+        // Blank parts are none, and a blank name is the site's default.
+        let p = Poster::new(Some(" ".into()), "Anonymous", Some("  ".into()), Some("##".into()));
+        assert_eq!((p.name(), p.trip(), p.capcode()), ("Anonymous", None, None));
+        // FoolFuuka's letters, and the words saved copies of its threads kept, are 4chan's.
+        assert_eq!(Poster::new(None, "Anonymous", None, Some("M".into())).name(), "Anonymous ## mod");
+        assert_eq!(Poster::stored("Anonymous ## Mod".into(), None, Some("Mod".into())).capcode(), Some("mod"));
+    }
 
     #[test]
     fn file_kind_from_mime_then_url_then_name() {

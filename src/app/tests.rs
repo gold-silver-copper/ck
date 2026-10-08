@@ -147,7 +147,7 @@ fn the_wheel_never_answers_a_save_question() {
 fn the_wheel_moves_the_filter_choices_over_a_thread() {
     let mut app = thread_app();
     let mut posts = nos(&(1..=60).collect::<Vec<_>>());
-    posts[0].name = "Satoshi".into();
+    posts[0].poster = "Satoshi".into();
     posts[0].subject = Some("Bitcoin".into());
     app.set_thread(posts);
     draw_at(&mut app, 80, 20);
@@ -975,9 +975,9 @@ fn catalogs_mark_new_threads_and_replies() {
 
 #[test]
 fn repeated_post_numbers_keep_the_first() {
-    let post = |no, name: &str| Post { no, name: name.into(), ..Default::default() };
+    let post = |no, name: &str| Post { no, poster: name.into(), ..Default::default() };
     let t = ThreadView::new(tkey("x", 1), vec![post(1, "op"), post(2, "a"), post(2, "b"), post(3, "c")]);
-    assert_eq!(t.posts.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(), ["op", "a", "c"]);
+    assert_eq!(t.posts.iter().map(|p| p.poster.name()).collect::<Vec<_>>(), ["op", "a", "c"]);
     assert_eq!((t.index[&3], t.backlinks.len(), t.entries.len()), (2, 3, 3));
 }
 
@@ -1035,9 +1035,11 @@ fn grid_moves_in_two_dimensions() {
     app.tab.catalog = catalog_here(&app, (1..=7).map(|no| Post { no, ..Default::default() }).collect());
     app.tab.navigate(View::Catalog);
     app.default_layout = CatalogLayout::Grid;
-    app.grid_cols = 3;
+    app.images = crate::images::Images::offline();
     app.tab.catalog_list.state.select(Some(0));
-    let press = |app: &mut App, c| app.on_key(KeyEvent::from(KeyCode::Char(c)));
+    // Drawn three cards wide; the keys come as from the terminal, all before the next frame.
+    draw_at(&mut app, 70, 30);
+    let press = |app: &mut App, c| app.handle(Msg::Input(Event::Key(KeyEvent::from(KeyCode::Char(c)))));
     let at = |app: &App| app.tab.catalog_list.state.selected().unwrap();
     press(&mut app, 'j');
     assert_eq!(at(&app), 3);
@@ -1062,6 +1064,51 @@ fn grid_moves_in_two_dimensions() {
     // c cycles this board's layout.
     app.act(Action::Compact);
     assert_eq!(app.layout(), CatalogLayout::Cards);
+}
+
+#[test]
+fn keys_before_a_changed_grid_is_drawn_move_by_one_card() {
+    let mut app = test_app();
+    app.tab.catalog = Catalog::of(&app.current_site().cfg.name, "x", (1..=7).map(|no| Post { no, ..Default::default() }).collect());
+    app.tab.navigate(View::Catalog);
+    app.default_layout = CatalogLayout::Grid;
+    app.images = crate::images::Images::offline();
+    app.tab.catalog_list.state.select(Some(0));
+    draw_at(&mut app, 70, 30);
+    let press = |app: &mut App, c| app.handle(Msg::Input(Event::Key(KeyEvent::from(KeyCode::Char(c)))));
+    let at = |app: &App| app.tab.catalog_list.state.selected().unwrap();
+    // A resize and keys in one batch: the three columns drawn no longer hold, and h/l move
+    // a card rather than open a thread or leave the catalog.
+    app.handle(Msg::Input(Event::Resize(50, 30)));
+    press(&mut app, 'j');
+    assert_eq!(at(&app), 1);
+    press(&mut app, 'l');
+    assert_eq!(at(&app), 2);
+    press(&mut app, 'h');
+    assert_eq!((app.tab.view(), at(&app)), (View::Catalog, 1));
+    // Out of the grid (c) and a key in one batch: the cards step one by one.
+    draw_at(&mut app, 70, 30);
+    press(&mut app, 'c');
+    assert_ne!(app.layout(), CatalogLayout::Grid);
+    press(&mut app, 'j');
+    assert_eq!(at(&app), 2);
+}
+
+#[test]
+fn h_in_a_gallery_not_yet_redrawn_moves_a_card_instead_of_closing_it() {
+    let mut app = local_app();
+    app.images = crate::images::Images::offline();
+    app.tab.board = Some(Board { uri: "x".into(), title: String::new(), nsfw: None });
+    let file = |name: &str| Attachment { filename: name.into(), ..Attachment::at(format!("http://127.0.0.1:3/x/src/{name}")) };
+    app.tab.thread = Some(ThreadView::new(tkey("x", 1), vec![Post { no: 1, files: vec![file("a.png"), file("b.png"), file("c.png")], ..Default::default() }]));
+    app.tab.navigate(View::Thread);
+    app.act(Action::Gallery);
+    draw_at(&mut app, 60, 30);
+    app.tab.gallery.as_mut().unwrap().state.select(Some(1));
+    // A resize and h in one batch, before the next frame.
+    app.handle(Msg::Input(Event::Resize(61, 30)));
+    app.handle(Msg::Input(Event::Key(KeyEvent::from(KeyCode::Char('h')))));
+    assert_eq!(app.tab.gallery.as_ref().map(|g| g.state.selected()), Some(Some(0)));
 }
 
 #[test]
@@ -1158,7 +1205,6 @@ fn gallery_of_the_threads_files() {
     app.act(Action::Gallery);
     // It starts at the selected post's file, or the next.
     assert_eq!(app.tab.gallery.as_ref().unwrap().state.selected(), Some(1));
-    app.tab.gallery.as_mut().unwrap().cols = 2;
     let press = |app: &mut App, code| app.on_key(KeyEvent::from(code));
     press(&mut app, KeyCode::Char('l'));
     assert_eq!(app.tab.gallery.as_ref().unwrap().state.selected(), Some(2));
@@ -1171,7 +1217,9 @@ fn gallery_of_the_threads_files() {
     press(&mut app, KeyCode::Esc);
     assert!(app.tab.viewer().is_none());
     assert_eq!(app.tab.gallery.as_ref().unwrap().state.selected(), Some(1));
-    // The wheel moves through the grid a row at a time, not the thread behind it.
+    // Drawn two cards wide, the wheel moves through the grid a row at a time, not the
+    // thread behind it.
+    draw_at(&mut app, 60, 30);
     let scroll = app.tab.thread.as_ref().unwrap().scroll;
     app.on_mouse(mouse(MouseEventKind::ScrollUp, 5, 5), Instant::now());
     assert_eq!(app.tab.gallery.as_ref().unwrap().state.selected(), Some(0));
@@ -1348,6 +1396,23 @@ fn reverse_image_search() {
 }
 
 #[test]
+fn a_session_not_restored_is_left_as_it_was() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("session.json");
+    let mut app = saving_app(dir.path(), 1000);
+    app.goto_str("a/x");
+    app.save_session(None);
+    let before = std::fs::read(&file).unwrap();
+    // A run with restore_session off saves everything else, never the session.
+    let mut next = saving_app(dir.path(), 1000);
+    next.restore_session = false;
+    next.goto_str("b/y/5");
+    next.save_session(None);
+    next.store.save().unwrap();
+    assert_eq!(std::fs::read(&file).unwrap(), before);
+}
+
+#[test]
 fn sessions_save_and_restore() {
     let dir = tempfile::tempdir().unwrap();
     let mut app = local_app();
@@ -1358,7 +1423,7 @@ fn sessions_save_and_restore() {
     app.tab.thread.as_mut().unwrap().selected = 1;
     app.tab.catalog_sort = Sort::Newest;
     app.save_session(None);
-    let saved = app.store.load_session().unwrap();
+    let saved = app.store.session.clone();
     assert_eq!(saved.tabs[0], crate::store::Place {
         view: "thread".into(),
         site: "b".into(),
@@ -1458,7 +1523,7 @@ fn new_tabs_switching_closing_and_the_session() {
     assert_eq!((app.active, app.tab.view()), (1, View::Thread));
     // The session has both.
     app.save_session(None);
-    let s = app.store.load_session().unwrap();
+    let s = app.store.session.clone();
     assert_eq!((s.tabs.len(), s.active, s.tabs[1].thread), (2, 1, Some(2)));
     // ctrl-w closes; the last tab stays.
     app.on_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL));
@@ -2046,7 +2111,7 @@ fn filter_app(dir: &std::path::Path) -> App {
     let mut app = app_with(FILTER_CONFIG);
     app.config_path = Some(path);
     app.goto_str("a/x/1");
-    let named = |no, name: &str| Post { no, name: name.into(), ..Default::default() };
+    let named = |no, name: &str| Post { no, poster: name.into(), ..Default::default() };
     app.handle(answer(app.tab.req().unwrap(), thread_arrived, arrived(vec![named(1, "Anonymous"), named(2, "Named !Trip"), named(3, "Anonymous"), named(4, "Named !Trip")])));
     app
 }
@@ -2112,7 +2177,7 @@ fn filters_from_a_catalog_by_subject_and_image() {
     let mut app = filter_app(dir.path());
     app.goto_str("a/x");
     let file = Attachment { filename: "cat.png".into(), md5: Some("q1w2e3==".into()), ..Default::default() };
-    let op = |no, subject: &str| Post { no, subject: Some(subject.into()), name: "Anonymous".into(), files: vec![file.clone()], ..Default::default() };
+    let op = |no, subject: &str| Post { no, subject: Some(subject.into()), poster: "Anonymous".into(), files: vec![file.clone()], ..Default::default() };
     app.handle(answer(app.tab.req().unwrap(), App::catalog_arrived, Ok(vec![op(1, "Daily (thread)"), op(2, "Other"), op(3, "Daily (thread)")])));
     app.act(Action::Filter);
     let a = app.filter_add().unwrap();
@@ -2307,7 +2372,7 @@ fn i_shows_a_posters_posts_until_esc() {
     assert_eq!(shown(&app), [2, 5, 6]);
     // It isn't kept in the session (a conversation is).
     app.save_session(None);
-    assert_eq!(app.store.load_session().map(|s| s.tabs[0].conversation), Some(None));
+    assert_eq!(app.store.session.tabs[0].conversation, None);
     // esc: the whole thread, scrolled where it was.
     app.on_key(KeyEvent::from(KeyCode::Esc));
     let t = app.tab.thread.as_ref().unwrap();
@@ -2349,7 +2414,7 @@ fn a_conversation_is_remembered_in_the_session() {
     app.act(Action::Conversation);
     app.tab.thread.as_mut().unwrap().select(2);
     app.save_session(None);
-    let place = app.store.load_session().unwrap().tabs[0].clone();
+    let place = app.store.session.clone().tabs[0].clone();
     assert_eq!((place.conversation, place.selected), (Some(2), Some(3)));
     // An old session without it still loads.
     let old: crate::store::Place = serde_json::from_str(r#"{"view":"thread","site":"a","board":"x","thread":1}"#).unwrap();
@@ -3229,7 +3294,7 @@ fn hidden_words_hide_posts_everywhere() {
     app.popup = None;
     app.tab.navigate(View::Thread);
     // From a post's X: w, the thread's search to start with; u right after takes it back.
-    app.tab.thread.as_mut().unwrap().posts[1].name = "Satoshi".into();
+    app.tab.thread.as_mut().unwrap().posts[1].poster = "Satoshi".into();
     app.tab.thread.as_mut().unwrap().set_search("free".into());
     app.tab.thread.as_mut().unwrap().select(1);
     app.open_add_filter();

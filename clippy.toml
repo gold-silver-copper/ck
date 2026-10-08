@@ -6,7 +6,7 @@ allow-indexing-slicing-in-tests = true
 
 # Text is measured only as ratatui draws it (markup::columns); files land, and cache folders
 # are listed and trimmed, only through crate::atomic, so a temp file is never shared, never
-# left behind on error, and never counted or evicted.
+# left behind on error, and never counted or evicted; a list's scroll is set only as drawn.
 disallowed-methods = [
   # Text width: one measure, the one ratatui draws with.
   { path = "unicode_width::UnicodeWidthStr::width", reason = "measures differently from what ratatui draws; use markup::columns or markup::spans_columns" },
@@ -28,4 +28,8 @@ disallowed-methods = [
   { path = "std::fs::read_dir", reason = "list folders with crate::atomic::files/trim so in-flight temps are skipped" },
   { path = "std::path::Path::read_dir", reason = "list folders with crate::atomic::files/trim so in-flight temps are skipped" },
   { path = "std::fs::remove_dir_all", reason = "trim folders with crate::atomic::trim so in-flight temps are spared" },
+  # Scroll: a popup keeps its ListState, and only ui::window sets where it's drawn from, so
+  # what's kept is what was shown (an offset made anew each frame is clamped only there).
+  { path = "ratatui::widgets::ListState::with_offset", reason = "keep the ListState in the popup; ui::window sets its offset as drawn" },
+  { path = "ratatui::widgets::ListState::offset_mut", reason = "keep the ListState in the popup; ui::window sets its offset as drawn (keys scroll with app::input::scroll_by)" },
 ]

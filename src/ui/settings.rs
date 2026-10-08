@@ -47,9 +47,10 @@ pub(super) fn draw_settings(f: &mut Frame, app: &mut App, area: Rect) {
     }
 }
 
-pub(super) fn draw_settings_popup(f: &mut Frame, app: &App) {
-    let Some(Popup::Settings(popup)) = &app.popup else { return };
-    match popup {
+pub(super) fn draw_settings_popup(f: &mut Frame, app: &mut App) {
+    // Out while it's drawn, so its list can scroll beside the rest of the app.
+    let Some(Popup::Settings(mut popup)) = app.popup.take_if(|p| matches!(p, Popup::Settings(_))) else { return };
+    match &mut popup {
         SettingsPopup::Themes { list, names, .. } => draw_themes(f, app, list, names),
         SettingsPopup::Colors { list, editing } => draw_colors(f, app, list, editing.as_deref()),
         SettingsPopup::Keys { list, capture } => draw_keys(f, app, list, *capture),
@@ -60,13 +61,12 @@ pub(super) fn draw_settings_popup(f: &mut Frame, app: &App) {
         SettingsPopup::FilterEdit { index, draft, row, typing } => draw_filter_edit(f, app, *index, draft, *row, typing.as_deref()),
         SettingsPopup::Folder { value } => draw_folder(f, value),
     }
+    app.popup = Some(Popup::Settings(popup));
 }
 
-fn draw_themes(f: &mut Frame, app: &App, list: &ListState, names: &[String]) {
+fn draw_themes(f: &mut Frame, app: &App, list: &mut ListState, names: &[String]) {
     let t = theme();
-    let inner = panel(f, 52, cells(names.len()).saturating_add(3), "Theme", "enter keep · esc cancel");
-    list_rows(f, inner, 0, names.len(), list.selected().or(Some(0)), |k| {
-        let Some(name) = names.get(k) else { return Line::default() };
+    list_panel(f, (52, "Theme", "enter keep · esc cancel"), list, names, ("", true), |_| Vec::new(), |_, name, _| {
         let mut spans = vec![Span::styled(pad(name, 22), Style::new().fg(t.text))];
         // A row of colored cells: the theme at a glance.
         if let Ok(th) = theme::resolve(name, &app.themes) {
@@ -77,17 +77,23 @@ fn draw_themes(f: &mut Frame, app: &App, list: &ListState, names: &[String]) {
     });
 }
 
-fn draw_colors(f: &mut Frame, app: &App, list: &ListState, editing: Option<&str>) {
+fn draw_colors(f: &mut Frame, app: &App, list: &mut ListState, editing: Option<&str>) {
     let t = theme();
     let title = format!("Colors · {}", app.theme_name);
     let hint = if editing.is_some() { "enter save · esc cancel" } else { "enter edit · x reset · esc close" };
-    let h = (cells(ROLES.len()).saturating_add(5)).min(f.area().height.saturating_sub(4));
-    let inner = panel(f, 96, h, &title, hint);
-    let rows = inner.height.saturating_sub(2) as usize;
     let sel = list.selected().unwrap_or(0);
-    let first = sel.saturating_sub(rows.saturating_sub(1));
-    list_rows(f, Rect { height: rows as u16, ..inner }, first, ROLES.len(), Some(sel), |k| {
-        let Some(&(role, desc)) = ROLES.get(k) else { return Line::default() };
+    let foot = |_| {
+        vec![match editing {
+            Some(text) => Line::from(vec![
+                Span::styled(format!("New {} color: ", ROLES.get(sel).map_or("", |r| r.0)), Style::new().fg(t.text)),
+                Span::styled(text.to_string(), bold(t.text)),
+                Span::styled("▏", Style::new().fg(t.primary)),
+                Span::styled("   #rrggbb, a name, 0-255, or default", dim()),
+            ]),
+            None => Line::styled("Changing a color of a built-in theme saves it as a copy: NAME-custom.", dim()),
+        }]
+    };
+    list_panel(f, (96, &title, hint), list, ROLES, ("", true), foot, |_, &(role, desc), _| {
         let c = t.get(role).unwrap_or(Color::Reset);
         Line::from(vec![
             Span::styled("    ", Style::new().bg(c)),
@@ -96,34 +102,31 @@ fn draw_colors(f: &mut Frame, app: &App, list: &ListState, editing: Option<&str>
             Span::styled(desc, dim()),
         ])
     });
-    let y = inner.bottom().saturating_sub(1);
-    let line = match editing {
-        Some(text) => Line::from(vec![
-            Span::styled(format!("New {} color: ", ROLES.get(sel).map_or("", |r| r.0)), Style::new().fg(t.text)),
-            Span::styled(text.to_string(), bold(t.text)),
-            Span::styled("▏", Style::new().fg(t.primary)),
-            Span::styled("   #rrggbb, a name, 0-255, or default", dim()),
-        ]),
-        None => Line::styled("Changing a color of a built-in theme saves it as a copy: NAME-custom.", dim()),
-    };
-    put(f, inner.x, y, inner.width, line);
 }
 
-fn draw_keys(f: &mut Frame, app: &App, list: &ListState, capture: Option<bool>) {
+fn draw_keys(f: &mut Frame, app: &App, list: &mut ListState, capture: Option<bool>) {
     let t = theme();
     let rows = key_rows();
     let hint = if capture.is_some() { "press a key · esc cancel" } else { "enter rebind · a add · u unbind · x reset · esc close" };
-    let h = (cells(rows.len()).saturating_add(5)).min(f.area().height.saturating_sub(4));
-    let inner = panel(f, 96, h, "Keys", hint);
-    let view = inner.height.saturating_sub(2) as usize;
     let sel = list.selected().unwrap_or(0);
-    let first = (sel + 2).saturating_sub(view).min(rows.len().saturating_sub(view));
+    let foot = |_| {
+        vec![match (capture, rows.get(sel).and_then(|r| r.ok()).and_then(|i| keys::ACTIONS.get(i))) {
+            (Some(add), Some(entry)) => {
+                let verb = if add { "Press a key to add to" } else { "Press the new key for" };
+                Line::from(vec![
+                    Span::styled(format!("{verb} "), Style::new().fg(t.text)),
+                    Span::styled(entry.1, bold(t.primary)),
+                    Span::styled("   esc cancels", dim()),
+                ])
+            }
+            _ => Line::styled("Changed keys are saved in [keys]; navigation keys are fixed. Without a key: in the . menu.", dim()),
+        }]
+    };
     // Group titles are never selected, so never painted.
-    list_rows(f, Rect { height: view as u16, ..inner }, first, rows.len(), Some(sel), |k| {
-        let i = match rows.get(k) {
-            Some(Err(title)) => return Line::styled(title.to_string(), bold(t.primary)),
-            Some(&Ok(i)) => i,
-            None => return Line::default(),
+    list_panel(f, (96, "Keys", hint), list, &rows, ("", true), foot, |_, &row, width| {
+        let i = match row {
+            Err(title) => return Line::styled(title.to_string(), bold(t.primary)),
+            Ok(i) => i,
         };
         let Some(&(action, name, _, scopes, desc)) = keys::ACTIONS.get(i) else { return Line::default() };
         let changed = !app.keys.is_default(action);
@@ -135,28 +138,15 @@ fn draw_keys(f: &mut Frame, app: &App, list: &ListState, capture: Option<bool>) 
             _ => vec![Span::styled(format!("  {}", col(&label, 16)), key_style)],
         };
         // Narrow: just the key and what it does.
-        if inner.width >= 80 {
+        if width >= 80 {
             spans.push(Span::styled(pad(name, 17), dim()));
             spans.push(Span::styled(col(desc, 37), Style::new().fg(t.text)));
-            spans.push(Span::styled(truncate(&scopes, (inner.width as usize).saturating_sub(72)), dim()));
+            spans.push(Span::styled(truncate(&scopes, (width as usize).saturating_sub(72)), dim()));
         } else {
-            spans.push(Span::styled(truncate(desc, (inner.width as usize).saturating_sub(18)), Style::new().fg(t.text)));
+            spans.push(Span::styled(truncate(desc, (width as usize).saturating_sub(18)), Style::new().fg(t.text)));
         }
         Line::from(spans)
     });
-    let y = inner.bottom().saturating_sub(1);
-    let line = match (capture, rows.get(sel).and_then(|r| r.ok()).and_then(|i| keys::ACTIONS.get(i))) {
-        (Some(add), Some(entry)) => {
-            let verb = if add { "Press a key to add to" } else { "Press the new key for" };
-            Line::from(vec![
-                Span::styled(format!("{verb} "), Style::new().fg(t.text)),
-                Span::styled(entry.1, bold(t.primary)),
-                Span::styled("   esc cancels", dim()),
-            ])
-        }
-        _ => Line::styled("Changed keys are saved in [keys]; navigation keys are fixed. Without a key: in the . menu.", dim()),
-    };
-    put(f, inner.x, y, inner.width, line);
 }
 
 fn draw_folder(f: &mut Frame, value: &str) {
@@ -193,41 +183,33 @@ fn counts_text((posts, threads): (usize, usize)) -> String {
 }
 
 /// Settings › Catalog › Hidden words.
-fn draw_hidden_words(f: &mut Frame, app: &App, list: &ListState, typing: Option<&str>) {
+fn draw_hidden_words(f: &mut Frame, app: &App, list: &mut ListState, typing: Option<&str>) {
     let t = theme();
-    let words = &app.hidden_words;
     let hint = if typing.is_some() { "enter add · esc cancel" } else { "a add · x remove · esc close" };
     let empty = if typing.is_some() { "" } else { "None yet. a adds one; so does w in a post's X." };
-    let sel = list.selected().unwrap_or(0);
-    let inner = list_panel(f, (70, "Hidden words", hint), words.len(), (sel, typing.is_none()), (empty, "Whole words, any case. Kept in the config as hidden_words."), (1, 1), |k, _| {
-        Line::styled(words.get(k).cloned().unwrap_or_default(), Style::new().fg(t.text))
-    });
-    if let Some(text) = typing {
-        let line = Line::from(vec![Span::styled("New  ", dim()), Span::styled(text.to_string(), bold(t.text)), Span::styled("▏", Style::new().fg(t.primary))]);
-        put(f, inner.x, inner.bottom().saturating_sub(2), inner.width, line);
-    }
+    let typed = typing.map(|text| Line::from(vec![Span::styled("New  ", dim()), Span::styled(text.to_string(), bold(t.text)), Span::styled("▏", Style::new().fg(t.primary))]));
+    let foot = |_| vec![typed.unwrap_or_default(), Line::styled("Whole words, any case. Kept in the config as hidden_words.", dim())];
+    list_panel(f, (70, "Hidden words", hint), list, &app.hidden_words, (empty, typing.is_none()), foot, |_, word, _| Line::styled(word.clone(), Style::new().fg(t.text)));
 }
 
 /// Settings › Catalog › Board images: boards with their own image setting.
-fn draw_board_images(f: &mut Frame, app: &App, list: &ListState) {
+fn draw_board_images(f: &mut Frame, app: &App, list: &mut ListState) {
     let t = theme();
     let boards = app.boards_with_images_set();
     let empty = "None: every board follows the default. A board's . menu changes it.";
     let note = "Boards the site marks NSFW follow the NSFW boards setting; the rest show images.";
-    list_panel(f, (70, "Board images", "x back to the default · esc close"), boards.len(), (list.selected().unwrap_or(0), true), (empty, note), (0, 0), |k, width| {
-        let Some((key, on)) = boards.get(k) else { return Line::default() };
+    list_panel(f, (70, "Board images", "x back to the default · esc close"), list, &boards, (empty, true), |_| vec![Line::styled(note, dim())], |_, (key, on), width| {
         spread(vec![Span::styled(key.clone(), Style::new().fg(t.text))], vec![Span::styled(if *on { "images on" } else { "images off" }, dim())], width as usize)
     });
 }
 
 /// Settings › Sites › Your sites: the config's `[[site]]` tables.
-fn draw_my_sites(f: &mut Frame, m: &crate::app::MySites) {
+fn draw_my_sites(f: &mut Frame, m: &mut crate::app::MySites) {
     let t = theme();
     let empty = "None yet: only the built-in sites. a adds one from a link to it.";
     let note = "Kept in the config as [[site]] tables; the built-in sites are always there too.";
     let hint = "a add · r update a vichan site's boards · x remove · esc close";
-    list_panel(f, (100, "Your sites", hint), m.sites.len(), (m.list.selected().unwrap_or(0), true), (empty, note), (1, 0), |k, width| {
-        let Some(s) = m.sites.get(k) else { return Line::default() };
+    list_panel(f, (100, "Your sites", hint), &mut m.list, &m.sites, (empty, true), |_| vec![Line::default(), Line::styled(note, dim())], |k, s, width| {
         let left = vec![
             Span::styled(col(&s.name, 18), bold(t.text)),
             Span::styled(pad(s.kind.as_str(), 11), Style::new().fg(t.text)),
@@ -238,14 +220,12 @@ fn draw_my_sites(f: &mut Frame, m: &crate::app::MySites) {
     });
 }
 
-fn draw_filter_list(f: &mut Frame, app: &App, list: &ratatui::widgets::ListState, counts: &[(usize, usize)]) {
+fn draw_filter_list(f: &mut Frame, app: &App, list: &mut ListState, counts: &[(usize, usize)]) {
     let t = theme();
-    let cfgs = &app.filter_cfgs;
     let empty = format!("No filters yet. a adds one; {} on a post makes one like it.", app.keys.key(Action::Filter));
     let note = "Counts are for the open catalog and thread. Kept in the config as [[filter]] tables.";
     let hint = "enter edit · space on/off · a add · x remove · esc close";
-    list_panel(f, (110, "Filters", hint), cfgs.len(), (list.selected().unwrap_or(0), true), (&empty, note), (1, 0), |k, width| {
-        let Some(c) = cfgs.get(k) else { return Line::default() };
+    list_panel(f, (110, "Filters", hint), list, &app.filter_cfgs, (&empty, true), |_| vec![Line::default(), Line::styled(note, dim())], |k, c, width| {
         let wide = width >= 90;
         let style = if c.enabled { Style::new().fg(t.text) } else { dim() };
         let fields = c.fields().iter().map(|f| f.as_str()).collect::<Vec<_>>().join("+");
@@ -279,14 +259,17 @@ fn draw_filter_edit(f: &mut Frame, app: &App, index: Option<usize>, draft: &crat
         None => "New filter".into(),
     };
     let hint = if typing.is_some() { "enter keep · esc cancel" } else { "enter change · esc back" };
-    let inner = panel(f, 84, cells(EDIT_ROWS.len()).saturating_add(6), &title, hint);
     let fields = draft.fields();
+    // What's wrong with what's being typed, as it's typed; else what it catches.
+    let r = EDIT_ROWS.get(row).copied().unwrap_or(EditRow::Pattern);
+    let note = match typing.map(|text| crate::app::filters_problem(&crate::app::filters_with_text(draft, r, text))) {
+        Some(Some(e)) => Line::styled(e, Style::new().fg(t.error)),
+        _ if draft.pattern.is_empty() => Line::styled("Type a pattern (a regex; an MD5 for md5, a range like >2MB for filesize).", dim()),
+        _ => Line::styled(format!("Catches {} now. Each change is saved in the config.", counts_text(app.filter_counts(draft))), dim()),
+    };
     // On a short screen the rows scroll, the selected one in view.
-    let shown = inner.height.saturating_sub(2) as usize;
-    let skip = (row + 1).saturating_sub(shown);
-    for (k, r) in EDIT_ROWS.iter().enumerate().skip(skip).take(shown) {
-        let y = inner.y + (k - skip) as u16;
-        paint_row(f, Rect::new(inner.x - 2, y, inner.width + 4, 1), None, k == row, false);
+    let mut list = ListState::default().with_selected(Some(row));
+    list_panel(f, (84, &title, hint), &mut list, &EDIT_ROWS, ("", true), |_| vec![Line::default(), note], |k, r, width| {
         let (name, value): (String, String) = match r {
             EditRow::Pattern => ("Pattern".into(), draft.pattern.clone()),
             EditRow::Label => ("Label".into(), draft.label.clone().unwrap_or_else(|| "(the pattern)".into())),
@@ -324,18 +307,10 @@ fn draw_filter_edit(f: &mut Frame, app: &App, index: Option<usize>, draft: &crat
         let mut spans = vec![Span::styled(pad(&name, 13), dim())];
         match typing.filter(|_| k == row) {
             Some(text) => spans.extend([Span::styled(text.to_string(), bold(t.text)), Span::styled("▏", Style::new().fg(t.primary))]),
-            None => spans.push(Span::styled(truncate(&value, (inner.width as usize).saturating_sub(14)), Style::new().fg(t.text))),
+            None => spans.push(Span::styled(truncate(&value, (width as usize).saturating_sub(14)), Style::new().fg(t.text))),
         }
-        put(f, inner.x, y, inner.width, Line::from(spans));
-    }
-    // What's wrong with what's being typed, as it's typed; else what it catches.
-    let r = EDIT_ROWS.get(row).copied().unwrap_or(EditRow::Pattern);
-    let line = match typing.map(|text| crate::app::filters_problem(&crate::app::filters_with_text(draft, r, text))) {
-        Some(Some(e)) => Line::styled(e, Style::new().fg(t.error)),
-        _ if draft.pattern.is_empty() => Line::styled("Type a pattern (a regex; an MD5 for md5, a range like >2MB for filesize).", dim()),
-        _ => Line::styled(format!("Catches {} now. Each change is saved in the config.", counts_text(app.filter_counts(draft))), dim()),
-    };
-    put(f, inner.x, inner.bottom().saturating_sub(1), inner.width, line);
+        Line::from(spans)
+    });
 }
 
 // ----- the image viewer -----

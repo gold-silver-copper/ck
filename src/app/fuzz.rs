@@ -209,7 +209,12 @@ impl Fake {
         let files = rng.below(most);
         Post {
             no,
-            name: if rng.chance(90) { "Anonymous".into() } else { fuzz::html(rng, 2) },
+            poster: crate::model::Poster::new(
+                (!rng.chance(90)).then(|| fuzz::html(rng, 2)),
+                "Anonymous",
+                no.is_multiple_of(11).then(|| "!!trip".into()),
+                no.is_multiple_of(13).then(|| "mod".into()),
+            ),
             subject: rng.chance(30).then(|| fuzz::html(rng, 3)),
             time: 1_790_000_000 - rng.below(400 * 86_400) as i64,
             files: (0..files).map(|k| self.file(rng, board, no * 10 + k as u64)).collect(),
@@ -222,8 +227,6 @@ impl Fake {
             // A few posters, by number (taking nothing from `rng`, so seeds replay as before).
             id: (!no.is_multiple_of(7)).then(|| format!("id{}", no % 4)),
             flag: no.is_multiple_of(3).then(|| crate::model::Flag { code: "US".into(), name: "United States".into() }),
-            trip: no.is_multiple_of(11).then(|| "!!trip".into()),
-            capcode: no.is_multiple_of(13).then(|| "mod".into()),
             ..markup::parse_html(&html, flavor).into()
         }
     }
