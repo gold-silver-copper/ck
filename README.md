@@ -1,5 +1,11 @@
 # ck
 
+[![crates.io](https://img.shields.io/crates/v/ck.svg)](https://crates.io/crates/ck)
+[![downloads](https://img.shields.io/crates/d/ck.svg)](https://crates.io/crates/ck)
+[![license](https://img.shields.io/crates/l/ck.svg)](#license)
+[![CI](https://github.com/gold-silver-copper/ck/actions/workflows/ci.yml/badge.svg)](https://github.com/gold-silver-copper/ck/actions/workflows/ci.yml)
+[![Built With Ratatui](https://ratatui.rs/built-with-ratatui/badge.svg)](https://ratatui.rs/)
+
 ## Install
 
     cargo install ck
