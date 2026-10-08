@@ -25,7 +25,7 @@ pub struct Search {
     /// Pages loaded.
     pub pages: u32,
     /// Where back goes: the site, board and view the search started from.
-    back: (usize, Option<Board>, View),
+    pub(super) back: (usize, Option<Board>, View),
 }
 
 /// A search of the saved threads, running or done.
@@ -63,11 +63,6 @@ impl Search {
     #[cfg(test)]
     pub fn for_tests(board: &str, query: &str, page: SearchPage) -> Self {
         Self { saved: None, board: board.into(), query: query.into(), hits: page.hits, marks: Marks::default(), total: page.total, pages: 1, back: (0, None, View::Catalog) }
-    }
-
-    /// Where the search started: its site, board and view.
-    pub(super) fn back_place(&self) -> (usize, Option<&Board>, View) {
-        (self.back.0, self.back.1.as_ref(), self.back.2)
     }
 
     /// The thread hit `k` is in: its saved copy, or the archive's thread on `site`.

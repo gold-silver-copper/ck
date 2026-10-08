@@ -32,11 +32,10 @@ impl App {
     /// Images on a catalog's thread: the catalog's own setting if it has one (an overboard
     /// as a whole), else the thread's board's.
     pub fn catalog_images_on(&self, p: &Post) -> bool {
-        let (site, catalog) = (self.tab.catalog.site(), self.tab.catalog.board().map_or("", |b| b.uri.as_str()));
-        if let Some(on) = self.store.board_prefs.get(&crate::store::board_key(site, catalog)).and_then(|p| p.images) {
+        if let Some(on) = self.store.board_prefs.get(&self.board_key()).and_then(|p| p.images) {
             return on;
         }
-        self.images_on(site, &self.tab.catalog.board_of(p))
+        self.images_on(self.tab.catalog.site(), &self.tab.catalog.board_of(p))
     }
 
     /// With `nsfw_images = "off"`, know which of a site's boards are NSFW: from its saved
@@ -92,8 +91,7 @@ impl App {
         let Some((site, board)) = self.images_target() else { return };
         let on = !self.images_on(&site, &board);
         let own = (on != self.images_by_default(&site, &board)).then_some(on);
-        let key = crate::store::board_key(&site, &board);
-        self.store.board_prefs.entry(key).or_default().images = own;
+        self.store.board_prefs.entry(crate::store::board_key(&site, &board)).or_default().images = own;
         self.save_now();
         self.info(if on { format!("Images on /{board}/") } else { format!("Images off on /{board}/: none are asked for") });
     }

@@ -269,7 +269,7 @@ impl App {
         let copy = saved.filter(|_| opening && watched).and_then(|at| Some((self.store.load_saved(&key).ok().and_then(Thread::saved)?, at)));
         let pages = self.pages.clone().filter(|_| !watched);
         let read = pages.clone().filter(|_| opening && self.tab.thread.is_none());
-        let (k, now, no) = (key.clone(), self.clock.now(), key.no);
+        let (k, shown, now) = (key.clone(), key.clone(), self.clock.now());
         let job = move |b: &dyn Backend, id, tx: &Sender<Msg>| {
             let kept = read.and_then(|p| p.read(&k.site, &k.board, Some(k.no)));
             if let Some((copies, fetched)) = &kept {
@@ -285,8 +285,7 @@ impl App {
             }
             res
         };
-        let shown = key.clone();
-        self.spawn(backend, format!("Loading thread {no}"), Then::Thread { open }, job, move |app, r| app.thread_arrived(&shown, r));
+        self.spawn(backend, format!("Loading thread {}", key.no), Then::Thread { open }, job, move |app, r| app.thread_arrived(&shown, r));
         if let Some((t, at)) = copy {
             self.set_cached_thread(key, t, at);
         }

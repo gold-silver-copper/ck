@@ -346,9 +346,7 @@ fn location(app: &App) -> (Vec<String>, Vec<Span<'static>>) {
             if th.is_some_and(|th| !app.images_on(&th.key().site, &th.key().board)) {
                 meta.push("images off".into());
             }
-            // The thread's own site and board.
-            let site = || th.map_or_else(site, |th| th.key().site.clone());
-            let uri = th.map(|th| th.key().board.as_str()).or_else(|| app.tab.board.as_ref().map(|b| b.uri.as_str())).map(|b| format!("/{b}/")).unwrap_or_default();
+            let uri = app.tab.board.as_ref().map(|b| format!("/{}/", b.uri)).unwrap_or_default();
             if let Some(c) = th.and_then(|th| th.conversation.as_ref()).filter(|_| app.tab.gallery.is_none()) {
                 // The conversation's posts instead of the thread's.
                 meta.retain(|m| !m.ends_with("posts") && !m.ends_with("post"));

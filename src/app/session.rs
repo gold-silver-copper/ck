@@ -27,11 +27,10 @@ impl App {
     pub fn place(&self) -> Place {
         // From settings or search results: where they were opened from.
         let (site, board, view) = match &self.tab.search {
-            Some(s) if self.tab.place_view() == View::Search => s.back_place(),
+            Some(s) if self.tab.place_view() == View::Search => (s.back.0, s.back.1.as_ref(), s.back.2),
             _ => (self.tab.site, self.tab.board.as_ref(), self.tab.place_view()),
         };
-        let site = self.sites.get(site).map_or(String::new(), |s| s.cfg.name.clone());
-        let mut place = Place { view: view_name(view).into(), site, ..Default::default() };
+        let mut place = Place { view: view_name(view).into(), site: self.sites.get(site).map_or(String::new(), |s| s.cfg.name.clone()), ..Default::default() };
         // A saved copy open: reopened as one.
         if view == View::Thread && self.tab.saved().is_some() {
             place.view = "saved".into();

@@ -129,8 +129,7 @@ impl App {
         self.selected_post()?.files.get(k)
     }
 
-    /// Where a quote link in the selected post leads, as a web address, from where the tab
-    /// is (a thread shown is where the tab is, so it's that thread's site and board).
+    /// Where a quote link in the selected post leads, as a web address, from where the tab is.
     pub(super) fn quote_url(&self, l: &Link) -> Option<String> {
         let t = self.tab.thread.as_ref().filter(|_| self.tab.view() == View::Thread);
         let board = l.board.clone().or_else(|| self.tab.board.as_ref().map(|b| b.uri.clone()))?;

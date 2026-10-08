@@ -1149,10 +1149,9 @@ impl App {
 
     // ----- downloads and settings -----
 
-    /// The open catalog's board, as `site/board` (for its own sort and layout).
+    /// The open catalog's board, as `site/board` (for its own sort, layout and images).
     fn board_key(&self) -> String {
-        let c = &self.tab.catalog;
-        crate::store::board_key(c.site(), c.board().map_or("", |b| b.uri.as_str()))
+        crate::store::board_key(self.tab.catalog.site(), self.tab.catalog.board().map_or("", |b| b.uri.as_str()))
     }
 
     /// The catalog layout here: the board's own, or the default.
@@ -1678,9 +1677,7 @@ impl App {
             (View::Catalog, Some(i)) => {
                 let Some(p) = self.tab.catalog.posts().get(i) else { return };
                 // On an overboard the thread lives on its own board.
-                let (no, uri) = (p.no, self.tab.catalog.board_of(p));
-                let board = self.tab.catalog.board().filter(|b| b.uri == uri).cloned().unwrap_or_else(|| self.find_board(&uri));
-                self.open_thread_at(board, no, Opening::default());
+                self.open_thread_at(self.find_board(&self.tab.catalog.board_of(p)), p.no, Opening::default());
                 self.tab.return_to = None;
                 self.tab.from_catalog = true;
             }
@@ -1690,7 +1687,7 @@ impl App {
 
     /// Show `board`'s catalog from the top, and load it.
     fn open_catalog(&mut self, board: Board) {
-        self.tab.catalog = Catalog::new(self.current_site().cfg.name.clone(), board.clone());
+        self.tab.catalog = Catalog::default();
         self.tab.board = Some(board);
         self.tab.catalog_list = FilteredList::top();
         self.tab.navigate(View::Catalog);
