@@ -6,13 +6,13 @@
 [![CI](https://github.com/gold-silver-copper/ck/actions/workflows/ci.yml/badge.svg)](https://github.com/gold-silver-copper/ck/actions/workflows/ci.yml)
 [![Built With Ratatui](https://ratatui.rs/built-with-ratatui/badge.svg)](https://ratatui.rs/)
 
+[![A two-minute tour of ck](ck-demo.avif)](ck-demo.webm)
+
 ## Install
 
     cargo install ck
 
 Run `ck`, or `ck 4chan/g` (or any thread or board URL) to start there.
-
-[![A two-minute tour of ck](ck-demo.avif)](ck-demo.webm)
 
 A read-only terminal browser for imageboards, built with [ratatui](https://ratatui.rs): 4chan,
 vichan and LynxChan sites, jschan, 2ch and FoolFuuka archives, with images drawn in the
