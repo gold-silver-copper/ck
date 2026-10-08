@@ -56,7 +56,7 @@ pub fn data(posts: &[Post], about: &About, dir: &Path) -> serde_json::Value {
                 })
                 .collect();
             json!({
-                "no": p.no, "name": p.name, "subject": p.subject, "time": p.time,
+                "no": p.no, "name": p.poster.name(), "subject": p.subject, "time": p.time,
                 "text": crate::app::copy_text(p, false), "quotes": p.quotes, "urls": p.urls, "files": files,
             })
         })
@@ -157,7 +157,7 @@ pre {{ background: {code_bg}; color: {code}; padding: 8px; overflow-x: auto; whi
     }
     for (i, p) in posts.iter().enumerate() {
         let time = chrono::DateTime::from_timestamp(p.time, 0).map(|d| d.format("%Y-%m-%d %H:%M UTC").to_string()).unwrap_or_default();
-        let _ = write!(out, r#"<article class="post" id="p{}"><div class="head"><span class="name">{}</span> "#, p.no, text(&p.name));
+        let _ = write!(out, r#"<article class="post" id="p{}"><div class="head"><span class="name">{}</span> "#, p.no, text(p.poster.name()));
         if i == 0 {
             out.push_str(r#"<span class="op">OP</span> "#);
         }
@@ -271,7 +271,7 @@ mod tests {
     fn posts() -> Vec<Post> {
         let post = |no, html: &str| {
             let p = parse_html(html, Flavor::Fourchan);
-            Post { no, name: "Anonymous".into(), time: 1_790_000_000, ..p.into() }
+            Post { no, poster: "Anonymous".into(), time: 1_790_000_000, ..p.into() }
         };
         let mut op = post(1, "Hello <b>world</b> &amp; <s>secret</s><br><span class=\"quote\">&gt;green</span>");
         op.subject = Some("A <thread>".into());

@@ -1,8 +1,10 @@
-//! The one way ck lands a file (whole or not at all, through a temp file of its own) and
-//! the one way it lists and trims a cache folder (never counting another writer's temp).
+//! The one way ck lands a file (whole or not at all, through a temp file of its own), reads
+//! a data file (and may then write it), and lists and trims a cache folder (never counting
+//! another writer's temp).
 #![allow(clippy::disallowed_methods)] // this module is the owner the lint points to
 
 use anyhow::{Context as _, Result};
+use std::cell::Cell;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -29,7 +31,7 @@ pub fn write_from(path: &Path, mut body: impl std::io::Read) -> Result<()> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
         if crate::http::lock(&SWEPT).insert(dir.to_path_buf()) {
-            walk(dir, 0).1.into_iter().filter(|t| stale(t.1) && ours(&t.0)).for_each(|t| drop(std::fs::remove_file(t.0)));
+            listing(dir, 0).1.into_iter().filter(|t| stale(t.1) && ours(&t.0)).for_each(|t| drop(std::fs::remove_file(t.0)));
         }
     }
     let mode = std::fs::symlink_metadata(path).ok().filter(std::fs::Metadata::is_file).map(|m| m.permissions());
@@ -87,10 +89,66 @@ fn link_target(path: &Path) -> PathBuf {
         .unwrap_or_else(|_| path.to_path_buf())
 }
 
-/// Move a file that won't load aside to `<x>.json.corrupt`, keeping it for the user; where it went.
-pub fn set_aside(path: &Path) -> std::io::Result<PathBuf> {
+/// What reading a JSON data file found, with the permission to write it (`Owned`) whenever
+/// what's on disk is known: not when it couldn't be read.
+pub enum Read<T> {
+    Missing(Owned),
+    Loaded(T, Owned),
+    /// It wouldn't load (not UTF-8 included), and was moved aside to `<x>.json.corrupt`.
+    Corrupt(String, Owned),
+    /// It couldn't be read (permissions, a folder in its place), or moved aside.
+    Unreadable(String),
+}
+
+pub fn read<T: serde::de::DeserializeOwned>(path: &Path) -> Read<T> {
+    let bytes = match std::fs::read(path) {
+        Ok(b) => b,
+        // Under a file instead of a folder, it can't be there either.
+        Err(e) if matches!(e.kind(), std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory) => return Read::Missing(Owned::new(path)),
+        Err(e) => return Read::Unreadable(format!("Couldn't read {} ({e})", path.display())),
+    };
+    let e = match serde_json::from_slice(&bytes) {
+        Ok(v) => return Read::Loaded(v, Owned::new(path)),
+        Err(e) => e,
+    };
     let aside = path.with_extension("json.corrupt");
-    std::fs::rename(path, &aside).map(|()| aside)
+    match std::fs::rename(path, &aside) {
+        Ok(()) => Read::Corrupt(format!("{} was corrupt ({e}); moved it to {}", path.display(), aside.display()), Owned::new(path)),
+        Err(r) => Read::Unreadable(format!("Couldn't read {}: corrupt ({e}), and couldn't be moved aside ({r})", path.display())),
+    }
+}
+
+/// The permission to write one data file, and a hash of what was last read or written there.
+pub struct Owned {
+    path: PathBuf,
+    last: Cell<Option<u64>>,
+}
+
+impl Owned {
+    fn new(path: &Path) -> Self {
+        Owned { path: path.to_path_buf(), last: Cell::new(None) }
+    }
+
+    /// Write `bytes` to the file unless they're what's there.
+    pub fn write(&self, bytes: &[u8]) -> Result<()> {
+        if self.last.get() != Some(hash(bytes)) {
+            write(&self.path, bytes)?;
+            self.mark(bytes);
+        }
+        Ok(())
+    }
+
+    /// Count `bytes` (what was just read, as ck would write it) as what's there.
+    pub fn mark(&self, bytes: &[u8]) {
+        self.last.set(Some(hash(bytes)));
+    }
+}
+
+fn hash(bytes: &[u8]) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    bytes.hash(&mut h);
+    h.finish()
 }
 
 /// Whether `path` is a temp file: ours, an older version's `<x>.tmp`, or an old download's `.part`.
@@ -114,43 +172,60 @@ fn stale(modified: Option<SystemTime>) -> bool {
 }
 
 /// The regular files under `dir`, down to `depth` folders below it (path, size, last
-/// modified), and apart from them the temp files (path, last modified).
-type Listing = (Vec<(PathBuf, u64, SystemTime)>, Vec<(PathBuf, Option<SystemTime>)>);
+/// modified), apart from them the temp files (path, last modified), and what couldn't be
+/// listed.
+type Listing = (Vec<(PathBuf, u64, SystemTime)>, Vec<(PathBuf, Option<SystemTime>)>, Vec<String>);
 
-fn walk(dir: &Path, depth: u8) -> Listing {
-    let (mut files, mut temps) = (Vec::new(), Vec::new());
-    for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
-        let path = entry.path();
-        let Ok(meta) = std::fs::metadata(&path) else { continue };
-        if meta.is_dir() && depth > 0 {
-            let (f, t) = walk(&path, depth - 1);
-            files.extend(f);
-            temps.extend(t);
-        } else if meta.is_file() && is_temp(&path) {
-            temps.push((path, meta.modified().ok()));
-        } else if meta.is_file() {
-            files.push((path, meta.len(), meta.modified().unwrap_or(SystemTime::UNIX_EPOCH)));
-        }
-    }
-    (files, temps)
+fn listing(dir: &Path, depth: u8) -> Listing {
+    let mut listing = Listing::default();
+    walk(dir, depth, &mut listing);
+    listing
 }
 
-/// The files under `dir`, down to `depth` folders below it, temp files left out. (A
-/// symlinked folder is followed; `depth` keeps a loop of them finite.)
-pub fn files(dir: &Path, depth: u8) -> Vec<PathBuf> {
-    walk(dir, depth).0.into_iter().map(|f| f.0).collect()
+fn walk(dir: &Path, depth: u8, into: &mut Listing) {
+    let entries = match std::fs::read_dir(dir) {
+        Ok(entries) => entries,
+        // Not made yet, removed since it was listed, or a file in its place: nothing in it.
+        Err(e) if matches!(e.kind(), std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory) => return,
+        Err(e) => return into.2.push(format!("Couldn't list {} ({e})", dir.display())),
+    };
+    for path in entries.flatten().map(|entry| entry.path()) {
+        let meta = match std::fs::metadata(&path) {
+            Ok(meta) => meta,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(e) => {
+                into.2.push(format!("Couldn't look at {} ({e})", path.display()));
+                continue;
+            }
+        };
+        if meta.is_dir() && depth > 0 {
+            walk(&path, depth - 1, into);
+        } else if meta.is_file() && is_temp(&path) {
+            into.1.push((path, meta.modified().ok()));
+        } else if meta.is_file() {
+            into.0.push((path, meta.len(), meta.modified().unwrap_or(SystemTime::UNIX_EPOCH)));
+        }
+    }
+}
+
+/// The files under `dir`, down to `depth` folders below it, temp files left out, and what
+/// under it couldn't be listed. (A symlinked folder is followed; `depth` keeps a loop of
+/// them finite.)
+pub fn files(dir: &Path, depth: u8) -> (Vec<PathBuf>, Vec<String>) {
+    let (files, _, unlisted) = listing(dir, depth);
+    (files.into_iter().map(|f| f.0).collect(), unlisted)
 }
 
 /// The bytes the files under `dir` take, down to `depth` folders below it, temp files left out.
 pub fn total(dir: &Path, depth: u8) -> u64 {
-    walk(dir, depth).0.iter().fold(0, |sum, f| sum.saturating_add(f.1))
+    listing(dir, depth).0.iter().fold(0, |sum, f| sum.saturating_add(f.1))
 }
 
 /// For a cache folder, down to `depth` folders below it: remove temp files older than a
 /// day, then the least recently modified files until at most `target` bytes remain; the
 /// bytes left. A younger temp file is another write in flight: neither counted nor removed.
 pub fn trim(dir: &Path, depth: u8, target: u64) -> u64 {
-    let (mut files, temps) = walk(dir, depth);
+    let (mut files, temps, _) = listing(dir, depth);
     temps.into_iter().filter(|t| stale(t.1)).for_each(|t| drop(std::fs::remove_file(t.0)));
     files.sort_by_key(|f| f.2);
     let mut left = files.iter().fold(0u64, |sum, f| sum.saturating_add(f.1));
@@ -354,7 +429,7 @@ mod tests {
         std::os::unix::fs::symlink("nowhere", dir.path().join("dangling")).unwrap();
         // A loop of links ends.
         std::os::unix::fs::symlink(dir.path(), elsewhere.path().join("g/loop")).unwrap();
-        assert_eq!(files(dir.path(), 2), vec![dir.path().join("4chan/g/1.json")]);
+        assert_eq!(files(dir.path(), 2).0, vec![dir.path().join("4chan/g/1.json")]);
     }
 
     #[cfg(unix)]
@@ -400,7 +475,7 @@ mod tests {
         age(&part, STALE * 3);
         // Temps aren't counted or listed.
         assert_eq!(total(dir.path(), 2), 10);
-        assert_eq!(files(dir.path(), 2), vec![dir.path().join("e.json")]);
+        assert_eq!(files(dir.path(), 2).0, vec![dir.path().join("e.json")]);
         // Even with nothing allowed, a write in flight stays; a crash's leftovers go.
         assert_eq!(trim(dir.path(), 2, 0), 0);
         assert!(fresh.exists());
@@ -421,12 +496,19 @@ mod tests {
     }
 
     #[test]
-    fn set_aside_keeps_the_file() {
+    fn a_file_that_wont_load_is_kept_aside() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("history.json");
         std::fs::write(&path, b"{").unwrap();
-        assert_eq!(set_aside(&path).unwrap(), dir.path().join("history.json.corrupt"));
-        assert_eq!(std::fs::read(dir.path().join("history.json.corrupt")).unwrap(), b"{");
-        assert!(set_aside(&path).is_err());
+        assert!(matches!(read::<Vec<u64>>(&path), Read::Corrupt(..)));
+        let aside = dir.path().join("history.json.corrupt");
+        assert_eq!(std::fs::read(&aside).unwrap(), b"{");
+        assert!(matches!(read::<Vec<u64>>(&path), Read::Missing(_)));
+        // Where it can't be moved, it can't be written over either.
+        std::fs::write(&path, b"{").unwrap();
+        std::fs::remove_file(&aside).unwrap();
+        std::fs::create_dir_all(aside.join("in-the-way")).unwrap();
+        assert!(matches!(read::<Vec<u64>>(&path), Read::Unreadable(_)));
+        assert_eq!(std::fs::read(&path).unwrap(), b"{");
     }
 }

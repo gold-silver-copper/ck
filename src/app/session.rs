@@ -69,25 +69,19 @@ impl App {
             return;
         }
         if let Some(now) = now {
-            if now.duration_since(self.session_saved.1) < SAVE_EVERY {
+            if now.duration_since(self.session_saved) < SAVE_EVERY {
                 return;
             }
-            self.session_saved.1 = now;
+            self.session_saved = now;
         }
         let session = self.session();
-        if self.session_saved.0.as_ref() == Some(&session) {
-            return;
-        }
         // Not worth an error message; it's tried again later.
-        if self.store.save_session(&session).is_ok() {
-            self.session_saved.0 = Some(session);
-        }
+        let _ = self.store.save_session(session);
     }
 
     /// Start where the last run left off, with the same tabs.
     pub fn restore_session(&mut self) {
-        let Some(session) = self.store.load_session() else { return };
-        self.session_saved.0 = Some(session.clone());
+        let session = self.store.session.clone();
         for (i, place) in session.tabs.iter().take(super::MAX_TABS).enumerate() {
             if i > 0 {
                 self.tabs.push(super::Tab::new(0, self.clock.instant()));
