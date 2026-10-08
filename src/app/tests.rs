@@ -4859,3 +4859,84 @@ fn a_click_after_the_settings_open_or_close_waits_for_the_next_frame() {
     app.tab.close_settings();
     assert!(app.drawn().is_none(), "the settings drawn are clickable over the boards");
 }
+
+// ----- what is shown knows where it came from -----
+
+#[test]
+fn a_saved_copy_from_another_site_is_watched_on_its_own_site_after_the_search_closes() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = saving_app(dir.path(), 1000);
+    let theirs = ThreadKey { site: "b".into(), board: "y".into(), no: 5 };
+    app.store.keep_thread(&theirs, "five", "u", &whole(&nos(&[5, 6])), 900);
+    app.flush_writes();
+    // In site a's thread x/1, a search of saved threads finds b's /y/5.
+    app.goto_str("a/x/1");
+    app.handle(answer(app.tab.req().unwrap(), thread_arrived, arrived(nos(&[1, 2]))));
+    app.search_saved("post");
+    settle_until(&mut app, |a| a.tab.search.as_ref().and_then(|s| s.saved.as_ref()).is_some_and(|s| s.finished));
+    app.tab.search_list.state.select(Some(0));
+    app.enter();
+    assert_eq!(app.tab.thread.as_ref().map(|t| t.no), Some(5));
+    // Back to the results, and back again to where the search started.
+    app.back();
+    assert_eq!(app.tab.view(), View::Search);
+    app.back();
+    // b's copy is still what is shown, so watching it watches b's /y/5.
+    assert_eq!((app.tab.view(), app.tab.thread.as_ref().map(|t| t.no)), (View::Thread, Some(5)));
+    app.act(Action::Watch);
+    let wrong = ThreadKey { site: "a".into(), ..theirs.clone() };
+    assert_eq!((app.store.watched(&theirs).is_some(), app.store.watched(&wrong).is_some()), (true, false));
+}
+
+#[test]
+fn a_new_board_shows_none_of_the_last_boards_hidden_threads() {
+    let mut app = local_app();
+    app.goto_str("a/x");
+    let ops = (1..=5).map(|no| Post { no, ..Default::default() }).collect::<Vec<_>>();
+    app.handle(answer(app.tab.req().unwrap(), App::catalog_arrived, Ok(ops)));
+    // Two of /x/'s threads hidden by hand.
+    for _ in 0..2 {
+        app.tab.catalog_list.state.select(Some(0));
+        app.act(Action::Hide);
+    }
+    assert_eq!(app.tab.catalog_marks.hidden_count(), 2);
+    // /xy/ is opening (and stays empty if it fails): nothing of it is hidden.
+    app.goto_str("a/xy");
+    assert_eq!((app.tab.view(), app.tab.catalog.len()), (View::Catalog, 0));
+    assert_eq!(app.tab.catalog_marks.hidden_count(), 0);
+}
+
+#[test]
+fn a_new_boards_first_pages_show_none_of_the_last_boards_new_threads() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = saving_app(dir.path(), 1000);
+    let op = |no| Post { no, ..Default::default() };
+    // /x/ seen once, then again with thread 9 new on it.
+    app.goto_str("a/x");
+    app.handle(answer(app.tab.req().unwrap(), App::catalog_arrived, Ok(vec![op(1)])));
+    app.load_catalog(None);
+    app.handle(answer(app.tab.req().unwrap(), App::catalog_arrived, Ok(vec![op(9), op(1)])));
+    assert_eq!(app.tab.catalog_new, [9].into());
+    // /xy/ (numbered on its own) has a thread 9 too; its first page is not new to anyone.
+    app.goto_str("a/xy");
+    app.handle(partial(app.tab.req().unwrap(), App::catalog_partial, vec![op(9)]));
+    assert_eq!(app.tab.catalog.len(), 1);
+    assert!(!app.tab.catalog_new.contains(&9), "/xy/'s thread 9 is shown as new from /x/'s visit");
+}
+
+#[test]
+fn a_session_saved_during_an_archive_search_is_the_board_searched_from() {
+    let mut app = app_with(
+        "[[site]]\nname = \"chan\"\nkind = \"vichan\"\nurl = \"http://127.0.0.1:3\"\nboards = [\"g\"]\narchive = \"arch\"\n\
+         [[site]]\nname = \"arch\"\nkind = \"foolfuuka\"\nurl = \"http://localhost:3\"\nboards = [\"g\"]",
+    );
+    app.tab.board = Some(Board { uri: "g".into(), title: String::new(), nsfw: None });
+    app.tab.navigate(View::Catalog);
+    app.act(Action::ArchiveSearch);
+    type_text(&mut app, "borrow");
+    app.on_key(KeyEvent::from(KeyCode::Enter));
+    assert_eq!(app.tab.view(), View::Search);
+    // Saved now, the next run reopens chan's /g/, where the search started.
+    let place = app.place();
+    assert_eq!((place.view.as_str(), place.site.as_str(), place.board.as_deref()), ("catalog", "chan", Some("g")));
+}
