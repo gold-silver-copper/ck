@@ -154,11 +154,14 @@ fn thumb(v: &Value) -> (Option<String>, bool) {
 }
 
 /// LynxChan sends the tripcode inside the name (`Bernd!!Fz3mQwerty`): it starts at the
-/// first `!` followed by nothing but a trip's characters.
+/// last run of `!` followed by nothing but a trip's characters, so a `!` earlier in the
+/// name stays in the name.
 fn name_and_trip(raw: Option<String>) -> (Option<String>, Option<String>) {
-    let trip = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_alphanumeric() || b"./+".contains(&b));
-    match raw.as_deref().and_then(|r| r.split_once('!')) {
-        Some((name, rest)) if trip(rest.trim_start_matches('!')) => (Some(name.into()), Some(format!("!{rest}"))),
+    let Some(r) = raw.as_deref() else { return (None, None) };
+    let hash = r.trim_end_matches(|c: char| c.is_ascii_alphanumeric() || "./+".contains(c));
+    let name = hash.trim_end_matches('!');
+    match r.strip_prefix(name) {
+        Some(trip) if hash.len() < r.len() && name.len() < hash.len() => (Some(name.into()), Some(trip.into())),
         _ => (raw, None),
     }
 }
@@ -333,6 +336,8 @@ mod tests {
         assert_eq!(p.poster.trip(), Some("!!Fz3mQwerty"), "name {:?}", p.poster.name());
         let f = crate::filter::tests::filters("[[filter]]\npattern = \"^!!Fz3m\"\nfield = \"tripcode\"\n").unwrap();
         assert!(f.check("endchan", "b", &p, false).hidden.is_some(), "a tripcode filter misses the post");
+        let p = end.post(&serde_json::json!({"threadId": 1, "name": "Hi!there!!Fz3mQwerty"}), "threadId");
+        assert_eq!((p.poster.name(), p.poster.trip()), ("Hi!there !!Fz3mQwerty", Some("!!Fz3mQwerty")));
     }
 
     #[test]

@@ -202,6 +202,22 @@ fn clean(s: Option<String>) -> Option<String> {
     s.map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
 }
 
+/// A capcode spelled 4chan's way whatever the engine sends: FoolFuuka's letters (`M`, and
+/// `N` for none) and capitalised words (`Mod`) become `mod`. Other roles stay as sent.
+fn role(c: &str) -> Option<String> {
+    let word = match c.to_ascii_lowercase().as_str() {
+        "" | "n" => return None,
+        "m" | "mod" | "moderator" => "mod",
+        "a" | "admin" | "administrator" => "admin",
+        "d" | "developer" => "developer",
+        "v" | "verified" => "verified",
+        "f" | "founder" => "founder",
+        "g" | "manager" => "manager",
+        _ => c,
+    };
+    Some(word.into())
+}
+
 /// Who posted: the name as shown, and its tripcode and capcode apart for filters. Every
 /// engine builds it through [`Poster::new`], so each part is spelled one way.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
@@ -224,10 +240,9 @@ impl Poster {
         p
     }
 
-    /// A saved copy's poster: the name as it was shown then, its parts cleaned as now.
+    /// Saved copies only: the name as it was shown then, its parts cleaned and spelled as now.
     pub fn stored(shown: String, trip: Option<String>, capcode: Option<String>) -> Self {
-        let capcode = clean(capcode).map(|c| c.trim_start_matches(['#', ' ']).to_string()).filter(|c| !c.is_empty());
-        Self { shown, trip: clean(trip), capcode }
+        Self { shown, trip: clean(trip), capcode: clean(capcode).and_then(|c| role(c.trim_start_matches(['#', ' ']))) }
     }
 
     /// The name as shown, tripcode and capcode included.
@@ -396,6 +411,9 @@ mod tests {
         // Blank parts are none, and a blank name is the site's default.
         let p = Poster::new(Some(" ".into()), "Anonymous", Some("  ".into()), Some("##".into()));
         assert_eq!((p.name(), p.trip(), p.capcode()), ("Anonymous", None, None));
+        // FoolFuuka's letters, and the words saved copies of its threads kept, are 4chan's.
+        assert_eq!(Poster::new(None, "Anonymous", None, Some("M".into())).name(), "Anonymous ## mod");
+        assert_eq!(Poster::stored("Anonymous ## Mod".into(), None, Some("Mod".into())).capcode(), Some("mod"));
     }
 
     #[test]

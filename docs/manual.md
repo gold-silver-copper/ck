@@ -391,7 +391,7 @@ The fields:
 | `filename`, `md5` | each file's name; each file's MD5 in base64, compared exactly (not a regex) |
 | `id` | the poster ID, on boards that have them |
 | `flag` | the country or board flag: its code (`US`) or its name (`United States`) |
-| `tripcode`, `capcode` | the tripcode alone (`!!Fz3mQwerty`); the capcode alone, as the site spells it (`mod`, `admin`, `Board Owner`, …; a 4chan archive spells it like 4chan) |
+| `tripcode`, `capcode` | the tripcode alone (`!!Fz3mQwerty`); the capcode alone: 4chan's roles are spelled its way on every site (`mod`, `admin`, `developer`, …), other roles as the site sends them (`Board Owner`) |
 | `dimensions` | each file's width and height, as `1920x1080` |
 | `filesize` | each file's size against a range, not a regex: `>2MB`, `>=2MB`, `<100KB`, `<=100KB`, `1MB-5MB`, or one size; units `B`, `KB`, `MB`, `GB` (of 1024; any case), bytes without one |
 | `postno` | the post's number, in digits (`(\d)\1$` for dubs) |
