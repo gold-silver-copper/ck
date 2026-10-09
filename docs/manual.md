@@ -617,7 +617,10 @@ ctrl-s sends it. ck asks 4chan for a captcha and shows it in the box:
 ctrl-r asks for another captcha; one that has expired asks with `enter`. When 4chan says to
 wait before asking again, the box counts it down. The post goes up once the captcha is
 answered; then the box closes, the thread is watched, and your post is marked as yours, so
-replies to it are counted and notified. If 4chan refuses it (too soon, a wrong answer, a
+replies to it are counted and notified. 4chan's API has a new post a few seconds late, so
+the thread is refreshed as often as the API allows (every 10 seconds) until your post is in
+it, and then it's selected. A new thread opens a few seconds after it's posted (a "not
+found" then means the API doesn't list it yet, and ck tries again). If 4chan refuses it (too soon, a wrong answer, a
 file too big), the box says why and keeps what you wrote: fix it and ctrl-s again.
 
 `esc` closes the box and keeps what's written, per thread, for the next `P` there (pressing

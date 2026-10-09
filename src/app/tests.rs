@@ -5415,6 +5415,38 @@ fn a_post_goes_from_captcha_to_yours() {
     assert!(app.popup.is_none() && app.drafts.is_empty());
     let key = here(&app, "g", 1);
     assert_eq!(app.store.watched(&key).unwrap().mine(), [3]);
+    // The thread's refreshed as often as 4chan's API allows until the post's in it; then it's
+    // selected, and refreshes go back to their pace.
+    assert_eq!(app.thread_every(), crate::http::MIN_REFETCH + Duration::from_secs(1));
+    let post = |no| Post { no, ..Default::default() };
+    refresh(&mut app, key.clone(), vec![post(1), post(2)]);
+    assert!(app.awaiting.is_some());
+    refresh(&mut app, key, vec![post(1), post(2), post(3)]);
+    assert!(app.awaiting.is_none());
+    assert_eq!(app.tab.thread.as_ref().unwrap().current().map(|p| p.no), Some(3));
+    assert!(app.thread_every() >= Duration::from_secs(10));
+}
+
+#[test]
+fn a_new_thread_opens_once_the_api_has_it() {
+    let mut app = test_app();
+    app.clock = Clock { fixed: Some(NOW), ..Default::default() };
+    app.tab.board = Some(Board { uri: "g".into(), title: String::new(), nsfw: None });
+    app.tab.navigate(View::Catalog);
+    app.tab.catalog = catalog_here(&app, vec![]);
+    app.act(Action::Reply);
+    let to = reply_box(&mut app).to.clone();
+    app.web_for = Some(to);
+    app.on_web(Some(crate::web::Reply::Posted { thread: 9, no: 9 }));
+    // Not opened at once: 4chan's API lists a new thread a few seconds late.
+    assert_eq!(app.tab.view(), View::Catalog);
+    let open_at = app.awaiting.as_ref().and_then(|a| a.open_at).unwrap();
+    assert!(app.next_wake(app.clock.instant()) <= open_at.saturating_duration_since(app.clock.instant()));
+    // A 404 then is "not yet", not "gone".
+    let key = here(&app, "g", 9);
+    app.thread_arrived(&key, Err(anyhow::Error::new(crate::http::HttpError::NotFound("gone".into()))));
+    assert!(app.awaiting.as_ref().is_some_and(|a| a.open_at.is_some()));
+    assert!(!app.store.watched(&key).unwrap().status.is_dead());
 }
 
 #[test]

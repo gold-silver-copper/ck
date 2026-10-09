@@ -246,6 +246,23 @@ impl Compose {
     }
 }
 
+/// A post just sent, until the thread shows it: 4chan's API has it a few seconds late, so
+/// its thread is refreshed as often as the API allows (`MIN_REFETCH`), and a new thread is
+/// opened only once it should be there.
+pub struct Awaiting {
+    pub key: ThreadKey,
+    pub no: u64,
+    /// When to stop waiting.
+    pub until: Instant,
+    /// A new thread: when to open it (again, after a 404).
+    pub open_at: Option<Instant>,
+}
+
+/// How long a post is waited for.
+const AWAIT: Duration = Duration::from_secs(120);
+/// How long after posting a new thread to open it.
+const NEW_THREAD_AFTER: Duration = Duration::from_secs(5);
+
 /// What a key in the box leads to, past the box itself.
 enum Then {
     Nothing,
@@ -621,12 +638,53 @@ impl App {
             self.rehide(|a| a.store.toggle_mine(&key, no));
         }
         self.save_now();
-        if open {
-            self.refresh();
-        } else if to.new_thread() {
-            self.open_key(&key);
+        let now = self.clock.instant();
+        let open_at = (!open && to.new_thread()).then(|| now + NEW_THREAD_AFTER);
+        self.awaiting = Some(Awaiting { key, no, until: now + AWAIT, open_at });
+        let shows = if open_at.is_some() { "it opens in a few seconds" } else { "it shows at the next refresh" };
+        self.info(format!("Posted No.{no}, marked as yours; {shows}"));
+    }
+
+    /// Whether the open thread's refreshes are for a post just sent: then as often as the API
+    /// allows, past its cache's `MIN_REFETCH` (as `cached_get` counts it).
+    pub(super) fn awaiting_here(&self) -> bool {
+        let now = self.clock.instant();
+        self.awaiting.as_ref().is_some_and(|a| now < a.until && a.open_at.is_none() && self.tab.thread.as_ref().is_some_and(|t| t.key() == &a.key))
+    }
+
+    /// Open a new thread just posted once it's due; and once the thread shows the post,
+    /// select it.
+    pub(super) fn await_post(&mut self) {
+        let now = self.clock.instant();
+        let Some(a) = &mut self.awaiting else { return };
+        if now >= a.until {
+            self.awaiting = None;
+            return;
         }
-        self.info(format!("Posted No.{no}; it's marked as yours"));
+        if a.open_at.is_some_and(|t| now >= t) {
+            a.open_at = None;
+            let key = a.key.clone();
+            self.open_key(&key);
+            return;
+        }
+        let (key, no) = (a.key.clone(), a.no);
+        if self.tab.view() == View::Thread
+            && let Some(t) = self.tab.thread.as_mut().filter(|t| t.key() == &key)
+            && t.select_post(no)
+        {
+            self.awaiting = None;
+            self.info(format!("Your post No.{no} is in"));
+        }
+    }
+
+    /// A 404 for a thread just posted: not on the API yet, so it's asked for again later
+    /// (rather than taken as gone).
+    pub(super) fn not_there_yet(&mut self, key: &ThreadKey) -> bool {
+        let now = self.clock.instant();
+        let Some(a) = self.awaiting.as_mut().filter(|a| &a.key == key && now < a.until) else { return false };
+        a.open_at = Some(now + crate::http::MIN_REFETCH + Duration::from_secs(1));
+        self.info("4chan's API doesn't list the new thread yet; trying again");
+        true
     }
 
     /// A click on the reply box: on the browser view, to the page.

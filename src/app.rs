@@ -498,6 +498,8 @@ pub struct App {
     drafts: HashMap<posting::Where, Compose>,
     /// The name and options last posted with.
     poster: (String, String),
+    /// A post just sent, until its thread shows it.
+    awaiting: Option<posting::Awaiting>,
     tx: Sender<Msg>,
     rx: Receiver<Msg>,
 }
@@ -632,6 +634,7 @@ impl App {
             web_helper: cfg.web_helper.clone(),
             drafts: HashMap::new(),
             poster: (String::new(), String::new()),
+            awaiting: None,
             tx,
             rx,
         };
@@ -911,6 +914,9 @@ impl App {
             after(t, Duration::ZERO);
         }
         if let Some(t) = self.footer.due() {
+            after(t, Duration::ZERO);
+        }
+        if let Some(t) = self.awaiting.as_ref().and_then(|a| a.open_at) {
             after(t, Duration::ZERO);
         }
         if self.tab.view() == View::Thread && self.tab.thread.is_some() && self.tab.loading().is_none() && self.tab.saved().is_none() {
