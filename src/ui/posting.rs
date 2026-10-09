@@ -22,6 +22,8 @@ pub(super) fn draw_reply(f: &mut Frame, app: &mut App) {
     };
     let hint = match &c.stage {
         Stage::Writing => "ctrl-s post · tab next · esc keep for later",
+        Stage::Offer => "y download · esc back",
+        Stage::Installing { .. } => "esc keep for later",
         Stage::Asking | Stage::Sending => "esc stop",
         Stage::Person(_) => "click it · esc stop",
         Stage::Waiting { .. } => "enter ask again · esc back",
@@ -47,6 +49,30 @@ pub(super) fn draw_reply(f: &mut Frame, app: &mut App) {
     let say = |f: &mut Frame, text: String| put(f, body.x, body.y, body.width, Line::styled(text, Style::new().fg(t.primary)));
     match &c.stage {
         Stage::Writing => draw_fields(f, c, body),
+        Stage::Offer => {
+            say(f, "Posting to 4chan needs ck-web, ck's browser for 4chan's captcha.".into());
+            let mb = crate::web::install::SIZE_MB;
+            let lines = [
+                format!("It's Chromium with no window: ck downloads it once (about {mb} MB), from ck's"),
+                "releases on GitHub, checks it, and keeps it in ck's data folder.".into(),
+                String::new(),
+                "Download it now? y / n".into(),
+            ];
+            for (i, l) in lines.into_iter().enumerate() {
+                put(f, body.x, body.y + 2 + cells(i), body.width, Line::styled(l, Style::new().fg(t.text)));
+            }
+        }
+        Stage::Installing { got, size } => {
+            let mb = |b: u64| b / (1 << 20);
+            let of = size.map_or(String::new(), |s| format!(" of {} MB", mb(s)));
+            say(f, format!("{spin} Downloading ck-web: {} MB{of}…", mb(*got)));
+            if let Some(s) = size.filter(|&s| s > 0) {
+                let w = u64::from(body.width.saturating_sub(2));
+                let done = cells(usize::try_from(got.saturating_mul(w) / s).unwrap_or(0));
+                fill(f, Rect::new(body.x, body.y + 2, body.width.saturating_sub(2), 1), t.surface_high);
+                fill(f, Rect::new(body.x, body.y + 2, done.min(body.width.saturating_sub(2)), 1), t.primary);
+            }
+        }
         Stage::Asking => say(f, format!("{spin} Getting a captcha from 4chan…")),
         Stage::Sending => say(f, format!("{spin} Posting…")),
         Stage::Waiting { until, message } => {

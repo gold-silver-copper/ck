@@ -1,0 +1,59 @@
+name: ck-web release
+
+# ck-web with Chromium's files, for each system, attached to the release `ck-web-vX.Y.Z`. ck
+# downloads the one for its system the first time you post, and checks it against the
+# SHA-256 it has for it (src/web/install.rs): after a release, those go there.
+on:
+  push:
+    tags: ["ck-web-v*"]
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  TAG: ${{ github.ref_name }}
+  GH_TOKEN: ${{ github.token }}
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: The tag is ck-web's version
+        run: grep -qx "version = \"${TAG#ck-web-v}\"" ck-web/Cargo.toml
+      # Not "latest": that's ck's own releases.
+      - run: >
+          gh release view "$TAG" ||
+          gh release create "$TAG" --latest=false --title "ck-web ${TAG#ck-web-v}"
+          --notes "ck's browser helper for posting to 4chan (Chromium, through CEF). ck downloads it by itself the first time you post; there's nothing to do here."
+
+  bundle:
+    needs: release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The oldest Ubuntu runners: the bundle runs on systems as old as their glibc.
+          - { os: ubuntu-22.04, target: linux-x86_64 }
+          - { os: ubuntu-22.04-arm, target: linux-aarch64 }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: sudo apt-get update && sudo apt-get install -y cmake ninja-build
+      - run: cargo build --release -p ck-web
+      - name: Bundle
+        run: |
+          name="ck-web-${TAG#ck-web-v}-${{ matrix.target }}"
+          mkdir -p "$name/locales"
+          r=target/release
+          cp $r/ck-web $r/libcef.so $r/libvk_swiftshader.so $r/libvulkan.so.1 $r/vk_swiftshader_icd.json \
+             $r/icudtl.dat $r/resources.pak $r/chrome_100_percent.pak $r/chrome_200_percent.pak \
+             $r/v8_context_snapshot.bin $r/CREDITS.html "$name/"
+          cp $r/locales/en-US.pak "$name/locales/"
+          strip "$name/ck-web" "$name/libcef.so" "$name/libvk_swiftshader.so" "$name/libvulkan.so.1"
+          tar -C "$name" -czf "$name.tar.gz" .
+          sha256sum "$name.tar.gz" > "$name.tar.gz.sha256"
+          ls -l "$name.tar.gz"
+          gh release upload "$TAG" "$name.tar.gz" "$name.tar.gz.sha256" --clobber

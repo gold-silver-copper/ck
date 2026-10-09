@@ -512,11 +512,34 @@ pub fn get_bytes(url: &str, limit: u64) -> Result<Vec<u8>> {
 
 /// Download `url` into `path` at low priority, through a temp file renamed into place.
 pub fn download_to(url: &str, path: &std::path::Path) -> Result<()> {
+    download_with_progress(url, path, |_, _| {})
+}
+
+/// `download_to`, telling `progress` the bytes so far and the whole size (if the server says).
+pub fn download_with_progress(url: &str, path: &std::path::Path, progress: impl FnMut(u64, Option<u64>)) -> Result<()> {
     throttle(url, Priority::Low)?;
     let mut resp = AGENT.get(url).call().with_context(|| format!("GET {url}"))?;
     check_status(resp.status().as_u16(), url)?;
-    let body = resp.body_mut().with_config().limit(1 << 30).reader();
+    let size = resp.headers().get("content-length").and_then(|v| v.to_str().ok()).and_then(|v| v.parse().ok());
+    let body = Counted { inner: resp.body_mut().with_config().limit(1 << 30).reader(), got: 0, size, progress };
     crate::atomic::write_from(path, body).with_context(|| format!("downloading {url}"))
+}
+
+/// A reader that tells how much it's read.
+struct Counted<R, F> {
+    inner: R,
+    got: u64,
+    size: Option<u64>,
+    progress: F,
+}
+
+impl<R: std::io::Read, F: FnMut(u64, Option<u64>)> std::io::Read for Counted<R, F> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let n = self.inner.read(buf)?;
+        self.got = self.got.saturating_add(n as u64);
+        (self.progress)(self.got, self.size);
+        Ok(n)
+    }
 }
 
 /// Percent-encode a single path segment (board names can be non-ASCII, e.g. `λ`).

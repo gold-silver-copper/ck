@@ -50,6 +50,49 @@ pub fn write_from(path: &Path, mut body: impl std::io::Read) -> Result<()> {
     landed.with_context(|| format!("writing {}", path.display()))
 }
 
+/// Unpack the tar archive `archive` into the folder `dir`, whole or not at all: into a folder
+/// of its own beside it, renamed into place (replacing what was there), and removed on any
+/// error.
+pub fn unpack(archive: impl std::io::Read, dir: &Path) -> Result<()> {
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let parent = dir.parent().context("no folder to unpack into")?;
+    std::fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
+    let name = dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let mut tmp = TempDir(parent.join(format!("{name}.ck-{}-{}.tmp", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed))));
+    let landed = (|| -> std::io::Result<()> {
+        tar::Archive::new(archive).unpack(&tmp.0)?;
+        if dir.exists() {
+            std::fs::remove_dir_all(dir)?;
+        }
+        std::fs::rename(&tmp.0, dir)?;
+        tmp.0 = PathBuf::new();
+        Ok(())
+    })();
+    landed.with_context(|| format!("unpacking into {}", dir.display()))
+}
+
+/// Remove the folders in `dir` but `keep` (what older versions unpacked there).
+pub fn remove_other_dirs(dir: &Path, keep: &Path) {
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    for e in entries.flatten() {
+        let path = e.path();
+        if path != keep && e.file_type().is_ok_and(|t| t.is_dir()) {
+            let _ = std::fs::remove_dir_all(&path);
+        }
+    }
+}
+
+/// A folder being unpacked, removed when dropped unless it was renamed into place.
+struct TempDir(PathBuf);
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        if !self.0.as_os_str().is_empty() {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+}
+
 /// A temp file, removed when dropped (by an error's early return or a panic's unwinding)
 /// unless it was renamed into place.
 struct Temp(PathBuf);
@@ -253,6 +296,27 @@ mod tests {
     fn age(path: &Path, by: Duration) {
         let f = std::fs::File::options().write(true).open(path).unwrap();
         f.set_modified(SystemTime::now() - by).unwrap();
+    }
+
+    #[test]
+    fn unpacks_a_folder_whole_or_not_at_all() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut tar = tar::Builder::new(Vec::new());
+        let mut header = tar::Header::new_gnu();
+        header.set_size(2);
+        header.set_mode(0o755);
+        header.set_cksum();
+        tar.append_data(&mut header, "bin/ck-web", &b"hi"[..]).unwrap();
+        let archive = tar.into_inner().unwrap();
+        let to = dir.path().join("web").join("1");
+        std::fs::create_dir_all(to.join("old")).unwrap();
+        unpack(&archive[..], &to).unwrap();
+        assert_eq!(std::fs::read(to.join("bin/ck-web")).unwrap(), b"hi");
+        assert!(!to.join("old").exists());
+        // A broken archive leaves what was there, and no temp.
+        assert!(unpack(&archive[..100], &to).is_err());
+        assert!(to.join("bin/ck-web").exists());
+        assert_eq!(names(&dir.path().join("web")), ["1"]);
     }
 
     #[test]

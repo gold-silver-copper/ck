@@ -1,6 +1,7 @@
 //! ck-web, the browser helper ck posts to 4chan through (see `ck-web/`): finding it,
 //! starting it, and talking to it.
 
+pub mod install;
 mod protocol;
 
 use std::io::{BufRead, BufReader, Write};
@@ -20,18 +21,20 @@ pub struct Helper {
 
 impl Helper {
     /// Start the helper at `path`; `on_reply` gets each of its replies, on a thread of its
-    /// own, until it returns false or the helper ends (then with None).
+    /// own, until it returns false or the helper ends: then with None, after the last thing it
+    /// printed (a missing library, a crash), as a failure.
     pub fn start(path: &Path, on_reply: impl Fn(Option<Reply>) -> bool + Send + 'static) -> Result<Helper> {
         let mut child = Command::new(path)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
+            .stderr(Stdio::piped())
             .spawn()
             .with_context(|| format!("Couldn't start {}", path.display()))?;
-        let (Some(stdin), Some(stdout)) = (child.stdin.take(), child.stdout.take()) else {
+        let (Some(stdin), Some(stdout), Some(stderr)) = (child.stdin.take(), child.stdout.take(), child.stderr.take()) else {
             let _ = child.kill();
             anyhow::bail!("Couldn't talk to {}", path.display());
         };
+        let last_words = std::thread::spawn(move || BufReader::new(stderr).lines().map_while(Result::ok).filter(|l| !l.trim().is_empty()).last());
         std::thread::spawn(move || {
             for line in BufReader::new(stdout).lines() {
                 let Ok(line) = line else { break };
@@ -41,6 +44,9 @@ impl Helper {
                 {
                     return;
                 }
+            }
+            if let Ok(Some(said)) = last_words.join() {
+                on_reply(Some(Reply::Failed { error: format!("ck-web stopped: {said}") }));
             }
             on_reply(None);
         });
@@ -60,10 +66,17 @@ impl Drop for Helper {
     }
 }
 
-/// Where ck-web is: the configured path, else next to ck, else on the PATH.
+/// Where ck-web is: the configured path, else as downloaded, else next to ck, else on the
+/// PATH. Tests find none.
 pub fn find(configured: Option<&str>) -> Option<PathBuf> {
+    if crate::sandboxed() {
+        return None;
+    }
     if let Some(p) = configured {
         return Some(crate::config::expand_home(p));
+    }
+    if let Some(p) = install::installed() {
+        return Some(p);
     }
     let exe = format!("{NAME}{}", std::env::consts::EXE_SUFFIX);
     let beside = std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.join(&exe)));

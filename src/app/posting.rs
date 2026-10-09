@@ -9,9 +9,9 @@ use crate::web::{self, Reply, Request};
 use image::DynamicImage;
 use ratatui_image::protocol::Protocol;
 
-/// What to say when ck-web isn't there.
-const NO_HELPER: &str = "Posting to 4chan needs ck-web, ck's browser helper: build it from ck's repository with \
-                         cargo build --release -p ck-web, then put target/release next to ck or set web_helper";
+/// What to say when ck-web isn't there, and can't be downloaded for this system.
+const NO_HELPER: &str = "Posting to 4chan needs ck-web, ck's browser helper, which isn't built for this system yet: \
+                         see the manual (Posting) to build it, and set web_helper";
 
 /// Where a post goes: a site's board, and a thread there (0: a new thread).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -45,6 +45,10 @@ impl Field {
 /// Where the box is in posting.
 pub enum Stage {
     Writing,
+    /// ck-web isn't here: asking to download it.
+    Offer,
+    /// Downloading it: the bytes so far, of how many.
+    Installing { got: u64, size: Option<u64> },
     /// The captcha's been asked for.
     Asking,
     /// The site wants a person (Cloudflare's check, hCaptcha): the part of its page to
@@ -147,7 +151,7 @@ impl Compose {
 
     /// Nothing written: closing it keeps no draft.
     fn is_blank(&self) -> bool {
-        self.comment.text().trim().is_empty() && self.file.is_empty() && self.subject.is_empty() && matches!(self.stage, Stage::Writing)
+        self.comment.text().trim().is_empty() && self.file.is_empty() && self.subject.is_empty() && matches!(self.stage, Stage::Writing | Stage::Offer)
     }
 
     /// Quote post `no` (and its text, if given), on lines of their own at the cursor; a post
@@ -222,6 +226,7 @@ enum Then {
     Ask,
     Post,
     Cancel,
+    Install,
 }
 
 /// What a reply quotes.
@@ -274,6 +279,9 @@ impl App {
             self.cancel_web();
             c.stage = Stage::Writing;
         }
+        if matches!(c.stage, Stage::Offer) {
+            c.stage = Stage::Writing;
+        }
         c.art = None;
         if !c.is_blank() {
             self.drafts.insert(c.to.clone(), *c);
@@ -315,6 +323,12 @@ impl App {
                     Then::Nothing
                 }
             },
+            Stage::Offer if matches!(key.code, KeyCode::Char('y') | KeyCode::Enter) => Then::Install,
+            Stage::Offer if matches!(key.code, KeyCode::Char('n') | KeyCode::Esc) => {
+                c.stage = Stage::Writing;
+                Then::Nothing
+            }
+            Stage::Installing { .. } if key.code == KeyCode::Esc => Then::Close,
             Stage::Asking | Stage::Person(_) if key.code == KeyCode::Esc => Then::Cancel,
             Stage::Waiting { .. } if key.code == KeyCode::Esc => {
                 c.stage = Stage::Writing;
@@ -333,7 +347,7 @@ impl App {
             Stage::Solving(s) => {
                 if solve_key(s, key.code) { Then::Post } else { Then::Nothing }
             }
-            Stage::Asking | Stage::Person(_) | Stage::Waiting { .. } | Stage::Sending => Then::Nothing,
+            Stage::Offer | Stage::Installing { .. } | Stage::Asking | Stage::Person(_) | Stage::Waiting { .. } | Stage::Sending => Then::Nothing,
         };
         match then {
             Then::Nothing => {}
@@ -341,6 +355,7 @@ impl App {
             Then::Send => self.send_reply(),
             Then::Ask => self.ask_captcha(),
             Then::Post => self.post_reply(),
+            Then::Install => self.install_helper(),
             Then::Cancel => {
                 self.cancel_web();
                 if let Some(c) = self.reply_box() {
@@ -381,7 +396,54 @@ impl App {
         }
         let poster = (c.name.text().to_string(), c.options.text().to_string());
         self.poster = poster;
+        if self.web.is_none() && web::find(self.web_helper.as_deref()).is_none() && web::install::bundle().is_some() {
+            if let Some(c) = self.reply_box() {
+                c.stage = Stage::Offer;
+                c.problem = None;
+            }
+            return;
+        }
         self.ask_captcha();
+    }
+
+    /// Download ck-web for the box's post, then go on to its captcha.
+    fn install_helper(&mut self) {
+        let Some(c) = self.reply_box() else { return };
+        let to = c.to.clone();
+        if crate::sandboxed() {
+            c.problem("ck-web isn't downloaded here");
+            return;
+        }
+        c.stage = Stage::Installing { got: 0, size: None };
+        let later = self.later();
+        std::thread::spawn(move || {
+            let mut told = 0;
+            let shown = to.clone();
+            let progress = |got: u64, size: Option<u64>| {
+                // A redraw a megabyte.
+                if got >= told + (1 << 20) || size == Some(got) {
+                    told = got;
+                    let to = shown.clone();
+                    later.run(move |app| {
+                        if let Some(c) = app.compose_for(&to).filter(|c| matches!(c.stage, Stage::Installing { .. })) {
+                            c.stage = Stage::Installing { got, size };
+                        }
+                    });
+                }
+            };
+            let done = crate::guard::result(|| web::install::install(progress));
+            later.run(move |app| app.helper_installed(&to, done));
+        });
+    }
+
+    fn helper_installed(&mut self, to: &Where, done: anyhow::Result<std::path::PathBuf>) {
+        let open = matches!(&self.popup, Some(Popup::Reply(c)) if &c.to == to);
+        let Some(c) = self.compose_for(to) else { return };
+        match done {
+            Err(e) => c.problem(format!("Couldn't get ck-web: {e:#}")),
+            Ok(_) if open => self.ask_captcha(),
+            Ok(_) => c.stage = Stage::Writing,
+        }
     }
 
     /// Ask ck-web for a captcha for the box's post.

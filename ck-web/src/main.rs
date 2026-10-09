@@ -220,6 +220,9 @@ fn run(args: &Args, app: &mut cef::App, profile: &std::path::Path, web: &mut Web
         cache_path: path(profile.join("profile")),
         log_file: path(profile.join("log.txt")),
         log_severity: LogSeverity::WARNING,
+        // The bundle ships English alone.
+        locale: CefString::from("en-US"),
+        no_sandbox: i32::from(!sandbox_works()),
         ..Default::default()
     };
     if initialize(Some(args.as_main_args()), Some(&settings), Some(app), std::ptr::null_mut()) != 1 {
@@ -451,6 +454,14 @@ fn png(mut bgra: Vec<u8>, width: u32, height: u32) -> Option<(String, u32, u32)>
     let mut out = std::io::Cursor::new(Vec::new());
     part.write_to(&mut out, image::ImageFormat::Png).ok()?;
     Some((base64::engine::general_purpose::STANDARD.encode(out.into_inner()), left, top))
+}
+
+/// Whether Chromium's sandbox can start: it needs user namespaces, which Ubuntu (since
+/// 23.10) and some kernels keep from programs like this one. Without them it runs unsandboxed
+/// (it only ever loads 4chan's pages and its captchas').
+fn sandbox_works() -> bool {
+    let read = |p: &str| std::fs::read_to_string(p).map(|s| s.trim().to_string()).ok();
+    read("/proc/sys/kernel/apparmor_restrict_unprivileged_userns").as_deref() != Some("1") && read("/proc/sys/kernel/unprivileged_userns_clone").as_deref() != Some("0")
 }
 
 /// ck's requests, a line each, read on their own thread. The channel closes with stdin.
