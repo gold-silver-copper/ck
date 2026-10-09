@@ -50,6 +50,10 @@ notify = "auto"
 # Or run a command (no shell; {title} and {body} are filled in):
 # notify_command = ["notify-send", "{title}", "{body}"]
 
+# Where ck-web, the browser helper for posting to 4chan, is (by default: next to ck, then on
+# the PATH).
+# web_helper = "~/ck/target/release/ck-web"
+
 # The terminal's title says where you are and what's new: "ck: (3) /g/ Thread subject",
 # with "(You)" when a new post replies to yours. The old title is put back on exit. Also in
 # Settings.

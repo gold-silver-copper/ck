@@ -5341,3 +5341,73 @@ fn a_new_favorite_leaves_the_home_screen_selection_on_its_site() {
     app.tab.navigate(View::Sites);
     assert_eq!(app.selected_key(View::Sites), Some(site));
 }
+
+/// The default config's 4chan, on a thread of `posts` on /g/.
+fn fourchan_thread(posts: &[u64]) -> App {
+    let mut app = test_app();
+    app.tab.board = Some(Board { uri: "g".into(), title: String::new(), nsfw: None });
+    let key = here(&app, "g", posts[0]);
+    app.tab.thread = Some(ThreadView::new(key, posts.iter().map(|&no| Post { no, ..Default::default() }).collect()));
+    app.tab.navigate(View::Thread);
+    app
+}
+
+fn reply_box(app: &mut App) -> &mut Compose {
+    match &mut app.popup {
+        Some(Popup::Reply(c)) => c,
+        _ => panic!("no reply box"),
+    }
+}
+
+#[test]
+fn replies_quote_the_post_and_keep_their_draft() {
+    let mut app = fourchan_thread(&[1, 2, 3]);
+    app.tab.thread.as_mut().unwrap().selected = 1;
+    app.act(Action::Reply);
+    type_text(&mut app, "hi");
+    assert_eq!(reply_box(&mut app).comment.text(), ">>2\nhi");
+    // Closed, it's kept; opened on another post, that one's quoted under it.
+    app.on_key(KeyEvent::from(KeyCode::Esc));
+    assert!(app.popup.is_none());
+    app.tab.thread.as_mut().unwrap().selected = 2;
+    app.act(Action::Reply);
+    assert_eq!(reply_box(&mut app).comment.text(), ">>2\nhi\n>>3\n");
+    // Only 4chan, so far.
+    let mut other = local_app();
+    other.tab.thread = Some(ThreadView::new(here(&other, "x", 1), vec![Post { no: 1, ..Default::default() }]));
+    other.tab.navigate(View::Thread);
+    other.act(Action::Reply);
+    assert!(other.popup.is_none());
+}
+
+#[test]
+fn a_post_goes_from_captcha_to_yours() {
+    let mut app = fourchan_thread(&[1, 2]);
+    // On the opening post, nothing's quoted.
+    app.act(Action::Reply);
+    type_text(&mut app, "first");
+    // Tests start no ck-web: sending says so, and keeps the text.
+    app.on_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL));
+    let c = reply_box(&mut app);
+    assert!(c.problem.is_some() && matches!(c.stage, Stage::Writing));
+    assert_eq!(c.comment.text(), "first");
+    // As ck-web would answer: a captcha to type, answered in the box.
+    let to = c.to.clone();
+    app.web_for = Some(to.clone());
+    app.on_web(Some(crate::web::Reply::Captcha { twister: serde_json::json!({"challenge": "c", "ttl": 60, "extTask": {"mode": 1, "str": "Type it"}}) }));
+    assert!(matches!(reply_box(&mut app).stage, Stage::Solving(_)));
+    type_text(&mut app, "Ab1");
+    let Stage::Solving(s) = &reply_box(&mut app).stage else { panic!("not solving") };
+    assert_eq!(s.answer().as_deref(), Some("ab1"));
+    // 4chan refuses: the box says why, and keeps the post.
+    app.web_for = Some(to.clone());
+    app.on_web(Some(crate::web::Reply::Failed { error: "You must wait longer.".into() }));
+    let c = reply_box(&mut app);
+    assert_eq!((c.problem.as_deref(), c.comment.text()), (Some("You must wait longer."), "first"));
+    // Then it's up: the box closes, and the post is yours.
+    app.web_for = Some(to);
+    app.on_web(Some(crate::web::Reply::Posted { thread: 1, no: 3 }));
+    assert!(app.popup.is_none() && app.drafts.is_empty());
+    let key = here(&app, "g", 1);
+    assert_eq!(app.store.watched(&key).unwrap().mine(), [3]);
+}

@@ -2,14 +2,20 @@
 name = "ck"
 version = "0.8.0"
 edition = "2024"
-description = "A read-only terminal imageboard browser for 4chan, vichan, LynxChan, jschan and FoolFuuka archives"
+description = "A terminal imageboard browser for 4chan, vichan, LynxChan, jschan and FoolFuuka archives"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/gold-silver-copper/ck"
 readme = "README.md"
 keywords = ["imageboard", "tui", "terminal", "4chan", "ratatui"]
 categories = ["command-line-utilities"]
 # Test data (real scraped posts), UI snapshots and the demo stay in the repository only.
-exclude = ["tests/fixtures", "src/snapshots", "demo", "ck-demo.webm", "ck-demo-small.webm", "ck-demo.avif"]
+exclude = ["ck-web", "tests/fixtures", "src/snapshots", "demo", "ck-demo.webm", "ck-demo-small.webm", "ck-demo.avif"]
+
+[workspace]
+members = [".", "ck-web"]
+# ck-web downloads and builds Chromium (CEF): only when asked for, with -p ck-web.
+default-members = ["."]
+exclude = ["fuzz"]
 
 [dependencies]
 anyhow = "1.0.104"

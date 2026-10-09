@@ -38,13 +38,8 @@ pub fn default_root() -> PathBuf {
 
 /// The directory for thread `key`'s files, from the `download_dir` template.
 pub fn dir(template: Option<&str>, key: &ThreadKey) -> PathBuf {
-    let home = dirs::home_dir().unwrap_or_default();
     let downloads = downloads();
-    let t = template.unwrap_or(DEFAULT_DIR);
-    let t = match t.strip_prefix("~/") {
-        Some(rest) => format!("{}/{rest}", home.display()),
-        None => t.to_string(),
-    };
+    let t = crate::config::expand_home(template.unwrap_or(DEFAULT_DIR)).display().to_string();
     let path = t
         .replace("{downloads}", &downloads.display().to_string())
         .replace("{site}", &sanitize(&key.site))

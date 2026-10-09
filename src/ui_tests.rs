@@ -2047,3 +2047,12 @@ fn the_add_filter_popup_draws_only_inside_its_panel_on_a_short_screen() {
         assert_eq!(buf[(x as u16, y as u16)].bg, panel, "{needle:?} is drawn outside the panel, on row {y}:\n{text}");
     }
 }
+
+#[test]
+fn reply_box() {
+    use ratatui::crossterm::event::{KeyCode, KeyEvent};
+    let mut a = thread_app(false);
+    a.on_key(KeyEvent::from(KeyCode::Char('P')));
+    type_text(&mut a, "hello");
+    insta::assert_snapshot!(snapshot(&mut a));
+}

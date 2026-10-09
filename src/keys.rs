@@ -97,6 +97,8 @@ actions! {
     Poster, "poster", Some(Key::char('I')), &[Scope::Thread], "the post's poster's posts alone (by poster ID)";
     Media, "media", Some(Key::char('M')), &[Scope::Thread], "show all posts, only those with files, or all with images hidden (in turn)";
     Mine, "mine", Some(Key::char('m')), &[Scope::Thread], "mark the post as yours (notified of replies)";
+    Reply, "reply", Some(Key::char('P')), &[Scope::Catalog, Scope::Thread], "post: reply to the thread (quoting the post), or start one in the catalog";
+    Quote, "quote", None, &[Scope::Thread], "reply quoting the post's text";
     NewTab, "new_tab", Some(Key::char('T')), &[Scope::Catalog, Scope::Thread, Scope::Saved], "open the thread (or link) in a new tab";
     Favorite, "favorite", Some(Key::char('*')), &[Scope::Lists, Scope::Catalog], "favorite board: on / off";
     AddSite, "add_site", None, &[Scope::Lists], "add a site from a link to any page of it";

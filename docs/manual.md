@@ -135,6 +135,7 @@ ones for where you are.
 | `H` / `Z` | hide / unhide the thread; show hidden threads, dimmed [`hide`, `show_hidden`] |
 | `X`  | hide or highlight threads like this one: by subject, image or file name (a filter) [`filter`] |
 | `A`  | search the board's archive [`archive_search`] |
+| `P`  | start a thread (4chan; see Posting) [`reply`] |
 | `y` / `Y` | copy the OP's subject and text / the thread's link [`copy`, `copy_link`] |
 
 **Thread**
@@ -161,6 +162,7 @@ ones for where you are.
 | `w` / `T` | watch / unwatch; follow the quote `enter` would follow in a new tab [`watch`, `new_tab`] |
 | `H` / `Z` | hide / unhide the post; show hidden posts [`hide`, `show_hidden`] |
 | `X`  | hide or highlight posts like this one: by poster ID, name and tripcode, flag, image, file name, or (on the OP) subject (a filter) [`filter`] |
+| `P`  | reply, quoting the post (4chan; see Posting); the menu also replies quoting its text [`reply`, `quote`] |
 | `m`  | mark the post as yours, to be told about replies [`mine`] |
 | `F`  | follow the thread as a general: when it dies or fills up, the next one is watched [`follow`] |
 | `a`  | after a 404: open the thread in the site's archive [`archive`] |
@@ -566,8 +568,8 @@ when some of them reply to your posts. The title from before is put back when ck
 (terminals that can't do that are left with an empty one). `set_title = false` (or
 Settings › Terminal title) leaves the title alone.
 
-ck never posts, so it can't know which posts are yours: `m` marks the selected post as
-yours (and watches the thread). Replies to it are counted in Watched ("1 reply to you"),
+Posts you send from ck are marked as yours (see Posting). For the rest, `m` marks the
+selected post as yours (and watches the thread). Replies to it are counted in Watched ("1 reply to you"),
 quotes of it read `>>123 (You)`, and they get their own notification. The marks show in
 every tab at once; unwatching the thread (`w`, or `x` in Watched) forgets them.
 
@@ -590,6 +592,56 @@ write removes its temp. A write to a symlinked state, config or saved-thread fil
 the file it points to. Temps of that name that a crash or kill left (older than a day) are
 removed the first time in a run that ck writes into that folder; a `<name>.tmp` left by an
 older ck is not, and can be deleted by hand.
+
+## Posting
+
+ck posts to 4chan. `P` in a thread opens the reply box, quoting the selected post (`>>123`)
+unless it's the opening post; the menu's "reply quoting its text" quotes its text too
+(`>line`). `P` in a catalog starts a new thread on the board.
+
+The box has the post's fields: name, options (`sage`, …), the subject for a new thread,
+the comment, a file (a path; `~/` works) and whether to spoiler it. `tab` and shift-tab go
+between them (so do the arrows, outside the comment); in a field the keys are a shell's:
+ctrl-a / ctrl-e line start and end, ctrl-w a word back, ctrl-u / ctrl-k to the line's start
+or end, alt or ctrl with the arrows a word at a time. Pasted text keeps its lines in the
+comment. The counter is 4chan's limit, 2000 characters.
+
+ctrl-s sends it. ck asks 4chan for a captcha and shows it in the box:
+
+- slider steps: `←`/`→` (or `h`/`l`) go through the pictures, `enter` takes the one that
+  fits and goes to the next step;
+- a picture to read: type what it says, `enter`;
+- a grid: the arrows move, `space` (or `1`-`9`) picks, `enter` sends.
+
+ctrl-r asks for another captcha; one that has expired asks with `enter`. When 4chan says to
+wait before asking again, the box counts it down. The post goes up once the captcha is
+answered; then the box closes, the thread is watched, and your post is marked as yours, so
+replies to it are counted and notified. If 4chan refuses it (too soon, a wrong answer, a
+file too big), the box says why and keeps what you wrote: fix it and ctrl-s again.
+
+`esc` closes the box and keeps what's written, per thread, for the next `P` there (pressing
+`P` on other posts adds their quotes). Drafts last until ck quits.
+
+### ck-web, and Cloudflare
+
+4chan's captcha and posts are behind Cloudflare, which only lets browsers through, so ck
+posts through a browser of its own: ck-web, Chromium (CEF) with no window, which ck starts
+the first time you send a post. It loads a page on 4chan's own domain with nothing on it
+(`boards.4chan.org/robots.txt`: no ads, no 4chan scripts), gets the captcha there and sends
+the post from there, as 4chan's own reply form would, with Chromium's sandbox on. Its
+profile (cookies, Cloudflare's pass) is kept in `$XDG_CACHE_HOME/ck/web`, so the next post
+usually skips the check.
+
+When Cloudflare (or 4chan's occasional hCaptcha) wants a person, the box shows the page
+and you click it there: ck passes the clicks (and the wheel) to the browser. ck never clicks
+it for you. With half-block images the page is coarse; kitty, sixel or iTerm2 graphics show
+it as it is. With images off, there's nothing to click: turn them on in Settings.
+
+ck-web isn't in `cargo install ck`: Chromium is too big for crates.io, and its files must
+sit next to the program. Build it from the repository with `cargo build --release -p
+ck-web` (it downloads CEF's Chromium, about 300 MB, the first time; it needs cmake and
+ninja), and either run ck from the same `target/release` folder or point `web_helper` at
+it. It's built and tested on Linux; macOS needs an app bundle, which isn't made yet.
 
 ## Searching archives
 

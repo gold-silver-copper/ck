@@ -14,7 +14,15 @@
 
 Run `ck`, or `ck 4chan/g` (or any thread or board URL) to start there.
 
-A read-only terminal browser for imageboards, built with [ratatui](https://ratatui.rs): 4chan,
+To post to 4chan, ck needs its browser helper, ck-web (Chromium, with no window). Build it
+from the repository (it downloads Chromium, about 300 MB; Linux, with cmake and ninja):
+
+    git clone https://github.com/gold-silver-copper/ck && cd ck
+    cargo build --release -p ck -p ck-web
+
+and run `target/release/ck` (ck-web is found next to it), or set `web_helper` in the config.
+
+A terminal browser for imageboards, built with [ratatui](https://ratatui.rs): 4chan,
 vichan and LynxChan sites, jschan, 2ch and FoolFuuka archives, with images drawn in the
 terminal. (Click the tour for [the video](ck-demo.webm), with controls.)
 
@@ -24,6 +32,8 @@ terminal. (Click the tour for [the video](ck-demo.webm), with controls.)
 - **Threads** with quote previews, replies shown inline, one post's conversation alone, and search.
 - **Images** in the terminal (kitty, sixel, iTerm2, or half-blocks anywhere), a full-screen
   viewer that plays GIFs, a gallery of a thread's files, downloads and reverse image search.
+- **Posting** to 4chan: a reply box with quoting and drafts, the captcha answered in the
+  terminal, and Cloudflare's check clicked there too; your posts are marked as yours.
 - **Watched threads** refresh in the background and notify you of new posts and replies to
   yours. They're saved as they go, so a thread that dies can still be read offline.
 - **Filters** and hidden words hide or highlight threads and posts.

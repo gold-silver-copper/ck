@@ -140,7 +140,7 @@ fn help_text() -> String {
     let path = |p: Option<std::path::PathBuf>| p.map_or_else(|| "(no home directory)".into(), |p| p.display().to_string());
     let config_state = if Config::path().is_some_and(|p| p.exists()) { "" } else { " (not created; using defaults)" };
     format!(
-        "ck {} - browse imageboards from the terminal (read-only)
+        "ck {} - browse imageboards from the terminal
 
 usage: ck                  start
        ck URL              start at a board or thread: a URL, or a short form like

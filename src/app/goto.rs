@@ -119,6 +119,10 @@ impl App {
 
     /// Text pasted into the terminal: into the input being typed, or a URL to go to.
     pub fn paste(&mut self, text: &str) {
+        // The reply box keeps the lines.
+        if self.paste_reply(text) {
+            return;
+        }
         let text = text.trim().replace(['\n', '\r'], " ");
         if self.paste_adding(&text) {
             return;

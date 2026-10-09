@@ -15,6 +15,7 @@ pub(super) enum Modal {
     Menu,
     Hints,
     ImageSearch,
+    Reply,
     Viewer,
     Preview,
     Gallery,
@@ -52,6 +53,8 @@ impl App {
             Modal::Hints => (App::close_top, App::close_top, App::ignore, false),
             Modal::Menu => (App::rows, App::on_menu_click, App::close_top, false),
             Modal::ImageSearch => (App::rows, App::on_image_search_click, App::ignore, false),
+            // Over the browser view, the mouse is the page's; elsewhere in the box, nothing.
+            Modal::Reply => (App::on_reply_wheel, App::on_reply_click, App::ignore, false),
             Modal::Preview => (App::rows, App::close_top, App::ignore, true),
             Modal::Links => (App::rows, App::on_links_click, App::ignore, true),
             // The gallery's wheel moves through its grid, a row a notch.
@@ -188,6 +191,7 @@ impl App {
                 Popup::AddFilter(_) => Modal::AddFilter,
                 Popup::ImageSearch(_) => Modal::ImageSearch,
                 Popup::Help(_) => Modal::Help,
+                Popup::Reply(_) => Modal::Reply,
             });
         }
         let open = [
@@ -275,6 +279,7 @@ impl App {
                 _ => self.popup = None,
             },
             Modal::ImageSearch => self.on_image_search_key(key.code),
+            Modal::Reply => self.on_reply_key(key),
             Modal::Viewer => match self.keys.action(Scope::Viewer, &key) {
                 Some(action) => self.act(action),
                 None => self.on_viewer_key(key.code),
@@ -407,6 +412,8 @@ impl App {
             Action::Links => self.open_links(),
             Action::Hide => self.toggle_hidden(),
             Action::Mine => self.toggle_mine(),
+            Action::Reply => self.open_reply(super::posting::Quoting::Number),
+            Action::Quote => self.open_reply(super::posting::Quoting::Text),
             Action::Gallery => self.open_gallery(),
             Action::Export => self.ask_to_save(Saving::Page),
             Action::ArchiveSearch => self.start_archive_search(),
