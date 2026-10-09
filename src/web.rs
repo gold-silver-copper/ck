@@ -7,23 +7,42 @@ mod protocol;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
+use std::sync::mpsc::{Sender, channel};
+use std::sync::{Arc, Mutex};
 
-use anyhow::{Context, Result};
-pub use protocol::{Reply, Request};
+use anyhow::{Context, Result, bail};
+pub use protocol::{Reply, Request, Upload};
 
 const NAME: &str = "ck-web";
 
-/// A running ck-web. It stops when this is dropped (its stdin closes, and it's killed).
-pub struct Helper {
-    child: Child,
-    stdin: ChildStdin,
+/// A running ck-web, shared by the threads that ask it things. It stops when the last clone
+/// is dropped (its stdin closes, and it's killed).
+#[derive(Clone)]
+pub struct Helper(Arc<Shared>);
+
+struct Shared {
+    child: Mutex<Child>,
+    stdin: Mutex<ChildStdin>,
+    /// Who's waiting for an answer: one asker at a time (`turn`).
+    waiter: Arc<Mutex<Option<Sender<Option<Reply>>>>>,
+    turn: Mutex<()>,
+    /// The page it's on, as last opened.
+    page: Mutex<Option<String>>,
+}
+
+impl Drop for Shared {
+    fn drop(&mut self) {
+        let child = self.child.get_mut().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _ = child.kill();
+        let _ = child.wait();
+    }
 }
 
 impl Helper {
-    /// Start the helper at `path`; `on_reply` gets each of its replies, on a thread of its
-    /// own, until it returns false or the helper ends: then with None, after the last thing it
-    /// printed (a missing library, a crash), as a failure.
-    pub fn start(path: &Path, on_reply: impl Fn(Option<Reply>) -> bool + Send + 'static) -> Result<Helper> {
+    /// Start the helper at `path`. The browser view, while the site wants a person, goes to
+    /// `on_view` (on a thread of the helper's); `on_stop` hears it's ended, with the last thing
+    /// it printed (a missing library, a crash).
+    pub fn start(path: &Path, on_view: impl Fn(Reply) + Send + 'static, on_stop: impl FnOnce(Option<String>) + Send + 'static) -> Result<Helper> {
         let mut child = Command::new(path)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -32,37 +51,127 @@ impl Helper {
             .with_context(|| format!("Couldn't start {}", path.display()))?;
         let (Some(stdin), Some(stdout), Some(stderr)) = (child.stdin.take(), child.stdout.take(), child.stderr.take()) else {
             let _ = child.kill();
-            anyhow::bail!("Couldn't talk to {}", path.display());
+            bail!("Couldn't talk to {}", path.display());
         };
+        let waiter: Arc<Mutex<Option<Sender<Option<Reply>>>>> = Arc::default();
         let last_words = std::thread::spawn(move || BufReader::new(stderr).lines().map_while(Result::ok).filter(|l| !l.trim().is_empty()).last());
+        let answers = waiter.clone();
         std::thread::spawn(move || {
             for line in BufReader::new(stdout).lines() {
                 let Ok(line) = line else { break };
                 // A line that isn't a reply (from a newer or older ck-web) is skipped.
-                if let Ok(reply) = serde_json::from_str(&line)
-                    && !on_reply(Some(reply))
-                {
-                    return;
+                match serde_json::from_str(&line) {
+                    Ok(view @ Reply::View { .. }) => on_view(view),
+                    Ok(reply) => {
+                        if let Some(tx) = crate::http::lock(&answers).take() {
+                            let _ = tx.send(Some(reply));
+                        }
+                    }
+                    Err(_) => {}
                 }
             }
-            if let Ok(Some(said)) = last_words.join() {
-                on_reply(Some(Reply::Failed { error: format!("ck-web stopped: {said}") }));
+            if let Some(tx) = crate::http::lock(&answers).take() {
+                let _ = tx.send(None);
             }
-            on_reply(None);
+            on_stop(last_words.join().ok().flatten());
         });
-        Ok(Helper { child, stdin })
+        Ok(Helper(Arc::new(Shared { child: Mutex::new(child), stdin: Mutex::new(stdin), waiter, turn: Mutex::new(()), page: Mutex::new(None) })))
     }
 
-    pub fn send(&mut self, request: &Request) -> Result<()> {
+    /// Ask, and wait for the answer. A `Failed` comes back as an error, as does ck-web
+    /// stopping or the asking being cancelled.
+    pub fn ask(&self, request: &Request) -> Result<Reply> {
+        let _turn = crate::http::lock(&self.0.turn);
+        let (tx, rx) = channel();
+        *crate::http::lock(&self.0.waiter) = Some(tx);
+        self.send(request)?;
+        match rx.recv() {
+            Ok(Some(Reply::Failed { error })) => bail!(error),
+            Ok(Some(reply)) => Ok(reply),
+            Ok(None) | Err(_) => bail!("ck-web stopped"),
+        }
+    }
+
+    /// Be on `url` (a page of the site posted to), opening it if it isn't the one open.
+    pub fn open(&self, url: &str) -> Result<()> {
+        if crate::http::lock(&self.0.page).as_deref() == Some(url) {
+            return Ok(());
+        }
+        self.ask(&Request::Open { url: url.to_string() })?;
+        *crate::http::lock(&self.0.page) = Some(url.to_string());
+        Ok(())
+    }
+
+    /// Send a request from the page: what came back.
+    pub fn fetch(&self, f: Fetch<'_>) -> Result<Fetched> {
+        let headers = f.headers.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
+        let request = Request::Fetch { method: f.method.into(), url: f.url.into(), headers, fields: f.fields, file: f.file, body: f.body };
+        match self.ask(&request)? {
+            Reply::Fetched { status, body } => Ok(Fetched { status, body }),
+            other => bail!("ck-web answered {other:?}"),
+        }
+    }
+
+    /// Tell ck-web without waiting (a click, the wheel); stopping what's being asked fails it.
+    pub fn send(&self, request: &Request) -> Result<()> {
+        if matches!(request, Request::Cancel) {
+            *crate::http::lock(&self.0.page) = None;
+            if let Some(tx) = crate::http::lock(&self.0.waiter).take() {
+                let _ = tx.send(Some(Reply::Failed { error: "Cancelled".into() }));
+            }
+        }
         let line = serde_json::to_string(request)?;
-        writeln!(self.stdin, "{line}").and_then(|()| self.stdin.flush()).context("ck-web has stopped")
+        let mut stdin = crate::http::lock(&self.0.stdin);
+        writeln!(stdin, "{line}").and_then(|()| stdin.flush()).context("ck-web has stopped")
     }
 }
 
-impl Drop for Helper {
-    fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+/// A request for `Helper::fetch`: a GET with nothing, unless said otherwise.
+#[derive(Debug, Clone, Default)]
+pub struct Fetch<'a> {
+    pub method: &'a str,
+    pub url: &'a str,
+    pub headers: Vec<(&'a str, &'a str)>,
+    /// A form: its fields, and a file.
+    pub fields: Vec<(String, String)>,
+    pub file: Option<Upload>,
+    /// Or a body as it is (with its `Content-Type` among the headers).
+    pub body: Option<String>,
+}
+
+impl<'a> Fetch<'a> {
+    pub fn get(url: &'a str) -> Self {
+        Fetch { method: "GET", url, ..Default::default() }
+    }
+
+    pub fn post(url: &'a str, fields: Vec<(String, String)>) -> Self {
+        Fetch { method: "POST", url, fields, ..Default::default() }
+    }
+
+    pub fn header(mut self, name: &'a str, value: &'a str) -> Self {
+        self.headers.push((name, value));
+        self
+    }
+}
+
+/// What a `fetch` got back.
+#[derive(Debug, Clone)]
+pub struct Fetched {
+    pub status: u16,
+    /// Text, or base64 for an image.
+    pub body: String,
+}
+
+impl Fetched {
+    /// The body as JSON, or why it isn't.
+    pub fn json(&self) -> Result<serde_json::Value> {
+        serde_json::from_str(&self.body).with_context(|| format!("the site answered {} with {}", self.status, crate::markup::strip_tags(&self.body).chars().take(200).collect::<String>()))
+    }
+
+    /// The body as an image.
+    pub fn image(&self) -> Result<image::DynamicImage> {
+        let bytes = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &self.body).context("the image didn't come through")?;
+        image::load_from_memory(&bytes).context("not an image")
     }
 }
 
@@ -91,7 +200,7 @@ mod tests {
     #[test]
     // page.js writes its replies by hand.
     fn replies_read_as_page_js_writes_them() {
-        let posted: Reply = serde_json::from_str(r#"{"is":"posted","thread":1,"no":2}"#).unwrap();
-        assert_eq!(posted, Reply::Posted { thread: 1, no: 2 });
+        let fetched: Reply = serde_json::from_str(r#"{"is":"fetched","status":200,"body":"hi"}"#).unwrap();
+        assert!(matches!(fetched, Reply::Fetched { status: 200, .. }));
     }
 }

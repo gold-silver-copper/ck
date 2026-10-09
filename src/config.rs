@@ -95,10 +95,14 @@ pub struct Config {
     /// In a thread, replies to a hidden post (and theirs) are hidden too.
     #[serde(default)]
     pub recursive_hiding: bool,
-    /// Where ck-web, the browser helper for posting to 4chan, is, if you built your own
+    /// Where ck-web, the browser helper ck posts through, is, if you built your own
     /// (default: the one ck downloads, then next to ck, then on the PATH).
     #[serde(default)]
     pub web_helper: Option<String>,
+    /// The password posts are sent with, for deleting them on sites that let you (default: a
+    /// new one each run).
+    #[serde(default)]
+    pub post_password: Option<String>,
     /// `[[filter]]`: hide or highlight threads and posts.
     #[serde(default, rename = "filter")]
     pub filters: Vec<crate::filter::FilterConfig>,

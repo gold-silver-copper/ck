@@ -319,8 +319,8 @@ impl Images {
         Self::start(Some(picker), Arc::new(|| {}), None, 0)
     }
 
-    /// Put an already decoded image in the cache (tests and benchmarks).
-    #[cfg(test)]
+    /// Put an already decoded image in the cache: a captcha's picture that came with it
+    /// rather than by a URL (and tests' and benchmarks').
     pub fn insert_decoded(&mut self, url: &str, img: DynamicImage) {
         let bytes = img.as_bytes().len().saturating_mul(2);
         let slot = Slot::Ready { img: Arc::new(img), protos: Vec::new(), pending: None, asked: None, failed: None, bytes, used: 0, frames: None, animation: None, animating: None };

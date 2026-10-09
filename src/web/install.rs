@@ -8,7 +8,7 @@ use anyhow::{Context, Result, ensure};
 use sha2::{Digest, Sha256};
 
 /// The ck-web this ck talks to: its release is `ck-web-v{VERSION}`.
-pub const VERSION: &str = "0.1.0";
+pub const VERSION: &str = "0.2.0";
 const RELEASES: &str = "https://github.com/gold-silver-copper/ck/releases/download";
 /// Each system's bundle, with its SHA-256 (from the release's `.sha256` files).
 const BUNDLES: &[(&str, &str)] = &[

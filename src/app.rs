@@ -14,7 +14,7 @@ use ratatui::widgets::ListState;
 
 use crate::backend::{self, Backend};
 pub use crate::config::Sort;
-use crate::config::{CatalogLayout, ColorMode, Config, ImagesMode, SiteConfig, SiteKind};
+use crate::config::{CatalogLayout, ColorMode, Config, ImagesMode, SiteConfig};
 use crate::disk_cache::DiskCache;
 use crate::download;
 use crate::filter::{Filters, Hidden};
@@ -494,6 +494,8 @@ pub struct App {
     web_for: Option<posting::Where>,
     /// `web_helper`: where ck-web is.
     web_helper: Option<String>,
+    /// What posts are sent with to delete them by (`post_password`, or one for this run).
+    post_password: String,
     /// Posts written and not sent, by where they go.
     drafts: HashMap<posting::Where, Compose>,
     /// The name and options last posted with.
@@ -632,6 +634,7 @@ impl App {
             web: None,
             web_for: None,
             web_helper: cfg.web_helper.clone(),
+            post_password: cfg.post_password.clone().unwrap_or_else(posting::random_password),
             drafts: HashMap::new(),
             poster: (String::new(), String::new()),
             awaiting: None,

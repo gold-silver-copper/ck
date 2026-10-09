@@ -1,31 +1,21 @@
-//! Posting: the reply box (`P`), 4chan's captcha answered in the terminal, and the post sent
-//! through ck-web, the browser helper (`crate::web`). Drafts are kept per thread until sent.
+//! Posting: the reply box (`P`), the site's captcha answered in the terminal, and the post
+//! sent through ck-web, the browser helper (`crate::web`), the way the site's engine posts
+//! (`crate::post`). Drafts are kept per thread until sent.
 
 use super::*;
 use anyhow::Context;
-use crate::captcha::{Solving, Task, Twister};
+use crate::captcha::{Captcha, Solving, Task};
 use crate::editor::Editor;
+pub use crate::post::Where;
+use crate::post::{Answered, Draft, Poster, Sent};
 use crate::web::{self, Reply, Request};
 use image::DynamicImage;
 use ratatui_image::protocol::Protocol;
+use std::sync::Arc;
 
 /// What to say when ck-web isn't there, and can't be downloaded for this system.
-const NO_HELPER: &str = "Posting to 4chan needs ck-web, ck's browser helper, which isn't built for this system yet: \
+const NO_HELPER: &str = "Posting needs ck-web, ck's browser helper, which isn't built for this system yet: \
                          see the manual (Posting) to build it, and set web_helper";
-
-/// Where a post goes: a site's board, and a thread there (0: a new thread).
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct Where {
-    pub site: String,
-    pub board: String,
-    pub thread: u64,
-}
-
-impl Where {
-    pub fn new_thread(&self) -> bool {
-        self.thread == 0
-    }
-}
 
 /// The reply box's fields, in the order tab goes through them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -103,10 +93,14 @@ pub struct Compose {
     pub frames: u64,
     /// The keys' pointer on the browser view, in the page's pixels.
     pub pointer: Option<(u32, u32)>,
+    /// Bumped by each try at posting and each stop, so a stopped try's answers are dropped.
+    attempt: u64,
+    /// The site's longest comment, where ck knows it.
+    pub limit: Option<usize>,
 }
 
 impl Compose {
-    fn new(to: Where, name: &str, options: &str) -> Self {
+    fn new(to: Where, name: &str, options: &str, limit: Option<usize>) -> Self {
         let line = |s: &str| {
             let mut e = Editor::default();
             e.set(s);
@@ -128,6 +122,8 @@ impl Compose {
             view_at: None,
             frames: 0,
             pointer: None,
+            attempt: 0,
+            limit,
         }
     }
 
@@ -183,19 +179,18 @@ impl Compose {
         self.comment.insert(&s);
     }
 
-    /// The form's fields, with the captcha's answer.
-    fn form(&self, challenge: &str, answer: &str) -> Vec<(String, String)> {
-        let mut fields = vec![("name".into(), self.name.text().to_string()), ("email".into(), self.options.text().to_string())];
-        if self.to.new_thread() {
-            fields.push(("sub".into(), self.subject.text().to_string()));
+    /// The post as written, with the password to delete it by.
+    fn draft(&self, password: &str) -> Draft {
+        let file = Some(self.file.text().trim()).filter(|f| !f.is_empty()).map(crate::config::expand_home);
+        Draft {
+            name: self.name.text().to_string(),
+            email: self.options.text().to_string(),
+            subject: if self.to.new_thread() { self.subject.text().to_string() } else { String::new() },
+            comment: self.comment.text().to_string(),
+            spoiler: self.spoiler && file.is_some(),
+            file,
+            password: password.to_string(),
         }
-        fields.push(("com".into(), self.comment.text().to_string()));
-        if self.spoiler && !self.file.is_empty() {
-            fields.push(("spoiler".into(), "on".into()));
-        }
-        fields.push(("t-challenge".into(), challenge.to_string()));
-        fields.push(("t-response".into(), answer.to_string()));
-        fields
     }
 
     /// A key while writing: to the field, or moving between them.
@@ -263,6 +258,20 @@ const AWAIT: Duration = Duration::from_secs(120);
 /// How long after posting a new thread to open it.
 const NEW_THREAD_AFTER: Duration = Duration::from_secs(5);
 
+/// Eight letters and digits, new each run: what posts are sent with when `post_password`
+/// isn't set (LynxChan keeps eight).
+pub fn random_password() -> String {
+    use std::hash::{BuildHasher, Hasher};
+    let mut n = std::collections::hash_map::RandomState::new().build_hasher().finish();
+    (0..8)
+        .map(|_| {
+            let c = char::from_digit((n % 36) as u32, 36).unwrap_or('0');
+            n /= 36;
+            c
+        })
+        .collect()
+}
+
 /// What a key in the box leads to, past the box itself.
 enum Then {
     Nothing,
@@ -286,9 +295,10 @@ pub enum Quoting {
 }
 
 impl App {
-    /// Whether ck can post where you are: 4chan, live (not a saved copy).
+    /// Whether ck can post where you are: a site whose engine it posts to, live (not a
+    /// saved copy).
     pub(super) fn can_post(&self) -> bool {
-        self.current_site().cfg.kind == SiteKind::Fourchan && self.tab.saved().is_none()
+        crate::post::poster(&self.current_site().cfg).is_some() && self.tab.saved().is_none()
     }
 
     /// `P`: the reply box for the thread (quoting the selected post), or for a new thread in
@@ -303,13 +313,12 @@ impl App {
             self.info("Open a thread to reply, or a catalog to start a thread");
             return;
         };
-        let fourchan = self.site_index(&to.site).and_then(|i| self.sites.get(i)).is_some_and(|s| s.cfg.kind == SiteKind::Fourchan);
-        if !fourchan {
+        let Some(poster) = self.poster_for(&to) else {
             let browser = self.keys.key(Action::Browser);
-            self.info(format!("ck posts to 4chan only, so far; {browser} opens this in the browser"));
+            self.info(format!("ck can't post on this site (an archive takes no posts); {browser} opens this in the browser"));
             return;
-        }
-        let mut c = self.drafts.remove(&to).unwrap_or_else(|| Compose::new(to, &self.poster.0, &self.poster.1));
+        };
+        let mut c = self.drafts.remove(&to).unwrap_or_else(|| Compose::new(to, &self.poster.0, &self.poster.1, poster.comment_limit()));
         if let Some(t) = &self.tab.thread
             && let Some(p) = t.current().filter(|p| self.tab.view() == View::Thread && (p.no != t.key().no || quoting == Quoting::Text))
         {
@@ -324,6 +333,7 @@ impl App {
         let Some(Popup::Reply(mut c)) = self.popup.take() else { return };
         if matches!(c.stage, Stage::Asking | Stage::Person(_)) {
             self.cancel_web();
+            c.attempt += 1;
             c.stage = Stage::Writing;
         }
         if matches!(c.stage, Stage::Offer) {
@@ -337,7 +347,7 @@ impl App {
     }
 
     fn cancel_web(&mut self) {
-        if let Some(h) = &mut self.web {
+        if let Some(h) = &self.web {
             let _ = h.send(&Request::Cancel);
         }
         self.web_for = None;
@@ -417,6 +427,7 @@ impl App {
             Then::Cancel => {
                 self.cancel_web();
                 if let Some(c) = self.reply_box() {
+                    c.attempt += 1;
                     c.stage = Stage::Writing;
                 }
             }
@@ -504,83 +515,129 @@ impl App {
         }
     }
 
-    /// Ask ck-web for a captcha for the box's post.
+    /// How the site of `to` posts.
+    fn poster_for(&self, to: &Where) -> Option<Arc<dyn Poster>> {
+        self.site_index(&to.site).and_then(|i| self.sites.get(i)).and_then(|s| crate::post::poster(&s.cfg))
+    }
+
+    /// Ask the site for a captcha for the box's post (through ck-web, on a thread of its own).
     fn ask_captcha(&mut self) {
         let Some(to) = self.reply_box().map(|c| c.to.clone()) else { return };
-        let asked = self.helper().and_then(|h| h.send(&Request::Captcha { board: to.board.clone(), thread: to.thread }));
-        let Some(c) = self.reply_box() else { return };
-        match asked {
-            Ok(()) => {
-                c.stage = Stage::Asking;
-                c.problem = None;
-                self.web_for = Some(to);
+        let Some((helper, poster)) = self.posting_to(&to) else { return };
+        let Some(attempt) = self.start_attempt(&to, Stage::Asking) else { return };
+        let later = self.later();
+        std::thread::spawn(move || {
+            let got = crate::guard::result(|| {
+                helper.open(&poster.page())?;
+                poster.captcha(&helper, &to)
+            });
+            later.run(move |app| app.on_captcha(&to, attempt, got));
+        });
+    }
+
+    /// ck-web and the site's way of posting, for posting `to`; or the box says why not.
+    fn posting_to(&mut self, to: &Where) -> Option<(web::Helper, Arc<dyn Poster>)> {
+        let Some(poster) = self.poster_for(to) else {
+            self.box_problem(to, "ck can't post on this site");
+            return None;
+        };
+        match self.helper() {
+            Ok(h) => Some((h.clone(), poster)),
+            Err(e) => {
+                let e = e.to_string();
+                self.box_problem(to, e);
+                None
             }
-            Err(e) => c.problem(e.to_string()),
+        }
+    }
+
+    /// Put the box for `to` at `stage` for a new try: its number, for the answers to find.
+    pub(super) fn start_attempt(&mut self, to: &Where, stage: Stage) -> Option<u64> {
+        self.web_for = Some(to.clone());
+        let c = self.compose_for(to)?;
+        c.attempt += 1;
+        c.stage = stage;
+        c.problem = None;
+        Some(c.attempt)
+    }
+
+    /// The box for `to`, if `attempt` is still its try.
+    fn attempt_of(&mut self, to: &Where, attempt: u64) -> Option<&mut Compose> {
+        self.compose_for(to).filter(|c| c.attempt == attempt && matches!(c.stage, Stage::Asking | Stage::Person(_) | Stage::Sending))
+    }
+
+    fn box_problem(&mut self, to: &Where, what: impl Into<String>) {
+        if let Some(c) = self.compose_for(to) {
+            c.problem(what);
         }
     }
 
     /// ck-web, started if it isn't running.
-    fn helper(&mut self) -> anyhow::Result<&mut web::Helper> {
+    fn helper(&mut self) -> anyhow::Result<&web::Helper> {
         if self.web.is_none() {
             if crate::sandboxed() {
                 anyhow::bail!("ck-web isn't started here");
             }
             let path = web::find(self.web_helper.as_deref()).context(NO_HELPER)?;
-            let later = self.later();
-            self.web = Some(web::Helper::start(&path, move |reply| later.run(move |app| app.on_web(reply)))?);
+            let (views, stops) = (self.later(), self.later());
+            let on_view = move |view| {
+                views.run(move |app| app.on_view(view));
+            };
+            let on_stop = move |said: Option<String>| {
+                stops.run(move |app| app.on_helper_stop(said));
+            };
+            self.web = Some(web::Helper::start(&path, on_view, on_stop)?);
         }
-        self.web.as_mut().context(NO_HELPER)
+        self.web.as_ref().context(NO_HELPER)
     }
 
-    /// What ck-web said (None: it's stopped).
-    pub(super) fn on_web(&mut self, reply: Option<Reply>) {
-        let Some(reply) = reply else {
-            self.web = None;
-            if let Some(to) = self.web_for.take()
-                && let Some(c) = self.compose_for(&to)
-                && matches!(c.stage, Stage::Asking | Stage::Person(_) | Stage::Sending)
-            {
-                c.problem("ck-web stopped");
-            }
-            return;
-        };
+    /// ck-web has stopped (with the last thing it said): a post on its way through it fails.
+    pub(super) fn on_helper_stop(&mut self, said: Option<String>) {
+        self.web = None;
+        if let Some(to) = self.web_for.take()
+            && let Some(c) = self.compose_for(&to)
+            && matches!(c.stage, Stage::Asking | Stage::Person(_) | Stage::Sending)
+        {
+            c.problem(said.map_or_else(|| "ck-web stopped".to_string(), |s| format!("ck-web stopped: {s}")));
+        }
+    }
+
+    /// The browser view, while the site wants a person: shown in the box it's for.
+    pub(super) fn on_view(&mut self, view: Reply) {
+        let Reply::View { png, left, top } = view else { return };
         let Some(to) = self.web_for.clone() else { return };
-        match reply {
-            Reply::Ready => {}
-            Reply::Captcha { twister } => {
-                let Some(c) = self.compose_for(&to) else { return };
-                match Twister::parse(&twister, Instant::now()) {
-                    Twister::Refused(why) => c.problem(why),
-                    Twister::Wait { until, message } => c.stage = Stage::Waiting { until, message },
-                    Twister::Challenge(ch) => {
-                        let none = matches!(ch.task, Task::None);
-                        c.stage = Stage::Solving(Box::new(Solving::new(ch)));
-                        c.art = None;
-                        c.side_art = None;
-                        if none {
-                            self.post_for(&to);
-                        }
-                    }
+        let Some(c) = self.compose_for(&to).filter(|c| matches!(c.stage, Stage::Asking | Stage::Person(_) | Stage::Sending)) else { return };
+        let img = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, png).ok().and_then(|b| image::load_from_memory(&b).ok());
+        // The pointer starts in the middle of what's shown, and stays where it was on the page
+        // as the view changes.
+        if c.pointer.is_none()
+            && let Some(i) = &img
+        {
+            c.pointer = Some((left + i.width() / 2, top + i.height() / 2));
+        }
+        c.stage = Stage::Person(img.map(|i| (i, left, top)));
+        c.frames += 1;
+    }
+
+    /// What the site said when asked for a captcha (or after an answer, or a post it wants
+    /// one for first).
+    pub(super) fn on_captcha(&mut self, to: &Where, attempt: u64, got: anyhow::Result<Captcha>) {
+        let Some(c) = self.attempt_of(to, attempt) else { return };
+        match got {
+            Err(e) => c.problem(format!("{e:#}")),
+            Ok(Captcha::Refused(why)) => c.problem(why),
+            Ok(Captcha::Wait { until, message }) => c.stage = Stage::Waiting { until, message },
+            Ok(Captcha::Challenge(mut ch)) => {
+                for (key, img) in std::mem::take(&mut ch.pictures) {
+                    self.images.insert_decoded(&key, enlarged(img));
                 }
-            }
-            Reply::View { png, left, top } => {
-                let Some(c) = self.compose_for(&to) else { return };
-                let img = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, png).ok().and_then(|b| image::load_from_memory(&b).ok());
-                // The pointer starts in the middle of what's shown, and stays where it was on
-                // the page as the view changes.
-                if c.pointer.is_none()
-                    && let Some(i) = &img
-                {
-                    c.pointer = Some((left + i.width() / 2, top + i.height() / 2));
-                }
-                c.stage = Stage::Person(img.map(|i| (i, left, top)));
-                c.frames += 1;
-            }
-            Reply::Posted { thread, no } => self.posted(&to, thread, no),
-            Reply::Failed { error } => {
-                self.web_for = None;
-                if let Some(c) = self.compose_for(&to) {
-                    c.problem(error);
+                let Some(c) = self.compose_for(to) else { return };
+                let none = matches!(ch.task, Task::None);
+                c.stage = Stage::Solving(Box::new(Solving::new(ch)));
+                c.art = None;
+                c.side_art = None;
+                if none {
+                    self.post_for(to);
                 }
             }
         }
@@ -593,27 +650,35 @@ impl App {
         }
     }
 
+    /// Give the site the captcha's answer, then (once it's done) send the post: on a thread of
+    /// its own.
     fn post_for(&mut self, to: &Where) {
+        let password = self.post_password.clone();
+        let Some((helper, poster)) = self.posting_to(to) else { return };
         let Some(c) = self.compose_for(to) else { return };
         let Stage::Solving(s) = &c.stage else { return };
         let Some(answer) = s.answer() else { return };
-        let fields = c.form(&s.challenge.id, &answer);
-        let file = Some(c.file.text().trim()).filter(|f| !f.is_empty()).map(|f| crate::config::expand_home(f).display().to_string());
-        let request = Request::Post { board: to.board.clone(), thread: to.thread, fields, file };
-        let sent = self.helper().and_then(|h| h.send(&request));
-        let Some(c) = self.compose_for(to) else { return };
-        match sent {
-            Ok(()) => {
-                c.stage = Stage::Sending;
-                self.web_for = Some(to.clone());
-            }
-            Err(e) => c.problem(e.to_string()),
-        }
+        let challenge = s.challenge.clone();
+        let draft = c.draft(&password);
+        let Some(attempt) = self.start_attempt(to, Stage::Sending) else { return };
+        let (later, to) = (self.later(), to.clone());
+        std::thread::spawn(move || {
+            let sent = crate::guard::result(|| match poster.answer(&helper, &challenge, &answer)? {
+                Answered::Next(next) => Ok(Sent::Again(Captcha::Challenge(next))),
+                Answered::Done(fields) => poster.post(&helper, &to, &draft, &fields),
+            });
+            later.run(move |app| match sent {
+                // Up, even if the box was closed meanwhile: it's yours all the same.
+                Ok(Sent::Posted { thread, no }) => app.posted(&to, thread, no),
+                Ok(Sent::Again(captcha)) => app.on_captcha(&to, attempt, Ok(captcha)),
+                Err(e) => app.on_captcha(&to, attempt, Err(e)),
+            });
+        });
     }
 
     /// The post's up: it's yours (the thread's watched for replies to it), and the thread's
     /// shown with it.
-    fn posted(&mut self, to: &Where, thread: u64, no: u64) {
+    pub(super) fn posted(&mut self, to: &Where, thread: u64, no: u64) {
         self.web_for = None;
         let subject = self.compose_for(to).map(|c| c.subject.text().to_string()).unwrap_or_default();
         if matches!(&self.popup, Some(Popup::Reply(c)) if &c.to == to) {
@@ -697,7 +762,7 @@ impl App {
     }
 
     fn click_page(&mut self, x: u32, y: u32) {
-        if let Some(h) = &mut self.web {
+        if let Some(h) = &self.web {
             let _ = h.send(&Request::Click { x, y });
         }
     }
@@ -706,7 +771,7 @@ impl App {
     pub(super) fn on_reply_wheel(&mut self, ev: MouseEvent, _: Instant) {
         let dy = if ev.kind == ratatui::crossterm::event::MouseEventKind::ScrollDown { 60 } else { -60 };
         if let Some((x, y)) = self.view_point(ev)
-            && let Some(h) = &mut self.web
+            && let Some(h) = &self.web
         {
             let _ = h.send(&Request::Scroll { x, y, dy });
         }
@@ -724,6 +789,16 @@ impl App {
         let at = |cell: u16, start: u16, cells: u16, px: u32| (u32::from(cell - start) * 2 + 1) * px / (u32::from(cells.max(1)) * 2);
         Some((v.left + at(ev.column, v.area.x, v.area.width, v.width), v.top + at(ev.row, v.area.y, v.area.height, v.height)))
     }
+}
+
+/// A captcha's small picture made bigger (a whole number of times, to at least 200 pixels
+/// high): easier to make out, and drawn over enough rows to sit where it's put.
+fn enlarged(img: DynamicImage) -> DynamicImage {
+    let times = 200u32.div_ceil(img.height().max(1));
+    if times < 2 {
+        return img;
+    }
+    img.resize(img.width().saturating_mul(times), img.height().saturating_mul(times), image::imageops::FilterType::Lanczos3)
 }
 
 /// A key while answering the captcha; whether it's answered now.

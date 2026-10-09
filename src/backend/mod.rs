@@ -116,7 +116,7 @@ pub const ENGINES: [Engine; 6] = [
         kind: SiteKind::Jschan,
         name: "jschan",
         label: "jschan",
-        build: |c| Arc::new(jschan::Jschan::new(url(c), boards(c))),
+        build: |c| Arc::new(jschan::Jschan::new(site_url(c), boards(c))),
         hosts: &[],
         probe: Some(detect::boards_json),
         parse: |v| {
@@ -128,7 +128,7 @@ pub const ENGINES: [Engine; 6] = [
         kind: SiteKind::Lynxchan,
         name: "lynxchan",
         label: "LynxChan",
-        build: |c| Arc::new(lynxchan::Lynxchan::new(url(c), boards(c))),
+        build: |c| Arc::new(lynxchan::Lynxchan::new(site_url(c), boards(c))),
         hosts: &[],
         probe: Some(detect::lynxchan),
         parse: |v| {
@@ -141,7 +141,7 @@ pub const ENGINES: [Engine; 6] = [
         kind: SiteKind::Foolfuuka,
         name: "foolfuuka",
         label: "FoolFuuka",
-        build: |c| Arc::new(foolfuuka::Foolfuuka::new(url(c), boards(c))),
+        build: |c| Arc::new(foolfuuka::Foolfuuka::new(site_url(c), boards(c))),
         hosts: &[],
         probe: Some(detect::foolfuuka),
         parse: |v| {
@@ -154,7 +154,7 @@ pub const ENGINES: [Engine; 6] = [
         kind: SiteKind::Vichan,
         name: "vichan",
         label: "vichan",
-        build: |c| Arc::new(futaba::Futaba::vichan(url(c), c.thumb_ext.clone(), c.media_url.clone(), boards(c))),
+        build: |c| Arc::new(futaba::Futaba::vichan(site_url(c), c.thumb_ext.clone(), c.media_url.clone(), boards(c))),
         hosts: &[],
         probe: Some(detect::vichan),
         parse: |v| {
@@ -167,7 +167,7 @@ pub const ENGINES: [Engine; 6] = [
         kind: SiteKind::Makaba,
         name: "makaba",
         label: "makaba",
-        build: |c| Arc::new(makaba::Makaba::new(url(c), c.media_url.clone(), boards(c))),
+        build: |c| Arc::new(makaba::Makaba::new(site_url(c), c.media_url.clone(), boards(c))),
         hosts: &["2ch.hk", "2ch.su", "2ch.life"],
         probe: Some(detect::makaba),
         parse: |v| {
@@ -214,7 +214,7 @@ fn as_u32(v: &serde_json::Value) -> Option<u32> {
     crate::http::as_u64(v).map(saturate)
 }
 
-fn url(cfg: &SiteConfig) -> String {
+pub(crate) fn site_url(cfg: &SiteConfig) -> String {
     cfg.url.as_deref().map(|u| u.trim_end_matches('/').to_string()).unwrap_or_default()
 }
 

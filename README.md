@@ -24,9 +24,10 @@ terminal. (Click the tour for [the video](ck-demo.webm), with controls.)
 - **Threads** with quote previews, replies shown inline, one post's conversation alone, and search.
 - **Images** in the terminal (kitty, sixel, iTerm2, or half-blocks anywhere), a full-screen
   viewer that plays GIFs, a gallery of a thread's files, downloads and reverse image search.
-- **Posting** to 4chan: a reply box with quoting and drafts, the captcha answered in the
-  terminal, and Cloudflare's check clicked there too; your posts are marked as yours. The
-  first post downloads ck-web, the browser ck posts through (about 135 MB, once; Linux for now).
+- **Posting** on 4chan, vichan, LynxChan, jschan and 2ch sites: a reply box with quoting and
+  drafts, the site's captcha answered in the terminal, and Cloudflare's check clicked there
+  too; your posts are marked as yours. The first post downloads ck-web, the browser ck posts
+  through (about 135 MB, once; Linux for now).
 - **Watched threads** refresh in the background and notify you of new posts and replies to
   yours. They're saved as they go, so a thread that dies can still be read offline.
 - **Filters** and hidden words hide or highlight threads and posts.
