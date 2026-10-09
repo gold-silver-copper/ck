@@ -5416,3 +5416,31 @@ fn a_post_goes_from_captcha_to_yours() {
     let key = here(&app, "g", 1);
     assert_eq!(app.store.watched(&key).unwrap().mine(), [3]);
 }
+
+#[test]
+fn the_browser_view_has_a_pointer_for_the_keys() {
+    let mut app = fourchan_thread(&[1]);
+    app.act(Action::Reply);
+    let to = reply_box(&mut app).to.clone();
+    app.web_for = Some(to);
+    // A 100x60 part of the page, from (10, 20).
+    let mut png = std::io::Cursor::new(Vec::new());
+    image::DynamicImage::new_rgb8(100, 60).write_to(&mut png, image::ImageFormat::Png).unwrap();
+    let png = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, png.into_inner());
+    app.on_web(Some(crate::web::Reply::View { png, left: 10, top: 20 }));
+    assert_eq!(reply_box(&mut app).pointer, Some((60, 50)));
+    // Before it's drawn, a step is a guessed cell (8x16); shift goes five; it stays on the view.
+    app.on_key(KeyEvent::from(KeyCode::Char('l')));
+    app.on_key(KeyEvent::from(KeyCode::Down));
+    assert_eq!(reply_box(&mut app).pointer, Some((68, 66)));
+    app.on_key(KeyEvent::new(KeyCode::Left, KeyModifiers::SHIFT));
+    app.on_key(KeyEvent::from(KeyCode::Char('K')));
+    assert_eq!(reply_box(&mut app).pointer, Some((28, 20)));
+    // Drawn, a click puts it where it lands.
+    app.images = crate::images::Images::offline();
+    draw_at(&mut app, 100, 30);
+    let v = reply_box(&mut app).view_at.unwrap();
+    app.on_mouse(MouseEvent { kind: MouseEventKind::Down(MouseButton::Left), column: v.area.x, row: v.area.y, modifiers: KeyModifiers::NONE }, Instant::now());
+    let (x, y) = reply_box(&mut app).pointer.unwrap();
+    assert!(x < 20 && y < 30, "{x} {y}");
+}

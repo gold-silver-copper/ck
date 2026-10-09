@@ -7,6 +7,7 @@ use std::time::Instant;
 use crate::captcha::{Cell, Prompt, Solving, Task};
 use crate::editor::Editor;
 use image::DynamicImage;
+use std::borrow::Cow;
 
 /// 4chan's longest comment.
 const MAX_COMMENT: usize = 2000;
@@ -25,7 +26,7 @@ pub(super) fn draw_reply(f: &mut Frame, app: &mut App) {
         Stage::Offer => "y download · esc back",
         Stage::Installing { .. } => "esc keep for later",
         Stage::Asking | Stage::Sending => "esc stop",
-        Stage::Person(_) => "click it · esc stop",
+        Stage::Person(_) => "arrows move · enter click · esc stop",
         Stage::Waiting { .. } => "enter ask again · esc back",
         Stage::Solving(s) if s.expired(Instant::now()) => "enter new captcha · esc back",
         Stage::Solving(s) => match s.challenge.task {
@@ -82,11 +83,15 @@ pub(super) fn draw_reply(f: &mut Frame, app: &mut App) {
             put(f, body.x, body.y + 2, body.width, Line::styled(when, dim()));
         }
         Stage::Person(img) => {
-            put(f, body.x, body.y, body.width, Line::styled("4chan wants to know you're a person: click what it asks below.", Style::new().fg(t.primary)));
+            let how = "4chan wants to know you're a person: move the red pointer onto what it asks (arrows, shift for bigger steps) and press enter, or click it.";
+            put(f, body.x, body.y, body.width, Line::styled(truncate(how, body.width as usize), Style::new().fg(t.primary)));
             let view = Rect { y: body.y + 2, height: body.height.saturating_sub(2), ..body };
             match img {
                 Some((img, left, top)) => {
-                    if let Some(area) = art(f, images, &mut c.art, c.frames, img, view, true) {
+                    let cell = c.view_at.map_or((8, 16), |v| (v.width / u32::from(v.area.width.max(1)), v.height / u32::from(v.area.height.max(1))));
+                    let at = c.pointer.map(|(x, y)| (x.saturating_sub(*left), y.saturating_sub(*top)));
+                    let key = c.frames << 32 | at.map_or(0, |(x, y)| u64::from(x) << 16 | u64::from(y));
+                    if let Some(area) = art(f, images, &mut c.art, key, || Cow::Owned(with_pointer(img, at, cell)), view, true) {
                         c.view_at = Some(ViewAt { area, left: *left, top: *top, width: img.width(), height: img.height() });
                     }
                 }
@@ -208,7 +213,7 @@ fn draw_captcha(f: &mut Frame, images: &mut Images, c: &mut Compose, area: Rect)
             };
             if let Some(img) = shown {
                 let key = (s.step as u64) << 32 | s.slide as u64;
-                art(f, images, &mut c.art, key, img, pic, false);
+                art(f, images, &mut c.art, key, || Cow::Borrowed(img), pic, false);
             }
         }
         Task::Text { prompt, image } => {
@@ -249,6 +254,43 @@ fn draw_captcha(f: &mut Frame, images: &mut Images, c: &mut Compose, area: Rect)
     }
 }
 
+/// The browser view with the keys' pointer drawn on it at `at` (its pixels): a red cross a
+/// few cells wide, open in the middle so what's under it shows; `cell` is a cell's size in
+/// its pixels, so it reads at any size.
+fn with_pointer(img: &DynamicImage, at: Option<(u32, u32)>, cell: (u32, u32)) -> DynamicImage {
+    let Some((px, py)) = at else { return img.clone() };
+    let mut out = img.to_rgb8();
+    let (w, h) = out.dimensions();
+    let (cw, ch) = (cell.0.max(2), cell.1.max(2));
+    let red = image::Rgb([230, 20, 40]);
+    let mut put = |x: i64, y: i64| {
+        if let (Ok(x), Ok(y)) = (u32::try_from(x), u32::try_from(y))
+            && x < w
+            && y < h
+        {
+            out.put_pixel(x, y, red);
+        }
+    };
+    let (px, py) = (i64::from(px), i64::from(py));
+    // Arms two cells long, a third of a cell thick, starting half a cell out.
+    let (tw, th) = (i64::from(cw / 3).max(1), i64::from(ch / 6).max(1));
+    let (gap_x, gap_y) = (i64::from(cw / 2), i64::from(ch / 2));
+    let (arm_x, arm_y) = (i64::from(cw) * 2, i64::from(ch));
+    for d in gap_x..gap_x + arm_x {
+        for t in -th..=th {
+            put(px - d, py + t);
+            put(px + d, py + t);
+        }
+    }
+    for d in gap_y..gap_y + arm_y {
+        for t in -tw..=tw {
+            put(px + t, py - d);
+            put(px + t, py + d);
+        }
+    }
+    DynamicImage::ImageRgb8(out)
+}
+
 /// A picture of 4chan's (a captcha's) by its URL, fetched like any other.
 fn url_image(f: &mut Frame, images: &mut Images, url: &str, area: Rect) {
     match images.get(url, Size::new(area.width, area.height), Kind::Full) {
@@ -261,15 +303,16 @@ fn url_image(f: &mut Frame, images: &mut Images, url: &str, area: Rect) {
     }
 }
 
-/// Draw `img` in `area`, encoded once for `key` and the area; where it was drawn. The
+/// Draw `img` (made only when it's to be encoded) in `area`, encoded once for `key` and the
+/// area; where it was drawn. The
 /// browser view (`grow`) is made as big as fits, centered; a captcha's pictures are drawn as
 /// they are, if they fit.
-fn art(f: &mut Frame, images: &Images, cache: &mut Option<Art>, key: u64, img: &DynamicImage, area: Rect, grow: bool) -> Option<Rect> {
+fn art<'a>(f: &mut Frame, images: &Images, cache: &mut Option<Art>, key: u64, img: impl FnOnce() -> Cow<'a, DynamicImage>, area: Rect, grow: bool) -> Option<Rect> {
     if area.is_empty() {
         return None;
     }
     if cache.as_ref().is_none_or(|a| a.key != key || a.area != area) {
-        *cache = images.encode_now(img, Size::new(area.width, area.height), grow).map(|proto| Art { key, area, proto });
+        *cache = images.encode_now(&img(), Size::new(area.width, area.height), grow).map(|proto| Art { key, area, proto });
     }
     let Some(a) = cache.as_ref() else {
         put(f, area.x, area.y, area.width, Line::styled("Images are off: turn them on in Settings to see this", Style::new().fg(theme().error)));

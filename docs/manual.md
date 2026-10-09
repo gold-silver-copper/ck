@@ -640,8 +640,10 @@ profile (cookies, Cloudflare's pass) is kept in `$XDG_CACHE_HOME/ck/web`, so the
 usually skips the check.
 
 When Cloudflare (or 4chan's occasional hCaptcha) wants a person, the box shows the page
-and you click it there: ck passes the clicks (and the wheel) to the browser. ck never clicks
-it for you. With half-block images the page is coarse; kitty, sixel or iTerm2 graphics show
+with a red pointer on it: the arrows (or `h`/`j`/`k`/`l`) move it a cell at a time, shift
+(or `H`/`J`/`K`/`L`) five, and `enter` or `space` clicks where it is, so no mouse is needed.
+A mouse click on the page works too (and moves the pointer there), and the wheel scrolls
+it. ck never clicks it for you. With half-block images the page is coarse; kitty, sixel or iTerm2 graphics show
 it as it is. With images off, there's nothing to click: turn them on in Settings.
 
 The download is for Linux (x86_64 and ARM). Elsewhere, or to use your own build, build it

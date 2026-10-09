@@ -99,6 +99,8 @@ pub struct Compose {
     pub view_at: Option<ViewAt>,
     /// Bumped with each new browser view, so it's drawn anew.
     pub frames: u64,
+    /// The keys' pointer on the browser view, in the page's pixels.
+    pub pointer: Option<(u32, u32)>,
 }
 
 impl Compose {
@@ -122,6 +124,7 @@ impl Compose {
             art: None,
             view_at: None,
             frames: 0,
+            pointer: None,
         }
     }
 
@@ -211,6 +214,28 @@ impl Compose {
         }
     }
 
+    /// Move the browser view's pointer: the arrows (or h/j/k/l) by about a cell as drawn,
+    /// with shift by five.
+    fn move_pointer(&mut self, key: KeyEvent) {
+        let (Some((x, y)), Some(Stage::Person(Some((img, left, top))))) = (self.pointer, Some(&self.stage)) else { return };
+        // A cell's worth of the page, as last drawn (before that, a guess).
+        let (cw, ch) = self.view_at.map_or((8, 16), |v| (v.width / u32::from(v.area.width.max(1)), v.height / u32::from(v.area.height.max(1))));
+        let far = key.modifiers.contains(KeyModifiers::SHIFT) || matches!(key.code, KeyCode::Char('H' | 'J' | 'K' | 'L'));
+        let n = if far { 5 } else { 1 };
+        let (dx, dy): (i64, i64) = match key.code {
+            KeyCode::Left | KeyCode::Char('h' | 'H') => (-1, 0),
+            KeyCode::Right | KeyCode::Char('l' | 'L') => (1, 0),
+            KeyCode::Up | KeyCode::Char('k' | 'K') => (0, -1),
+            KeyCode::Down | KeyCode::Char('j' | 'J') => (0, 1),
+            _ => return,
+        };
+        let step = |at: u32, d: i64, cell: u32, start: u32, len: u32| {
+            let to = i64::from(at) + d * n * i64::from(cell.max(1));
+            u32::try_from(to.clamp(i64::from(start), i64::from(start + len.saturating_sub(1)))).unwrap_or(at)
+        };
+        self.pointer = Some((step(x, dx, cw, *left, img.width()), step(y, dy, ch, *top, img.height())));
+    }
+
     /// Back to writing, saying what went wrong.
     fn problem(&mut self, what: impl Into<String>) {
         self.stage = Stage::Writing;
@@ -227,6 +252,8 @@ enum Then {
     Post,
     Cancel,
     Install,
+    /// Click the browser view where the pointer is.
+    Click,
 }
 
 /// What a reply quotes.
@@ -330,6 +357,11 @@ impl App {
             }
             Stage::Installing { .. } if key.code == KeyCode::Esc => Then::Close,
             Stage::Asking | Stage::Person(_) if key.code == KeyCode::Esc => Then::Cancel,
+            Stage::Person(_) if matches!(key.code, KeyCode::Enter | KeyCode::Char(' ')) => Then::Click,
+            Stage::Person(_) => {
+                c.move_pointer(key);
+                Then::Nothing
+            }
             Stage::Waiting { .. } if key.code == KeyCode::Esc => {
                 c.stage = Stage::Writing;
                 Then::Nothing
@@ -347,7 +379,7 @@ impl App {
             Stage::Solving(s) => {
                 if solve_key(s, key.code) { Then::Post } else { Then::Nothing }
             }
-            Stage::Offer | Stage::Installing { .. } | Stage::Asking | Stage::Person(_) | Stage::Waiting { .. } | Stage::Sending => Then::Nothing,
+            Stage::Offer | Stage::Installing { .. } | Stage::Asking | Stage::Waiting { .. } | Stage::Sending => Then::Nothing,
         };
         match then {
             Then::Nothing => {}
@@ -356,6 +388,11 @@ impl App {
             Then::Ask => self.ask_captcha(),
             Then::Post => self.post_reply(),
             Then::Install => self.install_helper(),
+            Then::Click => {
+                if let Some((x, y)) = self.reply_box().and_then(|c| c.pointer) {
+                    self.click_page(x, y);
+                }
+            }
             Then::Cancel => {
                 self.cancel_web();
                 if let Some(c) = self.reply_box() {
@@ -507,6 +544,13 @@ impl App {
             Reply::View { png, left, top } => {
                 let Some(c) = self.compose_for(&to) else { return };
                 let img = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, png).ok().and_then(|b| image::load_from_memory(&b).ok());
+                // The pointer starts in the middle of what's shown, and stays where it was on
+                // the page as the view changes.
+                if c.pointer.is_none()
+                    && let Some(i) = &img
+                {
+                    c.pointer = Some((left + i.width() / 2, top + i.height() / 2));
+                }
                 c.stage = Stage::Person(img.map(|i| (i, left, top)));
                 c.frames += 1;
             }
@@ -581,9 +625,16 @@ impl App {
 
     /// A click on the reply box: on the browser view, to the page.
     pub(super) fn on_reply_click(&mut self, ev: MouseEvent, _: Instant) {
-        if let Some((x, y)) = self.view_point(ev)
-            && let Some(h) = &mut self.web
-        {
+        if let Some((x, y)) = self.view_point(ev) {
+            if let Some(c) = self.reply_box() {
+                c.pointer = Some((x, y));
+            }
+            self.click_page(x, y);
+        }
+    }
+
+    fn click_page(&mut self, x: u32, y: u32) {
+        if let Some(h) = &mut self.web {
             let _ = h.send(&Request::Click { x, y });
         }
     }
