@@ -608,8 +608,9 @@ comment. The counter is 4chan's limit, 2000 characters.
 
 ctrl-s sends it. ck asks 4chan for a captcha and shows it in the box:
 
-- slider steps: `←`/`→` (or `h`/`l`) go through the pictures, `enter` takes the one that
-  fits and goes to the next step;
+- slider steps: the shape to find is on the left, the strip the slider's on beside it;
+  `←`/`→` (or `h`/`l`) go through the strips, and `enter` takes the one with the shape in
+  it and goes to the next step;
 - a picture to read: type what it says, `enter`;
 - a grid: the arrows move, `space` (or `1`-`9`) picks, `enter` sends.
 

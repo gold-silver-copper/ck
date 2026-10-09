@@ -4,7 +4,7 @@
 use super::*;
 use crate::app::{Art, Compose, Field, Stage, ViewAt, grid_cols};
 use std::time::Instant;
-use crate::captcha::{Cell, Prompt, Solving, Task};
+use crate::captcha::{Cell, Solving, Task};
 use crate::editor::Editor;
 use image::DynamicImage;
 use std::borrow::Cow;
@@ -30,7 +30,7 @@ pub(super) fn draw_reply(f: &mut Frame, app: &mut App) {
         Stage::Waiting { .. } => "enter ask again · esc back",
         Stage::Solving(s) if s.expired(Instant::now()) => "enter new captcha · esc back",
         Stage::Solving(s) => match s.challenge.task {
-            Task::Slider(_) => "←/→ pick · enter next · ctrl-r new · esc back",
+            Task::Slider(_) => "←/→ slide · enter it's this one · ctrl-r new · esc back",
             Task::Grid { .. } => "arrows move · space pick · enter post · esc back",
             Task::Text { .. } | Task::None => "enter post · ctrl-r new · esc back",
         },
@@ -201,19 +201,22 @@ fn draw_captcha(f: &mut Frame, images: &mut Images, c: &mut Compose, area: Rect)
         Task::None => put(f, area.x, area.y, area.width, Line::styled("No captcha needed: posting…", Style::new().fg(t.primary))),
         Task::Slider(steps) => {
             let Some(step) = s.current() else { return };
-            let title = format!("Step {}/{} · {}/{} · {expiry}", s.step + 1, steps.len(), s.slide, step.items.len());
+            let title = format!("Step {}/{} · {expiry}", s.step + 1, steps.len());
             put(f, area.x, area.y, area.width, Line::styled(title, dim()));
-            let pic = Rect { y: area.y + 2, height: area.height.saturating_sub(2), ..area };
-            let shown = match (s.slide.checked_sub(1).and_then(|i| step.items.get(i)), &step.prompt) {
-                (Some(img), _) | (None, Prompt::Image(img)) => Some(img),
-                (None, Prompt::Text(text)) => {
-                    put(f, pic.x, pic.y, pic.width, Line::styled(format!("{text}  (→ to start)"), Style::new().fg(t.text)));
-                    None
-                }
-            };
-            if let Some(img) = shown {
+            put(f, area.x, area.y + 1, area.width, Line::styled(truncate(&step.text, area.width as usize), Style::new().fg(t.text)));
+            // The shape to find on the left, beside the strip the slider's on, to compare.
+            let height = area.height.saturating_sub(5).min(12);
+            let side = (area.width / 4).min(24);
+            let (find, strip) = (Rect::new(area.x, area.y + 4, side, height), Rect::new(area.x + side + 2, area.y + 4, area.width.saturating_sub(side + 2), height));
+            put(f, find.x, find.y - 1, find.width, Line::styled("Find this", bold(t.primary)));
+            let at = format!("← {} of {} →  in this one? enter", s.slide + 1, step.items.len());
+            put(f, strip.x, strip.y - 1, strip.width, Line::styled(at, bold(t.primary)));
+            if let Some(img) = &step.reference {
+                art(f, images, &mut c.side_art, s.step as u64, || Cow::Borrowed(img), find, true);
+            }
+            if let Some(img) = step.items.get(s.slide) {
                 let key = (s.step as u64) << 32 | s.slide as u64;
-                art(f, images, &mut c.art, key, || Cow::Borrowed(img), pic, false);
+                art(f, images, &mut c.art, key, || Cow::Borrowed(img), strip, true);
             }
         }
         Task::Text { prompt, image } => {

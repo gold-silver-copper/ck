@@ -96,6 +96,8 @@ pub struct Compose {
     pub problem: Option<String>,
     /// The picture drawn last, and where the browser view was drawn, for clicks.
     pub art: Option<Art>,
+    /// The picture beside it (a slider's shape to find).
+    pub side_art: Option<Art>,
     pub view_at: Option<ViewAt>,
     /// Bumped with each new browser view, so it's drawn anew.
     pub frames: u64,
@@ -122,6 +124,7 @@ impl Compose {
             stage: Stage::Writing,
             problem: None,
             art: None,
+            side_art: None,
             view_at: None,
             frames: 0,
             pointer: None,
@@ -310,6 +313,7 @@ impl App {
             c.stage = Stage::Writing;
         }
         c.art = None;
+        c.side_art = None;
         if !c.is_blank() {
             self.drafts.insert(c.to.clone(), *c);
         }
@@ -535,6 +539,8 @@ impl App {
                         let none = matches!(ch.task, Task::None);
                         c.stage = Stage::Solving(Box::new(Solving::new(ch)));
                         c.art = None;
+                        c.side_art = None;
+        c.side_art = None;
                         if none {
                             self.post_for(&to);
                         }

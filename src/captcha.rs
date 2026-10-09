@@ -42,17 +42,13 @@ pub enum Task {
     Grid { prompt: String, cells: Vec<Cell>, single: bool },
 }
 
+/// A slider step: pick the item (a strip of shapes) that has the reference (the shape to find)
+/// in it.
 #[derive(Debug)]
 pub struct Step {
-    /// What to look for: words, or a picture.
-    pub prompt: Prompt,
+    pub text: String,
+    pub reference: Option<DynamicImage>,
     pub items: Vec<DynamicImage>,
-}
-
-#[derive(Debug)]
-pub enum Prompt {
-    Text(String),
-    Image(DynamicImage),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -86,13 +82,21 @@ impl Twister {
     }
 }
 
+/// A slider step. Its words (`str`) are HTML, with the reference in them as an inline
+/// `<img src="data:image/png;base64,…">`; or the reference is on its own (`img`).
 fn step(t: &Value) -> Step {
-    let prompt = match t.get("img").and_then(Value::as_str).and_then(decode) {
-        Some(img) => Prompt::Image(img),
-        None => Prompt::Text(t.get("str").and_then(Value::as_str).map(strip_tags).unwrap_or_default()),
-    };
+    let html = t.get("str").and_then(Value::as_str).unwrap_or_default();
+    let reference = t.get("img").and_then(Value::as_str).and_then(decode).or_else(|| inline_image(html));
     let items = t.get("items").and_then(Value::as_array).map(|a| a.iter().filter_map(|i| i.as_str().and_then(decode)).collect()).unwrap_or_default();
-    Step { prompt, items }
+    Step { text: strip_tags(html), reference, items }
+}
+
+/// The first picture in a bit of HTML that's inline (a `data:` URL, base64).
+fn inline_image(html: &str) -> Option<DynamicImage> {
+    let at = html.find("base64,")? + "base64,".len();
+    let rest = html.get(at..)?;
+    let end = rest.find(|c: char| !(c.is_ascii_alphanumeric() || matches!(c, '+' | '/' | '='))).unwrap_or(rest.len());
+    decode(rest.get(..end)?)
 }
 
 fn ext_task(ext: &Value) -> Task {
@@ -138,7 +142,7 @@ pub fn strip_tags(html: &str) -> String {
 #[derive(Debug)]
 pub struct Solving {
     pub challenge: Challenge,
-    /// The slider's step, and its position (0 shows the prompt; then the items, from 1).
+    /// The slider's step, and the item it's on.
     pub step: usize,
     pub slide: usize,
     /// The slider's picks so far.
@@ -167,16 +171,18 @@ impl Solving {
         }
     }
 
-    /// Move the slider by `by`, within its items (and the prompt, at 0).
+    /// Move the slider by `by`, within its items.
     pub fn slide(&mut self, by: isize) {
-        let n = self.current().map_or(0, |s| s.items.len());
-        self.slide = self.slide.saturating_add_signed(by).min(n);
+        let last = self.current().map_or(0, |s| s.items.len().saturating_sub(1));
+        self.slide = self.slide.saturating_add_signed(by).min(last);
     }
 
     /// Take the slider's pick and go on; whether that was the last step.
     pub fn next_step(&mut self) -> bool {
-        let Some(pick) = self.slide.checked_sub(1) else { return false };
-        self.picks.push_str(&pick.to_string());
+        if self.current().is_none_or(|s| s.items.is_empty()) {
+            return false;
+        }
+        self.picks.push_str(&self.slide.to_string());
         self.step += 1;
         self.slide = 0;
         self.current().is_none()
@@ -230,18 +236,21 @@ mod tests {
     #[test]
     fn slider_steps_answer_with_their_picks() {
         let img = png();
+        // As 4chan sends them: the reference inline in the words, or on its own.
+        let words = format!(r#"<img src="data:image/png;base64,{img}" style="float:right">Use the scroll bar below to find the image"#);
         let mut s = challenge(&json!({"challenge": "abc", "ttl": 120, "tasks": [
-            {"str": "Pick the <b>cat</b>", "items": [img, img, img]},
+            {"str": words, "items": [img, img, img]},
             {"img": img, "items": [img, img]},
         ]}));
-        assert!(matches!(s.current().map(|c| &c.prompt), Some(Prompt::Text(t)) if t == "Pick the cat"));
-        // The prompt can't be picked; past the last item stays on it.
-        assert!(!s.next_step());
+        let step = s.current().unwrap();
+        assert_eq!(step.text, "Use the scroll bar below to find the image");
+        assert!(step.reference.is_some());
+        // Past the last item stays on it.
         s.slide(5);
-        assert_eq!(s.slide, 3);
+        assert_eq!(s.slide, 2);
         assert!(!s.next_step());
-        assert!(matches!(s.current().map(|c| &c.prompt), Some(Prompt::Image(_))));
-        s.slide(1);
+        assert!(s.current().unwrap().reference.is_some());
+        s.slide(-1);
         assert_eq!(s.answer(), None);
         assert!(s.next_step());
         assert_eq!((s.challenge.id.as_str(), s.answer().as_deref()), ("abc", Some("20")));
