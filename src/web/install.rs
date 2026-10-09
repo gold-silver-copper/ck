@@ -12,8 +12,8 @@ pub const VERSION: &str = "0.2.0";
 const RELEASES: &str = "https://github.com/gold-silver-copper/ck/releases/download";
 /// Each system's bundle, with its SHA-256 (from the release's `.sha256` files).
 const BUNDLES: &[(&str, &str)] = &[
-    ("linux-x86_64", "ec6eddb062bcbad58528e626e1d02708c07ea4f0d2bac9ae4c8f3bf7a542fccf"),
-    ("linux-aarch64", "3e744726547a6b3ed5912e7361676809a63469f591b734eb4c88407f4bb57e0d"),
+    ("linux-x86_64", "c77b7864851c3277c695cb596cff342860983358749c41f2745954d7f924d2e5"),
+    ("linux-aarch64", "e1bee7caf5b7c9bfb145eba440317bea3c5c274d2bf4bd0c03eb9f07d96313ce"),
 ];
 /// About how big a bundle is, in megabytes, to say before downloading it.
 pub const SIZE_MB: u64 = 135;
