@@ -5386,10 +5386,13 @@ fn a_post_goes_from_captcha_to_yours() {
     // On the opening post, nothing's quoted.
     app.act(Action::Reply);
     type_text(&mut app, "first");
-    // ck-web isn't there: sending offers to download it (tests don't), keeping the text.
+    // ck-web isn't there: sending offers to download it where there's one to download
+    // (tests don't), and says so either way, keeping the text.
     app.on_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL));
-    assert!(matches!(reply_box(&mut app).stage, Stage::Offer));
-    app.on_key(KeyEvent::from(KeyCode::Char('y')));
+    if crate::web::install::bundle().is_some() {
+        assert!(matches!(reply_box(&mut app).stage, Stage::Offer));
+        app.on_key(KeyEvent::from(KeyCode::Char('y')));
+    }
     let c = reply_box(&mut app);
     assert!(c.problem.is_some() && matches!(c.stage, Stage::Writing));
     assert_eq!(c.comment.text(), "first");
