@@ -317,6 +317,10 @@ impl App {
         if p.body.iter().flat_map(|l| &l.spans).any(|s| crate::markup::is_spoiler(s.style)) {
             items.push(act(A::Spoiler, "show its spoilers"));
         }
+        if self.can_post() {
+            items.push(act(A::Reply, if p.no == t.key().no { "reply to the thread" } else { "reply to it" }));
+            items.push(act(A::Quote, "reply quoting its text"));
+        }
         items.push(act(A::Mine, if t.marks.is_mine(p.no) { "it's not yours" } else { "mark it as yours" }));
         let hidden = t.marks.why_hidden(t.selected).is_some();
         items.push(act(A::Hide, if hidden { "unhide it" } else { "hide it" }));
@@ -399,6 +403,9 @@ impl App {
         items.push(MenuItem::Act(A::Sort, format!("sort by {} (now {})", sort.next().as_str(), sort.as_str())));
         let layout = self.layout();
         items.push(MenuItem::Act(A::Compact, format!("{} layout (now {})", layout.next().as_str(), layout.as_str())));
+        if self.can_post() {
+            items.push(act(A::Reply, "start a thread"));
+        }
         items.push(act(A::Favorite, "favorite the board (or not)"));
         if let Some(row) = self.board_images_row() {
             items.push(MenuItem::Act(A::BoardImages, row));

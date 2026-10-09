@@ -14,7 +14,7 @@ use ratatui::widgets::ListState;
 
 use crate::backend::{self, Backend};
 pub use crate::config::Sort;
-use crate::config::{CatalogLayout, ColorMode, Config, ImagesMode, SiteConfig};
+use crate::config::{CatalogLayout, ColorMode, Config, ImagesMode, SiteConfig, SiteKind};
 use crate::disk_cache::DiskCache;
 use crate::download;
 use crate::filter::{Filters, Hidden};
@@ -57,6 +57,8 @@ mod home;
 mod links;
 mod list;
 pub use list::FilteredList;
+mod posting;
+pub use posting::{Art, Compose, Field, Stage, ViewAt, grid_cols};
 mod saved;
 mod saving;
 mod board_images;
@@ -262,6 +264,8 @@ pub enum Popup {
     ImageSearch(ImageSearchPanel),
     /// The key help, scrolled this far (as last drawn).
     Help(ListState),
+    /// Writing a post (`P`).
+    Reply(Box<Compose>),
 }
 
 /// What's being typed in the footer: one thing at a time.
@@ -485,6 +489,17 @@ pub struct App {
     pub active: usize,
     /// The last request id given out (ids are unique across tabs).
     next_id: u64,
+    /// ck-web, once started for posting, and the post it's working on.
+    web: Option<crate::web::Helper>,
+    web_for: Option<posting::Where>,
+    /// `web_helper`: where ck-web is.
+    web_helper: Option<String>,
+    /// Posts written and not sent, by where they go.
+    drafts: HashMap<posting::Where, Compose>,
+    /// The name and options last posted with.
+    poster: (String, String),
+    /// A post just sent, until its thread shows it.
+    awaiting: Option<posting::Awaiting>,
     tx: Sender<Msg>,
     rx: Receiver<Msg>,
 }
@@ -614,6 +629,12 @@ impl App {
             tabs: vec![Tab::new(0, Instant::now())],
             active: 0,
             next_id: 0,
+            web: None,
+            web_for: None,
+            web_helper: cfg.web_helper.clone(),
+            drafts: HashMap::new(),
+            poster: (String::new(), String::new()),
+            awaiting: None,
             tx,
             rx,
         };
@@ -893,6 +914,9 @@ impl App {
             after(t, Duration::ZERO);
         }
         if let Some(t) = self.footer.due() {
+            after(t, Duration::ZERO);
+        }
+        if let Some(t) = self.awaiting.as_ref().and_then(|a| a.open_at) {
             after(t, Duration::ZERO);
         }
         if self.tab.view() == View::Thread && self.tab.thread.is_some() && self.tab.loading().is_none() && self.tab.saved().is_none() {

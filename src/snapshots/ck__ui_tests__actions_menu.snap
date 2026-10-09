@@ -13,22 +13,22 @@ expression: snapshot(&mut a)
     It has a few replies.    p      preview the posts it quotes
                              b      go to the first reply
     Replies  >>1001          e      show its replies under it
-                             m      mark it as yours
-                             H      hide it
+                             P      reply to it
+                                    reply quoting its text
+  ▌                          m      mark it as yours
+  ▌ Anonymous  2026-09-21 1  H      hide it
   ▌                          X      hide or highlight posts like it…
-  ▌ Anonymous  2026-09-21 1  c      its conversation alone
-  ▌                          M      only the posts with files
-  ▌ >>1000 (OP)              w      stop watching the thread
-  ▌ >implying                F      follow the thread as a general
+  ▌ >>1000 (OP)              c      its conversation alone
+  ▌ >implying                M      only the posts with files
+  ▌                          w      stop watching the thread
+  ▌ Replies  >>1003          F      follow the thread as a general
   ▌                          V      all the thread's files
-  ▌ Replies  >>1003                 save all the thread's files…
-  ▌                          U      the first unread post
-                             /      search the thread
+                                    save all the thread's files…
+                             U      the first unread post
+    Anonymous  2026-09-21 1  /      search the thread
                              f      pick a link or post by its label
-    Anonymous  2026-09-21 1         images on this board: on → off
-                                    save the thread as a page…
-    Code:                    r      reload
-    fn main() {              :      go to a URL or site/board/thread
-        println!("snapshot"  ,      settings
+    Code:                           images on this board: on → off
+    fn main() {                     save the thread as a page…
+        println!("snapshot"  r      reload
     }
  j/k post   enter quote   . more   tab images & links   c conversation   p preview quote   ? help

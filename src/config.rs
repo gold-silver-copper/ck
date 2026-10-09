@@ -95,6 +95,10 @@ pub struct Config {
     /// In a thread, replies to a hidden post (and theirs) are hidden too.
     #[serde(default)]
     pub recursive_hiding: bool,
+    /// Where ck-web, the browser helper for posting to 4chan, is, if you built your own
+    /// (default: the one ck downloads, then next to ck, then on the PATH).
+    #[serde(default)]
+    pub web_helper: Option<String>,
     /// `[[filter]]`: hide or highlight threads and posts.
     #[serde(default, rename = "filter")]
     pub filters: Vec<crate::filter::FilterConfig>,
@@ -104,6 +108,14 @@ pub struct Config {
     /// `false`: only the sites in this file, none of the built-in ones.
     #[serde(default = "default_true")]
     pub default_sites: bool,
+}
+
+/// A path from the config or typed in, with `~/` for the home directory.
+pub fn expand_home(path: &str) -> std::path::PathBuf {
+    match (path.strip_prefix("~/"), dirs::home_dir()) {
+        (Some(rest), Some(home)) => home.join(rest),
+        _ => std::path::PathBuf::from(path),
+    }
 }
 
 fn default_true() -> bool {

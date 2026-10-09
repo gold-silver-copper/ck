@@ -28,12 +28,14 @@ use crate::theme::{self, ROLES, Theme, theme};
 
 mod lists;
 mod popups;
+mod posting;
 mod settings;
 mod thread;
 mod viewer;
 
 use lists::*;
 use popups::*;
+use posting::*;
 use settings::*;
 use thread::*;
 use viewer::*;
@@ -194,6 +196,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         Some(Popup::ImageSearch(_)) => draw_image_search(f, app),
         Some(Popup::Adding(_)) => draw_adding(f, app),
         Some(Popup::Confirm(_)) => draw_confirm(f, app),
+        Some(Popup::Reply(_)) => draw_reply(f, app),
         _ => {}
     }
     app.images.end_frame();

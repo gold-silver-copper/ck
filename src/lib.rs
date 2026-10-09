@@ -1,4 +1,4 @@
-//! ck: a read-only terminal imageboard browser. The binary (`main.rs`) is a thin shell
+//! ck: a terminal imageboard browser. The binary (`main.rs`) is a thin shell
 //! around this library, which is also what the fuzz targets in `fuzz/` link against.
 // Tests lay out fixtures by hand; the code under test lands files through `atomic`.
 #![cfg_attr(test, allow(clippy::disallowed_methods))]
@@ -33,12 +33,14 @@ pub fn sandboxed() -> bool {
 pub(crate) mod app;
 pub(crate) mod atomic;
 pub(crate) mod backend;
+pub(crate) mod captcha;
 pub(crate) mod clipboard;
 #[cfg(test)]
 mod bench;
 pub(crate) mod config;
 pub(crate) mod disk_cache;
 pub(crate) mod download;
+pub(crate) mod editor;
 #[cfg(test)]
 mod e2e;
 pub(crate) mod export;
@@ -65,6 +67,7 @@ mod test_fixtures;
 pub(crate) mod theme;
 pub(crate) mod title;
 pub(crate) mod ui;
+pub(crate) mod web;
 pub(crate) mod writer;
 #[cfg(test)]
 mod ui_tests;

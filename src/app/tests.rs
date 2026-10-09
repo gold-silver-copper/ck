@@ -5341,3 +5341,138 @@ fn a_new_favorite_leaves_the_home_screen_selection_on_its_site() {
     app.tab.navigate(View::Sites);
     assert_eq!(app.selected_key(View::Sites), Some(site));
 }
+
+/// The default config's 4chan, on a thread of `posts` on /g/.
+fn fourchan_thread(posts: &[u64]) -> App {
+    let mut app = test_app();
+    app.tab.board = Some(Board { uri: "g".into(), title: String::new(), nsfw: None });
+    let key = here(&app, "g", posts[0]);
+    app.tab.thread = Some(ThreadView::new(key, posts.iter().map(|&no| Post { no, ..Default::default() }).collect()));
+    app.tab.navigate(View::Thread);
+    app
+}
+
+fn reply_box(app: &mut App) -> &mut Compose {
+    match &mut app.popup {
+        Some(Popup::Reply(c)) => c,
+        _ => panic!("no reply box"),
+    }
+}
+
+#[test]
+fn replies_quote_the_post_and_keep_their_draft() {
+    let mut app = fourchan_thread(&[1, 2, 3]);
+    app.tab.thread.as_mut().unwrap().selected = 1;
+    app.act(Action::Reply);
+    type_text(&mut app, "hi");
+    assert_eq!(reply_box(&mut app).comment.text(), ">>2\nhi");
+    // Closed, it's kept; opened on another post, that one's quoted under it.
+    app.on_key(KeyEvent::from(KeyCode::Esc));
+    assert!(app.popup.is_none());
+    app.tab.thread.as_mut().unwrap().selected = 2;
+    app.act(Action::Reply);
+    assert_eq!(reply_box(&mut app).comment.text(), ">>2\nhi\n>>3\n");
+    // Only 4chan, so far.
+    let mut other = local_app();
+    other.tab.thread = Some(ThreadView::new(here(&other, "x", 1), vec![Post { no: 1, ..Default::default() }]));
+    other.tab.navigate(View::Thread);
+    other.act(Action::Reply);
+    assert!(other.popup.is_none());
+}
+
+#[test]
+fn a_post_goes_from_captcha_to_yours() {
+    let mut app = fourchan_thread(&[1, 2]);
+    // On the opening post, nothing's quoted.
+    app.act(Action::Reply);
+    type_text(&mut app, "first");
+    // ck-web isn't there: sending offers to download it where there's one to download
+    // (tests don't), and says so either way, keeping the text.
+    app.on_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL));
+    if crate::web::install::bundle().is_some() {
+        assert!(matches!(reply_box(&mut app).stage, Stage::Offer));
+        app.on_key(KeyEvent::from(KeyCode::Char('y')));
+    }
+    let c = reply_box(&mut app);
+    assert!(c.problem.is_some() && matches!(c.stage, Stage::Writing));
+    assert_eq!(c.comment.text(), "first");
+    // As ck-web would answer: a captcha to type, answered in the box.
+    let to = c.to.clone();
+    app.web_for = Some(to.clone());
+    app.on_web(Some(crate::web::Reply::Captcha { twister: serde_json::json!({"challenge": "c", "ttl": 60, "extTask": {"mode": 1, "str": "Type it"}}) }));
+    assert!(matches!(reply_box(&mut app).stage, Stage::Solving(_)));
+    type_text(&mut app, "Ab1");
+    let Stage::Solving(s) = &reply_box(&mut app).stage else { panic!("not solving") };
+    assert_eq!(s.answer().as_deref(), Some("ab1"));
+    // 4chan refuses: the box says why, and keeps the post.
+    app.web_for = Some(to.clone());
+    app.on_web(Some(crate::web::Reply::Failed { error: "You must wait longer.".into() }));
+    let c = reply_box(&mut app);
+    assert_eq!((c.problem.as_deref(), c.comment.text()), (Some("You must wait longer."), "first"));
+    // Then it's up: the box closes, and the post is yours.
+    app.web_for = Some(to);
+    app.on_web(Some(crate::web::Reply::Posted { thread: 1, no: 3 }));
+    assert!(app.popup.is_none() && app.drafts.is_empty());
+    let key = here(&app, "g", 1);
+    assert_eq!(app.store.watched(&key).unwrap().mine(), [3]);
+    // The thread's refreshed as often as 4chan's API allows until the post's in it; then it's
+    // selected, and refreshes go back to their pace.
+    assert_eq!(app.thread_every(), crate::http::MIN_REFETCH + Duration::from_secs(1));
+    let post = |no| Post { no, ..Default::default() };
+    refresh(&mut app, key.clone(), vec![post(1), post(2)]);
+    assert!(app.awaiting.is_some());
+    refresh(&mut app, key, vec![post(1), post(2), post(3)]);
+    assert!(app.awaiting.is_none());
+    assert_eq!(app.tab.thread.as_ref().unwrap().current().map(|p| p.no), Some(3));
+    assert!(app.thread_every() >= Duration::from_secs(10));
+}
+
+#[test]
+fn a_new_thread_opens_once_the_api_has_it() {
+    let mut app = test_app();
+    app.clock = Clock { fixed: Some(NOW), ..Default::default() };
+    app.tab.board = Some(Board { uri: "g".into(), title: String::new(), nsfw: None });
+    app.tab.navigate(View::Catalog);
+    app.tab.catalog = catalog_here(&app, vec![]);
+    app.act(Action::Reply);
+    let to = reply_box(&mut app).to.clone();
+    app.web_for = Some(to);
+    app.on_web(Some(crate::web::Reply::Posted { thread: 9, no: 9 }));
+    // Not opened at once: 4chan's API lists a new thread a few seconds late.
+    assert_eq!(app.tab.view(), View::Catalog);
+    let open_at = app.awaiting.as_ref().and_then(|a| a.open_at).unwrap();
+    assert!(app.next_wake(app.clock.instant()) <= open_at.saturating_duration_since(app.clock.instant()));
+    // A 404 then is "not yet", not "gone".
+    let key = here(&app, "g", 9);
+    app.thread_arrived(&key, Err(anyhow::Error::new(crate::http::HttpError::NotFound("gone".into()))));
+    assert!(app.awaiting.as_ref().is_some_and(|a| a.open_at.is_some()));
+    assert!(!app.store.watched(&key).unwrap().status.is_dead());
+}
+
+#[test]
+fn the_browser_view_has_a_pointer_for_the_keys() {
+    let mut app = fourchan_thread(&[1]);
+    app.act(Action::Reply);
+    let to = reply_box(&mut app).to.clone();
+    app.web_for = Some(to);
+    // A 100x60 part of the page, from (10, 20).
+    let mut png = std::io::Cursor::new(Vec::new());
+    image::DynamicImage::new_rgb8(100, 60).write_to(&mut png, image::ImageFormat::Png).unwrap();
+    let png = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, png.into_inner());
+    app.on_web(Some(crate::web::Reply::View { png, left: 10, top: 20 }));
+    assert_eq!(reply_box(&mut app).pointer, Some((60, 50)));
+    // Before it's drawn, a step is a guessed cell (8x16); shift goes five; it stays on the view.
+    app.on_key(KeyEvent::from(KeyCode::Char('l')));
+    app.on_key(KeyEvent::from(KeyCode::Down));
+    assert_eq!(reply_box(&mut app).pointer, Some((68, 66)));
+    app.on_key(KeyEvent::new(KeyCode::Left, KeyModifiers::SHIFT));
+    app.on_key(KeyEvent::from(KeyCode::Char('K')));
+    assert_eq!(reply_box(&mut app).pointer, Some((28, 20)));
+    // Drawn, a click puts it where it lands.
+    app.images = crate::images::Images::offline();
+    draw_at(&mut app, 100, 30);
+    let v = reply_box(&mut app).view_at.unwrap();
+    app.on_mouse(MouseEvent { kind: MouseEventKind::Down(MouseButton::Left), column: v.area.x, row: v.area.y, modifiers: KeyModifiers::NONE }, Instant::now());
+    let (x, y) = reply_box(&mut app).pointer.unwrap();
+    assert!(x < 20 && y < 30, "{x} {y}");
+}

@@ -337,6 +337,20 @@ impl Images {
         }
     }
 
+    /// `img`, not from the cache (a captcha, a page), encoded to fit in `size` cells now;
+    /// with `grow`, as big as fits.
+    pub fn encode_now(&self, img: &DynamicImage, size: Size, grow: bool) -> Option<Protocol> {
+        let picker = self.picker.as_ref()?;
+        if !grow {
+            return encode(picker, img, size).ok();
+        }
+        if picker.protocol_type() == ProtocolType::Halfblocks {
+            return halfblocks(img, size, picker.font_size(), true).ok();
+        }
+        let (w, h) = pixels(size, picker.font_size());
+        picker.new_protocol(shrink(img, w, h, true), size, Resize::Fit(None)).ok()
+    }
+
     pub fn enabled(&self) -> bool {
         self.picker.is_some()
     }

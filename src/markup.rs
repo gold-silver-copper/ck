@@ -693,6 +693,22 @@ pub fn decode(s: &str) -> String {
     html_escape::decode_html_entities(s).into_owned()
 }
 
+/// The text of a bit of HTML: tags dropped, line breaks kept, entities decoded.
+pub fn strip_tags(html: &str) -> String {
+    let breaks = html.replace("<br>", "\n").replace("<br/>", "\n").replace("<br />", "\n");
+    let mut out = String::new();
+    let mut in_tag = false;
+    for c in breaks.chars() {
+        match c {
+            '<' => in_tag = true,
+            '>' if in_tag => in_tag = false,
+            c if !in_tag => out.push(c),
+            _ => {}
+        }
+    }
+    decode(out.trim())
+}
+
 /// Word-wrap a styled line to `width` columns. Over-long words are split. Code lines keep
 /// their whitespace and wrap by character, with a marker on each continuation line.
 pub fn wrap(line: &Line<'static>, width: usize) -> Vec<Line<'static>> {

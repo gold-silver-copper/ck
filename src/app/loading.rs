@@ -173,7 +173,11 @@ impl App {
         let open = self.tab.opened();
         self.tab.thread_checked = self.clock.instant();
         match res {
-            Ok(t) => self.show_thread(key.clone(), t, None, open),
+            Ok(t) => {
+                self.show_thread(key.clone(), t, None, open);
+                self.await_post();
+            }
+            Err(e) if http::is_not_found(&e) && self.not_there_yet(key) => {}
             Err(e) if http::is_not_found(&e) => {
                 if self.store.mark_dead(key) {
                     self.save();
@@ -488,6 +492,9 @@ impl App {
 
     /// How long the open thread waits between refreshes now.
     pub(super) fn thread_every(&self) -> Duration {
+        if self.awaiting_here() {
+            return http::MIN_REFETCH + Duration::from_secs(1);
+        }
         self.stretched(self.refresh_thread, self.tab.thread_quiet)
     }
 
@@ -501,6 +508,7 @@ impl App {
     /// a time.
     pub(super) fn background(&mut self) {
         self.know_nsfw(self.tab.site);
+        self.await_post();
         // A saved copy open isn't refreshed (a watched thread still is, below, unless it's dead).
         // Behind the settings it's refreshed as a watched thread is (counted, not visited).
         let open = self.tab.thread.as_ref().filter(|_| self.tab.view() == View::Thread && self.tab.saved().is_none()).map(|t| t.key().clone());
@@ -617,6 +625,7 @@ impl App {
                 let before = newest(self);
                 self.show_thread(key.clone(), t, None, Opening::default());
                 self.tab.thread_quiet = if newest(self) > before { 0 } else { self.tab.thread_quiet.saturating_add(1) };
+                self.await_post();
             }
             Ok(t) => {
                 // Cut short: counts, notes and the copy stay as they were.
