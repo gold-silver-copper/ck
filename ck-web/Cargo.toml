@@ -1,6 +1,6 @@
 [package]
 name = "ck-web"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
 description = "ck's browser helper: Chromium (CEF), with no window, for posting to 4chan from the terminal"
 license = "MIT OR Apache-2.0"

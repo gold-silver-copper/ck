@@ -513,8 +513,17 @@ fn free_profile(base: &std::path::Path) -> Option<(PathBuf, std::fs::File)> {
         // The folder itself is locked (flock works on a folder opened for reading).
         let lock = std::fs::File::open(&dir).ok()?;
         lock.try_lock().ok()?;
-        Some((dir, lock))
+        // A browser that doesn't take that lock (an older ck-web) may hold it all the same.
+        (!chromium_in(&dir)).then_some((dir, lock))
     })
+}
+
+/// Whether a running Chromium has the profile at `dir`: its `SingletonLock` names the host
+/// and process ("host-1234"), and that process is alive.
+fn chromium_in(dir: &std::path::Path) -> bool {
+    let Ok(link) = std::fs::read_link(dir.join("SingletonLock")) else { return false };
+    let pid = link.to_string_lossy().rsplit_once('-').and_then(|(_, pid)| pid.parse::<u32>().ok());
+    pid.is_some_and(|pid| std::path::Path::new(&format!("/proc/{pid}")).exists())
 }
 
 /// Whether Chromium's sandbox can start: it needs user namespaces, which Ubuntu (since
