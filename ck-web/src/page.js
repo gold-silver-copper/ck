@@ -6,7 +6,7 @@
   const say = (m) => console.log("ck-web:" + JSON.stringify(m));
   // A check before the site (Cloudflare's, DDoS-Guard's) is for a person: shown in the
   // browser view. Once it's passed, the page loads again and this runs again.
-  if (/just a moment|attention required|checking your browser|ddos-guard|ddos protection/i.test(document.title)) {
+  if (/just a moment|attention required|checking your browser|ddos-guard|ddos protection|hold on/i.test(document.title)) {
     say({ is: "human" });
     return;
   }
@@ -44,20 +44,28 @@
     say({ is: "loading" });
   };
 
-  // 4chan asks for an hCaptcha first (to earn a ticket) when it's been busy: shown in the
-  // browser view for a person to do, then the captcha is asked for again with its answer.
-  const hcaptcha = (sitekey) => {
+  // A captcha widget of a service's (hCaptcha, reCAPTCHA, Turnstile, Yandex's), on a sheet in
+  // the browser view for a person to do; `done` gets its token.
+  const WIDGETS = {
+    hcaptcha: ["https://js.hcaptcha.com/1/api.js?render=explicit&recaptchacompat=off&onload=", () => window.hcaptcha],
+    recaptcha: ["https://www.google.com/recaptcha/api.js?render=explicit&onload=", () => window.grecaptcha],
+    turnstile: ["https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit&onload=", () => window.turnstile],
+    yandex: ["https://smartcaptcha.yandexcloud.net/captcha.js?render=onload&onload=", () => window.smartCaptcha],
+  };
+  const widget = (provider, sitekey, done) => {
+    const kind = WIDGETS[provider];
+    if (!kind) return say({ is: "failed", error: "Unknown captcha: " + provider });
     const box = document.createElement("div");
     box.style = "display:flex;justify-content:center;padding-top:16px";
     sheet().appendChild(box);
-    window.ckwebHcaptcha = () => window.hcaptcha.render(box, { sitekey, callback: (resp) => load(resp) });
-    if (window.hcaptcha) {
-      window.ckwebHcaptcha();
+    window.ckwebWidget = () => kind[1]().render(box, { sitekey, callback: done });
+    if (kind[1]()) {
+      window.ckwebWidget();
     } else {
       const s = document.createElement("script");
-      s.src = "https://js.hcaptcha.com/1/api.js?onload=ckwebHcaptcha&render=explicit&recaptchacompat=off";
-      s.onerror = () => say({ is: "failed", error: "Couldn't load hCaptcha" });
-      document.head.appendChild(s);
+      s.src = kind[0] + "ckwebWidget";
+      s.onerror = () => say({ is: "failed", error: "Couldn't load the " + provider + " captcha" });
+      (document.head || document.documentElement).appendChild(s);
     }
     say({ is: "human" });
   };
@@ -67,7 +75,9 @@
     const t = e.data.twister;
     if (t.ticket) localStorage.setItem(TICKET, t.ticket);
     else if (t.ticket === false) localStorage.removeItem(TICKET);
-    if (t.mpcd) return hcaptcha(t.sitekey);
+    // 4chan asks for an hCaptcha first (to earn a ticket) when it's been busy: then the
+    // captcha is asked for again with its answer.
+    if (t.mpcd) return widget("hcaptcha", t.sitekey, (resp) => load(resp));
     clear();
     say({ is: "captcha", twister: t });
   });
@@ -100,7 +110,7 @@
     }
     const image = (r.headers.get("Content-Type") || "").startsWith("image/");
     const content = image ? base64(await r.arrayBuffer()) : await r.text();
-    say({ is: "fetched", status: r.status, body: content });
+    say({ is: "fetched", status: r.status, body: content, cookies: document.cookie });
   };
 
   window.ckweb = {
@@ -108,6 +118,11 @@
       wanted = { board, thread };
       load(null);
     },
+    widget: (provider, sitekey) =>
+      widget(provider, sitekey, (token) => {
+        clear();
+        say({ is: "token", token });
+      }),
     cancel: clear,
     send,
   };

@@ -20,6 +20,10 @@ pub enum Request {
     /// Its captcha comes in a frame of sys.4chan.org, and only to a page of 4chan's. Answered
     /// with `Captcha`; first with `View` frames if the site wants a person to click.
     Captcha { board: String, thread: u64 },
+    /// A captcha widget of a service's (`provider`: "hcaptcha", "recaptcha", "turnstile",
+    /// "yandex") with the site's `sitekey`, shown in the browser view for a person to do.
+    /// Answered with `Token`.
+    Widget { provider: String, sitekey: String },
     /// A click on the browser view, in the page's pixels.
     Click { x: u32, y: u32 },
     /// The wheel over the browser view, in the page's pixels: `dy` (down is positive).
@@ -41,10 +45,14 @@ pub struct Upload {
 pub enum Reply {
     /// The page asked for is open.
     Ready,
-    /// The answer to a `Fetch`: its status, and its body: text, or base64 for an image.
-    Fetched { status: u16, body: String },
+    /// The answer to a `Fetch`: its status, its body (text, or base64 for an image), and the
+    /// page's cookies after it (those its scripts can read: a site's captcha flags, LynxChan's
+    /// block bypass).
+    Fetched { status: u16, body: String, cookies: String },
     /// 4chan's captcha, as its captcha page gave it (the "twister").
     Captcha { twister: serde_json::Value },
+    /// What a widget gave once a person did it, for the site's form.
+    Token { token: String },
     /// The browser view, while the site wants a person (Cloudflare's check, hCaptcha): the
     /// part of the page with something on it, as a PNG (base64), from `left`, `top` in the
     /// page's pixels.

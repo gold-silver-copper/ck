@@ -616,9 +616,13 @@ box:
   in it and goes to the next step;
 - a picture to read (4chan, vichan, LynxChan): type what it says, `enter`;
 - a grid: the arrows move, `space` (or `1`-`9`) picks, `enter` sends. jschan's is a picture
-  of icons in rows, picked by their place (row 2, 3rd); 2ch's is a picture with icons
-  numbered under it, picked one at a time: each pick is checked, and the next round comes
-  until it's done.
+  of icons in rows, picked by their place (row 2, 3rd), or (its "grid2") a picture of squares
+  numbered in it; 2ch's is a picture with icons numbered under it, picked one at a time: each
+  pick is checked, and the next round comes until it's done; kissu's (when you post too
+  often) is nine pictures numbered, to pick every one of a character;
+- a captcha service's (hCaptcha, reCAPTCHA, Cloudflare Turnstile, Yandex's), where a site
+  uses one (leftypol once it's flagged you, and any vichan or jschan board set up with one):
+  shown as the page, in the box, for you to do as on the site.
 
 ctrl-r asks for another captcha; one that has expired asks with `enter`. When 4chan says to
 wait before asking again, the box counts it down. The post goes up once the captcha is
@@ -629,7 +633,9 @@ it, and then it's selected. A new thread opens a few seconds after it's posted (
 found" then means the API doesn't list it yet, and ck tries again). If 4chan refuses it (too
 soon, a wrong answer, a file too big), the box says why and keeps what you wrote: fix it and
 ctrl-s again. When a jschan or LynxChan site wants a "block bypass" first, the box shows its
-captcha for that, then sends the post. Posts go with a password (`post_password` in the
+captcha for that, then sends the post. Some ask a proof of work with it (alogs, kohlchan's
+"hashcash"): ck works it out on a few threads (at most four, and half the machine's), which
+can take a moment. 8kun asks its own captcha once a day, after the post is sent. Posts go with a password (`post_password` in the
 config, else a new one each run), for deleting them on the site where it lets you.
 
 `esc` closes the box and keeps what's written, per thread, for the next `P` there (pressing
@@ -659,8 +665,10 @@ with a red pointer on it: the arrows (or `h`/`j`/`k`/`l`) move it a cell at a ti
 A mouse click on the page works too (and moves the pointer there), and the wheel scrolls
 it. ck never clicks it for you. With half-block images the page is coarse; kitty, sixel or
 iTerm2 graphics show it as it is. With images off, there's nothing to click: turn them on in
-Settings. A board that asks for hCaptcha or reCAPTCHA in its form (some vichan boards do)
-isn't one ck can post on yet: the box says so.
+Settings. A captcha service's check (hCaptcha, reCAPTCHA…) is shown the same way. ck-web
+lets these load even on sites whose pages forbid other hosts' scripts (it loads nothing but
+the site's pages and the captcha). A bot check that works itself out (ptch.net's) shows a
+moment, then goes.
 
 The download is for Linux (x86_64 and ARM). Elsewhere, or to use your own build, build it
 from the repository with `cargo build --release -p ck-web` (it needs cmake and ninja) and

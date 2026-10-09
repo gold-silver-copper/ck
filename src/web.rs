@@ -107,7 +107,15 @@ impl Helper {
         let headers = f.headers.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
         let request = Request::Fetch { method: f.method.into(), url: f.url.into(), headers, fields: f.fields, file: f.file, body: f.body };
         match self.ask(&request)? {
-            Reply::Fetched { status, body } => Ok(Fetched { status, body }),
+            Reply::Fetched { status, body, cookies } => Ok(Fetched { status, body, cookies }),
+            other => bail!("ck-web answered {other:?}"),
+        }
+    }
+
+    /// A captcha widget of a service's, done by a person in the browser view: its token.
+    pub fn widget(&self, provider: &str, sitekey: &str) -> Result<String> {
+        match self.ask(&Request::Widget { provider: provider.into(), sitekey: sitekey.into() })? {
+            Reply::Token { token } => Ok(token),
             other => bail!("ck-web answered {other:?}"),
         }
     }
@@ -160,12 +168,19 @@ pub struct Fetched {
     pub status: u16,
     /// Text, or base64 for an image.
     pub body: String,
+    /// The page's cookies after it, those its scripts can read.
+    pub cookies: String,
 }
 
 impl Fetched {
     /// The body as JSON, or why it isn't.
     pub fn json(&self) -> Result<serde_json::Value> {
         serde_json::from_str(&self.body).with_context(|| format!("the site answered {} with {}", self.status, crate::markup::strip_tags(&self.body).chars().take(200).collect::<String>()))
+    }
+
+    /// The page's cookie `name`.
+    pub fn cookie(&self, name: &str) -> Option<&str> {
+        self.cookies.split(';').filter_map(|c| c.trim().split_once('=')).find(|(k, _)| *k == name).map(|(_, v)| v)
     }
 
     /// The body as an image.
@@ -200,7 +215,7 @@ mod tests {
     #[test]
     // page.js writes its replies by hand.
     fn replies_read_as_page_js_writes_them() {
-        let fetched: Reply = serde_json::from_str(r#"{"is":"fetched","status":200,"body":"hi"}"#).unwrap();
+        let fetched: Reply = serde_json::from_str(r#"{"is":"fetched","status":200,"body":"hi","cookies":"a=1"}"#).unwrap();
         assert!(matches!(fetched, Reply::Fetched { status: 200, .. }));
     }
 }

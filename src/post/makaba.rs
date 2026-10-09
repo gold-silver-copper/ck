@@ -118,58 +118,13 @@ fn emoji(id: &str, v: &Value, now: Instant) -> Result<Challenge> {
     Ok(Challenge { id: id.into(), expires: super::after(now, 300), task, pictures: vec![(key, sheet(&image, &keys))] })
 }
 
-/// The picture with the keys under it, four to a row, each in a white square with its number.
+/// The picture with the keys under it, four to a row, numbered.
 fn sheet(image: &DynamicImage, keys: &[DynamicImage]) -> DynamicImage {
-    const SLOT: u32 = 80;
-    const COLS: u32 = 4;
-    let rows = u32::try_from(keys.len()).unwrap_or(0).div_ceil(COLS);
-    let width = image.width().max(SLOT.saturating_mul(COLS));
-    let top = image.height().saturating_add(8);
-    let mut out = RgbaImage::from_pixel(width, top.saturating_add(rows.saturating_mul(SLOT)), Rgba([255, 255, 255, 255]));
+    let keys = crate::captcha::sheet(keys, 4);
+    let mut out = RgbaImage::from_pixel(image.width().max(keys.width()), image.height().saturating_add(8).saturating_add(keys.height()), Rgba([255, 255, 255, 255]));
     imageops::overlay(&mut out, &image.to_rgba8(), 0, 0);
-    for (n, key) in (0u32..).zip(keys) {
-        let (x, y) = ((n % COLS).saturating_mul(SLOT), top.saturating_add((n / COLS).saturating_mul(SLOT)));
-        let icon = key.to_rgba8();
-        let (dx, dy) = (SLOT.saturating_sub(icon.width()) / 2, SLOT.saturating_sub(icon.height()).saturating_add(10) / 2);
-        imageops::overlay(&mut out, &icon, i64::from(x.saturating_add(dx)), i64::from(y.saturating_add(dy)));
-        number(&mut out, n.saturating_add(1), x.saturating_add(3), y.saturating_add(3));
-    }
+    imageops::overlay(&mut out, &keys.to_rgba8(), 0, i64::from(image.height().saturating_add(8)));
     DynamicImage::ImageRgba8(out)
-}
-
-/// `n` written at `x`, `y` in a small blocky hand, three pixels to a dot.
-fn number(img: &mut RgbaImage, n: u32, x: u32, y: u32) {
-    // Each digit's 3x5 dots, a row a number (the top bit on the left).
-    const DIGITS: [[u8; 5]; 10] = [
-        [7, 5, 5, 5, 7],
-        [2, 6, 2, 2, 7],
-        [7, 1, 7, 4, 7],
-        [7, 1, 7, 1, 7],
-        [5, 5, 7, 1, 1],
-        [7, 4, 7, 1, 7],
-        [7, 4, 7, 5, 7],
-        [7, 1, 1, 1, 1],
-        [7, 5, 7, 5, 7],
-        [7, 5, 7, 1, 7],
-    ];
-    const DOT: u32 = 3;
-    for (i, d) in (0u32..).zip(n.to_string().bytes()) {
-        let Some(rows) = DIGITS.get(usize::from(d.saturating_sub(b'0'))) else { continue };
-        let left = x.saturating_add(i.saturating_mul(DOT.saturating_mul(4)));
-        for (row, bits) in (0u32..).zip(rows) {
-            for col in 0..3u32 {
-                if bits & (4 >> col) == 0 {
-                    continue;
-                }
-                for (px, py) in (0..DOT).flat_map(|a| (0..DOT).map(move |b| (a, b))) {
-                    let (ix, iy) = (left.saturating_add(col.saturating_mul(DOT).saturating_add(px)), y.saturating_add(row.saturating_mul(DOT).saturating_add(py)));
-                    if ix < img.width() && iy < img.height() {
-                        img.put_pixel(ix, iy, Rgba([200, 20, 40, 255]));
-                    }
-                }
-            }
-        }
-    }
 }
 
 /// The proof of work: the number under `limit` whose SHA-512 (in hex), put in `template` for
@@ -196,7 +151,8 @@ mod tests {
     fn the_keys_go_under_the_picture_numbered() {
         let keys = vec![DynamicImage::new_rgba8(50, 43); 8];
         let s = sheet(&DynamicImage::new_rgb8(300, 100), &keys);
-        assert_eq!((s.width(), s.height()), (320, 268));
+        // Squares of 74 (the largest key and its number), four to a row, under the picture.
+        assert_eq!((s.width(), s.height()), (300, 256));
         // "1" in the first square's corner.
         assert_eq!(s.to_rgba8().get_pixel(6, 111), &Rgba([200, 20, 40, 255]));
     }

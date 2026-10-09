@@ -634,7 +634,7 @@ impl App {
             web: None,
             web_for: None,
             web_helper: cfg.web_helper.clone(),
-            post_password: cfg.post_password.clone().unwrap_or_else(posting::random_password),
+            post_password: cfg.post_password.clone().unwrap_or_else(crate::post::random_password),
             drafts: HashMap::new(),
             poster: (String::new(), String::new()),
             awaiting: None,

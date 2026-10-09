@@ -245,6 +245,11 @@ fn run(args: &Args, app: &mut cef::App, profile: &std::path::Path, web: &mut Web
     };
     if let Some(host) = browser.host() {
         host.set_focus(1);
+        // Some sites' pages forbid scripts of other hosts (kohlchan's, erischan's): a captcha
+        // service's widget is one, put there by page.js. This browser loads only the sites'
+        // pages and what page.js adds to them.
+        let bypass = br#"{"id":1,"method":"Page.setBypassCSP","params":{"enabled":true}}"#;
+        host.send_dev_tools_message(Some(bypass));
     }
     let requests = read_requests();
     let mut open = true;
@@ -320,7 +325,7 @@ impl Web {
             // Answered once the new page is ready.
             Some(r @ Request::Open { .. }) => self.busy = Some(r),
             // Asked again on the new page.
-            Some(r @ Request::Captcha { .. }) => self.waiting.push_front(r),
+            Some(r @ (Request::Captcha { .. } | Request::Widget { .. })) => self.waiting.push_front(r),
             Some(Request::Fetch { method, .. }) if method != "GET" => {
                 // A form sent may have gone through, and sending it again could post twice.
                 self.send(&Reply::Failed { error: "The page reloaded before the site answered: check the thread before posting again".into() });
@@ -364,7 +369,7 @@ impl Web {
     /// answered; the browser's at once.
     fn take_requests(&mut self, browser: &Browser) {
         while let Some(r) = self.waiting.front() {
-            let page = matches!(r, Request::Fetch { .. } | Request::Captcha { .. });
+            let page = matches!(r, Request::Fetch { .. } | Request::Captcha { .. } | Request::Widget { .. });
             if page && (!self.ready || self.busy.is_some()) {
                 return;
             }
@@ -395,6 +400,7 @@ impl Web {
                 }
             }
             Request::Captcha { board, thread } => run_js(browser, &format!("ckweb.captcha({}, {thread})", json(board))),
+            Request::Widget { provider, sitekey } => run_js(browser, &format!("ckweb.widget({}, {})", json(provider), json(sitekey))),
             Request::Fetch { method, url, headers, fields, file, body } => {
                 let file = match file.as_ref().map(upload) {
                     None => serde_json::Value::Null,

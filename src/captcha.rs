@@ -3,7 +3,7 @@
 
 use std::time::Instant;
 
-use image::DynamicImage;
+use image::{DynamicImage, Rgba, RgbaImage};
 
 /// What a site said when asked for a captcha.
 #[derive(Debug)]
@@ -69,6 +69,60 @@ pub fn inline_image(html: &str) -> Option<DynamicImage> {
     let rest = html.get(at..)?;
     let end = rest.find(|c: char| !(c.is_ascii_alphanumeric() || matches!(c, '+' | '/' | '='))).unwrap_or(rest.len());
     decode(rest.get(..end)?)
+}
+
+/// Pictures in one picture, `cols` to a row, each in a white square numbered from 1 in its
+/// corner: a captcha's grid drawn whole (one picture sits well in every terminal, where many
+/// small ones don't).
+pub fn sheet(pictures: &[DynamicImage], cols: u32) -> DynamicImage {
+    let cols = cols.max(1);
+    let rows = u32::try_from(pictures.len()).unwrap_or(0).div_ceil(cols);
+    // Room for the largest, and for its number above it.
+    let slot = pictures.iter().map(|p| p.width().max(p.height())).max().unwrap_or(0).saturating_add(24);
+    let mut out = RgbaImage::from_pixel(slot.saturating_mul(cols), slot.saturating_mul(rows), Rgba([255, 255, 255, 255]));
+    for (n, picture) in (0u32..).zip(pictures) {
+        let (x, y) = ((n % cols).saturating_mul(slot), (n / cols).saturating_mul(slot));
+        let p = picture.to_rgba8();
+        let (dx, dy) = (slot.saturating_sub(p.width()) / 2, slot.saturating_sub(p.height()).saturating_add(16) / 2);
+        image::imageops::overlay(&mut out, &p, i64::from(x.saturating_add(dx)), i64::from(y.saturating_add(dy)));
+        number(&mut out, n.saturating_add(1), x.saturating_add(3), y.saturating_add(3));
+    }
+    DynamicImage::ImageRgba8(out)
+}
+
+/// `n` written at `x`, `y` in a small blocky hand, three pixels to a dot.
+pub fn number(img: &mut RgbaImage, n: u32, x: u32, y: u32) {
+    // Each digit's 3x5 dots, a row a number (the top bit on the left).
+    const DIGITS: [[u8; 5]; 10] = [
+        [7, 5, 5, 5, 7],
+        [2, 6, 2, 2, 7],
+        [7, 1, 7, 4, 7],
+        [7, 1, 7, 1, 7],
+        [5, 5, 7, 1, 1],
+        [7, 4, 7, 1, 7],
+        [7, 4, 7, 5, 7],
+        [7, 1, 1, 1, 1],
+        [7, 5, 7, 5, 7],
+        [7, 5, 7, 1, 7],
+    ];
+    const DOT: u32 = 3;
+    for (i, d) in (0u32..).zip(n.to_string().bytes()) {
+        let Some(rows) = DIGITS.get(usize::from(d.saturating_sub(b'0'))) else { continue };
+        let left = x.saturating_add(i.saturating_mul(DOT.saturating_mul(4)));
+        for (row, bits) in (0u32..).zip(rows) {
+            for col in 0..3u32 {
+                if bits & (4 >> col) == 0 {
+                    continue;
+                }
+                for (px, py) in (0..DOT).flat_map(|a| (0..DOT).map(move |b| (a, b))) {
+                    let (ix, iy) = (left.saturating_add(col.saturating_mul(DOT).saturating_add(px)), y.saturating_add(row.saturating_mul(DOT).saturating_add(py)));
+                    if ix < img.width() && iy < img.height() {
+                        img.put_pixel(ix, iy, Rgba([200, 20, 40, 255]));
+                    }
+                }
+            }
+        }
+    }
 }
 
 /// Answering a challenge: where the person is in it, and what they've picked.

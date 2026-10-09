@@ -12,7 +12,7 @@ use anyhow::{Context, Result, bail};
 use regex::Regex;
 use serde_json::Value;
 
-use super::{Answered, Draft, Poster, Sent, Where, said};
+use super::{Answered, Draft, Poster, Sent, Where, said, work};
 use crate::captcha::{Captcha, Challenge, Task};
 use crate::http::encode_segment as enc;
 use crate::web::{Fetch, Fetched, Helper, Upload};
@@ -32,6 +32,61 @@ impl Lynxchan {
         let task = Task::Text { prompt: "Type the text in the picture".into(), image: Some(key.clone()) };
         Ok(Captcha::Challenge(Challenge { id: id.into(), expires: super::after(Instant::now(), 300), task, pictures: vec![(key, r.image()?)] }))
     }
+}
+
+impl Lynxchan {
+    /// A new block bypass that has to be validated first (its cookie carries the work: the
+    /// session after its 24-character id, then the hash): the number found, sent to
+    /// `/validateBypass.js`.
+    fn validate(&self, web: &Helper, cookies: &str) -> Result<()> {
+        let bypass = cookies.split(';').filter_map(|c| c.trim().split_once('=')).find(|(k, _)| *k == "bypass").map(|(_, v)| percent_decoded(v)).unwrap_or_default();
+        let (Some(session), Some(hash)) = (bypass.get(24..368), bypass.get(368..)) else { return Ok(()) };
+        let code = work::lynxchan_bypass(session, hash, VALIDATION_LIMIT).context("The site's block bypass has a proof of work ck didn't find the answer to")?;
+        let v = web.fetch(Fetch::post(&format!("{}/validateBypass.js?json=1", self.root), vec![("code".into(), code.to_string())]))?.json()?;
+        match v.get("status").and_then(Value::as_str) {
+            Some("ok") => Ok(()),
+            _ => Err(said(v.get("data").and_then(Value::as_str).unwrap_or("The block bypass wasn't validated"))),
+        }
+    }
+
+    /// kohlchan's "hashcash" for a block bypass: the secret number an argon2 hash is of.
+    fn hashcash(&self, web: &Helper) -> Result<()> {
+        let v = web.fetch(Fetch::get(&format!("{}/addon.js/hashcash?action=get&json=1", self.root)))?.json()?;
+        let data = v.get("data").cloned().unwrap_or_default();
+        if data.get("solved").and_then(Value::as_bool) == Some(true) {
+            return Ok(());
+        }
+        let hash = data.get("hash").and_then(Value::as_str).context("The site's proof of work came without its hash")?;
+        let difficulty = data.get("difficulty").and_then(crate::http::as_u64).unwrap_or(0).min(VALIDATION_LIMIT);
+        let secret = work::argon2_secret(hash, difficulty).context("ck didn't find the answer to the site's proof of work")?;
+        let v = web.fetch(Fetch::post(&format!("{}/addon.js/hashcash?action=solve&json=1", self.root), vec![("secret".into(), secret.to_string())]))?.json()?;
+        match v.get("status").and_then(Value::as_str) {
+            Some("ok") => Ok(()),
+            _ => Err(said(v.get("data").and_then(Value::as_str).unwrap_or("The proof of work wasn't taken"))),
+        }
+    }
+}
+
+/// The most numbers a proof of work is searched through.
+const VALIDATION_LIMIT: u64 = 1_000_000;
+
+/// A cookie's value with its `%XX` escapes undone.
+fn percent_decoded(v: &str) -> String {
+    let mut out = Vec::with_capacity(v.len());
+    let mut bytes = v.bytes();
+    while let Some(b) = bytes.next() {
+        let hex = |c: Option<u8>| c.and_then(|c| char::from(c).to_digit(16)).and_then(|d| u8::try_from(d).ok());
+        if b == b'%' {
+            let mut ahead = bytes.clone();
+            if let (Some(hi), Some(lo)) = (hex(ahead.next()), hex(ahead.next())) {
+                out.push(hi.saturating_mul(16).saturating_add(lo));
+                bytes = ahead;
+                continue;
+            }
+        }
+        out.push(b);
+    }
+    String::from_utf8_lossy(&out).into_owned()
 }
 
 impl Poster for Lynxchan {
@@ -57,12 +112,14 @@ impl Poster for Lynxchan {
         if challenge.id != BYPASS {
             return Ok(Answered::Done(fields));
         }
-        let v = web.fetch(Fetch::post(&format!("{}/renewBypass.js?json=1", self.root), fields))?.json()?;
+        let r = web.fetch(Fetch::post(&format!("{}/renewBypass.js?json=1", self.root), fields))?;
+        let v = r.json()?;
         match v.get("status").and_then(Value::as_str) {
-            Some("ok" | "finish") => Ok(Answered::Done(Vec::new())),
-            Some("hashcash") => bail!("The site's block bypass wants a proof of work ck can't do: post from the browser once, then ck can"),
-            _ => Err(said(v.get("data").and_then(Value::as_str).unwrap_or("The block bypass wasn't taken"))),
+            Some("ok" | "finish") => self.validate(web, &r.cookies)?,
+            Some("hashcash") => self.hashcash(web)?,
+            _ => return Err(said(v.get("data").and_then(Value::as_str).unwrap_or("The block bypass wasn't taken"))),
         }
+        Ok(Answered::Done(Vec::new()))
     }
 
     fn post(&self, web: &Helper, to: &Where, draft: &Draft, captcha: &[(String, String)]) -> Result<Sent> {
@@ -111,6 +168,8 @@ fn answered(to: &Where, r: &Fetched) -> Result<Answer> {
             Ok(Answer::Posted(to.thread_of(no), no))
         }
         Some("bypassable") => Ok(Answer::Bypass),
+        Some("hashBan") => bail!("The site has banned that file"),
+        Some("maintenance") => bail!("The site is down for maintenance"),
         Some("banned") => bail!("You're banned there{}", data.and_then(|d| d.get("reason")).and_then(Value::as_str).map(|r| format!(": {r}")).unwrap_or_default()),
         _ => Err(said(data.and_then(Value::as_str).unwrap_or("The site didn't take the post"))),
     }
@@ -138,7 +197,12 @@ mod tests {
     use super::*;
 
     fn fetched(status: u16, body: &str) -> Fetched {
-        Fetched { status, body: body.into() }
+        Fetched { status, body: body.into(), cookies: String::new() }
+    }
+
+    #[test]
+    fn cookies_are_read_unescaped() {
+        assert_eq!(percent_decoded("ab%2Bc%3D%3D%zz"), "ab+c==%zz");
     }
 
     #[test]

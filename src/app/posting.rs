@@ -258,20 +258,6 @@ const AWAIT: Duration = Duration::from_secs(120);
 /// How long after posting a new thread to open it.
 const NEW_THREAD_AFTER: Duration = Duration::from_secs(5);
 
-/// Eight letters and digits, new each run: what posts are sent with when `post_password`
-/// isn't set (LynxChan keeps eight).
-pub fn random_password() -> String {
-    use std::hash::{BuildHasher, Hasher};
-    let mut n = std::collections::hash_map::RandomState::new().build_hasher().finish();
-    (0..8)
-        .map(|_| {
-            let c = char::from_digit((n % 36) as u32, 36).unwrap_or('0');
-            n /= 36;
-            c
-        })
-        .collect()
-}
-
 /// What a key in the box leads to, past the box itself.
 enum Then {
     Nothing,

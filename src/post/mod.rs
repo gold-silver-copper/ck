@@ -7,15 +7,18 @@
 mod form;
 mod fourchan;
 mod jschan;
+mod kissu;
 mod lynxchan;
 mod makaba;
 mod vichan;
+mod work;
 
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
+use regex::Regex;
 
 use crate::captcha::{Captcha, Challenge, Task};
 use crate::config::{SiteConfig, SiteKind};
@@ -98,14 +101,32 @@ pub trait Poster: Send + Sync {
 /// How a site of this config posts, if its engine can.
 pub fn poster(cfg: &SiteConfig) -> Option<Arc<dyn Poster>> {
     let root = crate::backend::site_url(cfg);
+    let host = root.split("://").nth(1).unwrap_or_default().split('/').next().unwrap_or_default().trim_start_matches("www.").to_string();
     Some(match cfg.kind {
         SiteKind::Fourchan => Arc::new(fourchan::Fourchan),
-        SiteKind::Vichan => Arc::new(vichan::Vichan { root }),
+        // 8kun posts to its sys host; kissu has its own engine now, on vichan's URLs.
+        SiteKind::Vichan if host == "8kun.top" => Arc::new(vichan::Vichan { root, sys: Some("https://sys.8kun.top".into()) }),
+        SiteKind::Vichan if host == "kissu.moe" => Arc::new(kissu::Kissu { root }),
+        SiteKind::Vichan => Arc::new(vichan::Vichan { root, sys: None }),
         SiteKind::Jschan => Arc::new(jschan::Jschan { root }),
         SiteKind::Lynxchan => Arc::new(lynxchan::Lynxchan { root }),
         SiteKind::Makaba => Arc::new(makaba::Makaba { root }),
         SiteKind::Foolfuuka => return None,
     })
+}
+
+/// Eight letters and digits, new each run: what posts are sent with when `post_password`
+/// isn't set (LynxChan keeps eight).
+pub fn random_password() -> String {
+    use std::hash::{BuildHasher, Hasher};
+    let mut n = std::collections::hash_map::RandomState::new().build_hasher().finish();
+    (0..8)
+        .map(|_| {
+            let c = char::from_digit(u32::try_from(n % 36).unwrap_or(0), 36).unwrap_or('0');
+            n /= 36;
+            c
+        })
+        .collect()
 }
 
 /// `secs` after `now`.
@@ -116,6 +137,30 @@ fn after(now: Instant, secs: u64) -> Instant {
 /// No captcha needed: a challenge that asks nothing (`id` says what for).
 fn no_captcha(id: &str) -> Captcha {
     Captcha::Challenge(Challenge { id: id.into(), expires: after(Instant::now(), 3600), task: Task::None, pictures: Vec::new() })
+}
+
+/// A captcha done without the box (a service's widget, done in the browser view): nothing
+/// left to answer, with the fields that go with the post.
+fn solved(fields: &[(String, String)]) -> Captcha {
+    let id = serde_json::to_string(fields).unwrap_or_default();
+    Captcha::Challenge(Challenge { id, expires: after(Instant::now(), 110), task: Task::None, pictures: Vec::new() })
+}
+
+/// The fields of a `solved` captcha (none for one that asked nothing).
+fn solved_fields(challenge: &Challenge) -> Vec<(String, String)> {
+    serde_json::from_str(&challenge.id).unwrap_or_default()
+}
+
+/// The provider and sitekey of a service's captcha widget in a page (`data-sitekey` on an
+/// `h-captcha`, `g-recaptcha`, `cf-turnstile` or `smart-captcha` element).
+fn widget_in(html: &str) -> Option<(&'static str, String)> {
+    static SITEKEY: LazyLock<Option<Regex>> = LazyLock::new(|| Regex::new(r#"class="([^"]*)"[^>]*data-sitekey="([^"]+)"|data-sitekey="([^"]+)"[^>]*class="([^"]*)""#).ok());
+    SITEKEY.as_ref()?.captures_iter(html).find_map(|c| {
+        let class = c.get(1).or_else(|| c.get(4))?.as_str();
+        let key = c.get(2).or_else(|| c.get(3))?.as_str().to_string();
+        let provider = [("h-captcha", "hcaptcha"), ("g-recaptcha", "recaptcha"), ("cf-turnstile", "turnstile"), ("smart-captcha", "yandex")].into_iter().find(|(c, _)| class.split_whitespace().any(|w| w == *c))?.1;
+        Some((provider, key))
+    })
 }
 
 /// A fresh number, for keys of captcha pictures (so a new one is never drawn from an old one's
@@ -140,6 +185,16 @@ fn thread_in(url: &str) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn widgets_are_found_by_their_class_and_sitekey() {
+        assert_eq!(widget_in(r#"<div class="h-captcha" data-sitekey="k1"></div>"#), Some(("hcaptcha", "k1".into())));
+        assert_eq!(widget_in(r#"<div data-sitekey="k2" class="g-recaptcha x"></div>"#), Some(("recaptcha", "k2".into())));
+        assert_eq!(widget_in(r#"<div class="other" data-sitekey="k3"></div>"#), None);
+        let c = solved(&[("captcha".into(), "t".into())]);
+        let Captcha::Challenge(c) = c else { panic!("not a challenge") };
+        assert_eq!(solved_fields(&c), [("captcha".to_string(), "t".to_string())]);
+    }
 
     #[test]
     fn thread_numbers_from_links() {

@@ -43,6 +43,9 @@ toml_edit = "0.25.15"
 unicode-segmentation = "1.13.3"
 unicode-width = "0.2.2"
 ureq = "3"
+# Proofs of work some sites ask before a post: LynxChan's block bypass, kohlchan's hashcash.
+pbkdf2 = { version = "0.12", default-features = false, features = ["hmac"] }
+argon2 = "0.5"
 
 # SIGTERM, SIGHUP and SIGQUIT end ck like a quit, saving first.
 [target.'cfg(unix)'.dependencies]

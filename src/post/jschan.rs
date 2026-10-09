@@ -24,9 +24,21 @@ const BYPASS: &str = "bypass";
 impl Jschan {
     /// A captcha: its kind and question from the site's settings, its picture from
     /// `/captcha` (which sets its cookie). `id` says what it's for.
-    fn fresh_captcha(&self, web: &Helper, id: &str) -> Result<Captcha> {
+    fn fresh_captcha(&self, web: &Helper, id: &str, board: &str) -> Result<Captcha> {
         let settings = web.fetch(Fetch::get(&format!("{}/settings.json", self.root)))?.json()?;
         let options = settings.get("captchaOptions").cloned().unwrap_or_default();
+        // A service's captcha: its key is in the board's page, done in the browser view, and
+        // its token goes as the answer.
+        if matches!(options.get("type").and_then(Value::as_str), Some("hcaptcha" | "google" | "yandex")) {
+            let page = web.fetch(Fetch::get(&format!("{}/{}/index.html", self.root, enc(board))))?.body;
+            let (provider, sitekey) = super::widget_in(&page).context("The site wants a captcha service's check, and ck couldn't find its key")?;
+            let token = web.widget(provider, &sitekey)?;
+            if id == BYPASS {
+                let r = web.fetch(Fetch::post(&format!("{}/forms/blockbypass", self.root), vec![("captcha".into(), token)]).header("x-using-xhr", "true"))?;
+                return if r.status >= 400 { Err(error(&r)) } else { Ok(super::solved(&[])) };
+            }
+            return Ok(super::solved(&[("captcha".into(), token)]));
+        }
         let picture = web.fetch(Fetch::get(&format!("{}/captcha", self.root)))?;
         Ok(Captcha::Challenge(challenge(id, &options, picture.image()?, Instant::now())?))
     }
@@ -41,12 +53,15 @@ impl Poster for Jschan {
         let board = web.fetch(Fetch::get(&format!("{}/{}/settings.json", self.root, enc(&to.board))))?.json()?;
         let mode = board.get("captchaMode").and_then(Value::as_u64).unwrap_or(0);
         if mode == 2 || (mode == 1 && to.new_thread()) {
-            return self.fresh_captcha(web, "post");
+            return self.fresh_captcha(web, "post", &to.board);
         }
         Ok(super::no_captcha("post"))
     }
 
     fn answer(&self, web: &Helper, challenge: &Challenge, answer: &str) -> Result<Answered> {
+        if matches!(challenge.task, Task::None) {
+            return Ok(Answered::Done(super::solved_fields(challenge)));
+        }
         let fields = answer_fields(&challenge.task, answer);
         if challenge.id != BYPASS {
             return Ok(Answered::Done(fields));
@@ -78,7 +93,7 @@ impl Poster for Jschan {
         let url = format!("{}/forms/board/{board}/post", self.root);
         let r = web.fetch(Fetch { file, ..Fetch::post(&url, fields) }.header("x-using-xhr", "true").header("Referer", &referer))?;
         if r.status == 403 && r.body.contains("block bypass") {
-            return Ok(Sent::Again(self.fresh_captcha(web, BYPASS)?));
+            return Ok(Sent::Again(self.fresh_captcha(web, BYPASS, &to.board)?));
         }
         if r.status >= 400 {
             return Err(error(&r));
@@ -93,30 +108,51 @@ fn answer_fields(task: &Task, answer: &str) -> Vec<(String, String)> {
     match task {
         Task::None => Vec::new(),
         Task::Grid { .. } => answer.chars().enumerate().filter(|&(_, c)| c == '1').map(|(i, _)| ("captcha".to_string(), i.to_string())).collect(),
-        _ => vec![("captcha".into(), answer.to_string())],
+        // Its text is six lower-case letters and digits, compared as sent.
+        _ => vec![("captcha".into(), answer.trim().to_lowercase())],
     }
 }
 
 /// jschan's captcha from its settings (`captchaOptions`) and picture: a grid (one picture of
-/// `size` rows of `size` icons, picked by their order), or text to read.
+/// `size` rows of `size` icons, picked by their order), a square grid ("grid2": arrows
+/// pointing at an icon, picked as cells), or text to read.
 fn challenge(id: &str, options: &Value, picture: DynamicImage, now: Instant) -> Result<Challenge> {
     let expires = super::after(now, 300);
     let kind = options.get("type").and_then(Value::as_str).unwrap_or("text");
     let key = format!("captcha:jschan:{}", super::next_key());
     match kind {
-        "grid" | "grid2" => {
+        "grid" => {
             // Each row's icons are shifted along at random, so the cells go by the icons'
             // order (row by row, left to right), not by squares of the picture.
-            let grid = options.get("grid").cloned().unwrap_or_default();
-            let size = grid.get("size").and_then(Value::as_u64).filter(|&n| n > 0).unwrap_or(4);
-            let question = grid.get("question").and_then(Value::as_str).unwrap_or("Pick the ones that fit");
+            let (size, question) = grid_options(options);
             let prompt = format!("{question}: the icons in order, row by row");
-            let cells = (1..=size).flat_map(|row| (1..=size).map(move |n| Cell::Label(format!("row {row}, {}", ordinal(n))))).collect();
+            let cells = (1..=u64::from(size)).flat_map(|row| (1..=u64::from(size)).map(move |n| Cell::Label(format!("row {row}, {}", ordinal(n))))).collect();
             Ok(Challenge { id: id.into(), expires, task: Task::Grid { prompt, image: Some(key.clone()), cells, single: false }, pictures: vec![(key, picture)] })
+        }
+        "grid2" => {
+            // A square grid: its cells are squares of the picture, numbered in it (one picture
+            // sits well in every terminal, where many small ones don't).
+            let (size, prompt) = grid_options(options);
+            let picture = picture.resize(450, 450, image::imageops::FilterType::Lanczos3);
+            let mut numbered = picture.to_rgba8();
+            let side = numbered.width().checked_div(size).unwrap_or(0);
+            for (n, (row, col)) in (1u32..).zip((0..size).flat_map(|row| (0..size).map(move |col| (row, col)))) {
+                crate::captcha::number(&mut numbered, n, col.saturating_mul(side).saturating_add(2), row.saturating_mul(side).saturating_add(2));
+            }
+            let cells = (0..size.saturating_mul(size)).map(|_| Cell::Label(String::new())).collect();
+            Ok(Challenge { id: id.into(), expires, task: Task::Grid { prompt, image: Some(key.clone()), cells, single: false }, pictures: vec![(key, DynamicImage::ImageRgba8(numbered))] })
         }
         "text" => Ok(Challenge { id: id.into(), expires, task: Task::Text { prompt: "Type the text in the picture".into(), image: Some(key.clone()) }, pictures: vec![(key, picture)] }),
         other => bail!("This site's captcha ({other}) isn't one ck can show yet: post from the browser"),
     }
+}
+
+/// A grid's size (cells a side) and question, from `captchaOptions`.
+fn grid_options(options: &Value) -> (u32, String) {
+    let grid = options.get("grid").cloned().unwrap_or_default();
+    let size = grid.get("size").and_then(Value::as_u64).and_then(|n| u32::try_from(n).ok()).filter(|&n| n > 0).unwrap_or(4);
+    let question = grid.get("question").and_then(Value::as_str).unwrap_or("Pick the ones that fit").to_string();
+    (size, question)
 }
 
 /// "1st", "2nd", … for an icon's place in its row.
