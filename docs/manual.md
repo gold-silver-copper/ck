@@ -626,9 +626,16 @@ file too big), the box says why and keeps what you wrote: fix it and ctrl-s agai
 
 4chan's captcha and posts are behind Cloudflare, which only lets browsers through, so ck
 posts through a browser of its own: ck-web, Chromium (CEF) with no window, which ck starts
-the first time you send a post. It loads a page on 4chan's own domain with nothing on it
+the first time you send a post. ck doesn't come with it (Chromium is too big for crates.io):
+the first ctrl-s asks to download it, about 135 MB, from ck's releases on GitHub (the
+`ck-web-v…` ones, built by the repository's workflow). ck checks the download against the
+SHA-256 it has for that version, and won't use one that differs, then unpacks it in
+`$XDG_DATA_HOME/ck/web/<version>` (default `~/.local/share/ck/web`). A ck that needs a newer
+ck-web downloads it the same way, and the older one goes. It loads a page on 4chan's own domain with nothing on it
 (`boards.4chan.org/robots.txt`: no ads, no 4chan scripts), gets the captcha there and sends
-the post from there, as 4chan's own reply form would, with Chromium's sandbox on. Its
+the post from there, as 4chan's own reply form would, with Chromium's sandbox on (where the
+system allows it: Ubuntu since 23.10 keeps it from programs like ck-web, which then runs
+without it). Its
 profile (cookies, Cloudflare's pass) is kept in `$XDG_CACHE_HOME/ck/web`, so the next post
 usually skips the check.
 
@@ -637,11 +644,11 @@ and you click it there: ck passes the clicks (and the wheel) to the browser. ck 
 it for you. With half-block images the page is coarse; kitty, sixel or iTerm2 graphics show
 it as it is. With images off, there's nothing to click: turn them on in Settings.
 
-ck-web isn't in `cargo install ck`: Chromium is too big for crates.io, and its files must
-sit next to the program. Build it from the repository with `cargo build --release -p
-ck-web` (it downloads CEF's Chromium, about 300 MB, the first time; it needs cmake and
-ninja), and either run ck from the same `target/release` folder or point `web_helper` at
-it. It's built and tested on Linux; macOS needs an app bundle, which isn't made yet.
+The download is for Linux (x86_64 and ARM). Elsewhere, or to use your own build, build it
+from the repository with `cargo build --release -p ck-web` (it needs cmake and ninja) and
+point `web_helper` at `target/release/ck-web`, or run ck from that folder. If ck-web stops
+(a library Chromium needs is missing, say), the box shows the last thing it said. macOS
+needs an app bundle, which isn't made yet.
 
 ## Searching archives
 

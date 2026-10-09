@@ -14,13 +14,8 @@
 
 Run `ck`, or `ck 4chan/g` (or any thread or board URL) to start there.
 
-To post to 4chan, ck needs its browser helper, ck-web (Chromium, with no window). Build it
-from the repository (it downloads Chromium, about 300 MB; Linux, with cmake and ninja):
-
-    git clone https://github.com/gold-silver-copper/ck && cd ck
-    cargo build --release -p ck -p ck-web
-
-and run `target/release/ck` (ck-web is found next to it), or set `web_helper` in the config.
+Posting to 4chan needs ck-web, a browser for 4chan's captcha: ck offers to download it
+(about 135 MB, once) the first time you post. Linux for now.
 
 A terminal browser for imageboards, built with [ratatui](https://ratatui.rs): 4chan,
 vichan and LynxChan sites, jschan, 2ch and FoolFuuka archives, with images drawn in the
