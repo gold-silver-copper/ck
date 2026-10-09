@@ -2,8 +2,7 @@
 //! `ck-web release` workflow), downloaded from its GitHub release the first time you post,
 //! checked against the SHA-256 here, and unpacked in ck's data folder.
 
-use std::io::Read;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, ensure};
 use sha2::{Digest, Sha256};
@@ -41,7 +40,8 @@ pub fn installed() -> Option<PathBuf> {
 pub fn install(progress: impl FnMut(u64, Option<u64>)) -> Result<PathBuf> {
     let (name, sum) = bundle().context("ck-web isn't built for this system yet")?;
     let base = dir().context("no data folder to put ck-web in")?;
-    let archive = base.join(&name);
+    // Named as this ck's temp, so another ck's cleanup leaves it be.
+    let archive = base.join(format!("{name}.ck-{}-0.tmp", std::process::id()));
     crate::http::download_with_progress(&format!("{RELEASES}/ck-web-v{VERSION}/{name}"), &archive, progress)?;
     let unpacked = (|| -> Result<()> {
         ensure!(sha256(&archive)? == sum, "The download isn't ck-web {VERSION} as this ck knows it (its checksum differs); not using it");
@@ -50,18 +50,12 @@ pub fn install(progress: impl FnMut(u64, Option<u64>)) -> Result<PathBuf> {
     })();
     let _ = std::fs::remove_file(&archive);
     unpacked?;
-    crate::atomic::remove_other_dirs(&base, &base.join(VERSION));
+    crate::atomic::remove_others(&base, &base.join(VERSION));
     installed().context("ck-web wasn't in the download")
 }
 
-fn sha256(path: &std::path::Path) -> Result<String> {
-    let mut file = std::fs::File::open(path)?;
+fn sha256(path: &Path) -> Result<String> {
     let mut hash = Sha256::new();
-    let mut buf = vec![0; 1 << 16];
-    loop {
-        let n = file.read(&mut buf)?;
-        let Some(chunk) = buf.get(..n).filter(|c| !c.is_empty()) else { break };
-        hash.update(chunk);
-    }
-    Ok(hash.finalize().iter().map(|b| format!("{b:02x}")).collect())
+    std::io::copy(&mut std::fs::File::open(path)?, &mut hash)?;
+    Ok(format!("{:x}", hash.finalize()))
 }

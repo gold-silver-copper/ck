@@ -620,8 +620,9 @@ answered; then the box closes, the thread is watched, and your post is marked as
 replies to it are counted and notified. 4chan's API has a new post a few seconds late, so
 the thread is refreshed as often as the API allows (every 10 seconds) until your post is in
 it, and then it's selected. A new thread opens a few seconds after it's posted (a "not
-found" then means the API doesn't list it yet, and ck tries again). If 4chan refuses it (too soon, a wrong answer, a
-file too big), the box says why and keeps what you wrote: fix it and ctrl-s again.
+found" then means the API doesn't list it yet, and ck tries again). If 4chan refuses it (too
+soon, a wrong answer, a file too big), the box says why and keeps what you wrote: fix it and
+ctrl-s again.
 
 `esc` closes the box and keeps what's written, per thread, for the next `P` there (pressing
 `P` on other posts adds their quotes). Drafts last until ck quits.
@@ -635,20 +636,20 @@ the first ctrl-s asks to download it, about 135 MB, from ck's releases on GitHub
 `ck-web-v…` ones, built by the repository's workflow). ck checks the download against the
 SHA-256 it has for that version, and won't use one that differs, then unpacks it in
 `$XDG_DATA_HOME/ck/web/<version>` (default `~/.local/share/ck/web`). A ck that needs a newer
-ck-web downloads it the same way, and the older one goes. It loads a page on 4chan's own domain with nothing on it
-(`boards.4chan.org/robots.txt`: no ads, no 4chan scripts), gets the captcha there and sends
-the post from there, as 4chan's own reply form would, with Chromium's sandbox on (where the
-system allows it: Ubuntu since 23.10 keeps it from programs like ck-web, which then runs
-without it). Its
-profile (cookies, Cloudflare's pass) is kept in `$XDG_CACHE_HOME/ck/web`, so the next post
-usually skips the check.
+ck-web downloads it the same way, and the older one goes. It loads a page on 4chan's own
+domain with nothing on it (`boards.4chan.org/robots.txt`: no ads, no 4chan scripts), gets
+the captcha there and sends the post from there, as 4chan's own reply form would, with
+Chromium's sandbox on (where the system allows it: Ubuntu since 23.10 keeps it from
+programs like ck-web, which then runs without it). Its profile (cookies, Cloudflare's pass)
+is kept in `$XDG_CACHE_HOME/ck/web`, so the next post usually skips the check; a second ck
+running at once uses `web-1`.
 
 When Cloudflare (or 4chan's occasional hCaptcha) wants a person, the box shows the page
 with a red pointer on it: the arrows (or `h`/`j`/`k`/`l`) move it a cell at a time, shift
 (or `H`/`J`/`K`/`L`) five, and `enter` or `space` clicks where it is, so no mouse is needed.
 A mouse click on the page works too (and moves the pointer there), and the wheel scrolls
-it. ck never clicks it for you. With half-block images the page is coarse; kitty, sixel or iTerm2 graphics show
-it as it is. With images off, there's nothing to click: turn them on in Settings.
+it. ck never clicks it for you. With half-block images the page is coarse; kitty, sixel or
+iTerm2 graphics show it as it is. With images off, there's nothing to click: turn them on in Settings.
 
 The download is for Linux (x86_64 and ARM). Elsewhere, or to use your own build, build it
 from the repository with `cargo build --release -p ck-web` (it needs cmake and ninja) and

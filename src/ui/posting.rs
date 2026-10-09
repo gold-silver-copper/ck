@@ -115,15 +115,8 @@ fn draw_fields(f: &mut Frame, c: &Compose, area: Rect) {
     for field in fields {
         let focused = c.field == field;
         let label_style = if focused { bold(t.primary) } else { dim() };
-        let label = match field {
-            Field::Name => "Name",
-            Field::Options => "Options",
-            Field::Subject => "Subject",
-            Field::Comment => "Comment",
-            Field::File => "File",
-            Field::Spoiler => "Spoiler",
-        };
-        put(f, area.x, y, LABEL, Line::styled(label, label_style));
+        // A field's name is its label.
+        put(f, area.x, y, LABEL, Line::styled(format!("{field:?}"), label_style));
         match field {
             Field::Comment => {
                 let n = c.comment.text().chars().count();
@@ -142,17 +135,11 @@ fn draw_fields(f: &mut Frame, c: &Compose, area: Rect) {
                 y += 1;
             }
             _ => {
-                let placeholder = match field {
-                    Field::Name => "Anonymous",
-                    Field::Options => "sage, …",
-                    Field::File => "a path: ~/pictures/cat.png",
-                    _ => "",
-                };
-                let editor = match field {
-                    Field::Name => &c.name,
-                    Field::Options => &c.options,
-                    Field::Subject => &c.subject,
-                    _ => &c.file,
+                let (editor, placeholder) = match field {
+                    Field::Name => (&c.name, "Anonymous"),
+                    Field::Options => (&c.options, "sage, …"),
+                    Field::Subject => (&c.subject, ""),
+                    _ => (&c.file, "a path: ~/pictures/cat.png"),
                 };
                 draw_editor(f, editor, Rect::new(value_x, y, value_w, 1), focused, Some(placeholder));
                 y += 1;

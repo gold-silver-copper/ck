@@ -58,7 +58,7 @@ pub fn unpack(archive: impl std::io::Read, dir: &Path) -> Result<()> {
     let parent = dir.parent().context("no folder to unpack into")?;
     std::fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
     let name = dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    let mut tmp = TempDir(parent.join(format!("{name}.ck-{}-{}.tmp", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed))));
+    let mut tmp = Temp(parent.join(format!("{name}.ck-{}-{}.tmp", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed))));
     let landed = (|| -> std::io::Result<()> {
         tar::Archive::new(archive).unpack(&tmp.0)?;
         if dir.exists() {
@@ -71,36 +71,27 @@ pub fn unpack(archive: impl std::io::Read, dir: &Path) -> Result<()> {
     landed.with_context(|| format!("unpacking into {}", dir.display()))
 }
 
-/// Remove the folders in `dir` but `keep` (what older versions unpacked there).
-pub fn remove_other_dirs(dir: &Path, keep: &Path) {
+/// Remove what's in `dir` but `keep` (what older versions left there), and never another
+/// writer's live temp: a download or unpack still going in another ck.
+pub fn remove_others(dir: &Path, keep: &Path) {
     let Ok(entries) = std::fs::read_dir(dir) else { return };
     for e in entries.flatten() {
         let path = e.path();
-        if path != keep && e.file_type().is_ok_and(|t| t.is_dir()) {
-            let _ = std::fs::remove_dir_all(&path);
+        let live = ours(&path) && !stale(e.metadata().ok().and_then(|m| m.modified().ok()));
+        if path != keep && !live {
+            let _ = std::fs::remove_file(&path).or_else(|_| std::fs::remove_dir_all(&path));
         }
     }
 }
 
-/// A folder being unpacked, removed when dropped unless it was renamed into place.
-struct TempDir(PathBuf);
-
-impl Drop for TempDir {
-    fn drop(&mut self) {
-        if !self.0.as_os_str().is_empty() {
-            let _ = std::fs::remove_dir_all(&self.0);
-        }
-    }
-}
-
-/// A temp file, removed when dropped (by an error's early return or a panic's unwinding)
-/// unless it was renamed into place.
+/// A temp file or folder, removed when dropped (by an error's early return or a panic's
+/// unwinding) unless it was renamed into place.
 struct Temp(PathBuf);
 
 impl Drop for Temp {
     fn drop(&mut self) {
         if !self.0.as_os_str().is_empty() {
-            let _ = std::fs::remove_file(&self.0);
+            let _ = std::fs::remove_file(&self.0).or_else(|_| std::fs::remove_dir_all(&self.0));
         }
     }
 }
@@ -317,6 +308,18 @@ mod tests {
         assert!(unpack(&archive[..100], &to).is_err());
         assert!(to.join("bin/ck-web").exists());
         assert_eq!(names(&dir.path().join("web")), ["1"]);
+    }
+
+    #[test]
+    fn removing_old_versions_spares_another_cks_live_temps() {
+        let dir = tempfile::tempdir().unwrap();
+        for d in ["0.1.0", "0.0.9", "0.1.0.ck-7-0.tmp"] {
+            std::fs::create_dir(dir.path().join(d)).unwrap();
+        }
+        std::fs::write(dir.path().join("ck-web.tar.gz.ck-7-0.tmp"), b"").unwrap();
+        std::fs::write(dir.path().join("ck-web.tar.gz"), b"").unwrap();
+        remove_others(dir.path(), &dir.path().join("0.1.0"));
+        assert_eq!(names(dir.path()), ["0.1.0", "0.1.0.ck-7-0.tmp", "ck-web.tar.gz.ck-7-0.tmp"]);
     }
 
     #[test]

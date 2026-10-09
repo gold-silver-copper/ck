@@ -14,9 +14,6 @@
 
 Run `ck`, or `ck 4chan/g` (or any thread or board URL) to start there.
 
-Posting to 4chan needs ck-web, a browser for 4chan's captcha: ck offers to download it
-(about 135 MB, once) the first time you post. Linux for now.
-
 A terminal browser for imageboards, built with [ratatui](https://ratatui.rs): 4chan,
 vichan and LynxChan sites, jschan, 2ch and FoolFuuka archives, with images drawn in the
 terminal. (Click the tour for [the video](ck-demo.webm), with controls.)
@@ -28,7 +25,8 @@ terminal. (Click the tour for [the video](ck-demo.webm), with controls.)
 - **Images** in the terminal (kitty, sixel, iTerm2, or half-blocks anywhere), a full-screen
   viewer that plays GIFs, a gallery of a thread's files, downloads and reverse image search.
 - **Posting** to 4chan: a reply box with quoting and drafts, the captcha answered in the
-  terminal, and Cloudflare's check clicked there too; your posts are marked as yours.
+  terminal, and Cloudflare's check clicked there too; your posts are marked as yours. The
+  first post downloads ck-web, the browser ck posts through (about 135 MB, once; Linux for now).
 - **Watched threads** refresh in the background and notify you of new posts and replies to
   yours. They're saved as they go, so a thread that dies can still be read offline.
 - **Filters** and hidden words hide or highlight threads and posts.

@@ -89,9 +89,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn requests_and_replies_are_json_lines() {
-        let r = Request::Post { board: "g".into(), thread: 1, fields: vec![("com".into(), "hi".into())], file: None };
-        assert_eq!(serde_json::to_string(&r).unwrap(), r#"{"do":"post","board":"g","thread":1,"fields":[["com","hi"]],"file":null}"#);
+    // page.js writes its replies by hand.
+    fn replies_read_as_page_js_writes_them() {
         let posted: Reply = serde_json::from_str(r#"{"is":"posted","thread":1,"no":2}"#).unwrap();
         assert_eq!(posted, Reply::Posted { thread: 1, no: 2 });
     }

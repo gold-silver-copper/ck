@@ -557,7 +557,6 @@ impl App {
                         c.stage = Stage::Solving(Box::new(Solving::new(ch)));
                         c.art = None;
                         c.side_art = None;
-        c.side_art = None;
                         if none {
                             self.post_for(&to);
                         }

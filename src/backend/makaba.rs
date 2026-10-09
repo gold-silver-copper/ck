@@ -52,8 +52,8 @@ impl Makaba {
         let parsed = markup::parse_html(v["comment"].as_str().unwrap_or(""), Flavor::Makaba);
         Post {
             no: as_u64(&v["num"]).unwrap_or(0),
-            poster: Poster::new(as_str(&v["name"]).map(|n| strip_tags(&n)), "Аноним", as_str(&v["trip"]).map(|t| strip_tags(&t)), None),
-            subject: as_str(&v["subject"]).map(|s| strip_tags(&s)).filter(|s| !s.is_empty()),
+            poster: Poster::new(as_str(&v["name"]).map(|n| markup::strip_tags(&n)), "Аноним", as_str(&v["trip"]).map(|t| markup::strip_tags(&t)), None),
+            subject: as_str(&v["subject"]).map(|s| markup::strip_tags(&s)).filter(|s| !s.is_empty()),
             time: as_i64(&v["timestamp"]).unwrap_or(0),
             files: items(&v["files"]).filter_map(|f| self.attachment(f)).collect(),
             sticky: as_bool(&v["sticky"]),
@@ -95,21 +95,6 @@ pub fn parse_boards(v: &Value) -> Vec<Board> {
             })
         })
         .collect()
-}
-
-/// Names and subjects can carry markup (e.g. coloured trips).
-fn strip_tags(s: &str) -> String {
-    let mut out = String::new();
-    let mut in_tag = false;
-    for c in s.chars() {
-        match c {
-            '<' => in_tag = true,
-            '>' if in_tag => in_tag = false,
-            c if !in_tag => out.push(c),
-            _ => {}
-        }
-    }
-    markup::decode(out.trim())
 }
 
 impl Backend for Makaba {

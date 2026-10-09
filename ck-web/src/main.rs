@@ -37,18 +37,21 @@ const PERSON_AFTER: Duration = Duration::from_millis(2500);
 /// The view is sent at most this often.
 const FRAME_EVERY: Duration = Duration::from_millis(150);
 
-/// What the page's script said (`page.js`).
+/// What the page's script said (`page.js`): a reply for ck, or news for ck-web alone.
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum Said {
+    Page(Page),
+    Reply(Reply),
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(tag = "is", rename_all = "snake_case")]
-enum Said {
-    Ready,
+enum Page {
     /// The captcha frame is loading.
     Loading,
     /// Something only a person can do is showing (hCaptcha).
     Human,
-    Captcha { twister: serde_json::Value },
-    Posted { thread: u64, no: u64 },
-    Failed { error: String },
 }
 
 /// What CEF's handlers found, for the main loop: they run on its thread, inside
@@ -194,8 +197,9 @@ fn main() -> ExitCode {
         return ExitCode::FAILURE;
     };
     let profile = std::env::var_os("CK_WEB_PROFILE").map(PathBuf::from).or_else(|| dirs::cache_dir().map(|d| d.join("ck").join("web")));
-    let Some(profile) = profile else {
-        eprintln!("ck-web: no cache directory for its browser profile");
+    // Held until ck-web exits.
+    let Some((profile, _lock)) = profile.and_then(|p| free_profile(&p)) else {
+        eprintln!("ck-web: no browser profile folder it can use");
         return ExitCode::FAILURE;
     };
     let mut web = Web { out: Some(out), viewing: false, person_at: None, last_frame: None };
@@ -247,6 +251,8 @@ fn run(args: &Args, app: &mut cef::App, profile: &std::path::Path, web: &mut Web
     let requests = read_requests();
     let mut waiting = VecDeque::new();
     let mut ready = false;
+    // What the page is busy with: a reload (Cloudflare's, say) loses it.
+    let mut busy: Option<Request> = None;
     let mut open = true;
     while open {
         do_message_loop_work();
@@ -265,13 +271,30 @@ fn run(args: &Args, app: &mut cef::App, profile: &std::path::Path, web: &mut Web
             (std::mem::take(&mut f.loaded), std::mem::take(&mut f.said))
         };
         if loaded {
+            // The script runs again, and says when it's ready again.
+            ready = false;
+            match busy.take() {
+                // The captcha is asked for again, on the new page.
+                Some(r @ Request::Captcha { .. }) => waiting.push_front(r),
+                // Not a post: it may have gone, and sending it again could post it twice.
+                Some(_) => web.send(&Reply::Failed { error: "The page reloaded before 4chan answered: check the thread before posting again".into() }),
+                None => {}
+            }
             run_js(&browser, include_str!("page.js"));
         }
         for s in said {
-            ready |= matches!(s, Said::Ready);
+            ready |= matches!(s, Said::Reply(Reply::Ready));
+            if matches!(s, Said::Reply(Reply::Captcha { .. } | Reply::Posted { .. } | Reply::Failed { .. })) {
+                busy = None;
+            }
             web.on_said(s);
         }
         while ready && let Some(r) = waiting.pop_front() {
+            busy = match &r {
+                Request::Captcha { .. } | Request::Post { .. } => Some(r.clone()),
+                Request::Cancel => None,
+                _ => busy,
+            };
             web.on_request(&browser, r);
         }
         web.tick(&browser, &found);
@@ -310,20 +333,16 @@ impl Web {
 
     fn on_said(&mut self, said: Said) {
         match said {
-            Said::Ready => self.send(&Reply::Ready),
-            Said::Loading => {
+            Said::Page(Page::Loading) => {
                 self.viewing = false;
                 self.person_at = Instant::now().checked_add(PERSON_AFTER);
             }
-            Said::Human => self.show(),
-            Said::Captcha { twister } => {
-                self.hide();
-                self.send(&Reply::Captcha { twister });
-            }
-            Said::Posted { thread, no } => self.send(&Reply::Posted { thread, no }),
-            Said::Failed { error } => {
-                self.hide();
-                self.send(&Reply::Failed { error });
+            Said::Page(Page::Human) => self.show(),
+            Said::Reply(reply) => {
+                if matches!(reply, Reply::Captcha { .. } | Reply::Failed { .. }) {
+                    self.hide();
+                }
+                self.send(&reply);
             }
         }
     }
@@ -454,6 +473,20 @@ fn png(mut bgra: Vec<u8>, width: u32, height: u32) -> Option<(String, u32, u32)>
     let mut out = std::io::Cursor::new(Vec::new());
     part.write_to(&mut out, image::ImageFormat::Png).ok()?;
     Some((base64::engine::general_purpose::STANDARD.encode(out.into_inner()), left, top))
+}
+
+/// A profile folder no other ck-web is using (Chromium allows one browser a profile): `base`,
+/// else `base-1`, `base-2`… for a second ck running at once, each keeping its own cookies.
+/// It's held while the file returned is open.
+fn free_profile(base: &std::path::Path) -> Option<(PathBuf, std::fs::File)> {
+    (0..10).find_map(|n| {
+        let dir = if n == 0 { base.to_path_buf() } else { base.with_file_name(format!("{}-{n}", base.file_name()?.to_string_lossy())) };
+        std::fs::create_dir_all(&dir).ok()?;
+        // The folder itself is locked (flock works on a folder opened for reading).
+        let lock = std::fs::File::open(&dir).ok()?;
+        lock.try_lock().ok()?;
+        Some((dir, lock))
+    })
 }
 
 /// Whether Chromium's sandbox can start: it needs user namespaces, which Ubuntu (since

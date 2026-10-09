@@ -7,6 +7,8 @@ use base64::Engine;
 use image::DynamicImage;
 use serde_json::Value;
 
+use crate::markup::strip_tags;
+
 /// Where 4chan keeps the images of its newer captchas (as its script has it).
 const IMAGES: &str = "https://s.4cdn.org/image/temp/april2026";
 
@@ -120,22 +122,6 @@ fn ext_task(ext: &Value) -> Task {
 fn decode(b64: &str) -> Option<DynamicImage> {
     let bytes = base64::engine::general_purpose::STANDARD.decode(b64).ok()?;
     image::load_from_memory(&bytes).ok()
-}
-
-/// The text of a bit of HTML (4chan's messages have links and line breaks).
-pub fn strip_tags(html: &str) -> String {
-    let breaks = html.replace("<br>", "\n").replace("<br/>", "\n").replace("<br />", "\n");
-    let mut out = String::new();
-    let mut in_tag = false;
-    for c in breaks.chars() {
-        match c {
-            '<' => in_tag = true,
-            '>' if in_tag => in_tag = false,
-            c if !in_tag => out.push(c),
-            _ => {}
-        }
-    }
-    html_escape::decode_html_entities(&out).trim().to_string()
 }
 
 /// Answering a challenge: where the person is in it, and what they've picked.
