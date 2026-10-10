@@ -23,9 +23,6 @@ use cef::{args::Args, rc::Rc as _, *};
 use protocol::{Reply, Request};
 use serde::Deserialize;
 
-/// The page the browser sits on: on the site's domain (so its captcha frame and post form
-/// answer it), with nothing of its own to run.
-const START: &str = "https://boards.4chan.org/robots.txt";
 /// The browser view's size, in pixels: room for Cloudflare's check and hCaptcha's puzzles.
 const VIEW_W: i32 = 480;
 const VIEW_H: i32 = 600;
@@ -202,7 +199,7 @@ fn main() -> ExitCode {
         eprintln!("ck-web: no browser profile folder it can use");
         return ExitCode::FAILURE;
     };
-    let mut web = Web { out: Some(out), viewing: false, person_at: None, last_frame: None };
+    let mut web = Web { out: Some(out), ..Default::default() };
     match run(&args, &mut app, &profile, &mut web) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
@@ -212,7 +209,8 @@ fn main() -> ExitCode {
     }
 }
 
-/// The browser process: start CEF on `START`, then take ck's requests until its stdin closes.
+/// The browser process: start CEF on a blank page, then take ck's requests until its stdin
+/// closes.
 fn run(args: &Args, app: &mut cef::App, profile: &std::path::Path, web: &mut Web) -> Result<(), String> {
     let path = |p: PathBuf| CefString::from(p.to_string_lossy().as_ref());
     let settings = Settings {
@@ -241,24 +239,25 @@ fn run(args: &Args, app: &mut cef::App, profile: &std::path::Path, web: &mut Web
     );
     let window = WindowInfo { windowless_rendering_enabled: 1, ..Default::default() };
     let browser_settings = BrowserSettings { windowless_frame_rate: 15, ..Default::default() };
-    let Some(browser) = browser_host_create_browser_sync(Some(&window), Some(&mut client), Some(&START.into()), Some(&browser_settings), None, None) else {
+    let Some(browser) = browser_host_create_browser_sync(Some(&window), Some(&mut client), Some(&"about:blank".into()), Some(&browser_settings), None, None) else {
         shutdown();
         return Err("Chromium (CEF) didn't open a page".into());
     };
     if let Some(host) = browser.host() {
         host.set_focus(1);
+        // Some sites' pages forbid scripts of other hosts (kohlchan's, erischan's): a captcha
+        // service's widget is one, put there by page.js. This browser loads only the sites'
+        // pages and what page.js adds to them.
+        let bypass = br#"{"id":1,"method":"Page.setBypassCSP","params":{"enabled":true}}"#;
+        host.send_dev_tools_message(Some(bypass));
     }
     let requests = read_requests();
-    let mut waiting = VecDeque::new();
-    let mut ready = false;
-    // What the page is busy with: a reload (Cloudflare's, say) loses it.
-    let mut busy: Option<Request> = None;
     let mut open = true;
     while open {
         do_message_loop_work();
         loop {
             match requests.try_recv() {
-                Ok(r) => waiting.push_back(r),
+                Ok(r) => web.waiting.push_back(r),
                 Err(TryRecvError::Empty) => break,
                 Err(TryRecvError::Disconnected) => {
                     open = false;
@@ -271,32 +270,14 @@ fn run(args: &Args, app: &mut cef::App, profile: &std::path::Path, web: &mut Web
             (std::mem::take(&mut f.loaded), std::mem::take(&mut f.said))
         };
         if loaded {
-            // The script runs again, and says when it's ready again.
-            ready = false;
-            match busy.take() {
-                // The captcha is asked for again, on the new page.
-                Some(r @ Request::Captcha { .. }) => waiting.push_front(r),
-                // Not a post: it may have gone, and sending it again could post it twice.
-                Some(_) => web.send(&Reply::Failed { error: "The page reloaded before 4chan answered: check the thread before posting again".into() }),
-                None => {}
-            }
+            web.reloaded();
             run_js(&browser, include_str!("page.js"));
         }
+        let at = browser.main_frame().map(|f| CefString::from(&f.url()).to_string()).unwrap_or_default();
         for s in said {
-            ready |= matches!(s, Said::Reply(Reply::Ready));
-            if matches!(s, Said::Reply(Reply::Captcha { .. } | Reply::Posted { .. } | Reply::Failed { .. })) {
-                busy = None;
-            }
-            web.on_said(s);
+            web.on_said(s, &at);
         }
-        while ready && let Some(r) = waiting.pop_front() {
-            busy = match &r {
-                Request::Captcha { .. } | Request::Post { .. } => Some(r.clone()),
-                Request::Cancel => None,
-                _ => busy,
-            };
-            web.on_request(&browser, r);
-        }
+        web.take_requests(&browser);
         web.tick(&browser, &found);
         open &= web.out.is_some();
         std::thread::sleep(Duration::from_millis(5));
@@ -312,12 +293,18 @@ fn run(args: &Args, app: &mut cef::App, profile: &std::path::Path, web: &mut Web
     Ok(())
 }
 
-/// ck's side: where replies go, and whether the browser view is being sent.
+/// ck's side: its requests, where replies go, and whether the browser view is being sent.
+#[derive(Default)]
 struct Web {
     /// None once ck has gone (a write failed).
     out: Option<Box<dyn Write>>,
+    /// ck's requests not taken yet, and the one being answered.
+    waiting: VecDeque<Request>,
+    busy: Option<Request>,
+    /// Whether the page's script is running (it isn't while the page loads).
+    ready: bool,
     viewing: bool,
-    /// When to show the view if the captcha hasn't come by then.
+    /// When to show the view if what's awaited hasn't come by then.
     person_at: Option<Instant>,
     last_frame: Option<Instant>,
 }
@@ -331,19 +318,63 @@ impl Web {
         }
     }
 
-    fn on_said(&mut self, said: Said) {
+    /// The page loaded again (Cloudflare's check passed, say): what it was doing is lost.
+    fn reloaded(&mut self) {
+        self.ready = false;
+        match self.busy.take() {
+            // Answered once the new page is ready.
+            Some(r @ Request::Open { .. }) => self.busy = Some(r),
+            // Asked again on the new page.
+            Some(r @ (Request::Captcha { .. } | Request::Widget { .. })) => self.waiting.push_front(r),
+            Some(Request::Fetch { method, .. }) if method != "GET" => {
+                // A form sent may have gone through, and sending it again could post twice.
+                self.send(&Reply::Failed { error: "The page reloaded before the site answered: check the thread before posting again".into() });
+            }
+            Some(r) => self.waiting.push_front(r),
+            None => {}
+        }
+    }
+
+    /// What the page said, on the page at `at`.
+    fn on_said(&mut self, said: Said, at: &str) {
         match said {
             Said::Page(Page::Loading) => {
                 self.viewing = false;
                 self.person_at = Instant::now().checked_add(PERSON_AFTER);
             }
             Said::Page(Page::Human) => self.show(),
-            Said::Reply(reply) => {
-                if matches!(reply, Reply::Captcha { .. } | Reply::Failed { .. }) {
+            // The blank page ck-web starts on isn't the one asked for, though its script runs.
+            Said::Reply(Reply::Ready) if at.is_empty() || at.starts_with("about:") => {}
+            Said::Reply(Reply::Ready) => {
+                self.ready = true;
+                // Only an `Open` is answered: a reload's ready is the page's own business.
+                if matches!(self.busy, Some(Request::Open { .. })) {
+                    self.busy = None;
                     self.hide();
+                    self.send(&Reply::Ready);
                 }
+            }
+            Said::Reply(reply) => {
+                // An answer to something cancelled is dropped, not taken for the next one's.
+                if self.busy.take().is_none() {
+                    return;
+                }
+                self.hide();
                 self.send(&reply);
             }
+        }
+    }
+
+    /// Take ck's requests: the page's own once its script runs and nothing else is being
+    /// answered; the browser's at once.
+    fn take_requests(&mut self, browser: &Browser) {
+        while let Some(r) = self.waiting.front() {
+            let page = matches!(r, Request::Fetch { .. } | Request::Captcha { .. } | Request::Widget { .. });
+            if page && (!self.ready || self.busy.is_some()) {
+                return;
+            }
+            let Some(r) = self.waiting.pop_front() else { return };
+            self.on_request(browser, r);
         }
     }
 
@@ -360,33 +391,47 @@ impl Web {
     }
 
     fn on_request(&mut self, browser: &Browser, request: Request) {
-        match request {
-            Request::Captcha { board, thread } => run_js(browser, &format!("ckweb.captcha({}, {thread})", json(&board))),
-            Request::Post { board, thread, fields, file } => {
-                let file = match file.as_deref().map(upload) {
+        match &request {
+            Request::Open { url } => {
+                self.ready = false;
+                self.person_at = Instant::now().checked_add(PERSON_AFTER);
+                if let Some(frame) = browser.main_frame() {
+                    frame.load_url(Some(&url.as_str().into()));
+                }
+            }
+            Request::Captcha { board, thread } => run_js(browser, &format!("ckweb.captcha({}, {thread})", json(board))),
+            Request::Widget { provider, sitekey } => run_js(browser, &format!("ckweb.widget({}, {})", json(provider), json(sitekey))),
+            Request::Fetch { method, url, headers, fields, file, body } => {
+                let file = match file.as_ref().map(upload) {
                     None => serde_json::Value::Null,
                     Some(Ok(f)) => f,
                     Some(Err(error)) => return self.send(&Reply::Failed { error }),
                 };
-                run_js(browser, &format!("ckweb.post({}, {thread}, {}, {})", json(&board), json(&fields), file));
+                run_js(browser, &format!("ckweb.send({}, {}, {}, {}, {file}, {})", json(method), json(url), json(headers), json(fields), json(body)));
             }
             Request::Click { x, y } => {
                 let Some(host) = browser.host() else { return };
-                let at = mouse(x, y);
+                let at = mouse(*x, *y);
                 host.send_mouse_move_event(Some(&at), 0);
                 host.send_mouse_click_event(Some(&at), MouseButtonType::LEFT, 0, 1);
                 host.send_mouse_click_event(Some(&at), MouseButtonType::LEFT, 1, 1);
+                return;
             }
             Request::Scroll { x, y, dy } => {
                 if let Some(host) = browser.host() {
-                    host.send_mouse_wheel_event(Some(&mouse(x, y)), 0, -dy);
+                    host.send_mouse_wheel_event(Some(&mouse(*x, *y)), 0, -dy);
                 }
+                return;
             }
             Request::Cancel => {
                 self.hide();
-                run_js(browser, "ckweb.cancel()");
+                self.busy = None;
+                self.waiting.clear();
+                run_js(browser, "ckweb && ckweb.cancel()");
+                return;
             }
         }
+        self.busy = Some(request);
     }
 
     /// Show the view once the captcha is late, and send it when it's changed.
@@ -419,7 +464,8 @@ impl Web {
 
 fn run_js(browser: &Browser, code: &str) {
     if let Some(frame) = browser.main_frame() {
-        frame.execute_java_script(Some(&code.into()), Some(&START.into()), 0);
+        let url = CefString::from(&frame.url());
+        frame.execute_java_script(Some(&code.into()), Some(&url), 0);
     }
 }
 
@@ -432,25 +478,13 @@ fn mouse(x: u32, y: u32) -> MouseEvent {
     MouseEvent { x: px(x, VIEW_W), y: px(y, VIEW_H), modifiers: 0 }
 }
 
-/// The file at `path` for the page's form: its name, type and bytes (base64).
-fn upload(path: &str) -> Result<serde_json::Value, String> {
-    let p = std::path::Path::new(path);
-    let bytes = std::fs::read(p).map_err(|e| format!("Couldn't read {path}: {e}"))?;
+/// A file for the page's form: its field, name and bytes (base64).
+fn upload(file: &protocol::Upload) -> Result<serde_json::Value, String> {
+    let p = std::path::Path::new(&file.path);
+    let bytes = std::fs::read(p).map_err(|e| format!("Couldn't read {}: {e}", file.path))?;
     let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "file".into());
-    let ext = p.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
-    let mime = match ext.as_str() {
-        "jpg" | "jpeg" => "image/jpeg",
-        "png" => "image/png",
-        "gif" => "image/gif",
-        "webp" => "image/webp",
-        "webm" => "video/webm",
-        "mp4" => "video/mp4",
-        "pdf" => "application/pdf",
-        "swf" => "application/x-shockwave-flash",
-        _ => "application/octet-stream",
-    };
     let data = base64::engine::general_purpose::STANDARD.encode(bytes);
-    Ok(serde_json::json!({ "name": name, "mime": mime, "data": data }))
+    Ok(serde_json::json!({ "field": file.field, "name": name, "data": data }))
 }
 
 /// A painted BGRA frame as a PNG (base64): the part with something on it (not the page's
@@ -485,8 +519,17 @@ fn free_profile(base: &std::path::Path) -> Option<(PathBuf, std::fs::File)> {
         // The folder itself is locked (flock works on a folder opened for reading).
         let lock = std::fs::File::open(&dir).ok()?;
         lock.try_lock().ok()?;
-        Some((dir, lock))
+        // A browser that doesn't take that lock (an older ck-web) may hold it all the same.
+        (!chromium_in(&dir)).then_some((dir, lock))
     })
+}
+
+/// Whether a running Chromium has the profile at `dir`: its `SingletonLock` names the host
+/// and process ("host-1234"), and that process is alive.
+fn chromium_in(dir: &std::path::Path) -> bool {
+    let Ok(link) = std::fs::read_link(dir.join("SingletonLock")) else { return false };
+    let pid = link.to_string_lossy().rsplit_once('-').and_then(|(_, pid)| pid.parse::<u32>().ok());
+    pid.is_some_and(|pid| std::path::Path::new(&format!("/proc/{pid}")).exists())
 }
 
 /// Whether Chromium's sandbox can start: it needs user namespaces, which Ubuntu (since

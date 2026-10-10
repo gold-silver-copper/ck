@@ -8,12 +8,12 @@ use anyhow::{Context, Result, ensure};
 use sha2::{Digest, Sha256};
 
 /// The ck-web this ck talks to: its release is `ck-web-v{VERSION}`.
-pub const VERSION: &str = "0.1.0";
+pub const VERSION: &str = "0.2.2";
 const RELEASES: &str = "https://github.com/gold-silver-copper/ck/releases/download";
 /// Each system's bundle, with its SHA-256 (from the release's `.sha256` files).
 const BUNDLES: &[(&str, &str)] = &[
-    ("linux-x86_64", "ec6eddb062bcbad58528e626e1d02708c07ea4f0d2bac9ae4c8f3bf7a542fccf"),
-    ("linux-aarch64", "3e744726547a6b3ed5912e7361676809a63469f591b734eb4c88407f4bb57e0d"),
+    ("linux-x86_64", "b324a92292ca53e14c3a6d0708dc70d6aeb8d8e15c2af7324aa82ce062022064"),
+    ("linux-aarch64", "355707430f63e7c38f5c2dc98808889d0f0215578fffe50b627068c25370f587"),
 ];
 /// About how big a bundle is, in megabytes, to say before downloading it.
 pub const SIZE_MB: u64 = 135;

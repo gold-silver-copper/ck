@@ -57,6 +57,7 @@ pub(crate) mod keys;
 pub(crate) mod markup;
 pub(crate) mod model;
 pub(crate) mod pages;
+pub(crate) mod post;
 pub(crate) mod notify;
 pub(crate) mod route;
 pub(crate) mod saved;

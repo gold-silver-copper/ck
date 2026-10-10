@@ -14,8 +14,11 @@
 #   kind = "foolfuuka" FoolFuuka 4chan archives (desuarchive, b4k, ...).
 #   kind = "jschan"    jschan engines (zzzchan, ...).
 #   kind = "makaba"    2ch.hk.
+#   kind = "kissu"     kissu.moe, read as vichan, posting its own way.
 #
 # `media_url` is where a site's files are served from when that's another host (8kun, 2ch).
+#
+# vichan sites may set `post_url` when posts go to another host (8kun's sys.8kun.top).
 #
 # `archive` names another site (a FoolFuuka archive) to offer when a thread 404s.
 #
@@ -50,9 +53,18 @@ notify = "auto"
 # Or run a command (no shell; {title} and {body} are filled in):
 # notify_command = ["notify-send", "{title}", "{body}"]
 
-# Where ck-web, the browser helper for posting to 4chan, is, if you built your own (by
+# Where ck-web, the browser helper ck posts through, is, if you built your own (by
 # default: the one ck downloads, then next to ck, then on the PATH).
 # web_helper = "~/ck/target/release/ck-web"
+
+# The password posts are sent with, for deleting them on sites that let you (by default a
+# new one each run).
+# post_password = "something only you know"
+
+# Some sites ask a proof of work before a post (alogs', kohlchan's): how long ck searches for
+# it, in seconds, and on how many threads (by default half the machine's, four at most).
+# proof_of_work_seconds = 180
+# proof_of_work_threads = 4
 
 # The terminal's title says where you are and what's new: "ck: (3) /g/ Thread subject",
 # with "(You)" when a new post replies to yours. The old title is put back on exit. Also in
@@ -212,7 +224,7 @@ boards = [
 
 [[site]]
 name = "kissu"
-kind = "vichan"
+kind = "kissu"
 url = "https://kissu.moe"
 # Thumbnails are JPEGs whatever the file (PNG ones redirect to a missing copy).
 thumb_ext = "jpg"
@@ -296,6 +308,7 @@ name = "8kun"
 kind = "vichan"
 url = "https://8kun.top"
 media_url = "https://nerv.8kun.top"
+post_url = "https://sys.8kun.top"
 
 [[site]]
 name = "alogs"

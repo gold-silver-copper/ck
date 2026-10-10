@@ -232,6 +232,7 @@ impl Asking<'_> {
             thumb_ext: None,
             archive: None,
             media_url: None,
+            post_url: None,
         }
     }
 }

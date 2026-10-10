@@ -1,5 +1,5 @@
-//! The reply box (`P`): the post's fields, then 4chan's captcha, or the browser view when the
-//! site wants a person.
+//! The reply box (`P`): the post's fields, then the site's captcha, or the browser view when
+//! the site wants a person.
 
 use super::*;
 use crate::app::{Art, Compose, Field, Stage, ViewAt, grid_cols};
@@ -9,8 +9,6 @@ use crate::editor::Editor;
 use image::DynamicImage;
 use std::borrow::Cow;
 
-/// 4chan's longest comment.
-const MAX_COMMENT: usize = 2000;
 /// The label column's width.
 const LABEL: u16 = 9;
 
@@ -25,7 +23,7 @@ pub(super) fn draw_reply(f: &mut Frame, app: &mut App) {
         Stage::Writing => "ctrl-s post · tab next · esc keep for later",
         Stage::Offer => "y download · esc back",
         Stage::Installing { .. } => "esc keep for later",
-        Stage::Asking | Stage::Sending => "esc stop",
+        Stage::Working => "esc stop",
         Stage::Person(_) => "arrows move · enter click · esc stop",
         Stage::Waiting { .. } => "enter ask again · esc back",
         Stage::Solving(s) if s.expired(Instant::now()) => "enter new captcha · esc back",
@@ -51,7 +49,7 @@ pub(super) fn draw_reply(f: &mut Frame, app: &mut App) {
     match &c.stage {
         Stage::Writing => draw_fields(f, c, body),
         Stage::Offer => {
-            say(f, "Posting to 4chan needs ck-web, ck's browser for 4chan's captcha.".into());
+            say(f, "Posting needs ck-web, the browser ck posts through (for the site's captcha and checks).".into());
             let mb = crate::web::install::SIZE_MB;
             let lines = [
                 format!("It's Chromium with no window: ck downloads it once (about {mb} MB), from ck's"),
@@ -74,8 +72,7 @@ pub(super) fn draw_reply(f: &mut Frame, app: &mut App) {
                 fill(f, Rect::new(body.x, body.y + 2, done.min(body.width.saturating_sub(2)), 1), t.primary);
             }
         }
-        Stage::Asking => say(f, format!("{spin} Getting a captcha from 4chan…")),
-        Stage::Sending => say(f, format!("{spin} Posting…")),
+        Stage::Working => say(f, format!("{spin} Posting to {}…", c.to.site)),
         Stage::Waiting { until, message } => {
             let left = until.saturating_duration_since(Instant::now()).as_secs();
             say(f, message.clone());
@@ -83,8 +80,8 @@ pub(super) fn draw_reply(f: &mut Frame, app: &mut App) {
             put(f, body.x, body.y + 2, body.width, Line::styled(when, dim()));
         }
         Stage::Person(img) => {
-            let how = "4chan wants to know you're a person: move the red pointer onto what it asks (arrows, shift for bigger steps) and press enter, or click it.";
-            put(f, body.x, body.y, body.width, Line::styled(truncate(how, body.width as usize), Style::new().fg(t.primary)));
+            let how = format!("{} wants to know you're a person: move the red pointer onto what it asks (arrows, shift for bigger steps) and press enter, or click it.", c.to.site);
+            put(f, body.x, body.y, body.width, Line::styled(truncate(&how, body.width as usize), Style::new().fg(t.primary)));
             let view = Rect { y: body.y + 2, height: body.height.saturating_sub(2), ..body };
             match img {
                 Some((img, left, top)) => {
@@ -120,8 +117,8 @@ fn draw_fields(f: &mut Frame, c: &Compose, area: Rect) {
         match field {
             Field::Comment => {
                 let n = c.comment.text().chars().count();
-                let count = format!("{n}/{MAX_COMMENT}");
-                let style = if n > MAX_COMMENT { Style::new().fg(t.error) } else { dim() };
+                let count = c.limit.map_or_else(|| n.to_string(), |max| format!("{n}/{max}"));
+                let style = if c.limit.is_some_and(|max| n > max) { Style::new().fg(t.error) } else { dim() };
                 let rows = Rect::new(value_x, y, value_w.saturating_sub(cells(count.len()) + 1), comment_rows);
                 fill(f, Rect::new(value_x, y, value_w, comment_rows), t.surface);
                 draw_editor(f, &c.comment, rows, focused, Some(">>123 quotes, >text is green"));
@@ -215,12 +212,18 @@ fn draw_captcha(f: &mut Frame, images: &mut Images, c: &mut Compose, area: Rect)
                 url_image(f, images, url, pic);
             }
         }
-        Task::Grid { prompt, cells: grid, single } => {
+        Task::Grid { prompt, image, cells: grid, single } => {
             let how = if *single { "pick one" } else { "pick all that fit" };
             put(f, area.x, area.y, area.width, Line::from(vec![Span::styled(prompt.clone(), Style::new().fg(t.text)), Span::styled(format!("  {how} · {expiry}"), dim())]));
             let cols = grid_cols(grid.len()) as u16;
             let rows = grid.len().div_ceil(cols.max(1) as usize) as u16;
-            let space = Rect { y: area.y + 2, height: area.height.saturating_sub(2), ..area };
+            let mut space = Rect { y: area.y + 2, height: area.height.saturating_sub(2), ..area };
+            // The picture the cells are about, above them.
+            if let Some(url) = image {
+                let pic = Rect { height: space.height * 2 / 5, ..space };
+                url_image(f, images, url, pic);
+                space = Rect { y: pic.bottom() + 1, height: space.height.saturating_sub(pic.height + 1), ..space };
+            }
             let (cw, ch) = (space.width / cols.max(1), space.height / rows.max(1));
             for (i, cell) in grid.iter().enumerate() {
                 let (col, row) = (i as u16 % cols.max(1), i as u16 / cols.max(1));
@@ -281,7 +284,7 @@ fn with_pointer(img: &DynamicImage, at: Option<(u32, u32)>, cell: (u32, u32)) ->
     DynamicImage::ImageRgb8(out)
 }
 
-/// A picture of 4chan's (a captcha's) by its URL, fetched like any other.
+/// A captcha's picture by its URL (fetched like any other) or the key it came with.
 fn url_image(f: &mut Frame, images: &mut Images, url: &str, area: Rect) {
     match images.get(url, Size::new(area.width, area.height), Kind::Full) {
         State::Ready(p) => {

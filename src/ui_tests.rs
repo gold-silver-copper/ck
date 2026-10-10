@@ -1382,6 +1382,7 @@ fn adding_a_site() {
         thumb_ext: None,
         archive: None,
         media_url: None,
+        post_url: None,
     };
     a.popup = Some(Popup::Adding(Adding::Site { site: site.clone(), name: "somechan".into(), open: None }));
     insta::assert_snapshot!(snapshot(&mut a));
@@ -1460,7 +1461,7 @@ fn settings_list_popups() {
     use crate::config::{SiteConfig, SiteKind};
     let mut a = app(false);
     a.tab.navigate(View::Settings);
-    let site = |name: &str| SiteConfig { name: name.into(), kind: SiteKind::Vichan, url: Some(format!("https://{name}.example")), boards: None, thumb_ext: None, archive: None, media_url: None };
+    let site = |name: &str| SiteConfig { name: name.into(), kind: SiteKind::Vichan, url: Some(format!("https://{name}.example")), boards: None, thumb_ext: None, archive: None, media_url: None, post_url: None };
     let mut shots = Vec::new();
     // Your sites: none, then three with one armed for removal.
     a.popup = Some(Popup::Settings(SettingsPopup::Sites(MySites { list: ratatui::widgets::ListState::default().with_selected(Some(0)), sites: vec![], armed: None })));

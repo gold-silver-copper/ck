@@ -95,10 +95,15 @@ pub struct Engine {
     pub probe: Option<fn(&mut detect::Asking) -> Option<SiteConfig>>,
     /// All its parsers on one JSON value, for fuzzing.
     pub parse: fn(&serde_json::Value) -> Vec<Post>,
+    /// How it posts, if it takes posts.
+    pub post: Option<MakePoster>,
 }
 
+/// How an engine makes its poster for a site.
+pub type MakePoster = fn(&SiteConfig) -> Arc<dyn crate::post::Poster>;
+
 /// Every engine, in the order `detect` asks.
-pub const ENGINES: [Engine; 6] = [
+pub const ENGINES: [Engine; 7] = [
     Engine {
         kind: SiteKind::Fourchan,
         name: "4chan",
@@ -111,24 +116,26 @@ pub const ENGINES: [Engine; 6] = [
             let b = futaba::Futaba::fourchan(None);
             [b.parse_catalog("g", v), b.parse_thread("g", v)].concat()
         },
+        post: Some(|_| Arc::new(crate::post::Fourchan)),
     },
     Engine {
         kind: SiteKind::Jschan,
         name: "jschan",
         label: "jschan",
-        build: |c| Arc::new(jschan::Jschan::new(url(c), boards(c))),
+        build: |c| Arc::new(jschan::Jschan::new(site_url(c), boards(c))),
         hosts: &[],
         probe: Some(detect::boards_json),
         parse: |v| {
             let _ = jschan::parse_boards(v);
             [jschan::parse_overboard(FUZZ_BASE, v), jschan::parse_thread(FUZZ_BASE, v)].concat()
         },
+        post: Some(|c| Arc::new(crate::post::Jschan { root: site_url(c) })),
     },
     Engine {
         kind: SiteKind::Lynxchan,
         name: "lynxchan",
         label: "LynxChan",
-        build: |c| Arc::new(lynxchan::Lynxchan::new(url(c), boards(c))),
+        build: |c| Arc::new(lynxchan::Lynxchan::new(site_url(c), boards(c))),
         hosts: &[],
         probe: Some(detect::lynxchan),
         parse: |v| {
@@ -136,12 +143,13 @@ pub const ENGINES: [Engine; 6] = [
             let b = lynxchan::Lynxchan::new(FUZZ_BASE.into(), None);
             [b.parse_catalog(v), b.parse_index(v), b.parse_thread(v)].concat()
         },
+        post: Some(|c| Arc::new(crate::post::Lynxchan { root: site_url(c) })),
     },
     Engine {
         kind: SiteKind::Foolfuuka,
         name: "foolfuuka",
         label: "FoolFuuka",
-        build: |c| Arc::new(foolfuuka::Foolfuuka::new(url(c), boards(c))),
+        build: |c| Arc::new(foolfuuka::Foolfuuka::new(site_url(c), boards(c))),
         hosts: &[],
         probe: Some(detect::foolfuuka),
         parse: |v| {
@@ -149,25 +157,24 @@ pub const ENGINES: [Engine; 6] = [
             let search = foolfuuka::parse_search(v).map(|p| p.hits.into_iter().map(|(_, p)| p).collect::<Vec<_>>()).unwrap_or_default();
             [foolfuuka::parse_index(v), foolfuuka::parse_thread(v), search].concat()
         },
+        // Archives take no posts.
+        post: None,
     },
     Engine {
         kind: SiteKind::Vichan,
         name: "vichan",
         label: "vichan",
-        build: |c| Arc::new(futaba::Futaba::vichan(url(c), c.thumb_ext.clone(), c.media_url.clone(), boards(c))),
+        build: |c| Arc::new(futaba::Futaba::vichan(site_url(c), c.thumb_ext.clone(), c.media_url.clone(), boards(c))),
         hosts: &[],
         probe: Some(detect::vichan),
-        parse: |v| {
-            let _ = (futaba::parse_boards(v), futaba::parse_pages(v));
-            let b = futaba::Futaba::vichan(FUZZ_BASE.into(), None, None, None);
-            [b.parse_catalog("g", v), b.parse_thread("g", v)].concat()
-        },
+        parse: parse_vichan,
+        post: Some(|c| Arc::new(crate::post::Vichan { root: site_url(c), sys: c.post_url.as_ref().map(|u| u.trim_end_matches('/').to_string()) })),
     },
     Engine {
         kind: SiteKind::Makaba,
         name: "makaba",
         label: "makaba",
-        build: |c| Arc::new(makaba::Makaba::new(url(c), c.media_url.clone(), boards(c))),
+        build: |c| Arc::new(makaba::Makaba::new(site_url(c), c.media_url.clone(), boards(c))),
         hosts: &["2ch.hk", "2ch.su", "2ch.life"],
         probe: Some(detect::makaba),
         parse: |v| {
@@ -175,8 +182,26 @@ pub const ENGINES: [Engine; 6] = [
             let b = makaba::Makaba::new(FUZZ_BASE.into(), None, None);
             [b.parse_catalog(v), b.parse_thread(v)].concat()
         },
+        post: Some(|c| Arc::new(crate::post::Makaba { root: site_url(c) })),
+    },
+    // Read as vichan; posts its own way.
+    Engine {
+        kind: SiteKind::Kissu,
+        name: "kissu",
+        label: "kissu",
+        build: |c| Arc::new(futaba::Futaba::vichan(site_url(c), c.thumb_ext.clone(), c.media_url.clone(), boards(c))),
+        hosts: &[],
+        probe: None,
+        parse: parse_vichan,
+        post: Some(|c| Arc::new(crate::post::Kissu { root: site_url(c) })),
     },
 ];
+
+fn parse_vichan(v: &serde_json::Value) -> Vec<Post> {
+    let _ = (futaba::parse_boards(v), futaba::parse_pages(v));
+    let b = futaba::Futaba::vichan(FUZZ_BASE.into(), None, None, None);
+    [b.parse_catalog("g", v), b.parse_thread("g", v)].concat()
+}
 
 /// Where each `SiteKind` is in `ENGINES`, which has each once.
 #[allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)] // const-evaluated: out of bounds fails the build
@@ -214,7 +239,7 @@ fn as_u32(v: &serde_json::Value) -> Option<u32> {
     crate::http::as_u64(v).map(saturate)
 }
 
-fn url(cfg: &SiteConfig) -> String {
+pub(crate) fn site_url(cfg: &SiteConfig) -> String {
     cfg.url.as_deref().map(|u| u.trim_end_matches('/').to_string()).unwrap_or_default()
 }
 

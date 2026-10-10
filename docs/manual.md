@@ -135,7 +135,7 @@ ones for where you are.
 | `H` / `Z` | hide / unhide the thread; show hidden threads, dimmed [`hide`, `show_hidden`] |
 | `X`  | hide or highlight threads like this one: by subject, image or file name (a filter) [`filter`] |
 | `A`  | search the board's archive [`archive_search`] |
-| `P`  | start a thread (4chan; see Posting) [`reply`] |
+| `P`  | start a thread (see Posting) [`reply`] |
 | `y` / `Y` | copy the OP's subject and text / the thread's link [`copy`, `copy_link`] |
 
 **Thread**
@@ -162,7 +162,7 @@ ones for where you are.
 | `w` / `T` | watch / unwatch; follow the quote `enter` would follow in a new tab [`watch`, `new_tab`] |
 | `H` / `Z` | hide / unhide the post; show hidden posts [`hide`, `show_hidden`] |
 | `X`  | hide or highlight posts like this one: by poster ID, name and tripcode, flag, image, file name, or (on the OP) subject (a filter) [`filter`] |
-| `P`  | reply, quoting the post (4chan; see Posting); the menu also replies quoting its text [`reply`, `quote`] |
+| `P`  | reply, quoting the post (see Posting); the menu also replies quoting its text [`reply`, `quote`] |
 | `m`  | mark the post as yours, to be told about replies [`mine`] |
 | `F`  | follow the thread as a general: when it dies or fills up, the next one is watched [`follow`] |
 | `a`  | after a 404: open the thread in the site's archive [`archive`] |
@@ -595,7 +595,8 @@ older ck is not, and can be deleted by hand.
 
 ## Posting
 
-ck posts to 4chan. `P` in a thread opens the reply box, quoting the selected post (`>>123`)
+ck posts on every site but the archives: 4chan, and vichan, LynxChan, jschan and 2ch sites.
+`P` in a thread opens the reply box, quoting the selected post (`>>123`)
 unless it's the opening post; the menu's "reply quoting its text" quotes its text too
 (`>line`). `P` in a catalog starts a new thread on the board.
 
@@ -604,15 +605,24 @@ the comment, a file (a path; `~/` works) and whether to spoiler it. `tab` and sh
 between them (so do the arrows, outside the comment); in a field the keys are a shell's:
 ctrl-a / ctrl-e line start and end, ctrl-w a word back, ctrl-u / ctrl-k to the line's start
 or end, alt or ctrl with the arrows a word at a time. Pasted text keeps its lines in the
-comment. The counter is 4chan's limit, 2000 characters.
+comment. The counter counts its characters, against the site's limit where ck knows it
+(4chan's 2000).
 
-ctrl-s sends it. ck asks 4chan for a captcha and shows it in the box:
+ctrl-s sends it. ck asks the site for a captcha, if the board wants one, and shows it in the
+box:
 
-- slider steps: the shape to find is on the left, the strip the slider's on beside it;
-  `←`/`→` (or `h`/`l`) go through the strips, and `enter` takes the one with the shape in
-  it and goes to the next step;
-- a picture to read: type what it says, `enter`;
-- a grid: the arrows move, `space` (or `1`-`9`) picks, `enter` sends.
+- slider steps (4chan): the shape to find is on the left, the strip the slider's on beside
+  it; `←`/`→` (or `h`/`l`) go through the strips, and `enter` takes the one with the shape
+  in it and goes to the next step;
+- a picture to read (4chan, vichan, LynxChan): type what it says, `enter`;
+- a grid: the arrows move, `space` (or `1`-`9`) picks, `enter` sends. jschan's is a picture
+  of icons in rows, picked by their place (row 2, 3rd), or (its "grid2") a picture of squares
+  numbered in it; 2ch's is a picture with icons numbered under it, picked one at a time: each
+  pick is checked, and the next round comes until it's done; kissu's (when you post too
+  often) is nine pictures numbered, to pick every one of a character;
+- a captcha service's (hCaptcha, reCAPTCHA, Cloudflare Turnstile, Yandex's), where a site
+  uses one (leftypol once it's flagged you, and any vichan or jschan board set up with one):
+  shown as the page, in the box, for you to do as on the site.
 
 ctrl-r asks for another captcha; one that has expired asks with `enter`. When 4chan says to
 wait before asking again, the box counts it down. The post goes up once the captcha is
@@ -622,34 +632,44 @@ the thread is refreshed as often as the API allows (every 10 seconds) until your
 it, and then it's selected. A new thread opens a few seconds after it's posted (a "not
 found" then means the API doesn't list it yet, and ck tries again). If 4chan refuses it (too
 soon, a wrong answer, a file too big), the box says why and keeps what you wrote: fix it and
-ctrl-s again.
+ctrl-s again. When a jschan or LynxChan site wants a "block bypass" first, the box shows its
+captcha for that, then sends the post. Some ask a proof of work with it (alogs, kohlchan's
+"hashcash"): ck works it out on a few threads (by default half the machine's, four at most)
+for up to three minutes; `proof_of_work_seconds` and `proof_of_work_threads` in the config
+change that (alogs' takes longer). 8kun asks its own captcha once a day, after the post is sent. Posts go with a password (`post_password` in the
+config, else a new one each run), for deleting them on the site where it lets you.
 
 `esc` closes the box and keeps what's written, per thread, for the next `P` there (pressing
 `P` on other posts adds their quotes). Drafts last until ck quits.
 
 ### ck-web, and Cloudflare
 
-4chan's captcha and posts are behind Cloudflare, which only lets browsers through, so ck
+Many sites (4chan among them) are behind Cloudflare, which only lets browsers through, so ck
 posts through a browser of its own: ck-web, Chromium (CEF) with no window, which ck starts
 the first time you send a post. ck doesn't come with it (Chromium is too big for crates.io):
 the first ctrl-s asks to download it, about 135 MB, from ck's releases on GitHub (the
 `ck-web-v…` ones, built by the repository's workflow). ck checks the download against the
 SHA-256 it has for that version, and won't use one that differs, then unpacks it in
 `$XDG_DATA_HOME/ck/web/<version>` (default `~/.local/share/ck/web`). A ck that needs a newer
-ck-web downloads it the same way, and the older one goes. It loads a page on 4chan's own
-domain with nothing on it (`boards.4chan.org/robots.txt`: no ads, no 4chan scripts), gets
-the captcha there and sends the post from there, as 4chan's own reply form would, with
+ck-web downloads it the same way, and the older one goes. It loads a page on the site's own
+domain with nothing on it (its `robots.txt`: no ads, no scripts of the site's), gets the
+captcha there and sends the post from there, as the site's own reply form would, with
 Chromium's sandbox on (where the system allows it: Ubuntu since 23.10 keeps it from
 programs like ck-web, which then runs without it). Its profile (cookies, Cloudflare's pass)
 is kept in `$XDG_CACHE_HOME/ck/web`, so the next post usually skips the check; a second ck
 running at once uses `web-1`.
 
-When Cloudflare (or 4chan's occasional hCaptcha) wants a person, the box shows the page
+When Cloudflare (or 4chan's occasional hCaptcha, or DDoS-Guard) wants a person, the box
+shows the page
 with a red pointer on it: the arrows (or `h`/`j`/`k`/`l`) move it a cell at a time, shift
 (or `H`/`J`/`K`/`L`) five, and `enter` or `space` clicks where it is, so no mouse is needed.
 A mouse click on the page works too (and moves the pointer there), and the wheel scrolls
 it. ck never clicks it for you. With half-block images the page is coarse; kitty, sixel or
-iTerm2 graphics show it as it is. With images off, there's nothing to click: turn them on in Settings.
+iTerm2 graphics show it as it is. With images off, there's nothing to click: turn them on in
+Settings. A captcha service's check (hCaptcha, reCAPTCHA…) is shown the same way. ck-web
+lets these load even on sites whose pages forbid other hosts' scripts (it loads nothing but
+the site's pages and the captcha). A bot check that works itself out (ptch.net's) shows a
+moment, then goes.
 
 The download is for Linux (x86_64 and ARM). Elsewhere, or to use your own build, build it
 from the repository with `cargo build --release -p ck-web` (it needs cmake and ninja) and
