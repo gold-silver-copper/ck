@@ -1093,6 +1093,13 @@ fn grid_moves_in_two_dimensions() {
     assert_eq!(at(&app), 6);
     press(&mut app, 'k');
     assert_eq!(at(&app), 3);
+    // A count stops at the edge: 2l from the first column, then 5h back to it, not out.
+    press(&mut app, '2');
+    press(&mut app, 'l');
+    assert_eq!(at(&app), 5);
+    press(&mut app, '5');
+    press(&mut app, 'h');
+    assert_eq!((at(&app), app.tab.view()), (3, View::Catalog));
     // h in the first column goes back, as in lists.
     press(&mut app, 'h');
     assert_eq!(app.tab.view(), View::Boards);

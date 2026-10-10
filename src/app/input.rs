@@ -369,7 +369,14 @@ impl App {
             }
             KeyCode::Esc if !self.filter(self.tab.view()).is_empty() => self.edit_filter(self.tab.view(), String::clear),
             KeyCode::Esc => self.back(),
-            _ if self.tab.view() == View::Catalog && (0..n).all(|_| self.on_grid_key(key.code)) => {}
+            // A count stops at the grid's edge rather than going on to mean back.
+            _ if self.tab.view() == View::Catalog && self.on_grid_key(key.code) => {
+                for _ in 1..n {
+                    if !self.on_grid_key(key.code) {
+                        break;
+                    }
+                }
+            }
             KeyCode::Char(c @ '1'..='9') if self.tab.view() == View::Sites => self.open_favorite(c as usize - '1' as usize),
             KeyCode::Char('h') | KeyCode::Left | KeyCode::Backspace => self.back(),
             _ if self.tab.view() == View::Thread => self.on_thread_key(key.code, ctrl, n),
