@@ -336,8 +336,8 @@ impl App {
                 KeyCode::Esc if a.candidates.is_empty() => return,
                 KeyCode::Esc => {}
                 KeyCode::Enter => return self.add_hidden_word(&word),
-                code => {
-                    edit_text(&mut word, code);
+                _ => {
+                    edit_text(&mut word, key);
                     a.word = Some(word);
                 }
             }
@@ -348,8 +348,8 @@ impl App {
             match key.code {
                 KeyCode::Esc => {}
                 KeyCode::Enter => a.label = Some(text.trim().to_string()),
-                code => {
-                    edit_text(&mut text, code);
+                _ => {
+                    edit_text(&mut text, key);
                     a.typing = Some(text);
                 }
             }
@@ -578,8 +578,8 @@ impl App {
                         }
                     }
                 }
-                code => {
-                    edit_text(&mut text, code);
+                _ => {
+                    edit_text(&mut text, key);
                     Some(SettingsPopup::FilterEdit { index, draft, row, typing: Some(text) })
                 }
             };

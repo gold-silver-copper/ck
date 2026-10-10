@@ -1935,13 +1935,19 @@ fn list_move(code: KeyCode, cur: usize, len: usize) -> Option<usize> {
     }
 }
 
-/// Backspace and typed characters in a text field; other keys do nothing.
-fn edit_text(text: &mut String, code: KeyCode) {
-    match code {
+/// A key in a one-line text field, as a shell takes it: backspace, ctrl-w (or ctrl- or
+/// alt-backspace) a word, ctrl-u the whole line, and typed characters; other keys (another
+/// ctrl- or alt- letter among them) do nothing.
+fn edit_text(text: &mut String, key: KeyEvent) {
+    let (ctrl, alt) = (key.modifiers.contains(KeyModifiers::CONTROL), key.modifiers.contains(KeyModifiers::ALT));
+    match key.code {
+        KeyCode::Char('w') if ctrl => text.truncate(text.trim_end().trim_end_matches(|c: char| !c.is_whitespace()).len()),
+        KeyCode::Backspace if ctrl || alt => text.truncate(text.trim_end().trim_end_matches(|c: char| !c.is_whitespace()).len()),
+        KeyCode::Char('u') if ctrl => text.clear(),
         KeyCode::Backspace => {
             text.pop();
         }
-        KeyCode::Char(c) => text.push(c),
+        KeyCode::Char(c) if !ctrl && !alt => text.push(c),
         _ => {}
     }
 }

@@ -113,7 +113,7 @@ impl App {
                 self.goto_str(&input);
             }
             KeyCode::Tab => self.complete_goto(),
-            code => super::edit_text(text, code),
+            _ => super::edit_text(text, key),
         }
     }
 

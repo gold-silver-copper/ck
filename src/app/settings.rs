@@ -456,8 +456,8 @@ impl App {
                         }
                     }
                 }
-                code => {
-                    edit_text(&mut text, code);
+                _ => {
+                    edit_text(&mut text, key);
                     Some(SettingsPopup::Colors { list, editing: Some(text) })
                 }
             };
@@ -522,8 +522,8 @@ impl App {
                     let last = self.hidden_words.len().saturating_sub(1);
                     Some(SettingsPopup::HiddenWords { list: ListState::default().with_selected(Some(last)), typing: None })
                 }
-                code => {
-                    edit_text(&mut text, code);
+                _ => {
+                    edit_text(&mut text, key);
                     Some(SettingsPopup::HiddenWords { list, typing: Some(text) })
                 }
             };
@@ -579,8 +579,8 @@ impl App {
                 });
                 None
             }
-            code => {
-                edit_text(&mut value, code);
+            _ => {
+                edit_text(&mut value, key);
                 Some(SettingsPopup::Folder { value })
             }
         }

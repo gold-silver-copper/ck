@@ -755,6 +755,15 @@ fn goto_input_completes_and_takes_pastes() {
     // A paste with nothing being typed starts the input.
     app.paste("http://localhost:3/y/res/1.html\n");
     assert_eq!(app.goto_text(), Some("http://localhost:3/y/res/1.html"));
+    // ctrl-w takes a word, ctrl-u the line; other ctrl- and alt- letters type nothing.
+    let ctrl = |c| KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL);
+    type_text(&mut app, " ab cd");
+    for key in [ctrl('w'), ctrl('a'), KeyEvent::new(KeyCode::Char('x'), KeyModifiers::ALT)] {
+        app.on_key(key);
+    }
+    assert_eq!(app.goto_text(), Some("http://localhost:3/y/res/1.html ab "));
+    app.on_key(ctrl('u'));
+    assert_eq!(app.goto_text(), Some(""));
 }
 
 #[test]

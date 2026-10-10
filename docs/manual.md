@@ -317,7 +317,8 @@ nothing else is being typed starts this by itself), or type a short form. A site
 | `>>>/g/123`            | a cross-board quote: thread 123 on /g/             |
 | `saved`, `watched`, `history` | that list                                   |
 
-`tab` completes site and board names. `esc` (or `u` from a thread) goes back to where you
+`tab` completes site and board names. In a one-line box (`:`, `/`, the fields of Settings
+and the filter maker) ctrl-w takes back a word and ctrl-u the whole line. `esc` (or `u` from a thread) goes back to where you
 were (from Settings: to the place under them). `ck URL` (or `ck 4chan/g`) starts there.
 
 ### Remapping keys

@@ -548,7 +548,7 @@ impl App {
     }
 
     fn on_filter_key(&mut self, key: KeyEvent) {
-        self.edit_filter(self.tab.view(), |f| if key.code == KeyCode::Esc { f.clear() } else { edit_text(f, key.code) });
+        self.edit_filter(self.tab.view(), |f| if key.code == KeyCode::Esc { f.clear() } else { edit_text(f, key) });
         if matches!(key.code, KeyCode::Esc | KeyCode::Enter) || self.tab.view() == View::Thread {
             self.typing = None;
         }
@@ -739,16 +739,13 @@ impl App {
                 };
                 self.info(msg);
             }
-            KeyCode::Backspace => {
+            _ => {
                 let mut q = t.search.clone();
-                q.pop();
-                t.set_search(q);
+                edit_text(&mut q, key);
+                if q != t.search {
+                    t.set_search(q);
+                }
             }
-            KeyCode::Char(c) => {
-                let q = format!("{}{c}", t.search);
-                t.set_search(q);
-            }
-            _ => {}
         }
     }
 
