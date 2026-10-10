@@ -124,7 +124,10 @@ impl App {
                 let key = self.keys.key(crate::keys::Action::Favorite);
                 self.info(format!("No favorites yet: {key} on a board adds one"));
             }
-            None => self.info(format!("There are {} favorites", self.favorites.len())),
+            None => self.info(match self.favorites.len() {
+                1 => "There's 1 favorite".to_string(),
+                n => format!("There are {n} favorites"),
+            }),
         }
     }
 

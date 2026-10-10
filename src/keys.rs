@@ -250,15 +250,16 @@ fn fixed(scope: Scope) -> Vec<Key> {
     let mut keys: Vec<Key> = codes.into_iter().map(Key::code).collect();
     keys.push(Key::ctrl('c'));
     let chars: &[char] = match scope {
-        Scope::Thread => &['j', 'k', 'g', 'G', 'h', 'l', 'J', 'K', ' '],
+        Scope::Thread => &['j', 'k', 'g', 'G', 'h', 'l', 'J', 'K', ' ', 'z'],
         Scope::Viewer => &['j', 'k', 'h', 'l', 'i', 'q', 'v', ' ', '+', '=', '-', '0'],
-        // The home screen opens favorites with 1-9.
-        Scope::Lists => &['j', 'k', 'g', 'G', 'h', 'l', '1', '2', '3', '4', '5', '6', '7', '8', '9'],
         _ => &['j', 'k', 'g', 'G', 'h', 'l'],
     };
     keys.extend(chars.iter().map(|&c| Key::char(c)));
     if scope != Scope::Viewer {
-        keys.extend([Key::ctrl('d'), Key::ctrl('u')]);
+        // Counts (and the home screen's favorites), the vim scrolls, and ctrl-i, which is tab
+        // to a terminal.
+        keys.extend(('0'..='9').map(Key::char));
+        keys.extend(['d', 'u', 'e', 'y', 'f', 'b', 'i'].map(Key::ctrl));
     }
     keys
 }
@@ -409,6 +410,13 @@ mod tests {
         assert_eq!(m.action(Scope::Viewer, &ch('q')), None);
         // Shift is part of the character.
         assert_eq!(m.action(Scope::Thread, &KeyEvent::new(KeyCode::Char('U'), KeyModifiers::SHIFT)), Some(Action::Unread));
+    }
+
+    #[test]
+    fn counts_prefixes_and_vim_scrolls_cant_be_rebound() {
+        for (action, key) in [("watched", "z"), ("sort", "3"), ("expand", "0"), ("jump_back", "ctrl-f"), ("reload", "ctrl-e"), ("jump_forward", "ctrl-i")] {
+            assert!(map(&[(action, key)]).is_err(), "{action} = {key}");
+        }
     }
 
     #[test]

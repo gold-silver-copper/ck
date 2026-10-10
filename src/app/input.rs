@@ -70,6 +70,8 @@ impl App {
     /// something may have moved (a wheel notch among them), it does nothing until the next.
     pub fn on_mouse(&mut self, ev: MouseEvent, now: Instant) {
         http::user_input();
+        // The mouse drops a waiting count or prefix.
+        self.pending = Pending::default();
         let (before, top) = (self.shown(), self.modal());
         let (wheel, left, right, tabs) = self.mouse(top);
         let pos = Position::new(ev.column, ev.row);
@@ -266,6 +268,8 @@ impl App {
 
     /// A key for what's on top.
     fn on_modal_key(&mut self, modal: Modal, key: KeyEvent) {
+        // A count or prefix is for the view, not what's on top of it.
+        self.pending = Pending::default();
         match modal {
             Modal::Confirm => self.on_confirm_key(key),
             Modal::Adding => self.on_adding_key(key),
@@ -320,8 +324,15 @@ impl App {
                     self.pending = Pending { count: Some(count.min(99_999)), prefix: None };
                     return;
                 }
-                // `5g`, `5G`: the fifth post (or entry) at once.
-                'g' | 'G' if pending.count.is_some() => return self.go_to_entry(n),
+                // `5g`, `5G`: the fifth post (or entry) at once. A `g` right after `5g` is part
+                // of vim's `5gg`, already done.
+                'g' | 'G' if pending.count.is_some() => {
+                    self.go_to_entry(n);
+                    if c == 'g' {
+                        self.pending = Pending { count: None, prefix: Some(GG_DONE) };
+                    }
+                    return;
+                }
                 'g' => {
                     self.pending = Pending { count: None, prefix: Some('g') };
                     return;
@@ -440,8 +451,9 @@ impl App {
             }
             Action::Search => self.typing = Some(Typing::ListFilter),
             Action::Reload => self.refresh(),
-            Action::JumpBack if self.tab.view() != View::Thread => self.travel(true),
-            Action::JumpForward if self.tab.view() != View::Thread => self.travel(false),
+            // Outside a thread, or on one that didn't load (yet): along the threads.
+            Action::JumpBack if self.tab.view() != View::Thread || self.tab.thread.is_none() => self.travel(true),
+            Action::JumpForward if self.tab.view() != View::Thread || self.tab.thread.is_none() => self.travel(false),
             Action::Watched => self.tab.navigate(View::Watched),
             Action::Filter => self.open_add_filter(),
             Action::Conversation => self.toggle_conversation(),
@@ -613,6 +625,7 @@ impl App {
     /// False if `code` isn't one of these.
     fn finish_prefix(&mut self, prefix: char, code: KeyCode, count: Option<usize>) -> bool {
         let at = match (prefix, code) {
+            (GG_DONE, KeyCode::Char('g')) => return true,
             ('g', KeyCode::Char('g')) => {
                 self.go_to_entry(count.unwrap_or(1));
                 return true;
@@ -634,12 +647,15 @@ impl App {
         match &mut self.tab.thread {
             Some(t) if view == View::Thread => {
                 t.leave_mark();
-                t.select_entry(n.saturating_sub(1));
+                t.select_nth(n);
                 t.scroll_to(Reveal::Jump);
             }
             _ => {
                 self.move_selection(view, isize::MIN / 2);
                 self.move_selection(view, isize::try_from(n.saturating_sub(1)).unwrap_or(isize::MAX / 2));
+                if view == View::Search {
+                    self.search_moved();
+                }
             }
         }
     }
@@ -676,14 +692,12 @@ impl App {
                 None => self.info("No replies to this post"),
             },
             // Back to the post jumped from, or forward again; else to the thread before or after.
-            Action::JumpBack => {
-                if !t.jump_back() {
-                    self.travel(true);
-                }
-            }
-            Action::JumpForward => {
-                if !t.jump_forward() {
-                    self.travel(false);
+            Action::JumpBack | Action::JumpForward => {
+                let back = action == Action::JumpBack;
+                if if back { t.jump_back() } else { t.jump_forward() } {
+                    self.footer.clear_seen();
+                } else {
+                    self.travel(back);
                 }
             }
             Action::Unread => match (0..t.posts.len()).find(|&i| t.is_new(i)) {

@@ -97,9 +97,7 @@ impl App {
     pub(crate) fn position(&self) -> Option<(usize, usize)> {
         let view = self.tab.view();
         if view == View::Thread {
-            let t = self.tab.thread.as_ref().filter(|_| self.tab.gallery.is_none())?;
-            let n = t.entries.len();
-            return (n > 0).then(|| (t.entry().saturating_add(1).min(n), n));
+            return self.tab.thread.as_ref().filter(|_| self.tab.gallery.is_none())?.ruler();
         }
         let rows = self.row_keys(view);
         Some((row_in(self.list(view)?, &rows)?.saturating_add(1), rows.len())).filter(|&(_, n)| n > 0)

@@ -790,6 +790,26 @@ impl ThreadView {
         Some(((at, pages), start < self.scroll, last > self.scroll + view))
     }
 
+    /// Whether entry `e` is a post of its own, not a reply expanded (`e`) under another. A
+    /// conversation's are all its own, indented as they quote each other.
+    fn own(&self, e: &Entry) -> bool {
+        e.depth == 0 || self.conversation.is_some()
+    }
+
+    /// The ruler: the selected post among the thread's (an expanded reply counts as the post
+    /// it's under), and how many there are.
+    pub fn ruler(&self) -> Option<(usize, usize)> {
+        let of = self.entries.iter().filter(|e| self.own(e)).count();
+        let at = self.entries.iter().take(self.entry().saturating_add(1)).filter(|e| self.own(e)).count();
+        (of > 0).then_some((at.max(1), of))
+    }
+
+    /// Select the `n`th post (from 1; past the end, the last), not counting expanded replies.
+    pub(super) fn select_nth(&mut self, n: usize) {
+        let e = self.entries.iter().enumerate().filter(|(_, e)| self.own(e)).take(n.max(1)).last().map_or(0, |(i, _)| i);
+        self.select_entry(e);
+    }
+
     pub(super) fn select_entry(&mut self, e: usize) {
         self.set_cursor(e.min(self.entries.len().saturating_sub(1)));
         self.scroll_to(Reveal::Step);

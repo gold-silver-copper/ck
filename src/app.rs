@@ -332,10 +332,15 @@ pub struct Pending {
     pub prefix: Option<char>,
 }
 
+/// The prefix after `10g`, which went to post 10 at once: a `g` next finishes vim's `10gg`
+/// and does nothing more. Not shown.
+pub(crate) const GG_DONE: char = '\0';
+
 impl Pending {
     /// As the footer shows it: "10", "z", "10g".
     pub fn shown(self) -> Option<String> {
-        let text = format!("{}{}", self.count.map(|n| n.to_string()).unwrap_or_default(), self.prefix.map(String::from).unwrap_or_default());
+        let prefix = self.prefix.filter(|&p| p != GG_DONE);
+        let text = format!("{}{}", self.count.map(|n| n.to_string()).unwrap_or_default(), prefix.map(String::from).unwrap_or_default());
         Some(text).filter(|t| !t.is_empty())
     }
 }
@@ -568,7 +573,7 @@ impl App {
             hidden_sites: cfg.hidden_sites.iter().cloned().collect(),
             show_hidden_sites: false,
             watched_first: cfg.watched_first,
-            catalog_lines: cfg.catalog_lines.map(|n| n.clamp(1, 20)),
+            catalog_lines: cfg.catalog_lines.map(|n| n.clamp(1, 8)),
             default_layout: store.settings.catalog_layout.unwrap_or(match store.settings.compact_catalog {
                 Some(true) => CatalogLayout::Compact,
                 Some(false) => CatalogLayout::Cards,

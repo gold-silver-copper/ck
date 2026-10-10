@@ -633,6 +633,9 @@ fn vim_counts_prefixes_and_the_jump_list() {
     // 7G goes to the seventh post, gg to the first, G to the last: as the ruler says.
     keys(&mut app, "7G");
     assert_eq!(at(&app), 7);
+    // Vim's 3gg is 3g with a g after it that changes nothing.
+    keys(&mut app, "3gg");
+    assert_eq!((at(&app), app.pending.shown()), (3, None));
     keys(&mut app, "gg");
     assert_eq!((at(&app), app.position()), (1, Some((1, 10))));
     keys(&mut app, "G");

@@ -44,8 +44,10 @@ Navigation (fixed):
 | `j`/`k`, arrows         | move (in a thread: next/previous post)        |
 | `gg`/`G`                | top / bottom                                  |
 | ctrl-d / ctrl-u         | half a page (in a list, 10 rows)              |
-| ctrl-f / ctrl-b, space  | a page (in a list, 20 rows)                   |
-| `J`/`K`, ctrl-e / ctrl-y | scroll a thread by a line (in a list, move a row) |
+| ctrl-f / ctrl-b         | a page (in a list, 20 rows)                   |
+| space                   | in a thread: a page                           |
+| ctrl-e / ctrl-y         | scroll a thread by a line (in a list, move a row) |
+| `J`/`K`                 | in a thread: scroll by a line                 |
 | `zz` / `zt` / `zb`      | in a thread: scroll the selected post to the middle / top / bottom of the screen |
 | `enter`, `l`            | open (in a thread: follow a `>>quote`, also into other threads and boards) |
 | `esc`, `h`, backspace   | back                                          |
@@ -101,6 +103,8 @@ ones for where you are.
 | `/`  | filter the list; in a thread, search it [`search`] |
 | `r` / `o` | reload / open the board or thread in a browser [`reload`, `browser`] |
 | `:`  | go to a URL or a site/board/thread, see [Going to a URL](#going-to-a-url) [`goto`] |
+| `u` / ctrl-r | back / forward along the jump list, see above [`jump_back`, `jump_forward`] |
+| `W`  | the watched threads (not in the image viewer or gallery) [`watched`] |
 | `,`  | settings: theme, colors, keys, and more [`settings`] |
 | `.`, right-click | what you can do with what's selected, with each one's key [`menu`] |
 | `f`  | label what's on screen (posts, images, links, rows); type a label to open it (what it was put on, even if a refresh has moved it; if it's gone, ck says so) [`hints`] |
