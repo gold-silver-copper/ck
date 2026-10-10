@@ -1,11 +1,10 @@
 //! `V`: every file of the thread (or the conversation shown) as a grid of thumbnails.
 
-use ratatui::crossterm::event::{KeyCode, KeyEvent};
 use ratatui::widgets::ListState;
 
 use super::{App, TabPopup, View, Viewer};
 use crate::download;
-use crate::keys::{Action, Scope};
+use crate::keys::{Action, Nav};
 use crate::model::Attachment;
 
 pub struct Gallery {
@@ -40,34 +39,26 @@ impl App {
         if hidden { format!("Only hidden posts have files ({} shows them)", self.keys.key(Action::ShowHidden)) } else { none.to_string() }
     }
 
-    pub fn on_gallery_key(&mut self, key: KeyEvent) {
+    pub(super) fn on_gallery_nav(&mut self, nav: Nav) {
         // Before a changed gallery is drawn, it steps one card, with no edge to leave by.
         let (cols, edges) = self.drawn_cols().map_or((1, false), |c| (c.unwrap_or(1), true));
         let Some(g) = &mut self.tab.gallery else { return };
-        let n = g.files.len();
+        let last = g.files.len().saturating_sub(1);
         let cur = g.state.selected().unwrap_or(0);
-        let action = self.keys.action(Scope::Thread, &key);
-        let to = match key.code {
-            KeyCode::Char('j') | KeyCode::Down => Some((cur + cols).min(n - 1)),
-            KeyCode::Char('k') | KeyCode::Up => Some(cur.saturating_sub(cols)),
-            KeyCode::Char('l') | KeyCode::Right => Some((cur + 1).min(n - 1)),
-            KeyCode::Char('h') | KeyCode::Left if !edges || cur % cols != 0 => Some(cur.saturating_sub(1)),
-            KeyCode::Char('g') | KeyCode::Home => Some(0),
-            KeyCode::Char('G') | KeyCode::End => Some(n - 1),
-            KeyCode::PageDown => Some((cur + cols * 3).min(n - 1)),
-            KeyCode::PageUp => Some(cur.saturating_sub(cols * 3)),
-            _ => None,
+        let to = match nav {
+            Nav::Down => (cur + cols).min(last),
+            Nav::Up => cur.saturating_sub(cols),
+            Nav::Right => (cur + 1).min(last),
+            Nav::Left if !edges || cur % cols != 0 => cur.saturating_sub(1),
+            Nav::Top => 0,
+            Nav::Bottom => last,
+            Nav::PageDown => (cur + cols * 3).min(last),
+            Nav::PageUp => cur.saturating_sub(cols * 3),
+            Nav::Open => return self.view_from_gallery(cur),
+            Nav::Esc | Nav::Back | Nav::Left => return self.close_gallery(),
+            _ => return,
         };
-        if let Some(to) = to {
-            g.state.select(Some(to));
-            return;
-        }
-        match (key.code, action) {
-            (KeyCode::Enter, _) => self.view_from_gallery(cur),
-            (KeyCode::Esc | KeyCode::Char('q' | 'h') | KeyCode::Left | KeyCode::Backspace, _) => self.close_gallery(),
-            (_, Some(action)) => self.gallery_action(action),
-            _ => {}
-        }
+        g.state.select(Some(to));
     }
 
     /// A command in the gallery, on the selected file.
@@ -77,9 +68,7 @@ impl App {
         match action {
             Action::View => self.view_from_gallery(cur),
             Action::Download => self.download_file(cur),
-            Action::DownloadThread => self.ask_to_save(super::Saving::Files),
-            Action::Export => self.ask_to_save(super::Saving::Page),
-            Action::Menu => self.open_menu(),
+            Action::DownloadThread | Action::Export | Action::Menu | Action::Help => self.act(action),
             Action::Copy => {
                 if let Some((_, f)) = g.files.get(cur) {
                     match f.link() {

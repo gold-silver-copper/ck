@@ -510,6 +510,21 @@ impl ThreadView {
         self.ids.get(id).copied().unwrap_or(0)
     }
 
+    /// Esc in a thread backs out a step: from a focused part to its post, then out of a
+    /// search, then out of a conversation to the whole thread. False if there's none.
+    pub fn back_out(&mut self) -> bool {
+        if self.focus.take().is_some() {
+            self.layout = None;
+        } else if !self.search.is_empty() {
+            self.set_search(String::new());
+        } else if self.conversation.is_some() {
+            self.leave_conversation();
+        } else {
+            return false;
+        }
+        true
+    }
+
     /// Back to the whole thread, with the conversation's post selected and the thread
     /// scrolled where it was.
     pub fn leave_conversation(&mut self) {

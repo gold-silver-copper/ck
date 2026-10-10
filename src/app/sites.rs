@@ -208,8 +208,8 @@ impl App {
                 self.add_site_from(&text, false);
                 return;
             }
-            (Adding::Typing(mut text), code) => {
-                edit_text(&mut text, code);
+            (Adding::Typing(mut text), _) => {
+                edit_text(&mut text, key);
                 Some(Adding::Typing(text))
             }
             (Adding::Site { site, name, open }, KeyCode::Enter) => match self.name_problem(name.trim()) {
@@ -219,8 +219,8 @@ impl App {
                 }
                 None => return self.add_site(SiteConfig { name: name.trim().to_string(), ..site }, open),
             },
-            (Adding::Site { site, mut name, open }, code) => {
-                edit_text(&mut name, code);
+            (Adding::Site { site, mut name, open }, _) => {
+                edit_text(&mut name, key);
                 Some(Adding::Site { site, name, open })
             }
             (Adding::Board { site, board, open }, KeyCode::Enter) => return self.add_board(site, &board, open),

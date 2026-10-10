@@ -1110,20 +1110,18 @@ fn tab_chips_hidden_under_the_viewer_cant_be_clicked() {
 
 
 #[test]
-fn help_fits_at_110x36_and_scrolls_when_small() {
+fn help_lists_the_keys_with_yours_and_scrolls_when_small() {
     let mut a = app(false);
+    a.keys = toml::from_str("watch = \"Q\"\nexport = \"E\"").unwrap();
     a.popup = Some(Popup::Help(Default::default()));
-    let (text, _) = render_at(&mut a, 110, 36);
-    assert!(!text.contains("↓ more"), "{text}");
-    // Two columns, everything on screen.
-    for line in ["Everywhere", "Home screen", "Image viewer", "Catalog", "Thread", "mark as yours", "copy file URL / post link", "watch / quote tab / general", "favorite this board"] {
+    let (text, _) = render_at(&mut a, 220, 120);
+    for line in ["Everywhere", "Gallery", "Image viewer", "Q                  watch / unwatch", "E                  save the thread as a page", "q, v               close"] {
         assert!(text.contains(line), "{line} missing:\n{text}");
     }
+    // A command without a key is left to the menu.
+    assert!(!text.contains("save all the post's files"), "{text}");
     let (text, _) = render_at(&mut a, 60, 20);
-    assert!(text.contains("Everywhere") && !text.contains("mark as yours") && text.contains("↓ more (j)"), "{text}");
-    a.popup = Some(Popup::Help(ratatui::widgets::ListState::default().with_offset(100)));
-    let (text, _) = render_at(&mut a, 60, 20);
-    assert!(text.contains("copy text / link"), "{text}");
+    assert!(text.contains("↓ more (j)"), "{text}");
 }
 
 #[test]
@@ -1624,7 +1622,7 @@ fn help_opens_on_the_keys_for_where_you_are() {
     a.popup = Some(Popup::Help(Default::default()));
     let (text, _) = render_at(&mut a, 60, 40);
     let at = |title| text.find(&format!("  {title}\n")).unwrap_or(usize::MAX);
-    assert!(at("Everywhere") < at("Thread") && at("Thread") < at("Home screen"), "{text}");
+    assert!(at("Thread") < at("Everywhere"), "{text}");
 }
 
 #[test]
@@ -2081,3 +2079,4 @@ fn reply_box() {
     type_text(&mut a, "hello");
     insta::assert_snapshot!(snapshot(&mut a));
 }
+

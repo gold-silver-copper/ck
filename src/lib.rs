@@ -82,7 +82,6 @@ pub use download::default_root as download_root;
 pub use filter::Filters;
 pub use guard::catching;
 pub use images::choose_protocol;
-pub use keys::KeyMap;
 pub use pages::Pages;
 pub use store::Store;
 pub use theme::{from_config as theme_from_config, set as set_theme};

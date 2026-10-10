@@ -47,9 +47,10 @@ impl App {
                 let Some(op) = self.selected_index().and_then(|i| self.tab.catalog.posts().get(i)) else { return };
                 (self.tab.catalog.key(op), thread_subject(std::slice::from_ref(op)), 1, 0)
             }
-            View::Watched => {
-                let Some(w) = self.selected_index().and_then(|i| self.store.all_watched().get(i)) else { return };
-                (w.key.clone(), w.subject.clone(), w.posts, w.last_seen)
+            View::Watched | View::History | View::Saved => {
+                let Some((key, subject)) = self.selected_listed() else { return };
+                let w = self.store.watched(key);
+                (key.clone(), subject.to_string(), w.map_or(1, |w| w.posts), w.map_or(0, |w| w.last_seen))
             }
             _ => return,
         };

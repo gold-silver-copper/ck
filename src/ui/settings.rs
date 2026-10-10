@@ -110,12 +110,12 @@ fn draw_keys(f: &mut Frame, app: &App, list: &mut ListState, capture: Option<boo
     let hint = if capture.is_some() { "press a key · esc cancel" } else { "enter rebind · a add · u unbind · x reset · esc close" };
     let sel = list.selected().unwrap_or(0);
     let foot = |_| {
-        vec![match (capture, rows.get(sel).and_then(|r| r.ok()).and_then(|i| keys::ACTIONS.get(i))) {
-            (Some(add), Some(entry)) => {
+        vec![match (capture, rows.get(sel).and_then(|r| r.ok())) {
+            (Some(add), Some(action)) => {
                 let verb = if add { "Press a key to add to" } else { "Press the new key for" };
                 Line::from(vec![
                     Span::styled(format!("{verb} "), Style::new().fg(t.text)),
-                    Span::styled(entry.1, bold(t.primary)),
+                    Span::styled(action.name(), bold(t.primary)),
                     Span::styled("   esc cancels", dim()),
                 ])
             }
@@ -124,14 +124,13 @@ fn draw_keys(f: &mut Frame, app: &App, list: &mut ListState, capture: Option<boo
     };
     // Group titles are never selected, so never painted.
     list_panel(f, (96, "Keys", hint), list, &rows, ("", true), foot, |_, &row, width| {
-        let i = match row {
+        let action = match row {
             Err(title) => return Line::styled(title.to_string(), bold(t.primary)),
-            Ok(i) => i,
+            Ok(action) => action,
         };
-        let Some(&(action, name, _, scopes, desc)) = keys::ACTIONS.get(i) else { return Line::default() };
         let changed = !app.keys.is_default(action);
         let key_style = if changed { bold(t.primary) } else { bold(t.text) };
-        let scopes = scopes.iter().map(|s| s.label()).collect::<Vec<_>>().join(", ");
+        let scopes = action.scopes().iter().map(|s| s.label()).collect::<Vec<_>>().join(", ");
         let label = app.keys.label(action);
         let mut spans = match label.as_str() {
             "" => vec![Span::styled(format!("  {}", pad("menu", 16)), dim())],
@@ -139,11 +138,11 @@ fn draw_keys(f: &mut Frame, app: &App, list: &mut ListState, capture: Option<boo
         };
         // Narrow: just the key and what it does.
         if width >= 80 {
-            spans.push(Span::styled(pad(name, 17), dim()));
-            spans.push(Span::styled(col(desc, 37), Style::new().fg(t.text)));
+            spans.push(Span::styled(pad(action.name(), 17), dim()));
+            spans.push(Span::styled(col(action.what(), 37), Style::new().fg(t.text)));
             spans.push(Span::styled(truncate(&scopes, (width as usize).saturating_sub(72)), dim()));
         } else {
-            spans.push(Span::styled(truncate(desc, (width as usize).saturating_sub(18)), Style::new().fg(t.text)));
+            spans.push(Span::styled(truncate(action.what(), (width as usize).saturating_sub(18)), Style::new().fg(t.text)));
         }
         Line::from(spans)
     });

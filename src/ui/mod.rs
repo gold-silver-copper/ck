@@ -13,14 +13,14 @@ use std::rc::Rc;
 use ratatui_image::Image;
 
 use crate::app::{
-    App, Clock, Hit, LineCache, LinkItem, Part, Popup, Reveal, TabPopup, Spot, SettingsPopup, SiteRow, Sort, Status, ThreadLayout, ThreadCopy, ThreadView, Typing, View, key_rows,
+    App, Clock, Hit, LineCache, LinkItem, Part, Pending, Popup, Reveal, TabPopup, Spot, SettingsPopup, SiteRow, Sort, Status, ThreadLayout, ThreadCopy, ThreadView, Typing, View, key_rows,
     setting_rows, settings,
 };
 use std::collections::HashMap;
 
 use crate::http;
 use crate::images::{Images, Kind, State};
-use crate::keys::{self, Action, KeyMap};
+use crate::keys::{self, Action, Scope};
 use crate::config::CatalogLayout;
 use crate::markup;
 use crate::model::{Attachment, Post};
@@ -493,7 +493,7 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
     let d = &app.downloads;
     let mut right = Vec::new();
     // Keys waiting for the rest of their command (`10`, `z`), as vim shows them.
-    if let Some(keys) = app.pending.shown() {
+    if let Some(keys) = app.pending.and_then(Pending::shown) {
         right.extend([Span::styled(keys, bold(t.primary)), Span::raw("  ")]);
     }
     // Where you are, as an editor's ruler: the selected post (or row) of how many, and how

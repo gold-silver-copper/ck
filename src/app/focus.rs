@@ -10,7 +10,7 @@ use ratatui::widgets::ListState;
 
 use super::{App, Hit, Media, Part, Popup, RowKey, SiteRow, TabPopup, View, Viewer, list_move};
 use crate::download;
-use crate::keys::{Action, Scope};
+use crate::keys::{Action, Command};
 use crate::model::{Attachment, Link, Target};
 use crate::ui::{INDENT, PAD};
 
@@ -501,6 +501,8 @@ impl App {
             title = format!("No.{}", s.key.no);
             items.push(MenuItem::Enter("read the saved copy".into()));
             items.push(act(A::Remove, "remove the saved copy"));
+            items.push(act(A::NewTab, "open it in a new tab"));
+            items.push(act(A::Follow, "follow it as a general"));
             items.push(act(A::Copy, "copy its subject and link"));
             items.push(act(A::CopyLink, "copy its link"));
             items.push(act(A::Browser, "open it in the browser"));
@@ -546,8 +548,10 @@ impl App {
     }
 
     pub(super) fn on_menu_key(&mut self, key: KeyEvent) {
-        let scope = if self.tab.viewer().is_some() { Scope::Viewer } else { self.scope() };
-        let action = self.keys.action(scope, &key);
+        let action = match self.keys.command(self.scope(), key) {
+            Some(Command::Act(a)) => Some(a),
+            _ => None,
+        };
         let Some(Popup::Menu(m)) = &mut self.popup else { return };
         let cur = m.list.selected().unwrap_or(0);
         if let Some(to) = list_move(key.code, cur, m.items.len()) {

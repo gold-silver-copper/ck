@@ -116,7 +116,7 @@ impl App {
                     self.search_archive(query);
                 }
             }
-            code => super::edit_text(text, code),
+            _ => super::edit_text(text, key),
         }
     }
 

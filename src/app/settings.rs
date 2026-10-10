@@ -8,7 +8,7 @@ use ratatui::widgets::ListState;
 
 use super::{App, Popup, View, edit_text, list_move};
 use crate::config::{self, ColorMode, ImagesMode};
-use crate::keys::{ACTIONS, Key, Scope};
+use crate::keys::{Action, Key};
 use crate::theme::{self, ROLES, Theme, ThemeDef};
 
 /// One row of the settings screen: its label and hint, how its value reads, and what
@@ -239,7 +239,7 @@ pub const SECTIONS: &[(&str, &[Setting])] = &[
     ("Keys", &[row(
         "Key bindings",
         "Rebind any command",
-        |a| match ACTIONS.iter().filter(|e| !a.keys.is_default(e.0)).count() {
+        |a| match Action::ALL.iter().filter(|&&e| !a.keys.is_default(e)).count() {
             0 => "defaults".into(),
             n => format!("{n} changed"),
         },
@@ -305,26 +305,18 @@ pub enum SettingsPopup {
 }
 
 /// The key editor's rows: `Err(title)` for groups (by an action's first scope),
-/// `Ok(index into ACTIONS)` for actions.
-pub fn key_rows() -> Vec<Result<usize, &'static str>> {
-    let groups = [
-        (Scope::Global, "Everywhere"),
-        (Scope::Lists, "Lists"),
-        (Scope::Catalog, "Catalog"),
-        (Scope::Thread, "Thread"),
-        (Scope::Saved, "Watched and History"),
-        (Scope::Viewer, "Image viewer"),
-    ];
+/// `Ok` for actions.
+pub fn key_rows() -> Vec<Result<Action, &'static str>> {
     let mut out = Vec::new();
-    for (scope, title) in groups {
-        let actions: Vec<usize> = ACTIONS.iter().enumerate().filter(|(_, a)| a.3.first() == Some(&scope)).map(|(i, _)| i).collect();
+    for scope in crate::keys::SCOPES {
+        let actions: Vec<Action> = Action::ALL.iter().copied().filter(|a| a.scopes().first() == Some(&scope)).collect();
         if actions.is_empty() {
             continue;
         }
         if !out.is_empty() {
             out.push(Err(""));
         }
-        out.push(Err(title));
+        out.push(Err(scope.label()));
         out.extend(actions.into_iter().map(Ok));
     }
     out
@@ -456,8 +448,8 @@ impl App {
                         }
                     }
                 }
-                code => {
-                    edit_text(&mut text, code);
+                _ => {
+                    edit_text(&mut text, key);
                     Some(SettingsPopup::Colors { list, editing: Some(text) })
                 }
             };
@@ -481,7 +473,8 @@ impl App {
     fn on_keys_key(&mut self, key: KeyEvent, mut list: ListState, capture: Option<bool>) -> Option<SettingsPopup> {
         if let Some(add) = capture {
             if key.code != KeyCode::Esc {
-                self.bind_key(&list, Some((Key::from_event(&key), add)));
+                let key = Key::from(key);
+                self.set_keys(&list, |now| Some(now.iter().copied().filter(|&k| add && k != key).chain([key]).collect()));
             }
             return Some(SettingsPopup::Keys { list, capture: None });
         }
@@ -491,11 +484,11 @@ impl App {
             KeyCode::Char('a') => Some(SettingsPopup::Keys { list, capture: Some(true) }),
             // No key: the action is left to the menu.
             KeyCode::Char('u') => {
-                self.unbind_key(&list);
+                self.set_keys(&list, |_| Some(Vec::new()));
                 Some(SettingsPopup::Keys { list, capture: None })
             }
             KeyCode::Char('x') | KeyCode::Delete => {
-                self.bind_key(&list, None);
+                self.set_keys(&list, |_| None);
                 Some(SettingsPopup::Keys { list, capture: None })
             }
             code => {
@@ -522,8 +515,8 @@ impl App {
                     let last = self.hidden_words.len().saturating_sub(1);
                     Some(SettingsPopup::HiddenWords { list: ListState::default().with_selected(Some(last)), typing: None })
                 }
-                code => {
-                    edit_text(&mut text, code);
+                _ => {
+                    edit_text(&mut text, key);
                     Some(SettingsPopup::HiddenWords { list, typing: Some(text) })
                 }
             };
@@ -579,45 +572,25 @@ impl App {
                 });
                 None
             }
-            code => {
-                edit_text(&mut value, code);
+            _ => {
+                edit_text(&mut value, key);
                 Some(SettingsPopup::Folder { value })
             }
         }
     }
 
-    /// Bind a key to the action selected in the key editor (replacing its keys, or added to
-    /// them), or with `None` reset it to the default; refused if it would clash.
-    fn bind_key(&mut self, list: &ListState, key: Option<(Key, bool)>) {
-        let Some(&(action, name, ..)) = list.selected().and_then(|r| key_rows().get(r).copied()).and_then(Result::ok).and_then(|i| ACTIONS.get(i)) else { return };
-        let keys = key.map(|(k, add)| {
-            let mut keys = if add { self.keys.keys(action).to_vec() } else { Vec::new() };
-            if !keys.contains(&k) {
-                keys.push(k);
-            }
-            keys
-        });
-        match self.keys.with(action, keys) {
+    /// Change the keys of the action selected in the key editor to what `keys` makes of
+    /// them (`None`: the default; none: in the menu only), unless that would clash.
+    fn set_keys(&mut self, list: &ListState, keys: impl FnOnce(&[Key]) -> Option<Vec<Key>>) {
+        let Some(action) = list.selected().and_then(|r| key_rows().get(r).copied()).and_then(Result::ok) else { return };
+        match self.keys.with(action, keys(self.keys.keys(action))) {
             Ok(map) => {
                 self.keys = map;
-                let binding = self.keys.binding(action);
-                let what = format!("{name} = {}", self.keys.label(action));
-                self.save_config(&what, |d| config::set_key(d, name, binding.as_ref()));
+                let binding = self.keys.binding(action).map(<[Key]>::to_vec);
+                let label = Some(self.keys.label(action)).filter(|l| !l.is_empty()).unwrap_or_else(|| "[] (in the menu)".into());
+                self.save_config(&format!("{} = {label}", action.name()), |d| config::set_key(d, action.name(), binding.as_deref()));
             }
             Err(e) => self.error(e),
-        }
-    }
-
-    /// Take every key away from the action selected in the key editor.
-    fn unbind_key(&mut self, list: &ListState) {
-        let Some(&(action, name, ..)) = list.selected().and_then(|r| key_rows().get(r).copied()).and_then(Result::ok).and_then(|i| ACTIONS.get(i)) else { return };
-        if self.keys.keys(action).is_empty() {
-            return self.info(format!("{name} has no key (it's in the menu)"));
-        }
-        if let Ok(map) = self.keys.with(action, Some(Vec::new())) {
-            self.keys = map;
-            let binding = self.keys.binding(action);
-            self.save_config(&format!("{name} = [] (in the menu)"), |d| config::set_key(d, name, binding.as_ref()));
         }
     }
 

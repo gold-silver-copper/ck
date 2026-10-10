@@ -6,27 +6,27 @@ expression: snapshot(&mut a)
     Keys                                   enter rebind · a add · u unbind · x reset · esc close
 
     Everywhere
-  ▌   q               quit             quit                                 everywhere
-      ?               help             help                                 everywhere
-      ,               settings         settings: theme, colors, keys, …     everywhere
-      /               search           filter the list; search a thread     everywhere
-      r               reload           reload                               everywhere
-      o               browser          open in the browser                  everywhere
-      :               goto             go to a URL or site/board/thread     everywhere
-      ]               next_tab         next tab                             everywhere
-      [               prev_tab         previous tab                         everywhere
-      .               menu             what you can do with what's selected everywhere, image v…
-      ctrl-w          close_tab        close the tab                        everywhere
-      W               watched          the watched threads                  everywhere
+  ▌   q               quit             quit                                 Everywhere
+      ?               help             help                                 Everywhere, Gallery…
+      ,               settings         settings: theme, colors, keys, …     Everywhere
+      /               search           filter the list; search a thread     Everywhere
+      r               reload           reload                               Everywhere
+      o               browser          open in the browser                  Everywhere
+      :               goto             go to a URL or site/board/thread     Everywhere
+      ]               next_tab         next tab                             Everywhere
+      [               prev_tab         previous tab                         Everywhere
+      .               menu             what you can do with what's selected Everywhere, Gallery…
+      f               hints            label what's on screen; type a labe… Everywhere
+      ctrl-w          close_tab        close the tab                        Everywhere
+      u               jump_back        jump back: the post before, or the … Everywhere
+      ctrl-r          jump_forward     jump forward again (after jumping b… Everywhere
+      W               watched          the watched threads                  Everywhere
 
     Lists
-      f               hints            label what's on screen; type a labe… lists, catalog, thr…
-      u               jump_back        jump back: the post before, or the … lists, catalog, thr…
-      ctrl-r          jump_forward     jump forward again (after jumping b… lists, catalog, thr…
-      *               favorite         favorite board: on / off             lists, catalog
-      menu            add_site         add a site from a link to any page … lists
-      menu            update_boards    read a vichan site's board list aga… lists
-      menu            board_images     images on this board: on / off       lists, catalog, thr…
+      *               favorite         favorite board: on / off             Lists, Catalog
+      menu            add_site         add a site from a link to any page … Lists
+      menu            update_boards    read a vichan site's board list aga… Lists
+      menu            board_images     images on this board: on / off       Lists, Catalog, Thr…
 
 
     Changed keys are saved in [keys]; navigation keys are fixed. Without a key: in the . menu.

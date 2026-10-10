@@ -1,11 +1,11 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use toml_edit::{DocumentMut, Item, Table, value};
 
-use crate::keys::Binding;
+use crate::keys::{Key, KeyMap};
 use crate::theme::{LEGACY_KEYS, ThemeDef, ThemeSetting};
 
 pub const DEFAULT_CONFIG: &str = include_str!("../config.example.toml");
@@ -75,7 +75,7 @@ pub struct Config {
     pub download_dir: Option<String>,
     /// Key overrides: `action = "key"` or `action = ["key", "key"]`.
     #[serde(default)]
-    pub keys: HashMap<String, Binding>,
+    pub keys: KeyMap,
     /// A theme name (or, from ck 0.2, a table of color overrides).
     #[serde(default)]
     pub theme: Option<ThemeSetting>,
@@ -640,14 +640,14 @@ pub fn set_hidden_words(doc: &mut DocumentMut, words: &[String]) {
 }
 
 /// Set an action's keys in `[keys]`, or with `None` (the default) remove its entry.
-pub fn set_key(doc: &mut DocumentMut, action: &str, binding: Option<&Binding>) {
+pub fn set_key(doc: &mut DocumentMut, action: &str, binding: Option<&[Key]>) {
     if !doc.contains_key("keys") {
         doc.insert("keys", Item::Table(Table::new()));
     }
     let Some(keys) = doc["keys"].as_table_mut() else { return };
     match binding {
-        Some(Binding::One(k)) => keys[action] = value(k.as_str()),
-        Some(Binding::Many(v)) => keys[action] = value(v.iter().map(String::as_str).collect::<toml_edit::Array>()),
+        Some([one]) => keys[action] = value(one.to_string()),
+        Some(many) => keys[action] = value(many.iter().map(Key::to_string).collect::<toml_edit::Array>()),
         None => {
             keys.remove(action);
         }
@@ -697,7 +697,6 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::keys::Binding;
     use crate::theme::ThemeSetting;
 
     fn edit_at(path: &Path, f: impl FnOnce(&mut DocumentMut)) -> Result<()> {
@@ -711,7 +710,7 @@ mod tests {
     fn default_config_parses() {
         let c: Config = toml::from_str(DEFAULT_CONFIG).unwrap();
         assert!(!c.sites.is_empty());
-        assert!(!c.compact_catalog && c.keys.is_empty());
+        assert!(!c.compact_catalog && crate::keys::Action::ALL.iter().all(|&a| c.keys.is_default(a)));
     }
 
     #[test]
@@ -753,17 +752,16 @@ mod tests {
         let path = dir.path().join("config.toml");
         std::fs::write(&path, "[[site]]\nname = \"x\"\nkind = \"4chan\"\n\n# my keys\n[keys]\nsort = \"z\"\n").unwrap();
         edit_at(&path, |d| {
-            set_key(d, "watch", Some(&Binding::Many(vec!["Q".into(), "alt-w".into()])));
+            set_key(d, "watch", Some(&["Q".parse().unwrap(), "alt-w".parse().unwrap()]));
             set_key(d, "sort", None);
-            set_key(d, "help", Some(&Binding::One("f1".into())));
+            set_key(d, "help", Some(&["f1".parse().unwrap()]));
         })
         .unwrap();
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(text.contains("# my keys"), "{text}");
         let c: Config = toml::from_str(&text).unwrap();
-        assert_eq!(c.keys.len(), 2);
-        assert_eq!(c.keys["watch"], Binding::Many(vec!["Q".into(), "alt-w".into()]));
-        assert!(crate::keys::KeyMap::new(&c.keys).is_ok());
+        assert!(text.contains("watch = [\"Q\", \"alt-w\"]") && text.contains("help = \"f1\"") && !text.contains("sort"), "{text}");
+        assert_eq!(c.keys.label(crate::keys::Action::Watch), "Q, alt-w");
     }
     #[test]
     fn edits_keep_comments_and_tables() {

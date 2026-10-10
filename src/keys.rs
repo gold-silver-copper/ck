@@ -1,15 +1,20 @@
-//! Remappable commands, configured in the `[keys]` section of config.toml and on the
-//! Settings screen. Navigation (j/k/g/G/h/l/J/K, arrows, enter, esc, space, ctrl-d/u) is
-//! fixed, and so are keys inside text inputs and popups.
+//! Every key the views take, from two tables: the fixed keys that move around (`FIXED`), and
+//! the commands (`Action`), remappable in the `[keys]` section of config.toml and on the
+//! Settings screen. `KeyMap` looks both up, and won't give a command a key that's taken where
+//! it applies, so what a key does and whether it can be rebound come from the same place.
+//! Keys inside text inputs and popups are their own, and ctrl-c always quits.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt;
+use std::str::FromStr;
 
 use anyhow::{Result, bail};
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use serde::Deserialize;
+use serde::de::Error as _;
+use serde::{Deserialize, Deserializer};
 
-/// Where a key applies. Global keys work in every view but the image viewer.
+/// Where a key applies. Global commands work in every view, but not in the image viewer and
+/// gallery, which have their own.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Scope {
     Global,
@@ -19,6 +24,8 @@ pub enum Scope {
     Thread,
     /// Watched and History.
     Saved,
+    /// A thread's files as a grid.
+    Gallery,
     /// The full-screen image viewer.
     Viewer,
 }
@@ -26,35 +33,52 @@ pub enum Scope {
 impl Scope {
     pub fn label(self) -> &'static str {
         match self {
-            Scope::Global => "everywhere",
-            Scope::Lists => "lists",
-            Scope::Catalog => "catalog",
-            Scope::Thread => "thread",
-            Scope::Saved => "watched, history",
-            Scope::Viewer => "image viewer",
+            Scope::Global => "Everywhere",
+            Scope::Lists => "Lists",
+            Scope::Catalog => "Catalog",
+            Scope::Thread => "Thread",
+            Scope::Saved => "Watched and History",
+            Scope::Gallery => "Gallery",
+            Scope::Viewer => "Image viewer",
         }
+    }
+
+    /// Whether a command for `self` applies in `place`.
+    fn covers(self, place: Scope) -> bool {
+        self == place || (self == Scope::Global && !matches!(place, Scope::Gallery | Scope::Viewer))
     }
 }
 
-const VIEWS: [Scope; 5] = [Scope::Lists, Scope::Catalog, Scope::Thread, Scope::Saved, Scope::Viewer];
+/// In the order help and the key editor list them. Keys go to all but `Global`, which stands
+/// for most of them.
+pub const SCOPES: [Scope; 7] = [Scope::Global, Scope::Lists, Scope::Catalog, Scope::Thread, Scope::Saved, Scope::Gallery, Scope::Viewer];
 
-/// Declares `Action` and `ACTIONS` (every action: config name, default key, scopes, and
-/// what it does) from one list. Actions without a default key are in the `.` menu, and can
-/// be given one.
+/// Declares `Action`, every command with its config name, default key, scopes, and what it
+/// does, from one list. Actions without a default key are in the `.` menu, and can be given
+/// one.
 macro_rules! actions {
     ($($action:ident, $name:literal, $key:expr, $scopes:expr, $what:literal;)*) => {
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
         pub enum Action {
             $($action,)*
         }
 
-        pub const ACTIONS: &[(Action, &str, Option<Key>, &[Scope], &str)] = &[$((Action::$action, $name, $key, $scopes, $what),)*];
+        impl Action {
+            pub const ALL: &[Action] = &[$(Action::$action,)*];
+
+            /// Its name in `[keys]`, its default key, where it applies, and what it does.
+            const fn spec(self) -> (&'static str, Option<Key>, &'static [Scope], &'static str) {
+                match self {
+                    $(Action::$action => ($name, $key, $scopes, $what),)*
+                }
+            }
+        }
     };
 }
 
 actions! {
     Quit, "quit", Some(Key::char('q')), &[Scope::Global], "quit";
-    Help, "help", Some(Key::char('?')), &[Scope::Global], "help";
+    Help, "help", Some(Key::char('?')), &[Scope::Global, Scope::Gallery, Scope::Viewer], "help";
     Settings, "settings", Some(Key::char(',')), &[Scope::Global], "settings: theme, colors, keys, …";
     Search, "search", Some(Key::char('/')), &[Scope::Global], "filter the list; search a thread";
     Reload, "reload", Some(Key::char('r')), &[Scope::Global], "reload";
@@ -62,29 +86,29 @@ actions! {
     Goto, "goto", Some(Key::char(':')), &[Scope::Global], "go to a URL or site/board/thread";
     NextTab, "next_tab", Some(Key::char(']')), &[Scope::Global], "next tab";
     PrevTab, "prev_tab", Some(Key::char('[')), &[Scope::Global], "previous tab";
-    Menu, "menu", Some(Key::char('.')), &[Scope::Global, Scope::Viewer], "what you can do with what's selected";
-    Hints, "hints", Some(Key::char('f')), &[Scope::Lists, Scope::Catalog, Scope::Thread, Scope::Saved], "label what's on screen; type a label to open it";
+    Menu, "menu", Some(Key::char('.')), &[Scope::Global, Scope::Gallery, Scope::Viewer], "what you can do with what's selected";
+    Hints, "hints", Some(Key::char('f')), &[Scope::Global], "label what's on screen; type a label to open it";
     NextPart, "next_part", Some(Key::code(KeyCode::Tab)), &[Scope::Thread], "focus the post's next image or link (then the next post's)";
     PrevPart, "prev_part", Some(Key::code(KeyCode::BackTab)), &[Scope::Thread], "focus the previous image or link";
     CloseTab, "close_tab", Some(Key::ctrl('w')), &[Scope::Global], "close the tab";
-    View, "view", Some(Key::char('v')), &[Scope::Catalog, Scope::Thread], "view the post's images";
+    View, "view", Some(Key::char('v')), &[Scope::Catalog, Scope::Thread, Scope::Gallery], "view the post's images";
     Watch, "watch", Some(Key::char('w')), &[Scope::Catalog, Scope::Thread], "watch / unwatch the thread";
     Sort, "sort", Some(Key::char('s')), &[Scope::Catalog], "cycle the sort order";
     Compact, "compact", Some(Key::char('c')), &[Scope::Catalog], "layout: cards, compact, grid";
-    OpenFile, "open_file", Some(Key::char('i')), &[Scope::Thread], "open the file (videos in mpv)";
+    OpenFile, "open_file", Some(Key::char('i')), &[Scope::Thread, Scope::Viewer], "open the file (videos in mpv)";
     Replies, "replies", Some(Key::char('b')), &[Scope::Thread], "jump to the first reply";
-    JumpBack, "jump_back", Some(Key::char('u')), &[Scope::Lists, Scope::Catalog, Scope::Thread, Scope::Saved], "jump back: the post before, or the thread you left";
-    JumpForward, "jump_forward", Some(Key::ctrl('r')), &[Scope::Lists, Scope::Catalog, Scope::Thread, Scope::Saved], "jump forward again (after jumping back)";
+    JumpBack, "jump_back", Some(Key::char('u')), &[Scope::Global], "jump back: the post before, or the thread you left";
+    JumpForward, "jump_forward", Some(Key::ctrl('r')), &[Scope::Global], "jump forward again (after jumping back)";
     Watched, "watched", Some(Key::char('W')), &[Scope::Global], "the watched threads";
     Unread, "unread", Some(Key::char('U')), &[Scope::Thread], "jump to the first unread post";
     Preview, "preview", Some(Key::char('p')), &[Scope::Thread], "preview the quoted posts";
-    NextMatch, "next_match", Some(Key::char('n')), &[Scope::Thread], "next search match";
+    NextMatch, "next_match", Some(Key::char('n')), &[Scope::Thread, Scope::Lists], "next search match (archive search: more results)";
     PrevMatch, "prev_match", Some(Key::char('N')), &[Scope::Thread], "previous search match";
     Spoiler, "spoiler", Some(Key::char('s')), &[Scope::Thread], "show the post's spoilers";
     AllSpoilers, "all_spoilers", Some(Key::char('S')), &[Scope::Thread], "show all spoilers";
-    Download, "download", Some(Key::char('d')), &[Scope::Thread, Scope::Viewer], "save the file in front of you: focused, viewed, or in the gallery";
+    Download, "download", Some(Key::char('d')), &[Scope::Thread, Scope::Gallery, Scope::Viewer], "save the file in front of you: focused, viewed, or in the gallery";
     DownloadPost, "download_post", None, &[Scope::Thread], "save all the post's files";
-    DownloadThread, "download_thread", None, &[Scope::Thread], "save all the thread's files (asks first)";
+    DownloadThread, "download_thread", None, &[Scope::Thread, Scope::Gallery], "save all the thread's files (asks first)";
     Archive, "archive", Some(Key::char('a')), &[Scope::Thread], "open a 404'd thread in the archive";
     ArchiveSearch, "archive_search", Some(Key::char('A')), &[Scope::Catalog], "search the board's archive";
     Links, "links", Some(Key::char('O')), &[Scope::Catalog, Scope::Thread], "the post's links and files";
@@ -92,8 +116,8 @@ actions! {
     Filter, "filter", Some(Key::char('X')), &[Scope::Catalog, Scope::Thread], "hide or highlight posts like this one (a filter)";
     ShowHidden, "show_hidden", Some(Key::char('Z')), &[Scope::Catalog, Scope::Thread], "show hidden threads and posts";
     ImageSearch, "image_search", Some(Key::char('R')), &[Scope::Thread, Scope::Viewer], "reverse image search";
-    Gallery, "gallery", Some(Key::char('V')), &[Scope::Thread], "the thread's files as a grid";
-    Export, "export", None, &[Scope::Thread], "save the thread as a page, HTML and JSON (asks first)";
+    Gallery, "gallery", Some(Key::char('V')), &[Scope::Thread, Scope::Gallery], "the thread's files as a grid";
+    Export, "export", None, &[Scope::Thread, Scope::Gallery], "save the thread as a page, HTML and JSON (asks first)";
     Expand, "expand", Some(Key::char('e')), &[Scope::Thread], "show / hide the post's replies under it";
     Conversation, "conversation", Some(Key::char('c')), &[Scope::Thread], "the post's conversation alone: what it replies to, and its replies";
     Poster, "poster", Some(Key::char('I')), &[Scope::Thread], "the post's poster's posts alone (by poster ID)";
@@ -109,16 +133,50 @@ actions! {
     BoardImages, "board_images", None, &[Scope::Lists, Scope::Catalog, Scope::Thread], "images on this board: on / off";
     Follow, "follow", Some(Key::char('F')), &[Scope::Catalog, Scope::Thread, Scope::Saved], "follow as a general: watch its next thread";
     Remove, "remove", Some(Key::char('x')), &[Scope::Saved, Scope::Lists], "remove the entry (home: a favorite)";
-    Copy, "copy", Some(Key::char('y')), &[Scope::Catalog, Scope::Thread, Scope::Saved, Scope::Viewer], "copy the text (viewer: file URL)";
-    CopyLink, "copy_link", Some(Key::char('Y')), &[Scope::Catalog, Scope::Thread, Scope::Saved, Scope::Viewer], "copy the link";
+    Copy, "copy", Some(Key::char('y')), &[Scope::Catalog, Scope::Thread, Scope::Saved, Scope::Gallery, Scope::Viewer], "copy the text (viewer: file URL)";
+    CopyLink, "copy_link", Some(Key::char('Y')), &[Scope::Catalog, Scope::Thread, Scope::Saved, Scope::Gallery, Scope::Viewer], "copy the link";
+}
+
+impl Action {
+    pub fn name(self) -> &'static str {
+        self.spec().0
+    }
+
+    pub fn default_key(self) -> Option<Key> {
+        self.spec().1
+    }
+
+    pub fn scopes(self) -> &'static [Scope] {
+        self.spec().2
+    }
+
+    pub fn what(self) -> &'static str {
+        self.spec().3
+    }
+
+    /// Moves repeat with a count (`3n`); anything else (a toggle) happens once.
+    pub fn repeats(self) -> bool {
+        matches!(self, Action::NextMatch | Action::PrevMatch | Action::JumpBack | Action::JumpForward | Action::NextTab | Action::PrevTab | Action::NextPart | Action::PrevPart)
+    }
+}
+
+impl<'de> Deserialize<'de> for Action {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let name = String::deserialize(d)?;
+        Action::ALL.iter().copied().find(|a| a.name() == name).ok_or_else(|| {
+            let known: Vec<_> = Action::ALL.iter().map(|a| a.name()).collect();
+            D::Error::custom(format!("unknown action `{name}` (known: {})", known.join(", ")))
+        })
+    }
 }
 
 /// A key with its modifiers: `w`, `W`, `ctrl-w`, `alt-x`, `tab`, `shift-tab`, `f5`, ...
-/// Shift is part of a character (`W`), so it's only kept for tab (`shift-tab`).
+/// Read from a terminal event or parsed, the same way: shift is part of a character (`W`)
+/// and only kept for tab (`shift-tab`), and ctrl-i is tab, as terminals send it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Key {
-    pub code: KeyCode,
-    pub mods: KeyModifiers,
+    code: KeyCode,
+    mods: KeyModifiers,
 }
 
 const NAMED: &[(&str, KeyCode)] = &[
@@ -141,29 +199,40 @@ const NAMED: &[(&str, KeyCode)] = &[
 ];
 
 impl Key {
-    pub const fn char(c: char) -> Self {
+    const fn char(c: char) -> Self {
         Self { code: KeyCode::Char(c), mods: KeyModifiers::NONE }
     }
 
-    pub const fn ctrl(c: char) -> Self {
+    const fn ctrl(c: char) -> Self {
         Self { code: KeyCode::Char(c), mods: KeyModifiers::CONTROL }
     }
 
-    pub const fn code(code: KeyCode) -> Self {
+    const fn code(code: KeyCode) -> Self {
         Self { code, mods: KeyModifiers::NONE }
     }
 
-    /// The key a terminal event stands for.
-    pub fn from_event(ev: &KeyEvent) -> Self {
-        let mods = ev.modifiers & (KeyModifiers::CONTROL | KeyModifiers::ALT);
+    fn new(code: KeyCode, mods: KeyModifiers) -> Self {
+        match (code, mods & (KeyModifiers::CONTROL | KeyModifiers::ALT)) {
+            (KeyCode::Char('i'), KeyModifiers::CONTROL) => Self::code(KeyCode::Tab),
+            (code, mods) => Self { code, mods },
+        }
+    }
+}
+
+impl From<KeyEvent> for Key {
+    fn from(ev: KeyEvent) -> Self {
         let code = match ev.code {
             KeyCode::Tab if ev.modifiers.contains(KeyModifiers::SHIFT) => KeyCode::BackTab,
             c => c,
         };
-        Self { code, mods }
+        Self::new(code, ev.modifiers)
     }
+}
 
-    pub fn parse(s: &str) -> Result<Self> {
+impl FromStr for Key {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self> {
         let mut mods = KeyModifiers::NONE;
         let mut rest = s;
         loop {
@@ -191,7 +260,10 @@ impl Key {
                 }
             }
         };
-        Ok(Self { code, mods })
+        match Self::new(code, mods) {
+            key if key == Self::ctrl('c') => bail!("ctrl-c always quits"),
+            key => Ok(key),
+        }
     }
 }
 
@@ -214,121 +286,144 @@ impl fmt::Display for Key {
     }
 }
 
-/// `watch = "W"` or `watch = ["W", "alt-w"]`; `watch = []` for none.
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
-#[serde(untagged)]
-pub enum Binding {
-    One(String),
-    Many(Vec<String>),
+/// What the fixed keys do: move around, and start a count (`10j`) or a two-key command (`gg`,
+/// `zz`). Each place takes them its own way: in the catalog grid left is a column, in the
+/// image viewer the file before.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Nav {
+    Down,
+    Up,
+    Left,
+    Right,
+    Open,
+    /// Back out a step.
+    Esc,
+    Back,
+    LineDown,
+    LineUp,
+    HalfDown,
+    HalfUp,
+    PageDown,
+    PageUp,
+    Top,
+    Bottom,
+    /// `gg` is the top; after a count, `g` is that entry.
+    G,
+    /// `zz`, `zt` and `zb` put the post at the screen's middle, top or bottom.
+    Z,
+    /// A count's (on the home screen, a favorite's).
+    Digit,
+    Refresh,
+    ZoomIn,
+    ZoomOut,
+    Fit,
+    /// Pause an animated GIF, or the next file.
+    Play,
 }
 
-impl Binding {
-    fn specs(&self) -> Vec<&str> {
-        match self {
-            Binding::One(s) => vec![s],
-            Binding::Many(v) => v.iter().map(String::as_str).collect(),
-        }
-    }
+const EVERYWHERE: &[Scope] = &[Scope::Global, Scope::Gallery, Scope::Viewer];
+const LISTS: &[Scope] = &[Scope::Lists, Scope::Catalog, Scope::Saved];
+
+/// The fixed keys, which no command may have where they work, as the commands are listed:
+/// where, what they do, their keys, and what help says.
+const FIXED: &[(&[Scope], Nav, &[Key], &str)] = &[
+    (EVERYWHERE, Nav::Down, &[Key::char('j'), Key::code(KeyCode::Down)], "down (10j: ten)"),
+    (EVERYWHERE, Nav::Up, &[Key::char('k'), Key::code(KeyCode::Up)], "up"),
+    (EVERYWHERE, Nav::Left, &[Key::char('h'), Key::code(KeyCode::Left)], "back (in a grid: left)"),
+    (EVERYWHERE, Nav::Right, &[Key::char('l'), Key::code(KeyCode::Right)], "open (in a grid: right)"),
+    (EVERYWHERE, Nav::Open, &[Key::code(KeyCode::Enter)], "open (in a thread: follow a quote)"),
+    (EVERYWHERE, Nav::Esc, &[Key::code(KeyCode::Esc)], "back, close; drops a count"),
+    (&[Scope::Global], Nav::Back, &[Key::code(KeyCode::Backspace)], "back"),
+    (&[Scope::Global], Nav::Refresh, &[Key::code(KeyCode::F(5))], "reload"),
+    (&[Scope::Global], Nav::Top, &[Key::code(KeyCode::Home)], "top"),
+    (&[Scope::Global], Nav::G, &[Key::char('g')], "gg: top (10gg, 10g: the tenth)"),
+    (&[Scope::Global], Nav::Bottom, &[Key::char('G'), Key::code(KeyCode::End)], "bottom (10G: the tenth)"),
+    (&[Scope::Global], Nav::Digit, &[Key::char('0'), Key::char('1'), Key::char('2'), Key::char('3'), Key::char('4'), Key::char('5'), Key::char('6'), Key::char('7'), Key::char('8'), Key::char('9')], "a count (home: a favorite)"),
+    (&[Scope::Global], Nav::HalfDown, &[Key::ctrl('d')], "half a page down (a list: 10 rows)"),
+    (&[Scope::Global], Nav::HalfUp, &[Key::ctrl('u')], "half a page up"),
+    (&[Scope::Global], Nav::PageDown, &[Key::ctrl('f')], "a page down (a list: 20 rows)"),
+    (&[Scope::Global], Nav::PageUp, &[Key::ctrl('b')], "a page up"),
+    (&[Scope::Global], Nav::LineDown, &[Key::ctrl('e')], "a line down (a list: a row)"),
+    (&[Scope::Global], Nav::LineUp, &[Key::ctrl('y')], "a line up"),
+    (LISTS, Nav::HalfDown, &[Key::code(KeyCode::PageDown)], "10 rows down"),
+    (LISTS, Nav::HalfUp, &[Key::code(KeyCode::PageUp)], "10 rows up"),
+    (&[Scope::Thread], Nav::PageDown, &[Key::char(' '), Key::code(KeyCode::PageDown)], "a page down"),
+    (&[Scope::Thread], Nav::PageUp, &[Key::code(KeyCode::PageUp)], "a page up"),
+    (&[Scope::Thread], Nav::LineDown, &[Key::char('J')], "a line down"),
+    (&[Scope::Thread], Nav::LineUp, &[Key::char('K')], "a line up"),
+    (&[Scope::Thread], Nav::Z, &[Key::char('z')], "zz zt zb: the post to the middle, top, bottom"),
+    (&[Scope::Gallery], Nav::Esc, &[Key::char('q')], "back to the thread"),
+    (&[Scope::Gallery], Nav::Back, &[Key::code(KeyCode::Backspace)], "back to the thread"),
+    (&[Scope::Gallery], Nav::Top, &[Key::char('g'), Key::code(KeyCode::Home)], "the first file"),
+    (&[Scope::Gallery], Nav::Bottom, &[Key::char('G'), Key::code(KeyCode::End)], "the last file"),
+    (&[Scope::Gallery], Nav::PageDown, &[Key::code(KeyCode::PageDown)], "three rows down"),
+    (&[Scope::Gallery], Nav::PageUp, &[Key::code(KeyCode::PageUp)], "three rows up"),
+    (&[Scope::Viewer], Nav::Esc, &[Key::char('q'), Key::char('v')], "close"),
+    (&[Scope::Viewer], Nav::PageDown, &[Key::code(KeyCode::PageDown)], "the next file"),
+    (&[Scope::Viewer], Nav::PageUp, &[Key::code(KeyCode::PageUp)], "the previous file"),
+    (&[Scope::Viewer], Nav::ZoomIn, &[Key::char('+'), Key::char('=')], "zoom in (then h/j/k/l move)"),
+    (&[Scope::Viewer], Nav::ZoomOut, &[Key::char('-')], "zoom out"),
+    (&[Scope::Viewer], Nav::Fit, &[Key::char('0')], "fit the screen"),
+    (&[Scope::Viewer], Nav::Play, &[Key::char(' ')], "pause an animated GIF, or the next file"),
+];
+
+/// What a key does somewhere: a fixed move, or a command.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Command {
+    Nav(Nav),
+    Act(Action),
 }
 
-/// Fixed navigation keys per view, which remapped keys must not collide with.
-fn fixed(scope: Scope) -> Vec<Key> {
-    let codes = [
-        KeyCode::Enter,
-        KeyCode::Esc,
-        KeyCode::Backspace,
-        KeyCode::Up,
-        KeyCode::Down,
-        KeyCode::Left,
-        KeyCode::Right,
-        KeyCode::Home,
-        KeyCode::End,
-        KeyCode::PageUp,
-        KeyCode::PageDown,
-        KeyCode::F(5),
-    ];
-    let mut keys: Vec<Key> = codes.into_iter().map(Key::code).collect();
-    keys.push(Key::ctrl('c'));
-    let chars: &[char] = match scope {
-        Scope::Thread => &['j', 'k', 'g', 'G', 'h', 'l', 'J', 'K', ' ', 'z'],
-        Scope::Viewer => &['j', 'k', 'h', 'l', 'i', 'q', 'v', ' ', '+', '=', '-', '0'],
-        _ => &['j', 'k', 'g', 'G', 'h', 'l'],
-    };
-    keys.extend(chars.iter().map(|&c| Key::char(c)));
-    if scope != Scope::Viewer {
-        // Counts (and the home screen's favorites), the vim scrolls, and ctrl-i, which is tab
-        // to a terminal.
-        keys.extend(('0'..='9').map(Key::char));
-        keys.extend(['d', 'u', 'e', 'y', 'f', 'b', 'i'].map(Key::ctrl));
-    }
-    keys
-}
-
-fn applies(scopes: &[Scope], view: Scope) -> bool {
-    scopes.iter().any(|&s| s == view || (s == Scope::Global && view != Scope::Viewer))
-}
-
+/// The commands' keys, and what every key does in each place: made together by `new`, which
+/// refuses a key that would do two things in one place.
 #[derive(Debug, Clone)]
 pub struct KeyMap {
     keys: HashMap<Action, Vec<Key>>,
-    /// What each key does in each view, as `check` found it.
-    actions: HashMap<(Scope, Key), Action>,
+    commands: HashMap<(Scope, Key), Command>,
 }
 
 impl Default for KeyMap {
     fn default() -> Self {
-        let keys = ACTIONS.iter().map(|&(a, _, key, ..)| (a, key.into_iter().collect())).collect();
-        let mut map = Self { keys, actions: HashMap::new() };
-        // The defaults don't clash (a test checks), so this can't fail.
-        let _ = map.check();
-        map
+        // The defaults don't clash (a test checks).
+        Self::new(HashMap::new()).unwrap_or_else(|_| Self { keys: HashMap::new(), commands: HashMap::new() })
     }
-}
-
-fn default_keys(action: Action) -> Vec<Key> {
-    ACTIONS.iter().filter(|e| e.0 == action).filter_map(|e| e.2).collect()
 }
 
 impl KeyMap {
-    /// Apply `[keys]` overrides, rejecting unknown actions, things that aren't keys, and two
-    /// commands on one key in the same view. No keys (`[]`) leaves an action to the menu.
-    pub fn new(overrides: &HashMap<String, Binding>) -> Result<Self> {
-        let mut map = Self::default();
-        let mut named: Vec<_> = overrides.iter().collect();
-        named.sort_by_key(|&(name, _)| name);
-        for (name, binding) in named {
-            let Some(&(action, ..)) = ACTIONS.iter().find(|e| e.1 == name) else {
-                let known: Vec<_> = ACTIONS.iter().map(|e| e.1).collect();
-                bail!("[keys]: unknown action `{name}` (known: {})", known.join(", "));
-            };
-            let specs = binding.specs();
-            let keys = specs.iter().map(|s| Key::parse(s)).collect::<Result<Vec<_>>>();
-            map.keys.insert(action, keys.map_err(|e| anyhow::anyhow!("[keys]: `{name}`: {e}"))?);
+    /// These keys, and the defaults for the actions not given (`[]`: no key, in the menu
+    /// only). Refused if a key would do two things in one place.
+    pub fn new(mut keys: HashMap<Action, Vec<Key>>) -> Result<Self> {
+        for &action in Action::ALL {
+            keys.entry(action).or_insert_with(|| action.default_key().into_iter().collect());
         }
-        map.check().map_err(|e| anyhow::anyhow!("[keys]: {e}"))?;
-        Ok(map)
-    }
-
-    /// No key does two things in one view. Fills in the lookup from keys to actions.
-    fn check(&mut self) -> Result<()> {
-        self.actions.clear();
-        for view in VIEWS {
-            let mut seen: HashMap<Key, &str> = fixed(view).into_iter().map(|k| (k, "navigation")).collect();
-            for &(action, name, _, scopes, _) in ACTIONS {
-                if !applies(scopes, view) {
-                    continue;
-                }
-                for &key in self.keys.get(&action).into_iter().flatten() {
-                    if let Some(other) = seen.insert(key, name)
-                        && other != name
-                    {
-                        bail!("`{name}` and `{other}` both use '{key}' in the {} view", view.label());
+        let fixed = FIXED.iter().map(|&(scopes, nav, keys, _)| (scopes, Command::Nav(nav), keys));
+        let acts = Action::ALL.iter().map(|&a| (a.scopes(), Command::Act(a), keys.get(&a).map_or(&[][..], Vec::as_slice)));
+        let name = |c| match c {
+            Command::Nav(_) => "navigation",
+            Command::Act(a) => Action::name(a),
+        };
+        let mut commands = HashMap::new();
+        for place in SCOPES.into_iter().filter(|&s| s != Scope::Global) {
+            for (_, command, keys) in fixed.clone().chain(acts.clone()).filter(|(scopes, ..)| scopes.iter().any(|s| s.covers(place))) {
+                for &key in keys {
+                    if let Some(other) = commands.insert((place, key), command).filter(|&other| other != command) {
+                        bail!("`{}` and `{}` both use '{key}' in the {} view", name(command), name(other), place.label());
                     }
-                    self.actions.insert((view, key), action);
                 }
             }
         }
-        Ok(())
+        Ok(Self { keys, commands })
+    }
+
+    /// Every key that does something somewhere, in the tables' order.
+    #[cfg(test)]
+    pub fn every_key(&self) -> impl Iterator<Item = KeyEvent> {
+        FIXED.iter().flat_map(|f| f.2).chain(Action::ALL.iter().flat_map(|&a| self.keys(a))).map(|k| KeyEvent::new(k.code, k.mods))
+    }
+
+    /// What a key does in `place`.
+    pub fn command(&self, place: Scope, key: impl Into<Key>) -> Option<Command> {
+        self.commands.get(&(place, key.into())).copied()
     }
 
     /// The first key of an action, as shown in hints; empty when it has none.
@@ -358,32 +453,59 @@ impl KeyMap {
     }
 
     pub fn is_default(&self, action: Action) -> bool {
-        self.keys(action) == default_keys(action)
+        self.keys(action) == action.default_key().as_slice()
     }
 
-    /// The action bound to a key in `scope` (or a global one).
-    pub fn action(&self, scope: Scope, ev: &KeyEvent) -> Option<Action> {
-        self.actions.get(&(scope, Key::from_event(ev))).copied()
+    /// Help's rows for `scope`, with its fixed keys first: what works there first of all, or
+    /// with `all`, all that does but what works everywhere. Commands without keys are left to
+    /// the menu.
+    pub fn help(&self, scope: Scope, all: bool) -> Vec<(String, &'static str)> {
+        let listed = |scopes: &[Scope]| scopes.first() == Some(&scope) || (all && scopes.first() != Some(&Scope::Global) && scopes.contains(&scope));
+        let fixed = FIXED.iter().filter(|f| listed(f.0)).map(|&(_, _, keys, what)| match keys {
+            [first, .., last] if keys.len() > 3 => (format!("{first}-{last}"), what),
+            _ => (keys.iter().map(Key::to_string).collect::<Vec<_>>().join(", "), what),
+        });
+        let acts = Action::ALL.iter().filter(|a| listed(a.scopes()) && !self.keys(**a).is_empty()).map(|&a| (self.label(a), a.what()));
+        fixed.chain(acts).collect()
     }
 
     /// A copy with an action's keys replaced (`None`: the default), if that leaves no
     /// conflicts.
     pub fn with(&self, action: Action, keys: Option<Vec<Key>>) -> Result<Self> {
-        let mut map = self.clone();
-        map.keys.insert(action, keys.unwrap_or_else(|| default_keys(action)));
-        map.check()?;
-        Ok(map)
+        let mut all = self.keys.clone();
+        match keys {
+            Some(keys) => all.insert(action, keys),
+            None => all.remove(&action),
+        };
+        Self::new(all)
     }
 
     /// What `[keys]` holds for an action: `None` when it has the default.
-    pub fn binding(&self, action: Action) -> Option<Binding> {
-        if self.is_default(action) {
-            return None;
+    pub fn binding(&self, action: Action) -> Option<&[Key]> {
+        (!self.is_default(action)).then(|| self.keys(action))
+    }
+}
+
+/// `[keys]`: `watch = "W"` or `watch = ["W", "alt-w"]`; `watch = []` for none. Checked as it's
+/// read: a config whose keys clash doesn't load.
+impl<'de> Deserialize<'de> for KeyMap {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Spec {
+            One(String),
+            Many(Vec<String>),
         }
-        Some(match self.keys(action) {
-            [one] => Binding::One(one.to_string()),
-            keys => Binding::Many(keys.iter().map(Key::to_string).collect()),
-        })
+        let mut keys = HashMap::new();
+        for (action, spec) in BTreeMap::<Action, Spec>::deserialize(d)? {
+            let specs = match spec {
+                Spec::One(s) => vec![s],
+                Spec::Many(v) => v,
+            };
+            let parsed = specs.iter().map(|s| s.parse()).collect::<Result<_>>();
+            keys.insert(action, parsed.map_err(|e| D::Error::custom(format!("`{}`: {e}", action.name())))?);
+        }
+        Self::new(keys).map_err(D::Error::custom)
     }
 }
 
@@ -391,32 +513,38 @@ impl KeyMap {
 mod tests {
     use super::*;
 
-    fn map(pairs: &[(&str, &str)]) -> Result<KeyMap> {
-        KeyMap::new(&pairs.iter().map(|(a, b)| (a.to_string(), Binding::One(b.to_string()))).collect())
+    /// A `[keys]` table of these, as the config's is read.
+    fn map(pairs: &[(&str, &str)]) -> Result<KeyMap, toml::de::Error> {
+        toml::from_str(&pairs.iter().map(|(a, k)| format!("{a} = {k:?}\n")).collect::<String>())
     }
 
-    fn ch(c: char) -> KeyEvent {
-        KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE)
+    /// What a character does in `place`.
+    fn on(m: &KeyMap, place: Scope, c: char) -> Option<Command> {
+        m.command(place, KeyEvent::from(KeyCode::Char(c)))
     }
 
     #[test]
     fn defaults_are_consistent() {
-        let m = map(&[]).unwrap();
-        assert_eq!(m.action(Scope::Catalog, &ch('s')), Some(Action::Sort));
-        assert_eq!(m.action(Scope::Thread, &ch('s')), Some(Action::Spoiler));
-        assert_eq!(m.action(Scope::Saved, &ch('q')), Some(Action::Quit));
-        assert_eq!(m.action(Scope::Lists, &ch('z')), None);
-        // Global keys don't apply in the image viewer, which has its own.
-        assert_eq!(m.action(Scope::Viewer, &ch('q')), None);
+        let m = KeyMap::new(HashMap::new()).unwrap();
+        assert_eq!(on(&m, Scope::Catalog, 's'), Some(Command::Act(Action::Sort)));
+        assert_eq!(on(&m, Scope::Thread, 's'), Some(Command::Act(Action::Spoiler)));
+        assert_eq!(on(&m, Scope::Saved, 'q'), Some(Command::Act(Action::Quit)));
+        assert_eq!(on(&m, Scope::Lists, 'z'), None);
+        assert_eq!(on(&m, Scope::Thread, 'z'), Some(Command::Nav(Nav::Z)));
+        // Global keys don't apply in the image viewer and gallery, which have their own.
+        assert_eq!(on(&m, Scope::Viewer, 'q'), Some(Command::Nav(Nav::Esc)));
+        assert_eq!(on(&m, Scope::Gallery, 'W'), None);
         // Shift is part of the character.
-        assert_eq!(m.action(Scope::Thread, &KeyEvent::new(KeyCode::Char('U'), KeyModifiers::SHIFT)), Some(Action::Unread));
+        assert_eq!(m.command(Scope::Thread, KeyEvent::new(KeyCode::Char('U'), KeyModifiers::SHIFT)), Some(Command::Act(Action::Unread)));
     }
 
     #[test]
-    fn counts_prefixes_and_vim_scrolls_cant_be_rebound() {
-        for (action, key) in [("watched", "z"), ("sort", "3"), ("expand", "0"), ("jump_back", "ctrl-f"), ("reload", "ctrl-e"), ("jump_forward", "ctrl-i")] {
-            assert!(map(&[(action, key)]).is_err(), "{action} = {key}");
+    fn fixed_keys_cant_be_rebound() {
+        // Counts, prefixes, vim's scrolls, and the gallery's q (with quit moved).
+        for pairs in [[("watched", "z")], [("sort", "3")], [("expand", "0")], [("jump_back", "ctrl-f")], [("reload", "ctrl-e")], [("preview", "j")], [("preview", "ctrl-d")]] {
+            assert!(map(&pairs).unwrap_err().to_string().contains("navigation"), "{pairs:?}");
         }
+        assert!(map(&[("quit", "Q"), ("view", "q")]).is_err());
     }
 
     #[test]
@@ -424,50 +552,50 @@ mod tests {
         let doc = include_str!("../docs/manual.md");
         let block = doc.split("```toml\n[keys]").nth(1).and_then(|b| b.split("```").next()).unwrap();
         let cfg: crate::config::Config = toml::from_str(&format!("[keys]{block}")).unwrap();
-        KeyMap::new(&cfg.keys).unwrap();
+        assert_eq!(cfg.keys.keys(Action::Watch), [Key::char('Q')]);
     }
 
     #[test]
     fn overrides_and_errors() {
         let m = map(&[("watch", "Q")]).unwrap();
-        assert_eq!(m.action(Scope::Thread, &ch('Q')), Some(Action::Watch));
-        assert_eq!(m.action(Scope::Thread, &ch('w')), None);
+        assert_eq!(on(&m, Scope::Thread, 'Q'), Some(Command::Act(Action::Watch)));
+        assert_eq!(on(&m, Scope::Thread, 'w'), None);
 
         let err = |pairs| map(pairs).unwrap_err().to_string();
         assert!(err(&[("nope", "z")]).contains("unknown action `nope`"));
-        assert!(err(&[("watch", "ctrl-")]).contains("isn't a key"));
+        assert!(err(&[("watch", "ctrl-")]).contains("`watch`: `ctrl-` isn't a key"));
         assert!(err(&[("watch", "hyper-w")]).contains("isn't a key"));
-        assert!(err(&[("sort", "c")]).contains("both use 'c' in the catalog view"));
-        assert!(err(&[("preview", "j")]).contains("navigation"));
-        assert!(err(&[("preview", "ctrl-d")]).contains("navigation"));
-        // A global key can't shadow a view's key.
+        assert!(err(&[("watch", "ctrl-c")]).contains("ctrl-c always quits"));
+        assert!(err(&[("sort", "c")]).contains("both use 'c' in the Catalog view"));
+        // A global key can't shadow a view's key, nor ctrl-i tab (to a terminal they're one).
         assert!(err(&[("reload", "v")]).contains("'v'"));
+        assert!(err(&[("jump_forward", "ctrl-i")]).contains("'tab'"));
     }
 
     #[test]
     fn key_specs_round_trip() {
         for s in ["w", "W", ":", ",", "ctrl-w", "alt-x", "ctrl-alt-k", "tab", "shift-tab", "f5", "f12", "pageup", "space", "delete"] {
-            assert_eq!(Key::parse(s).unwrap().to_string(), s, "{s}");
+            assert_eq!(s.parse::<Key>().unwrap().to_string(), s, "{s}");
         }
-        assert_eq!(Key::parse("Tab").unwrap(), Key::code(KeyCode::Tab));
-        assert!(Key::parse("f13").is_err() && Key::parse("").is_err() && Key::parse("ww").is_err());
+        assert_eq!("Tab".parse::<Key>().unwrap(), Key::code(KeyCode::Tab));
+        assert!(["f13", "", "ww"].iter().all(|s| s.parse::<Key>().is_err()));
         // Terminal events map onto the same keys.
-        assert_eq!(Key::from_event(&KeyEvent::new(KeyCode::Tab, KeyModifiers::SHIFT)), Key::parse("shift-tab").unwrap());
-        assert_eq!(Key::from_event(&KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL)), Key::parse("ctrl-w").unwrap());
+        for (ev, s) in [(KeyEvent::new(KeyCode::Tab, KeyModifiers::SHIFT), "shift-tab"), (KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL), "ctrl-w"), (KeyEvent::new(KeyCode::Char('i'), KeyModifiers::CONTROL), "ctrl-i")] {
+            assert_eq!(Key::from(ev), s.parse().unwrap());
+        }
     }
 
     #[test]
     fn several_keys_per_action() {
-        let overrides = HashMap::from([("watch".to_string(), Binding::Many(vec!["Q".into(), "alt-w".into()]))]);
-        let m = KeyMap::new(&overrides).unwrap();
-        assert_eq!(m.action(Scope::Catalog, &ch('Q')), Some(Action::Watch));
-        assert_eq!(m.action(Scope::Catalog, &KeyEvent::new(KeyCode::Char('w'), KeyModifiers::ALT)), Some(Action::Watch));
+        let m: KeyMap = toml::from_str("watch = [\"Q\", \"alt-w\"]").unwrap();
+        assert_eq!(on(&m, Scope::Catalog, 'Q'), Some(Command::Act(Action::Watch)));
+        assert_eq!(m.command(Scope::Catalog, KeyEvent::new(KeyCode::Char('w'), KeyModifiers::ALT)), Some(Command::Act(Action::Watch)));
         assert_eq!(m.label(Action::Watch), "Q, alt-w");
-        assert_eq!(m.binding(Action::Watch), Some(Binding::Many(vec!["Q".into(), "alt-w".into()])));
+        assert_eq!(m.binding(Action::Watch), Some(["Q".parse().unwrap(), "alt-w".parse().unwrap()].as_slice()));
         assert_eq!(m.binding(Action::Sort), None);
         // Conflicts are checked across every key of every action.
-        let bad = HashMap::from([("sort".to_string(), Binding::Many(vec!["z".into(), "W".into()])), ("watch".to_string(), Binding::One("W".into()))]);
-        assert!(KeyMap::new(&bad).unwrap_err().to_string().contains("'W'"));
+        let bad = toml::from_str::<KeyMap>("sort = [\"z\", \"W\"]\nwatch = \"W\"");
+        assert!(bad.unwrap_err().to_string().contains("'W'"));
         // Editing: a conflicting change is refused, a reset restores the default.
         assert!(m.with(Action::Sort, Some(vec![Key::char('v')])).is_err());
         let m = m.with(Action::Watch, None).unwrap();
@@ -477,22 +605,21 @@ mod tests {
     #[test]
     fn actions_without_keys() {
         // Saving all the thread's files or the page has no key by default: it's in the menu.
-        let m = map(&[]).unwrap();
+        let m = KeyMap::default();
         assert!(m.keys(Action::Export).is_empty() && m.key(Action::Export).is_empty());
-        assert_eq!(m.action(Scope::Thread, &ch('E')), None);
+        assert_eq!(on(&m, Scope::Thread, 'E'), None);
         assert_eq!(m.how(Action::Export), "the . menu");
         assert_eq!(m.how(Action::Download), "d");
         assert_eq!(m.binding(Action::Export), None);
         // `[]` takes a key away; it's kept as `[]`, and the key is free.
-        let none = HashMap::from([("download".to_string(), Binding::Many(vec![]))]);
-        let m = KeyMap::new(&none).unwrap();
-        assert_eq!(m.action(Scope::Thread, &ch('d')), None);
-        assert_eq!(m.binding(Action::Download), Some(Binding::Many(vec![])));
-        assert_eq!(map(&[("watch", "d")]).unwrap_err().to_string(), "[keys]: `download` and `watch` both use 'd' in the thread view");
-        assert_eq!(KeyMap::new(&none).unwrap().with(Action::Watch, Some(vec![Key::char('d')])).unwrap().action(Scope::Thread, &ch('d')), Some(Action::Watch));
+        let none: KeyMap = toml::from_str("download = []").unwrap();
+        assert_eq!(on(&none, Scope::Thread, 'd'), None);
+        assert_eq!(none.binding(Action::Download), Some([].as_slice()));
+        assert!(map(&[("watch", "d")]).unwrap_err().to_string().contains("`download` and `watch` both use 'd' in the Thread view"));
+        assert_eq!(on(&none.with(Action::Watch, Some(vec![Key::char('d')])).unwrap(), Scope::Thread, 'd'), Some(Command::Act(Action::Watch)));
         // Given a key, it works like any other.
         let m = map(&[("export", "E")]).unwrap();
-        assert_eq!(m.action(Scope::Thread, &ch('E')), Some(Action::Export));
+        assert_eq!(on(&m, Scope::Thread, 'E'), Some(Command::Act(Action::Export)));
         let m = map(&[("menu", "alt-m")]).unwrap().with(Action::Menu, Some(vec![])).unwrap();
         assert_eq!(m.how(Action::Export), "the menu (right-click)");
     }

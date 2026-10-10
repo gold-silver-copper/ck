@@ -7,7 +7,7 @@ use ratatui::layout::Rect;
 use ratatui::text::Line;
 
 use super::*;
-use crate::keys::ACTIONS;
+use crate::keys::Command;
 use crate::store::Status;
 use crate::test_fixtures::*;
 
@@ -557,7 +557,7 @@ fn key_editor_rebinds_saves_and_refuses_clashes() {
     app.activate_setting();
     // Move to `watch` and rebind it to Q.
     let rows = settings::key_rows();
-    let watch = rows.iter().position(|r| *r == Ok(ACTIONS.iter().position(|e| e.0 == Action::Watch).unwrap())).unwrap();
+    let watch = rows.iter().position(|r| *r == Ok(Action::Watch)).unwrap();
     while app.settings_popup().is_some_and(|p| !matches!(p, SettingsPopup::Keys { list, .. } if list.selected() == Some(watch))) {
         press(&mut app, KeyCode::Down);
     }
@@ -579,11 +579,11 @@ fn key_editor_rebinds_saves_and_refuses_clashes() {
     press(&mut app, KeyCode::Char('x'));
     assert!(app.keys.is_default(Action::Watch));
     let c: Config = toml::from_str(&std::fs::read_to_string(dir.path().join("config.toml")).unwrap()).unwrap();
-    assert!(!c.keys.contains_key("watch"));
+    assert!(c.keys.is_default(Action::Watch));
     // The new keys work at once.
     app.popup = None;
     app.tab.navigate(View::Catalog);
-    assert_eq!(app.keys.action(app.scope(), &KeyEvent::from(KeyCode::Char('w'))), Some(Action::Watch));
+    assert_eq!(app.keys.command(app.scope(), KeyEvent::from(KeyCode::Char('w'))), Some(Command::Act(Action::Watch)));
 }
 
 #[test]
@@ -621,33 +621,60 @@ fn copies_text_and_links() {
 }
 
 #[test]
+fn a_dead_thread_left_for_its_archive_is_on_the_jump_list() {
+    let mut app = fourchan_thread(&[1, 2, 3]);
+    app.tab.thread.as_mut().unwrap().select(1);
+    let dead = app.tab.here().unwrap();
+    app.tab.archive_offer = Some(ThreadKey { site: "desuarchive".into(), board: "g".into(), no: 1 });
+    app.act(Action::Archive);
+    assert_eq!(app.tab.trail.last(), Some(&dead));
+}
+
+#[test]
+fn esc_from_watched_goes_back_where_w_was_pressed() {
+    let mut app = fourchan_thread(&[1, 2, 3]);
+    for view in [View::Catalog, View::Settings, View::Thread] {
+        app.tab.navigate(view);
+        app.act(Action::Watched);
+        app.on_key(KeyEvent::from(KeyCode::Esc));
+        assert_eq!(app.tab.view(), if view == View::Settings { View::Catalog } else { view });
+    }
+    // Watched from the home screen goes home.
+    app.tab.navigate(View::Sites);
+    app.enter();
+    assert_eq!(app.tab.view(), View::Watched);
+    app.on_key(KeyEvent::from(KeyCode::Esc));
+    assert_eq!(app.tab.view(), View::Sites);
+}
+
+#[test]
 fn vim_counts_prefixes_and_the_jump_list() {
     let mut app = fourchan_thread(&[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
     let at = |app: &App| app.tab.thread.as_ref().unwrap().current().unwrap().no;
     let keys = |app: &mut App, keys: &str| keys.chars().for_each(|c| app.on_key(KeyEvent::from(KeyCode::Char(c))));
     // A count repeats a move; the footer shows it while it waits.
     keys(&mut app, "3");
-    assert_eq!(app.pending.shown().as_deref(), Some("3"));
+    assert_eq!(app.pending.and_then(Pending::shown).as_deref(), Some("3"));
     keys(&mut app, "j");
-    assert_eq!((at(&app), app.pending.shown()), (4, None));
+    assert_eq!((at(&app), app.pending.and_then(Pending::shown)), (4, None));
     // 7G goes to the seventh post, gg to the first, G to the last: as the ruler says.
     keys(&mut app, "7G");
     assert_eq!(at(&app), 7);
     // Vim's 3gg is 3g with a g after it that changes nothing.
     keys(&mut app, "3gg");
-    assert_eq!((at(&app), app.pending.shown()), (3, None));
+    assert_eq!((at(&app), app.pending.and_then(Pending::shown)), (3, None));
     keys(&mut app, "gg");
     assert_eq!((at(&app), app.position()), (1, Some((1, 10))));
     keys(&mut app, "G");
     assert_eq!(app.position(), Some((10, 10)));
     // A key that doesn't finish a prefix drops it and acts as itself.
     keys(&mut app, "gk");
-    assert_eq!((at(&app), app.pending.shown()), (9, None));
+    assert_eq!((at(&app), app.pending.and_then(Pending::shown)), (9, None));
     keys(&mut app, "j");
     // Esc drops a waiting count, and only that.
     keys(&mut app, "5");
     app.on_key(KeyEvent::from(KeyCode::Esc));
-    assert_eq!((app.tab.view(), app.pending.shown()), (View::Thread, None));
+    assert_eq!((app.tab.view(), app.pending.and_then(Pending::shown)), (View::Thread, None));
     // G was a jump: u comes back from it, and ctrl-r goes forward again.
     keys(&mut app, "u");
     assert_eq!(at(&app), 1);
@@ -755,6 +782,15 @@ fn goto_input_completes_and_takes_pastes() {
     // A paste with nothing being typed starts the input.
     app.paste("http://localhost:3/y/res/1.html\n");
     assert_eq!(app.goto_text(), Some("http://localhost:3/y/res/1.html"));
+    // ctrl-w takes a word, ctrl-u the line; other ctrl- and alt- letters type nothing.
+    let ctrl = |c| KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL);
+    type_text(&mut app, " ab cd");
+    for key in [ctrl('w'), ctrl('a'), KeyEvent::new(KeyCode::Char('x'), KeyModifiers::ALT)] {
+        app.on_key(key);
+    }
+    assert_eq!(app.goto_text(), Some("http://localhost:3/y/res/1.html ab "));
+    app.on_key(ctrl('u'));
+    assert_eq!(app.goto_text(), Some(""));
 }
 
 #[test]
@@ -1281,6 +1317,9 @@ fn gallery_of_the_threads_files() {
     // d saves the one file.
     press(&mut app, KeyCode::Char('d'));
     assert_eq!((app.downloads.total, app.downloads.running), (1, 1));
+    // ? shows the help over it, as the footer says.
+    press(&mut app, KeyCode::Char('?'));
+    assert!(matches!(app.popup.take(), Some(Popup::Help(_))));
     // Esc: back to the thread, on the file's post.
     press(&mut app, KeyCode::Esc);
     assert!(app.tab.gallery.is_none());
@@ -1312,6 +1351,9 @@ fn archive_search_and_back() {
     assert_eq!(app.tab.req().unwrap(), req + 1);
     app.handle(answer(app.tab.req().unwrap(), |a, (page, r)| a.search_results(page, r), (2, Err(anyhow::anyhow!("You're searching too fast.")))));
     assert!(app.footer.get().is_some_and(|s| s.error && s.text.contains("too fast")));
+    // The menu's "more results" asks for it again, as n does.
+    run_menu_row(&mut app, "more results");
+    assert_eq!(app.tab.req().unwrap(), req + 2);
     // Enter: the thread, on the archive, with the post selected.
     app.pick_row(View::Search, 1);
     app.enter();
@@ -1742,6 +1784,12 @@ fn following_a_general() {
     app.pick_row(View::Watched, i);
     app.act(Action::Follow);
     assert_eq!(app.store.watched(&key(20)).unwrap().general, None);
+    // From History too, where the menu offers it.
+    app.tab.navigate(View::History);
+    let i = app.store.history.iter().position(|v| v.key == key(10)).unwrap();
+    app.pick_row(View::History, i);
+    run_menu_row(&mut app, "follow it as a general");
+    assert_eq!(app.store.watched(&key(10)).unwrap().general.as_deref(), Some("/lmg/"));
 }
 
 #[test]
@@ -2725,12 +2773,8 @@ fn saving_needs_a_target_or_asks_first() {
 #[test]
 fn an_action_without_a_key_is_in_the_menu() {
     let dir = tempfile::tempdir().unwrap();
-    let overrides = HashMap::from([
-        ("download".to_string(), crate::keys::Binding::Many(vec![])),
-        ("export".to_string(), crate::keys::Binding::One("E".into())),
-    ]);
     let mut app = local_app();
-    app.keys = KeyMap::new(&overrides).unwrap();
+    app.keys = toml::from_str("download = []\nexport = \"E\"").unwrap();
     app.download_dir = Some(dir.path().display().to_string());
     app.goto_str("a/x/1");
     let file = Attachment { filename: "a.png".into(), ..Attachment::at("http://127.0.0.1:3/x/src/a.png") };
