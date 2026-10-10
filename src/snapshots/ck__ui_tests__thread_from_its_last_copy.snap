@@ -31,4 +31,4 @@ expression: snapshot(&mut a)
     fn main() {
         println!("snapshot");
     }
- ⣾ Loading thread 1000…
+ ⣾ Loading thread 1000…                                                                   1/5  20%

@@ -492,6 +492,15 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
     };
     let d = &app.downloads;
     let mut right = Vec::new();
+    // Keys waiting for the rest of their command (`10`, `z`), as vim shows them.
+    if let Some(keys) = app.pending.shown() {
+        right.extend([Span::styled(keys, bold(t.primary)), Span::raw("  ")]);
+    }
+    // Where you are, as an editor's ruler: the selected post (or row) of how many, and how
+    // far down that is.
+    if let Some((at, of)) = app.position() {
+        right.extend([Span::styled(format!("{at}/{of}  {}%", at.saturating_mul(100) / of.max(1)), Style::new().fg(t.on_bar)), Span::raw("  ")]);
+    }
     if d.running > 0 {
         right.extend([chip(format!("⇣ {}/{}", d.done + d.skipped + d.failed, d.total), t.text, t.surface_high), Span::raw(" ")]);
     }
@@ -499,8 +508,10 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
         right.extend([chip(format!("↻ {}", app.refreshing.len()), t.text, t.surface_high), Span::raw(" ")]);
     }
     let right_w = cells(markup::spans_columns(&right));
-    let line = if line.spans.is_empty() { fit_hints(footer_hints(app), usize::from(area.width.saturating_sub(right_w))) } else { line };
-    put(f, area.x, area.y, area.width.saturating_sub(right_w), line);
+    let left_w = area.width.saturating_sub(right_w);
+    // Hints fit with room to spare; a long message is cut a gap short of what's on the right.
+    let (line, left_w) = if line.spans.is_empty() { (fit_hints(footer_hints(app), usize::from(left_w)), left_w) } else { (line, left_w.saturating_sub(if right_w > 0 { 2 } else { 0 })) };
+    put(f, area.x, area.y, left_w, line);
     put(f, area.right().saturating_sub(right_w), area.y, right_w, Line::from(right));
 }
 

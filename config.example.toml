@@ -123,6 +123,10 @@ catalog_layout = "cards"
 # threads a `top = true` filter highlights still come before them. Also in Settings.
 watched_first = false
 
+# Lines of each thread's text in catalog cards; the card and its thumbnail grow with them
+# (unset: as many as fit beside the thumbnail). Also in Settings › Preview lines.
+# catalog_lines = 5
+
 # Where saved files and pages go. {site}, {board} and {thread} are filled in, and {downloads}
 # is your Downloads folder. "~/" works too.
 # download_dir = "{downloads}/ck/{site}/{board}/{thread}"
@@ -354,10 +358,13 @@ url = "https://arch.b4k.dev"
 # character ("w", "W", ":"), ctrl-/alt- with one ("ctrl-w", "alt-x"), or a named key (tab,
 # shift-tab, enter, esc, backspace, delete, insert, up, down, left, right, home, end,
 # pageup, pagedown, space, f1-f12). Settings (`,`) has a key editor that saves here.
-# Navigation keys (j/k/g/G/h/l/J/K, arrows, enter, esc, space, ctrl-d/u) are fixed.
+# Navigation keys are fixed: j/k/h/l, g/G, J/K, z, digits (counts), arrows, enter, esc,
+# space, ctrl-d/u/e/y/f/b.
 # Actions and their defaults:
 #   everywhere: quit = "q", help = "?", search = "/", reload = "r", browser = "o", settings = ",",
-#               goto = ":", next_tab = "]", prev_tab = "[", close_tab = "ctrl-w", menu = "."
+#               goto = ":", next_tab = "]", prev_tab = "[", close_tab = "ctrl-w", menu = ".",
+#               jump_back = "u", jump_forward = "ctrl-r"
+#   everywhere but the image viewer and gallery: watched = "W"
 #   everywhere but the image viewer: hints = "f"
 #   catalog:    view = "v", watch = "w", sort = "s", compact = "c", links = "O", hide = "H",
 #               show_hidden = "Z", filter = "X", archive_search = "A"
@@ -365,7 +372,7 @@ url = "https://arch.b4k.dev"
 #               view, watch, links, hide, show_hidden, filter, mine = "m", expand = "e", gallery = "V",
 #               conversation = "c", poster = "I", media = "M",
 #               image_search = "R", open_file = "i",
-#               replies = "b", jump_back = "u", unread = "U",
+#               replies = "b", unread = "U",
 #               preview = "p", next_match = "n", prev_match = "N", spoiler = "s",
 #               all_spoilers = "S", download = "d", archive = "a",
 #               download_post, download_thread, export: no key (in the . menu)
@@ -374,7 +381,7 @@ url = "https://arch.b4k.dev"
 #   Watched/History/Saved: remove = "x"
 #   catalog, thread, Watched/History/Saved, image viewer: copy = "y", copy_link = "Y"
 [keys]
-# watch = "W"
+# watch = "Q"
 # help = ["?", "f1"]
 
 # Hidden words: any post or thread with one of these words is hidden, everywhere. Plain

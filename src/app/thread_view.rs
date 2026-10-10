@@ -137,8 +137,9 @@ pub struct ThreadView {
     pub backlinks: Vec<Vec<u64>>,
     pub selected: usize,
     pub scroll: usize,
-    /// Where `u` goes back to, by post number.
+    /// Where `u` goes back to, by post number, and where `ctrl-r` goes forward to again.
     pub(super) jumps: Vec<u64>,
+    pub(super) ahead: Vec<u64>,
     /// Rendered layout, rebuilt by the UI when the width changes, from cached post lines.
     pub layout: Option<ThreadLayout>,
     pub cache: LineCache,
@@ -188,6 +189,14 @@ pub struct ThreadView {
     ids: HashMap<String, usize>,
     /// Only the posts with files, or images hidden (`M`).
     pub media: Media,
+}
+
+/// Where `zz`, `zt` and `zb` put the selected entry on the screen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Place {
+    Top,
+    Middle,
+    Bottom,
 }
 
 /// How the selection comes into view.
@@ -781,6 +790,26 @@ impl ThreadView {
         Some(((at, pages), start < self.scroll, last > self.scroll + view))
     }
 
+    /// Whether entry `e` is a post of its own, not a reply expanded (`e`) under another. A
+    /// conversation's are all its own, indented as they quote each other.
+    fn own(&self, e: &Entry) -> bool {
+        e.depth == 0 || self.conversation.is_some()
+    }
+
+    /// The ruler: the selected post among the thread's (an expanded reply counts as the post
+    /// it's under), and how many there are.
+    pub fn ruler(&self) -> Option<(usize, usize)> {
+        let of = self.entries.iter().filter(|e| self.own(e)).count();
+        let at = self.entries.iter().take(self.entry().saturating_add(1)).filter(|e| self.own(e)).count();
+        (of > 0).then_some((at.max(1), of))
+    }
+
+    /// Select the `n`th post (from 1; past the end, the last), not counting expanded replies.
+    pub(super) fn select_nth(&mut self, n: usize) {
+        let e = self.entries.iter().enumerate().filter(|(_, e)| self.own(e)).take(n.max(1)).last().map_or(0, |(i, _)| i);
+        self.select_entry(e);
+    }
+
     pub(super) fn select_entry(&mut self, e: usize) {
         self.set_cursor(e.min(self.entries.len().saturating_sub(1)));
         self.scroll_to(Reveal::Step);
@@ -824,6 +853,21 @@ impl ThreadView {
         self.scroll = self.scroll.min(len.saturating_sub(view));
     }
 
+    /// `zz` / `zt` / `zb`: scroll so the selected entry is in the screen's middle, at its top,
+    /// or at its bottom (as far as the thread goes).
+    pub(super) fn place(&mut self, at: Place) {
+        let e = self.entry();
+        let Some((&start, &end, len)) = self.layout.as_ref().and_then(|l| Some((l.starts.get(e)?, l.starts.get(e + 1)?, l.len()))) else { return };
+        let view = self.viewport;
+        self.scroll = match at {
+            Place::Top => start,
+            Place::Middle => ((start + end) / 2).saturating_sub(view / 2),
+            Place::Bottom => end.saturating_sub(view),
+        }
+        .min(len.saturating_sub(view));
+        self.reveal = None;
+    }
+
     /// Scroll by lines, then select the entry at the top of the view.
     pub(super) fn scroll_lines(&mut self, delta: isize) {
         let Some(l) = &self.layout else { return };
@@ -845,14 +889,34 @@ impl ThreadView {
 
     /// Select post `i`, with the selected one to come back to (`u`).
     pub(super) fn jump(&mut self, i: usize) {
-        self.jumps.extend(self.current().map(|p| p.no));
+        self.leave_mark();
         self.select(i);
+    }
+
+    /// The selected post, to come back to (`u`) from a jump about to be made.
+    pub(super) fn leave_mark(&mut self) {
+        self.jumps.extend(self.current().map(|p| p.no));
+        self.ahead.clear();
     }
 
     /// `u`: back to the last post jumped from that's still here. False if there's none.
     pub(super) fn jump_back(&mut self) -> bool {
-        while let Some(no) = self.jumps.pop() {
-            if self.select_post(no) {
+        self.retrace(true)
+    }
+
+    /// `ctrl-r`: forward again to where `u` came back from. False if there's none.
+    pub(super) fn jump_forward(&mut self) -> bool {
+        self.retrace(false)
+    }
+
+    /// Along the jump list one way, leaving the selected post on the other.
+    fn retrace(&mut self, back: bool) -> bool {
+        let here = self.current().map(|p| p.no);
+        let (from, to) = if back { (&mut self.jumps, &mut self.ahead) } else { (&mut self.ahead, &mut self.jumps) };
+        while let Some(no) = from.pop() {
+            if let Some(&i) = self.index.get(&no) {
+                to.extend(here);
+                self.select(i);
                 return true;
             }
         }

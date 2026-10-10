@@ -555,25 +555,25 @@ fn key_editor_rebinds_saves_and_refuses_clashes() {
     app.tab.navigate(View::Settings);
     app.pick_row(View::Settings, settings::position("Key bindings").unwrap());
     app.activate_setting();
-    // Move to `watch` and rebind it to W.
+    // Move to `watch` and rebind it to Q.
     let rows = settings::key_rows();
     let watch = rows.iter().position(|r| *r == Ok(ACTIONS.iter().position(|e| e.0 == Action::Watch).unwrap())).unwrap();
     while app.settings_popup().is_some_and(|p| !matches!(p, SettingsPopup::Keys { list, .. } if list.selected() == Some(watch))) {
         press(&mut app, KeyCode::Down);
     }
     press(&mut app, KeyCode::Enter);
-    press(&mut app, KeyCode::Char('W'));
-    assert_eq!(app.keys.label(Action::Watch), "W");
+    press(&mut app, KeyCode::Char('Q'));
+    assert_eq!(app.keys.label(Action::Watch), "Q");
     // `a` adds a second key.
     press(&mut app, KeyCode::Char('a'));
     app.on_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::ALT));
-    assert_eq!(app.keys.label(Action::Watch), "W, alt-w");
+    assert_eq!(app.keys.label(Action::Watch), "Q, alt-w");
     let text = std::fs::read_to_string(dir.path().join("config.toml")).unwrap();
-    assert!(text.contains(r#"watch = ["W", "alt-w"]"#), "{text}");
+    assert!(text.contains(r#"watch = ["Q", "alt-w"]"#), "{text}");
     // A key another command uses in the same view is refused.
     press(&mut app, KeyCode::Enter);
     press(&mut app, KeyCode::Char('v'));
-    assert_eq!(app.keys.label(Action::Watch), "W, alt-w");
+    assert_eq!(app.keys.label(Action::Watch), "Q, alt-w");
     assert!(app.footer.get().is_some_and(|s| s.error && s.text.contains("'v'")), "{:?}", app.footer.get());
     // x resets to the default, which removes the entry.
     press(&mut app, KeyCode::Char('x'));
@@ -618,6 +618,47 @@ fn copies_text_and_links() {
     assert_eq!(app.copied.as_deref(), Some("Subj\nhello"));
     app.act(Action::CopyLink);
     assert_eq!(app.copied.as_deref(), Some("https://boards.4chan.org/g/thread/7"));
+}
+
+#[test]
+fn vim_counts_prefixes_and_the_jump_list() {
+    let mut app = fourchan_thread(&[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    let at = |app: &App| app.tab.thread.as_ref().unwrap().current().unwrap().no;
+    let keys = |app: &mut App, keys: &str| keys.chars().for_each(|c| app.on_key(KeyEvent::from(KeyCode::Char(c))));
+    // A count repeats a move; the footer shows it while it waits.
+    keys(&mut app, "3");
+    assert_eq!(app.pending.shown().as_deref(), Some("3"));
+    keys(&mut app, "j");
+    assert_eq!((at(&app), app.pending.shown()), (4, None));
+    // 7G goes to the seventh post, gg to the first, G to the last: as the ruler says.
+    keys(&mut app, "7G");
+    assert_eq!(at(&app), 7);
+    // Vim's 3gg is 3g with a g after it that changes nothing.
+    keys(&mut app, "3gg");
+    assert_eq!((at(&app), app.pending.shown()), (3, None));
+    keys(&mut app, "gg");
+    assert_eq!((at(&app), app.position()), (1, Some((1, 10))));
+    keys(&mut app, "G");
+    assert_eq!(app.position(), Some((10, 10)));
+    // A key that doesn't finish a prefix drops it and acts as itself.
+    keys(&mut app, "gk");
+    assert_eq!((at(&app), app.pending.shown()), (9, None));
+    keys(&mut app, "j");
+    // Esc drops a waiting count, and only that.
+    keys(&mut app, "5");
+    app.on_key(KeyEvent::from(KeyCode::Esc));
+    assert_eq!((app.tab.view(), app.pending.shown()), (View::Thread, None));
+    // G was a jump: u comes back from it, and ctrl-r goes forward again.
+    keys(&mut app, "u");
+    assert_eq!(at(&app), 1);
+    app.on_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL));
+    assert_eq!(at(&app), 10);
+    // W: the watched threads, the thread left on the jump list; u comes back to it, where
+    // it was left.
+    keys(&mut app, "W");
+    assert_eq!(app.tab.view(), View::Watched);
+    keys(&mut app, "u");
+    assert_eq!((app.tab.view(), app.tab.pending_thread.as_ref().unwrap().no, app.tab.opening().select), (View::Thread, 1, Some(10)));
 }
 
 #[test]
@@ -1055,6 +1096,13 @@ fn grid_moves_in_two_dimensions() {
     assert_eq!(at(&app), 6);
     press(&mut app, 'k');
     assert_eq!(at(&app), 3);
+    // A count stops at the edge: 2l from the first column, then 5h back to it, not out.
+    press(&mut app, '2');
+    press(&mut app, 'l');
+    assert_eq!(at(&app), 5);
+    press(&mut app, '5');
+    press(&mut app, 'h');
+    assert_eq!((at(&app), app.tab.view()), (3, View::Catalog));
     // h in the first column goes back, as in lists.
     press(&mut app, 'h');
     assert_eq!(app.tab.view(), View::Boards);

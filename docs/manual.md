@@ -42,12 +42,32 @@ Navigation (fixed):
 | key                     | action                                        |
 |-------------------------|-----------------------------------------------|
 | `j`/`k`, arrows         | move (in a thread: next/previous post)        |
-| `g`/`G`                 | top / bottom                                  |
-| ctrl-d / ctrl-u, space  | page                                          |
-| `J`/`K`                 | scroll a thread by line                       |
+| `gg`/`G`                | top / bottom                                  |
+| ctrl-d / ctrl-u         | half a page (in a list, 10 rows)              |
+| ctrl-f / ctrl-b         | a page (in a list, 20 rows)                   |
+| space                   | in a thread: a page                           |
+| ctrl-e / ctrl-y         | scroll a thread by a line (in a list, move a row) |
+| `J`/`K`                 | in a thread: scroll by a line                 |
+| `zz` / `zt` / `zb`      | in a thread: scroll the selected post to the middle / top / bottom of the screen |
 | `enter`, `l`            | open (in a thread: follow a `>>quote`, also into other threads and boards) |
 | `esc`, `h`, backspace   | back                                          |
 | mouse                   | wheel scrolls, click selects, double-click opens, right-click opens the menu (over popups: below) |
+
+As in vim, a count before a move repeats it: `10j` goes ten posts down, `5ctrl-d` five half
+pages. `10G` (or `10g`) goes to the tenth post (in a list, the tenth row). A count also
+repeats `n`/`N`, `u`/ctrl-r and tab. While a count or a `z`/`g` waits for the rest of its
+command it shows at the right of the footer, next to where you are: the selected post of how
+many (in a list, the row), and how far down that is, as an editor's ruler does. `esc` drops
+a waiting count or prefix; another key drops it and does what it does.
+
+The jump list: `u` goes back (in a thread first to the post you jumped from, by a quote,
+`gg`, `G` or `10G`, then to the thread before), ctrl-r forward again the same way
+[`jump_back`, `jump_forward`]. Every thread you leave
+is on it, at the post you were on, whichever way you left (back to the catalog, to the
+watched threads, by a link), so the thread you just closed is one `u` away, also from the
+catalog. `W` shows the watched threads from anywhere but the image viewer and gallery [`watched`]. (Vim's ctrl-i is the same
+key as tab to a terminal, which focuses a post's parts here; so forward is ctrl-r, the
+redo to `u`'s undo.)
 
 The mouse works on what's on top. Over a list popup (the menu, links, image search, the
 filter maker's choices, a settings picker) the wheel moves its rows; over the help, the
@@ -83,6 +103,8 @@ ones for where you are.
 | `/`  | filter the list; in a thread, search it [`search`] |
 | `r` / `o` | reload / open the board or thread in a browser [`reload`, `browser`] |
 | `:`  | go to a URL or a site/board/thread, see [Going to a URL](#going-to-a-url) [`goto`] |
+| `u` / ctrl-r | back / forward along the jump list, see above [`jump_back`, `jump_forward`] |
+| `W`  | the watched threads (not in the image viewer or gallery) [`watched`] |
 | `,`  | settings: theme, colors, keys, and more [`settings`] |
 | `.`, right-click | what you can do with what's selected, with each one's key [`menu`] |
 | `f`  | label what's on screen (posts, images, links, rows); type a label to open it (what it was put on, even if a refresh has moved it; if it's gone, ck says so) [`hints`] |
@@ -147,7 +169,7 @@ ones for where you are.
 | `enter`, `l` | on a focused part: view the image, go to the quoted post (it shows while focused), open the link, show the replies; on the post: follow its `>>quote`, also into other threads and boards |
 | `esc` | from a focused part back to the post |
 | `p` / `b` | preview the posts a post quotes / jump to the first reply [`preview`, `replies`] |
-| `u` / `U` | jump back (also to the previous thread) / to the first unread post [`jump_back`, `unread`] |
+| `u` / `U` | jump back (the post jumped from, then the thread before) / to the first unread post [`jump_back`, `unread`] |
 | `n` / `N` | next / previous search match [`next_match`, `prev_match`] |
 | `s` / `S` | show spoilers in the post / the whole thread [`spoiler`, `all_spoilers`] |
 | `e`  | show / hide the post's replies under it, indented; again on a reply goes a level deeper (up to 4) [`expand`] |
@@ -307,9 +329,9 @@ are saved in the config's `[keys]` section (only the keys you changed):
 
 ```toml
 [keys]
-watch = "W"
+watch = "Q"
 help = ["?", "f1"]
-reload = "ctrl-r"
+reload = ["r", "ctrl-l"]
 download_thread = "D"   # no key by default
 mine = []               # no key: only in the . menu
 ```
@@ -846,6 +868,9 @@ All settings are optional; see `config.example.toml` for every option with comme
   the data directory (`board_prefs.json`). In the grid, `h`/`l` move between columns
   (`h` in the first column goes back) and `j`/`k` between rows; without images it's
   shown as cards.
+- `catalog_lines = 5`: lines of each thread's text in a card; the card and its thumbnail
+  grow with them (unset: as many as fit beside the thumbnail). Settings › Preview lines
+  cycles through some.
 - `download_dir = "~/stuff/{site}/{board}/{thread}"`
 - `restore_session = false` to start at the site list instead of where you left off (the
   view, thread and selected post, catalog sort and filter, saved in the data directory
@@ -864,7 +889,7 @@ All settings are optional; see `config.example.toml` for every option with comme
 - `[[site]]`, `default_sites = false`: see [Adding sites](#adding-sites).
 - `archive = "desuarchive"` on a `[[site]]`: the archive for 404'd threads and `A` searches.
 - `[keys]`: `action = "key"`, `action = ["key", ...]`, or `action = []` for none (the `.`
-  menu only), e.g. `watch = "W"`; see
+  menu only), e.g. `watch = "Q"`; see
   [Remapping keys](#remapping-keys). Unknown actions, things that aren't keys, and two
   commands on one key in the same view are reported at startup.
 - `theme = "nord"`, `[themes.NAME]`, `color = "auto" | "truecolor" | "256"`: see

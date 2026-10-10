@@ -17,18 +17,18 @@ expression: snapshot(&mut a)
       [               prev_tab         previous tab                         everywhere
       .               menu             what you can do with what's selected everywhere, image v…
       ctrl-w          close_tab        close the tab                        everywhere
+      W               watched          the watched threads                  everywhere
 
     Lists
       f               hints            label what's on screen; type a labe… lists, catalog, thr…
+      u               jump_back        jump back: the post before, or the … lists, catalog, thr…
+      ctrl-r          jump_forward     jump forward again (after jumping b… lists, catalog, thr…
       *               favorite         favorite board: on / off             lists, catalog
       menu            add_site         add a site from a link to any page … lists
       menu            update_boards    read a vichan site's board list aga… lists
       menu            board_images     images on this board: on / off       lists, catalog, thr…
 
-    Catalog
-      v               view             view the post's images               catalog, thread
-      w               watch            watch / unwatch the thread           catalog, thread
 
     Changed keys are saved in [keys]; navigation keys are fixed. Without a key: in the . menu.
 
- enter change   esc back   ? help
+ enter change   esc back   ? help                                                      24/24  100%

@@ -70,6 +70,8 @@ impl App {
     /// something may have moved (a wheel notch among them), it does nothing until the next.
     pub fn on_mouse(&mut self, ev: MouseEvent, now: Instant) {
         http::user_input();
+        // The mouse drops a waiting count or prefix.
+        self.pending = Pending::default();
         let (before, top) = (self.shown(), self.modal());
         let (wheel, left, right, tabs) = self.mouse(top);
         let pos = Position::new(ev.column, ev.row);
@@ -87,7 +89,7 @@ impl App {
                 // `u` takes back a filter only right after it's added.
                 self.filter_undo = None;
                 match self.drawn().and_then(|d| d.tabs.iter().find(|(r, _)| r.contains(pos)).map(|&(_, i)| i)).filter(|_| tabs) {
-                    Some(i) => self.switch_tab(i),
+                    Some(i) => self.show_tab(i),
                     None => left(self, ev, now),
                 }
                 true
@@ -266,6 +268,8 @@ impl App {
 
     /// A key for what's on top.
     fn on_modal_key(&mut self, modal: Modal, key: KeyEvent) {
+        // A count or prefix is for the view, not what's on top of it.
+        self.pending = Pending::default();
         match modal {
             Modal::Confirm => self.on_confirm_key(key),
             Modal::Adding => self.on_adding_key(key),
@@ -294,17 +298,64 @@ impl App {
         }
     }
 
-    /// A key for the view, with nothing on top.
+    /// A key for the view, with nothing on top: vim's way, a count before it (`10j`) and
+    /// `z` / `g` taking a second key (`zz`, `gg`).
     fn on_view_key(&mut self, key: KeyEvent) {
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        let pending = std::mem::take(&mut self.pending);
+        // Esc drops a waiting count or prefix; a key that doesn't finish the prefix drops it and
+        // counts as itself.
+        if key.code == KeyCode::Esc && pending.shown().is_some() {
+            return;
+        }
+        if let Some(prefix) = pending.prefix
+            && self.finish_prefix(prefix, key.code, pending.count)
+        {
+            return;
+        }
+        let n = pending.count.unwrap_or(1);
+        let action = self.keys.action(self.scope(), &key);
+        if let (None, KeyCode::Char(c), false) = (action, key.code, ctrl || key.modifiers.contains(KeyModifiers::ALT)) {
+            match c {
+                // A count: digits, where they aren't keys of their own (home's favorites); a
+                // 0 only after another.
+                '0'..='9' if self.tab.view() != View::Sites && (c != '0' || pending.count.is_some()) => {
+                    let count = pending.count.unwrap_or(0).saturating_mul(10).saturating_add(c as usize - '0' as usize);
+                    self.pending = Pending { count: Some(count.min(99_999)), prefix: None };
+                    return;
+                }
+                // `5g`, `5G`: the fifth post (or entry) at once. A `g` right after `5g` is part
+                // of vim's `5gg`, already done.
+                'g' | 'G' if pending.count.is_some() => {
+                    self.go_to_entry(n);
+                    if c == 'g' {
+                        self.pending = Pending { count: None, prefix: Some(GG_DONE) };
+                    }
+                    return;
+                }
+                'g' => {
+                    self.pending = Pending { count: None, prefix: Some('g') };
+                    return;
+                }
+                'z' if self.tab.view() == View::Thread => {
+                    self.pending = Pending { count: None, prefix: Some('z') };
+                    return;
+                }
+                _ => {}
+            }
+        }
         if self.tab.view() == View::Search && self.keys.keys(Action::NextMatch).contains(&crate::keys::Key::from_event(&key)) {
             if self.more_results() {
                 self.load_search_page();
             }
             return;
         }
-        if let Some(action) = self.keys.action(self.scope(), &key) {
-            self.act(action);
+        if let Some(action) = action {
+            // Moves repeat with a count; anything else (a toggle) once.
+            let repeats = matches!(action, Action::NextMatch | Action::PrevMatch | Action::JumpBack | Action::JumpForward | Action::NextTab | Action::PrevTab | Action::NextPart | Action::PrevPart);
+            for _ in 0..if repeats { n } else { 1 } {
+                self.act(action);
+            }
             return;
         }
         match key.code {
@@ -329,25 +380,36 @@ impl App {
             }
             KeyCode::Esc if !self.filter(self.tab.view()).is_empty() => self.edit_filter(self.tab.view(), String::clear),
             KeyCode::Esc => self.back(),
-            _ if self.tab.view() == View::Catalog && self.on_grid_key(key.code) => {}
+            // A count stops at the grid's edge rather than going on to mean back.
+            _ if self.tab.view() == View::Catalog && self.on_grid_key(key.code) => {
+                for _ in 1..n {
+                    if !self.on_grid_key(key.code) {
+                        break;
+                    }
+                }
+            }
             KeyCode::Char(c @ '1'..='9') if self.tab.view() == View::Sites => self.open_favorite(c as usize - '1' as usize),
             KeyCode::Char('h') | KeyCode::Left | KeyCode::Backspace => self.back(),
-            _ if self.tab.view() == View::Thread => self.on_thread_key(key.code, ctrl),
+            _ if self.tab.view() == View::Thread => self.on_thread_key(key.code, ctrl, n),
             KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right => self.enter(),
             code => {
                 let view = self.tab.view();
-                let delta = match code {
+                let step = match code {
                     KeyCode::Char('j') | KeyCode::Down => 1,
                     KeyCode::Char('k') | KeyCode::Up => -1,
+                    KeyCode::Char('e') if ctrl => 1,
+                    KeyCode::Char('y') if ctrl => -1,
                     KeyCode::Char('d') if ctrl => 10,
                     KeyCode::Char('u') if ctrl => -10,
+                    KeyCode::Char('f') if ctrl => 20,
+                    KeyCode::Char('b') if ctrl => -20,
                     KeyCode::PageDown => 10,
                     KeyCode::PageUp => -10,
-                    KeyCode::Char('g') | KeyCode::Home => isize::MIN / 2,
+                    KeyCode::Home => isize::MIN / 2,
                     KeyCode::Char('G') | KeyCode::End => isize::MAX / 2,
                     _ => return,
                 };
-                self.move_selection(view, delta);
+                self.move_selection(view, step.saturating_mul(n as isize));
                 if view == View::Search {
                     self.search_moved();
                 }
@@ -389,6 +451,10 @@ impl App {
             }
             Action::Search => self.typing = Some(Typing::ListFilter),
             Action::Reload => self.refresh(),
+            // Outside a thread, or on one that didn't load (yet): along the threads.
+            Action::JumpBack if self.tab.view() != View::Thread || self.tab.thread.is_none() => self.travel(true),
+            Action::JumpForward if self.tab.view() != View::Thread || self.tab.thread.is_none() => self.travel(false),
+            Action::Watched => self.tab.navigate(View::Watched),
             Action::Filter => self.open_add_filter(),
             Action::Conversation => self.toggle_conversation(),
             Action::Poster => self.toggle_poster(),
@@ -466,6 +532,7 @@ impl App {
             Action::OpenFile
             | Action::Replies
             | Action::JumpBack
+            | Action::JumpForward
             | Action::Unread
             | Action::Preview
             | Action::NextMatch
@@ -509,24 +576,31 @@ impl App {
         true
     }
 
-    fn on_thread_key(&mut self, code: KeyCode, ctrl: bool) {
+    /// A thread's own key, `n` times over where it's a move.
+    fn on_thread_key(&mut self, code: KeyCode, ctrl: bool, n: usize) {
         if code == KeyCode::Enter && self.take_saved_offer() {
             return;
         }
         let Some(t) = &mut self.tab.thread else { return };
         let half = (t.viewport / 2).max(1) as isize;
+        let times = n as isize;
         match code {
-            KeyCode::Char('j') | KeyCode::Down => t.step(true),
-            KeyCode::Char('k') | KeyCode::Up => t.step(false),
-            KeyCode::Char('J') => t.scroll_lines(1),
-            KeyCode::Char('K') => t.scroll_lines(-1),
-            KeyCode::Char('d') if ctrl => t.scroll_lines(half),
-            KeyCode::Char('u') if ctrl => t.scroll_lines(-half),
-            KeyCode::PageDown | KeyCode::Char(' ') => t.scroll_lines(half * 2 - 1),
-            KeyCode::PageUp => t.scroll_lines(-(half * 2 - 1)),
-            KeyCode::Char('g') | KeyCode::Home => t.select_entry(0),
+            KeyCode::Char('j') | KeyCode::Down if !ctrl => (0..n).for_each(|_| t.step(true)),
+            KeyCode::Char('k') | KeyCode::Up if !ctrl => (0..n).for_each(|_| t.step(false)),
+            KeyCode::Char('J') => t.scroll_lines(times),
+            KeyCode::Char('K') => t.scroll_lines(-times),
+            KeyCode::Char('e') if ctrl => t.scroll_lines(times),
+            KeyCode::Char('y') if ctrl => t.scroll_lines(-times),
+            KeyCode::Char('d') if ctrl => t.scroll_lines(half.saturating_mul(times)),
+            KeyCode::Char('u') if ctrl => t.scroll_lines(-half.saturating_mul(times)),
+            KeyCode::PageDown | KeyCode::Char(' ') => t.scroll_lines((half * 2 - 1).saturating_mul(times)),
+            KeyCode::Char('f') if ctrl => t.scroll_lines((half * 2 - 1).saturating_mul(times)),
+            KeyCode::PageUp => t.scroll_lines(-(half * 2 - 1).saturating_mul(times)),
+            KeyCode::Char('b') if ctrl => t.scroll_lines(-(half * 2 - 1).saturating_mul(times)),
+            KeyCode::Home => t.select_entry(0),
             // The very end of the thread, so a refresh's new posts come into view.
             KeyCode::Char('G') | KeyCode::End => {
+                t.leave_mark();
                 t.select_entry(usize::MAX);
                 t.scroll_to(Reveal::Bottom);
                 t.reveal = Some(Reveal::Bottom);
@@ -543,6 +617,46 @@ impl App {
                 }
             }
             _ => {}
+        }
+    }
+
+    /// `z` or `g` with its second key: `zz` / `zt` / `zb` put the selected post at the
+    /// screen's middle, top or bottom; `gg` goes to the top (or, with a count, that entry).
+    /// False if `code` isn't one of these.
+    fn finish_prefix(&mut self, prefix: char, code: KeyCode, count: Option<usize>) -> bool {
+        let at = match (prefix, code) {
+            (GG_DONE, KeyCode::Char('g')) => return true,
+            ('g', KeyCode::Char('g')) => {
+                self.go_to_entry(count.unwrap_or(1));
+                return true;
+            }
+            ('z', KeyCode::Char('z' | '.')) => Place::Middle,
+            ('z', KeyCode::Char('t') | KeyCode::Enter) => Place::Top,
+            ('z', KeyCode::Char('b' | '-')) => Place::Bottom,
+            _ => return false,
+        };
+        if let Some(t) = &mut self.tab.thread {
+            t.place(at);
+        }
+        true
+    }
+
+    /// The `n`th entry (from 1): a thread's post, or a list's row.
+    fn go_to_entry(&mut self, n: usize) {
+        let view = self.tab.view();
+        match &mut self.tab.thread {
+            Some(t) if view == View::Thread => {
+                t.leave_mark();
+                t.select_nth(n);
+                t.scroll_to(Reveal::Jump);
+            }
+            _ => {
+                self.move_selection(view, isize::MIN / 2);
+                self.move_selection(view, isize::try_from(n.saturating_sub(1)).unwrap_or(isize::MAX / 2));
+                if view == View::Search {
+                    self.search_moved();
+                }
+            }
         }
     }
 
@@ -577,12 +691,13 @@ impl App {
                 }
                 None => self.info("No replies to this post"),
             },
-            Action::JumpBack => {
-                if !t.jump_back()
-                    && let Some((key, post)) = self.tab.trail.pop()
-                {
-                    // Back to the thread we came from by a cross-thread link.
-                    self.open_thread_key(&key, Opening::at(Some(post)));
+            // Back to the post jumped from, or forward again; else to the thread before or after.
+            Action::JumpBack | Action::JumpForward => {
+                let back = action == Action::JumpBack;
+                if if back { t.jump_back() } else { t.jump_forward() } {
+                    self.footer.clear_seen();
+                } else {
+                    self.travel(back);
                 }
             }
             Action::Unread => match (0..t.posts.len()).find(|&i| t.is_new(i)) {

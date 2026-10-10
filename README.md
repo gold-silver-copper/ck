@@ -63,8 +63,9 @@ You need few. With something selected:
 
 | key | action | key | action |
 |-----|--------|-----|--------|
-| `j`/`k`, `g`/`G` | move, top / bottom | `v` / `V` | image viewer / gallery |
-| `enter`, `esc` | open, back | `w` | watch a thread |
+| `j`/`k`, `gg`/`G` | move (`10j`), top / bottom | `v` / `V` | image viewer / gallery |
+| `enter`, `esc` | open, back | `w` / `W` | watch a thread / the watched ones |
+| `u` / ctrl-r | jump list: back / forward | `zz` / `zt` / `zb` | the post to the middle / top / bottom |
 | `:` | go to a URL or `site/board/thread` | `T`, `]` / `[` | new tab, next / previous |
 | `/` | filter the list, search a thread | `H` / `Z` / `X` | hide, show hidden, make a filter |
 | `c` | layout (catalog), conversation (thread) | `,` | settings |

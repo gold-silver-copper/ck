@@ -60,6 +60,10 @@ pub struct Config {
     /// the rest in the sort's order.
     #[serde(default)]
     pub watched_first: bool,
+    /// Lines of a thread's text in catalog cards (the card and its thumbnail grow with them);
+    /// unset, as many as fit beside the thumbnail.
+    #[serde(default)]
+    pub catalog_lines: Option<u16>,
     /// Catalog layout (cycled with `c`).
     #[serde(default)]
     pub catalog_layout: Option<CatalogLayout>,
@@ -749,7 +753,7 @@ mod tests {
         let path = dir.path().join("config.toml");
         std::fs::write(&path, "[[site]]\nname = \"x\"\nkind = \"4chan\"\n\n# my keys\n[keys]\nsort = \"z\"\n").unwrap();
         edit_at(&path, |d| {
-            set_key(d, "watch", Some(&Binding::Many(vec!["W".into(), "alt-w".into()])));
+            set_key(d, "watch", Some(&Binding::Many(vec!["Q".into(), "alt-w".into()])));
             set_key(d, "sort", None);
             set_key(d, "help", Some(&Binding::One("f1".into())));
         })
@@ -758,7 +762,7 @@ mod tests {
         assert!(text.contains("# my keys"), "{text}");
         let c: Config = toml::from_str(&text).unwrap();
         assert_eq!(c.keys.len(), 2);
-        assert_eq!(c.keys["watch"], Binding::Many(vec!["W".into(), "alt-w".into()]));
+        assert_eq!(c.keys["watch"], Binding::Many(vec!["Q".into(), "alt-w".into()]));
         assert!(crate::keys::KeyMap::new(&c.keys).is_ok());
     }
     #[test]
@@ -903,7 +907,7 @@ mod tests_filters {
         edit_filters(&mut d, FilterEdit::Add(&f)).unwrap();
         let text = d.to_string();
         assert!(text.trim_end().ends_with("[[filter]]\npattern = \"x\"\nfield = \"name\"\naction = \"hide\""), "{text}");
-        assert!(text.contains("[keys]\n# watch = \"W\""), "{text}");
+        assert!(text.contains("[keys]\n# watch = \"Q\""), "{text}");
         // Taking it back leaves the file as it was.
         edit_filters(&mut d, FilterEdit::Remove(0, &f)).unwrap();
         assert_eq!(d.to_string(), DEFAULT_CONFIG);

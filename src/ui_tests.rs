@@ -518,6 +518,8 @@ fn the_unread_line_keeps_long_threads_exact() {
     assert_eq!(row_of(&text, "new posts").unwrap() + 2, row_of(&text, "No.2251").unwrap(), "{text}");
     assert_layout_exact(&mut a);
     // In the end, a full layout to the line: the line took none.
+    // gg: the top, as vim has it.
+    a.on_key(KeyEvent::from(KeyCode::Char('g')));
     a.on_key(KeyEvent::from(KeyCode::Char('g')));
     for _ in 0..400 {
         a.on_key(KeyEvent::from(KeyCode::Char('j')));
@@ -587,8 +589,13 @@ fn long_threads_are_laid_out_near_the_view_only() {
     assert_layout_exact(&mut a);
     insta::assert_snapshot!("long_thread_end", snapshot(&mut a));
     // Scrolling up lays out what comes into view; coming back shows the same screen (the
-    // selection may have moved, kept on screen while scrolling: the same apart from it).
-    let unselected = |a: &mut App| render(a).0.replace('▌', " ").lines().map(str::trim_end).collect::<Vec<_>>().join("\n");
+    // selection may have moved, kept on screen while scrolling: the same apart from it, and
+    // the footer's ruler saying where it is).
+    let unselected = |a: &mut App| {
+        let text = render(a).0.replace('▌', " ");
+        let lines: Vec<_> = text.lines().map(str::trim_end).collect();
+        lines.get(..lines.len().saturating_sub(1)).unwrap_or_default().join("\n")
+    };
     let before = unselected(&mut a);
     for _ in 0..40 {
         a.on_key(KeyEvent::from(KeyCode::Char('K')));
@@ -623,6 +630,8 @@ fn long_threads_are_laid_out_near_the_view_only() {
     // Reading on through everything, the estimates all turn exact, and agree with a full
     // layout to the line.
     a.tab.thread.as_mut().unwrap().set_search(String::new());
+    // gg: the top, as vim has it.
+    a.on_key(KeyEvent::from(KeyCode::Char('g')));
     a.on_key(KeyEvent::from(KeyCode::Char('g')));
     for _ in 0..400 {
         a.on_key(KeyEvent::from(KeyCode::Char('j')));
@@ -792,6 +801,8 @@ fn the_selected_post_sits_at_the_margin_while_reading() {
             assert!(selected_row(&a) >= 0);
         }
         // The start of the thread: it can't scroll above, so the selection goes to the top.
+        // gg: the top, as vim has it.
+        a.on_key(KeyEvent::from(KeyCode::Char('g')));
         a.on_key(KeyEvent::from(KeyCode::Char('g')));
         render(&mut a);
         assert_eq!((selected_row(&a), a.tab.thread.as_ref().unwrap().scroll), (0, 0));
@@ -1611,8 +1622,11 @@ fn footer_hints_drop_whole_and_keep_help() {
     for w in [30, 40, 60, 80] {
         let mut a = thread_app(false);
         let (text, _) = render_at(&mut a, w, 20);
-        let footer = text.lines().last().unwrap().trim_end();
-        assert!(footer.ends_with("? help"), "{w}: {footer:?}");
+        let line = text.lines().last().unwrap().trim_end();
+        // The hints end with help; after them, only the ruler (where you are).
+        let (hints, ruler) = line.split_once("? help").unwrap_or_else(|| panic!("{w}: {line:?}"));
+        assert!(ruler.trim().is_empty() || ruler.trim().ends_with('%'), "{w}: {line:?}");
+        let footer = format!("{hints}? help");
         // Every hint before it is whole: a key, a space, a label, then three spaces.
         assert!(footer.split("   ").all(|h| h.trim().contains(' ')), "{w}: {footer:?}");
     }

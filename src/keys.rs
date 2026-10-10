@@ -73,7 +73,9 @@ actions! {
     Compact, "compact", Some(Key::char('c')), &[Scope::Catalog], "layout: cards, compact, grid";
     OpenFile, "open_file", Some(Key::char('i')), &[Scope::Thread], "open the file (videos in mpv)";
     Replies, "replies", Some(Key::char('b')), &[Scope::Thread], "jump to the first reply";
-    JumpBack, "jump_back", Some(Key::char('u')), &[Scope::Thread], "jump back (also to the last thread)";
+    JumpBack, "jump_back", Some(Key::char('u')), &[Scope::Lists, Scope::Catalog, Scope::Thread, Scope::Saved], "jump back: the post before, or the thread you left";
+    JumpForward, "jump_forward", Some(Key::ctrl('r')), &[Scope::Lists, Scope::Catalog, Scope::Thread, Scope::Saved], "jump forward again (after jumping back)";
+    Watched, "watched", Some(Key::char('W')), &[Scope::Global], "the watched threads";
     Unread, "unread", Some(Key::char('U')), &[Scope::Thread], "jump to the first unread post";
     Preview, "preview", Some(Key::char('p')), &[Scope::Thread], "preview the quoted posts";
     NextMatch, "next_match", Some(Key::char('n')), &[Scope::Thread], "next search match";
@@ -248,15 +250,16 @@ fn fixed(scope: Scope) -> Vec<Key> {
     let mut keys: Vec<Key> = codes.into_iter().map(Key::code).collect();
     keys.push(Key::ctrl('c'));
     let chars: &[char] = match scope {
-        Scope::Thread => &['j', 'k', 'g', 'G', 'h', 'l', 'J', 'K', ' '],
+        Scope::Thread => &['j', 'k', 'g', 'G', 'h', 'l', 'J', 'K', ' ', 'z'],
         Scope::Viewer => &['j', 'k', 'h', 'l', 'i', 'q', 'v', ' ', '+', '=', '-', '0'],
-        // The home screen opens favorites with 1-9.
-        Scope::Lists => &['j', 'k', 'g', 'G', 'h', 'l', '1', '2', '3', '4', '5', '6', '7', '8', '9'],
         _ => &['j', 'k', 'g', 'G', 'h', 'l'],
     };
     keys.extend(chars.iter().map(|&c| Key::char(c)));
     if scope != Scope::Viewer {
-        keys.extend([Key::ctrl('d'), Key::ctrl('u')]);
+        // Counts (and the home screen's favorites), the vim scrolls, and ctrl-i, which is tab
+        // to a terminal.
+        keys.extend(('0'..='9').map(Key::char));
+        keys.extend(['d', 'u', 'e', 'y', 'f', 'b', 'i'].map(Key::ctrl));
     }
     keys
 }
@@ -410,9 +413,24 @@ mod tests {
     }
 
     #[test]
+    fn counts_prefixes_and_vim_scrolls_cant_be_rebound() {
+        for (action, key) in [("watched", "z"), ("sort", "3"), ("expand", "0"), ("jump_back", "ctrl-f"), ("reload", "ctrl-e"), ("jump_forward", "ctrl-i")] {
+            assert!(map(&[(action, key)]).is_err(), "{action} = {key}");
+        }
+    }
+
+    #[test]
+    fn the_manuals_example_loads() {
+        let doc = include_str!("../docs/manual.md");
+        let block = doc.split("```toml\n[keys]").nth(1).and_then(|b| b.split("```").next()).unwrap();
+        let cfg: crate::config::Config = toml::from_str(&format!("[keys]{block}")).unwrap();
+        KeyMap::new(&cfg.keys).unwrap();
+    }
+
+    #[test]
     fn overrides_and_errors() {
-        let m = map(&[("watch", "W")]).unwrap();
-        assert_eq!(m.action(Scope::Thread, &ch('W')), Some(Action::Watch));
+        let m = map(&[("watch", "Q")]).unwrap();
+        assert_eq!(m.action(Scope::Thread, &ch('Q')), Some(Action::Watch));
         assert_eq!(m.action(Scope::Thread, &ch('w')), None);
 
         let err = |pairs| map(pairs).unwrap_err().to_string();
@@ -440,12 +458,12 @@ mod tests {
 
     #[test]
     fn several_keys_per_action() {
-        let overrides = HashMap::from([("watch".to_string(), Binding::Many(vec!["W".into(), "alt-w".into()]))]);
+        let overrides = HashMap::from([("watch".to_string(), Binding::Many(vec!["Q".into(), "alt-w".into()]))]);
         let m = KeyMap::new(&overrides).unwrap();
-        assert_eq!(m.action(Scope::Catalog, &ch('W')), Some(Action::Watch));
+        assert_eq!(m.action(Scope::Catalog, &ch('Q')), Some(Action::Watch));
         assert_eq!(m.action(Scope::Catalog, &KeyEvent::new(KeyCode::Char('w'), KeyModifiers::ALT)), Some(Action::Watch));
-        assert_eq!(m.label(Action::Watch), "W, alt-w");
-        assert_eq!(m.binding(Action::Watch), Some(Binding::Many(vec!["W".into(), "alt-w".into()])));
+        assert_eq!(m.label(Action::Watch), "Q, alt-w");
+        assert_eq!(m.binding(Action::Watch), Some(Binding::Many(vec!["Q".into(), "alt-w".into()])));
         assert_eq!(m.binding(Action::Sort), None);
         // Conflicts are checked across every key of every action.
         let bad = HashMap::from([("sort".to_string(), Binding::Many(vec!["z".into(), "W".into()])), ("watch".to_string(), Binding::One("W".into()))]);

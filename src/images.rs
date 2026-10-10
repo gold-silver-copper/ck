@@ -25,11 +25,13 @@ use crate::disk_cache::DiskCache;
 use crate::http::{self, lock};
 
 const WORKERS: usize = 4;
-/// Decoded images (plus their encoded protocols, estimated at the same size) kept in memory.
-const BUDGET_BYTES: usize = 96 * 1024 * 1024;
+/// Decoded images (plus their encoded protocols, estimated at the same size) kept in memory:
+/// room for a few full-size ones (`MAX_DIM`) besides the thumbnails.
+const BUDGET_BYTES: usize = 192 * 1024 * 1024;
 const MAX_DOWNLOAD: u64 = 25 * 1024 * 1024;
-/// Full-size images are scaled down to this before caching; no terminal shows more.
-const MAX_DIM: u32 = 2048;
+/// Full-size images are scaled down to this before caching: twice what a screen shows, so
+/// the viewer's zoom has detail to show before it pixelates.
+const MAX_DIM: u32 = 4096;
 /// A new size for an image that's already shown (a resize) is encoded once it has held
 /// this long, instead of on every step of the resize.
 const RESIZE_DEBOUNCE: Duration = Duration::from_millis(150);
@@ -235,7 +237,8 @@ enum Done {
 }
 
 enum EncodeJob {
-    One(String, View, Arc<DynamicImage>),
+    /// An image for a view; `fill`: scaled up to fill it too (a thumbnail in its tile).
+    One(String, View, Arc<DynamicImage>, bool),
     Frames(String, Size, Frames),
 }
 
@@ -342,7 +345,7 @@ impl Images {
     pub fn encode_now(&self, img: &DynamicImage, size: Size, grow: bool) -> Option<Protocol> {
         let picker = self.picker.as_ref()?;
         if !grow {
-            return encode(picker, img, size).ok();
+            return encode(picker, img, size, false).ok();
         }
         if picker.protocol_type() == ProtocolType::Halfblocks {
             return halfblocks(img, size, picker.font_size(), true).ok();
@@ -458,7 +461,7 @@ impl Images {
             if (protos.is_empty() || settled || new_part)
                 && let Some(enc) = &self.encode
             {
-                let _ = enc.send(EncodeJob::One(url.to_string(), view, img.clone()));
+                let _ = enc.send(EncodeJob::One(url.to_string(), view, img.clone(), kind == Kind::Thumb));
                 *pending = Some(view);
             }
         }
@@ -624,7 +627,7 @@ fn worker(q: &Queue, tx: &Sender<Done>, encode: &Sender<EncodeJob>, wake: &dyn F
         }
         // Encode right away for the size the UI asked for, saving a round trip.
         let pending = match (&res, size) {
-            (Ok((img, _)), Some(size)) => encode.send(EncodeJob::One(url.clone(), (size, Crop::FIT), img.clone())).is_ok().then_some((size, Crop::FIT)),
+            (Ok((img, _)), Some(size)) => encode.send(EncodeJob::One(url.clone(), (size, Crop::FIT), img.clone(), kind == Kind::Thumb)).is_ok().then_some((size, Crop::FIT)),
             _ => None,
         };
         if tx.send(Done::Fetched(url, res, pending)).is_err() {
@@ -643,12 +646,12 @@ fn bug<T>(what: String) -> Result<T, String> {
 fn encoder(picker: &Picker, jobs: &Receiver<EncodeJob>, tx: &Sender<Done>, wake: &dyn Fn()) {
     while let Ok(job) = jobs.recv() {
         let done = match job {
-            EncodeJob::One(url, (size, crop), img) => {
-                let res = crate::guard::catching(|| encode_crop(picker, &img, size, crop)).unwrap_or_else(bug);
+            EncodeJob::One(url, (size, crop), img, fill) => {
+                let res = crate::guard::catching(|| encode_crop(picker, &img, size, crop, fill)).unwrap_or_else(bug);
                 Done::Encoded(url, (size, crop), res)
             }
             EncodeJob::Frames(url, size, frames) => {
-                let res = crate::guard::catching(|| frames.iter().map(|(f, d)| encode(picker, f, size).map(|p| (p, *d))).collect()).unwrap_or_else(bug);
+                let res = crate::guard::catching(|| frames.iter().map(|(f, d)| encode(picker, f, size, false).map(|p| (p, *d))).collect()).unwrap_or_else(bug);
                 Done::EncodedFrames(url, size, res)
             }
         };
@@ -660,10 +663,10 @@ fn encoder(picker: &Picker, jobs: &Receiver<EncodeJob>, tx: &Sender<Done>, wake:
 }
 
 /// Encode the part `crop` of `img` to fit in `size` cells: scaled up to fill them (that's
-/// zooming in), unless it's the whole image.
-pub(crate) fn encode_crop(picker: &Picker, img: &DynamicImage, size: Size, crop: Crop) -> Result<Protocol, String> {
+/// zooming in), unless it's the whole image (then only with `fill`).
+pub(crate) fn encode_crop(picker: &Picker, img: &DynamicImage, size: Size, crop: Crop, fill: bool) -> Result<Protocol, String> {
     if crop.is_fit() {
-        return encode(picker, img, size);
+        return encode(picker, img, size, fill);
     }
     let font = picker.font_size();
     let (w, h) = pixels(size, font);
@@ -675,14 +678,15 @@ pub(crate) fn encode_crop(picker: &Picker, img: &DynamicImage, size: Size, crop:
     picker.new_protocol(shrink(&part, w, h, true), size, Resize::Fit(None)).map_err(|e| e.to_string())
 }
 
-/// Encode `img` to fit in `size` cells. Large images are scaled down from the shared copy
-/// first, so the full-size image is never cloned.
-fn encode(picker: &Picker, img: &DynamicImage, size: Size) -> Result<Protocol, String> {
+/// Encode `img` to fit in `size` cells (and, with `fill`, scaled up to fill them: a small
+/// thumbnail in its tile). Large images are scaled down from the shared copy first, so the
+/// full-size image is never cloned.
+fn encode(picker: &Picker, img: &DynamicImage, size: Size, fill: bool) -> Result<Protocol, String> {
     if picker.protocol_type() == ProtocolType::Halfblocks {
-        return halfblocks(img, size, picker.font_size(), false);
+        return halfblocks(img, size, picker.font_size(), fill);
     }
     let (w, h) = pixels(size, picker.font_size());
-    picker.new_protocol(shrink(img, w, h, false), size, Resize::Fit(None)).map_err(|e| e.to_string())
+    picker.new_protocol(shrink(img, w, h, fill), size, Resize::Fit(None)).map_err(|e| e.to_string())
 }
 
 /// `size` cells in pixels, at the terminal's cell size `font`.
@@ -888,7 +892,7 @@ mod tests {
             for (iw, ih) in [(1200, 1200), (1200, 350), (300, 1300), (250, 250), (40, 30), (1, 1), (2500, 3)] {
                 let img = DynamicImage::new_rgb8(iw, ih);
                 for size in [Size::new(117, 30), Size::new(16, 8), Size::new(3, 1)] {
-                    let ours = encode_crop(&picker, &img, size, Crop::FIT).unwrap().size();
+                    let ours = encode_crop(&picker, &img, size, Crop::FIT, false).unwrap().size();
                     assert_eq!(ours, library_size(&picker, &img, size, false), "font {font:?}, image {iw}x{ih}, area {size:?}");
                 }
                 // Zoomed: the part fills the area as it did (at small cell sizes: the
@@ -901,7 +905,7 @@ mod tests {
                 let view = (u32::from(size.width) * u32::from(font_px.width), u32::from(size.height) * u32::from(font_px.height));
                 let (x, y, cw, ch) = zoom.region(iw, ih, view);
                 let part = img.crop_imm(x, y, cw, ch);
-                let ours = encode_crop(&picker, &img, size, zoom).unwrap().size();
+                let ours = encode_crop(&picker, &img, size, zoom, false).unwrap().size();
                 assert_eq!(ours, library_size(&picker, &part, size, true), "zoomed: font {font:?}, image {iw}x{ih}");
             }
         }
@@ -917,9 +921,9 @@ mod tests {
             let mut picker = Picker::from_fontsize((10, 20).into());
             picker.set_protocol_type(proto);
             let size = Size::new(117, 30);
-            let fitted = encode_crop(&picker, &img, size, Crop::FIT).unwrap().size();
+            let fitted = encode_crop(&picker, &img, size, Crop::FIT, false).unwrap().size();
             assert_eq!(fitted.width, 60, "{proto:?}");
-            let zoomed = encode_crop(&picker, &img, size, Crop::FIT.zoomed(true).zoomed(true)).unwrap().size();
+            let zoomed = encode_crop(&picker, &img, size, Crop::FIT.zoomed(true).zoomed(true), false).unwrap().size();
             assert!(zoomed.width >= 115 && zoomed.height == 30, "{proto:?}: {zoomed:?}");
         }
     }
@@ -933,7 +937,7 @@ mod tests {
         #[allow(deprecated)]
         let mut picker = Picker::from_fontsize((25, 51).into());
         picker.set_protocol_type(ProtocolType::Halfblocks);
-        let p = encode_crop(&picker, &img, Size::new(20, 10), Crop::FIT).unwrap();
+        let p = encode_crop(&picker, &img, Size::new(20, 10), Crop::FIT, false).unwrap();
         let s = p.size();
         let mut buf = ratatui::buffer::Buffer::empty(ratatui::layout::Rect::new(0, 0, s.width, s.height));
         ratatui::widgets::Widget::render(ratatui_image::Image::new(&p), buf.area, &mut buf);
@@ -1232,7 +1236,7 @@ mod tests {
         im.rx = rx;
         let img = DynamicImage::new_rgb8(64, 48);
         let (big, small) = (Size::new(20, 10), Size::new(4, 2));
-        let p = encode(&Picker::halfblocks(), &img, big).unwrap();
+        let p = encode(&Picker::halfblocks(), &img, big, false).unwrap();
         tx.send(Done::Fetched("u".into(), Ok((Arc::new(img), None)), None)).unwrap();
         tx.send(Done::Encoded("u".into(), (big, Crop::FIT), Ok(p))).unwrap();
         tx.send(Done::Encoded("u".into(), (small, Crop::FIT), Err("no".into()))).unwrap();
@@ -1251,15 +1255,16 @@ mod tests {
         let mut im = Images::new(None, Arc::new(|| {}), None);
         let (tx, rx) = channel();
         im.rx = rx;
-        // Each 2048x2048 RGBA image counts as 32 MiB (doubled for its protocol).
-        for i in 0..4 {
+        // Each 2048x2048 RGBA image counts as 32 MiB (doubled for its protocol): seven are
+        // over the budget.
+        for i in 0..7 {
             let img = Arc::new(DynamicImage::new_rgba8(2048, 2048));
             tx.send(Done::Fetched(format!("u{i}"), Ok((img, None)), None)).unwrap();
         }
         im.poll();
         assert!(im.bytes <= BUDGET_BYTES);
         assert!(!im.slots.contains_key("u0"), "oldest image evicted first");
-        assert!(im.slots.contains_key("u3"));
+        assert!(im.slots.contains_key("u6"));
     }
 }
 

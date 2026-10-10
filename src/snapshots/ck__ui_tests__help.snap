@@ -6,14 +6,14 @@ expression: snapshot(&mut a)
                          Keys          j/k scroll · images: off · esc close
   ▌ ◉  Watched
     ◷  History           Everywhere
-    ▤  Saved               j k g G ^d ^u      move, top/bottom, page
-       4chan               enter l / esc h    open / back
-       lainchan            ., right-click     menu: what you can do here
-       wizchan             f                  label on-screen items to open
-       uboachan            /                  filter (thread: search)
-       endchan             r / o              reload / open in browser
-       kohlchan            :                  go to a URL or site/board
-       desuarchive         ,                  settings: theme, keys, …
+    ▤  Saved               j k gg G           move (10j), top / bottom
+       4chan               ^d ^u ^f ^b ^e ^y  half page, page, line
+       lainchan            enter l / esc h    open / back
+       wizchan             u / ctrl-r / W     back / forward / watched
+       uboachan            ., right-click     menu: what you can do here
+       endchan             f / /              hint labels / filter, search
+       kohlchan            r / o              reload / open in browser
+       desuarchive         : / ,              go to a URL / settings
        zzzchan             [ / ] / ctrl-w     previous / next / close tab
        2ch                 q, ctrl-c          quit (mouse works too)
        smuglo.li
@@ -31,4 +31,4 @@ expression: snapshot(&mut a)
        palanq              h / l, ← / →       previous / next file
        b4k                 space              pause an animated G↓ more (j)
 
- enter open   . more   / filter   o browser   r reload   , settings   ? help
+ enter open   . more   / filter   o browser   r reload   , settings   ? help              1/26  3%

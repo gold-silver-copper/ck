@@ -190,9 +190,9 @@ fn bench_encoding() {
             let mut p = Picker::from_fontsize(font.into());
             p.set_protocol_type(proto);
             let n = if proto == ProtocolType::Halfblocks { 10 } else { 3 };
-            time(&format!("{proto:?}, cells {cells}: a 2048px image in the viewer"), n, || crate::images::encode_crop(&p, &photo, Size::new(117, 30), Crop::FIT));
-            time(&format!("{proto:?}, cells {cells}: a thumbnail tile"), n, || crate::images::encode_crop(&p, &thumb, Size::new(16, 8), Crop::FIT));
-            time(&format!("{proto:?}, cells {cells}: the viewer zoomed to 200%"), n, || crate::images::encode_crop(&p, &photo, Size::new(117, 30), zoom));
+            time(&format!("{proto:?}, cells {cells}: a 2048px image in the viewer"), n, || crate::images::encode_crop(&p, &photo, Size::new(117, 30), Crop::FIT, false));
+            time(&format!("{proto:?}, cells {cells}: a thumbnail tile"), n, || crate::images::encode_crop(&p, &thumb, Size::new(16, 8), Crop::FIT, true));
+            time(&format!("{proto:?}, cells {cells}: the viewer zoomed to 200%"), n, || crate::images::encode_crop(&p, &photo, Size::new(117, 30), zoom, false));
         }
     }
 }

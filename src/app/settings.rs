@@ -88,6 +88,12 @@ pub const SECTIONS: &[(&str, &[Setting])] = &[
     ("Catalog", &[
         row("Default layout", "c in a catalog sets a board's own", |a| a.default_layout.as_str().into(), App::cycle_default_layout),
         row(
+            "Preview lines",
+            "How much of each thread a card shows (its thumbnail grows with it)",
+            |a| a.catalog_lines.map_or_else(|| "as fit beside the thumbnail".into(), |n| format!("{n} line{}", if n == 1 { "" } else { "s" })),
+            App::next_catalog_lines,
+        ),
+        row(
             "Watched first",
             "Threads you watch at the top of catalogs",
             |a| if a.watched_first { "watched threads first" } else { "in the sort's order" }.into(),
@@ -337,6 +343,18 @@ impl App {
         let list = ListState::default().with_selected(Some(names.iter().position(|n| *n == self.theme_name).unwrap_or(0)));
         let before = (self.theme_name.clone(), theme::theme());
         open(self, SettingsPopup::Themes { list, names, before });
+    }
+
+    fn next_catalog_lines(&mut self) {
+        const LINES: [Option<u16>; 6] = [None, Some(1), Some(2), Some(3), Some(5), Some(8)];
+        let at = LINES.iter().position(|&l| l == self.catalog_lines).unwrap_or(0);
+        self.catalog_lines = LINES.get(at + 1).copied().flatten();
+        match self.catalog_lines {
+            Some(n) => self.save_config(&format!("{n} line{} in catalog cards", if n == 1 { "" } else { "s" }), |d| d["catalog_lines"] = toml_edit::value(i64::from(n))),
+            None => self.save_config("catalog cards as tall as their thumbnails", |d| {
+                d.remove("catalog_lines");
+            }),
+        }
     }
 
     fn next_scroll_margin(&mut self) {
