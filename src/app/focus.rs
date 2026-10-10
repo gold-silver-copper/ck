@@ -10,7 +10,7 @@ use ratatui::widgets::ListState;
 
 use super::{App, Hit, Media, Part, Popup, RowKey, SiteRow, TabPopup, View, Viewer, list_move};
 use crate::download;
-use crate::keys::{Action, Scope};
+use crate::keys::Action;
 use crate::model::{Attachment, Link, Target};
 use crate::ui::{INDENT, PAD};
 
@@ -546,8 +546,7 @@ impl App {
     }
 
     pub(super) fn on_menu_key(&mut self, key: KeyEvent) {
-        let scope = if self.tab.viewer().is_some() { Scope::Viewer } else { self.scope() };
-        let action = self.keys.action(scope, &key);
+        let action = self.keys.action(self.scope(), &key);
         let Some(Popup::Menu(m)) = &mut self.popup else { return };
         let cur = m.list.selected().unwrap_or(0);
         if let Some(to) = list_move(key.code, cur, m.items.len()) {

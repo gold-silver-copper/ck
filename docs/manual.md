@@ -341,8 +341,8 @@ A command without a key is still in the `.` menu where it applies.
 Keys are a character (`"w"`, `"W"`, `":"`), `ctrl-` or `alt-` with one, or a named key:
 `tab`, `shift-tab`, `enter`, `esc`, `backspace`, `delete`, `insert`, arrows (`up`, ...),
 `home`, `end`, `pageup`, `pagedown`, `space`, `f1`–`f12`. Navigation keys (the first
-table) are fixed, as are keys inside text inputs and popups. In the image viewer only
-the viewer's own commands apply.
+table) are fixed, as are keys inside text inputs and popups. In the image viewer and the
+gallery only their own commands apply.
 
 ## Filters and hiding
 

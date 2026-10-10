@@ -9,7 +9,7 @@ use anyhow::{Result, bail};
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use serde::Deserialize;
 
-/// Where a key applies. Global keys work in every view but the image viewer.
+/// Where a key applies. Global keys work in every view but the image viewer and gallery.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Scope {
     Global,
@@ -19,6 +19,8 @@ pub enum Scope {
     Thread,
     /// Watched and History.
     Saved,
+    /// A thread's files as a grid.
+    Gallery,
     /// The full-screen image viewer.
     Viewer,
 }
@@ -31,12 +33,13 @@ impl Scope {
             Scope::Catalog => "catalog",
             Scope::Thread => "thread",
             Scope::Saved => "watched, history",
+            Scope::Gallery => "gallery",
             Scope::Viewer => "image viewer",
         }
     }
 }
 
-const VIEWS: [Scope; 5] = [Scope::Lists, Scope::Catalog, Scope::Thread, Scope::Saved, Scope::Viewer];
+const VIEWS: [Scope; 6] = [Scope::Lists, Scope::Catalog, Scope::Thread, Scope::Saved, Scope::Gallery, Scope::Viewer];
 
 /// Declares `Action` and `ACTIONS` (every action: config name, default key, scopes, and
 /// what it does) from one list. Actions without a default key are in the `.` menu, and can
@@ -62,12 +65,12 @@ actions! {
     Goto, "goto", Some(Key::char(':')), &[Scope::Global], "go to a URL or site/board/thread";
     NextTab, "next_tab", Some(Key::char(']')), &[Scope::Global], "next tab";
     PrevTab, "prev_tab", Some(Key::char('[')), &[Scope::Global], "previous tab";
-    Menu, "menu", Some(Key::char('.')), &[Scope::Global, Scope::Viewer], "what you can do with what's selected";
+    Menu, "menu", Some(Key::char('.')), &[Scope::Global, Scope::Gallery, Scope::Viewer], "what you can do with what's selected";
     Hints, "hints", Some(Key::char('f')), &[Scope::Lists, Scope::Catalog, Scope::Thread, Scope::Saved], "label what's on screen; type a label to open it";
     NextPart, "next_part", Some(Key::code(KeyCode::Tab)), &[Scope::Thread], "focus the post's next image or link (then the next post's)";
     PrevPart, "prev_part", Some(Key::code(KeyCode::BackTab)), &[Scope::Thread], "focus the previous image or link";
     CloseTab, "close_tab", Some(Key::ctrl('w')), &[Scope::Global], "close the tab";
-    View, "view", Some(Key::char('v')), &[Scope::Catalog, Scope::Thread], "view the post's images";
+    View, "view", Some(Key::char('v')), &[Scope::Catalog, Scope::Thread, Scope::Gallery], "view the post's images";
     Watch, "watch", Some(Key::char('w')), &[Scope::Catalog, Scope::Thread], "watch / unwatch the thread";
     Sort, "sort", Some(Key::char('s')), &[Scope::Catalog], "cycle the sort order";
     Compact, "compact", Some(Key::char('c')), &[Scope::Catalog], "layout: cards, compact, grid";
@@ -82,9 +85,9 @@ actions! {
     PrevMatch, "prev_match", Some(Key::char('N')), &[Scope::Thread], "previous search match";
     Spoiler, "spoiler", Some(Key::char('s')), &[Scope::Thread], "show the post's spoilers";
     AllSpoilers, "all_spoilers", Some(Key::char('S')), &[Scope::Thread], "show all spoilers";
-    Download, "download", Some(Key::char('d')), &[Scope::Thread, Scope::Viewer], "save the file in front of you: focused, viewed, or in the gallery";
+    Download, "download", Some(Key::char('d')), &[Scope::Thread, Scope::Gallery, Scope::Viewer], "save the file in front of you: focused, viewed, or in the gallery";
     DownloadPost, "download_post", None, &[Scope::Thread], "save all the post's files";
-    DownloadThread, "download_thread", None, &[Scope::Thread], "save all the thread's files (asks first)";
+    DownloadThread, "download_thread", None, &[Scope::Thread, Scope::Gallery], "save all the thread's files (asks first)";
     Archive, "archive", Some(Key::char('a')), &[Scope::Thread], "open a 404'd thread in the archive";
     ArchiveSearch, "archive_search", Some(Key::char('A')), &[Scope::Catalog], "search the board's archive";
     Links, "links", Some(Key::char('O')), &[Scope::Catalog, Scope::Thread], "the post's links and files";
@@ -92,8 +95,8 @@ actions! {
     Filter, "filter", Some(Key::char('X')), &[Scope::Catalog, Scope::Thread], "hide or highlight posts like this one (a filter)";
     ShowHidden, "show_hidden", Some(Key::char('Z')), &[Scope::Catalog, Scope::Thread], "show hidden threads and posts";
     ImageSearch, "image_search", Some(Key::char('R')), &[Scope::Thread, Scope::Viewer], "reverse image search";
-    Gallery, "gallery", Some(Key::char('V')), &[Scope::Thread], "the thread's files as a grid";
-    Export, "export", None, &[Scope::Thread], "save the thread as a page, HTML and JSON (asks first)";
+    Gallery, "gallery", Some(Key::char('V')), &[Scope::Thread, Scope::Gallery], "the thread's files as a grid";
+    Export, "export", None, &[Scope::Thread, Scope::Gallery], "save the thread as a page, HTML and JSON (asks first)";
     Expand, "expand", Some(Key::char('e')), &[Scope::Thread], "show / hide the post's replies under it";
     Conversation, "conversation", Some(Key::char('c')), &[Scope::Thread], "the post's conversation alone: what it replies to, and its replies";
     Poster, "poster", Some(Key::char('I')), &[Scope::Thread], "the post's poster's posts alone (by poster ID)";
@@ -109,8 +112,8 @@ actions! {
     BoardImages, "board_images", None, &[Scope::Lists, Scope::Catalog, Scope::Thread], "images on this board: on / off";
     Follow, "follow", Some(Key::char('F')), &[Scope::Catalog, Scope::Thread, Scope::Saved], "follow as a general: watch its next thread";
     Remove, "remove", Some(Key::char('x')), &[Scope::Saved, Scope::Lists], "remove the entry (home: a favorite)";
-    Copy, "copy", Some(Key::char('y')), &[Scope::Catalog, Scope::Thread, Scope::Saved, Scope::Viewer], "copy the text (viewer: file URL)";
-    CopyLink, "copy_link", Some(Key::char('Y')), &[Scope::Catalog, Scope::Thread, Scope::Saved, Scope::Viewer], "copy the link";
+    Copy, "copy", Some(Key::char('y')), &[Scope::Catalog, Scope::Thread, Scope::Saved, Scope::Gallery, Scope::Viewer], "copy the text (viewer: file URL)";
+    CopyLink, "copy_link", Some(Key::char('Y')), &[Scope::Catalog, Scope::Thread, Scope::Saved, Scope::Gallery, Scope::Viewer], "copy the link";
 }
 
 /// A key with its modifiers: `w`, `W`, `ctrl-w`, `alt-x`, `tab`, `shift-tab`, `f5`, ...
@@ -252,10 +255,11 @@ fn fixed(scope: Scope) -> Vec<Key> {
     let chars: &[char] = match scope {
         Scope::Thread => &['j', 'k', 'g', 'G', 'h', 'l', 'J', 'K', ' ', 'z'],
         Scope::Viewer => &['j', 'k', 'h', 'l', 'i', 'q', 'v', ' ', '+', '=', '-', '0'],
+        Scope::Gallery => &['j', 'k', 'h', 'l', 'g', 'G', 'q'],
         _ => &['j', 'k', 'g', 'G', 'h', 'l'],
     };
     keys.extend(chars.iter().map(|&c| Key::char(c)));
-    if scope != Scope::Viewer {
+    if !matches!(scope, Scope::Viewer | Scope::Gallery) {
         // Counts (and the home screen's favorites), the vim scrolls, and ctrl-i, which is tab
         // to a terminal.
         keys.extend(('0'..='9').map(Key::char));
@@ -265,7 +269,7 @@ fn fixed(scope: Scope) -> Vec<Key> {
 }
 
 fn applies(scopes: &[Scope], view: Scope) -> bool {
-    scopes.iter().any(|&s| s == view || (s == Scope::Global && view != Scope::Viewer))
+    scopes.iter().any(|&s| s == view || (s == Scope::Global && !matches!(view, Scope::Viewer | Scope::Gallery)))
 }
 
 #[derive(Debug, Clone)]
@@ -414,6 +418,8 @@ mod tests {
 
     #[test]
     fn counts_prefixes_and_vim_scrolls_cant_be_rebound() {
+        // q closes the gallery, whatever quits.
+        assert!(map(&[("quit", "Q"), ("view", "q")]).is_err());
         for (action, key) in [("watched", "z"), ("sort", "3"), ("expand", "0"), ("jump_back", "ctrl-f"), ("reload", "ctrl-e"), ("jump_forward", "ctrl-i")] {
             assert!(map(&[(action, key)]).is_err(), "{action} = {key}");
         }

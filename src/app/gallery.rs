@@ -46,7 +46,7 @@ impl App {
         let Some(g) = &mut self.tab.gallery else { return };
         let n = g.files.len();
         let cur = g.state.selected().unwrap_or(0);
-        let action = self.keys.action(Scope::Thread, &key);
+        let action = self.keys.action(Scope::Gallery, &key);
         let to = match key.code {
             KeyCode::Char('j') | KeyCode::Down => Some((cur + cols).min(n - 1)),
             KeyCode::Char('k') | KeyCode::Up => Some(cur.saturating_sub(cols)),

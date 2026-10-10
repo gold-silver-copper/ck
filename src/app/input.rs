@@ -411,8 +411,13 @@ impl App {
         }
     }
 
+    /// Where keys go: the viewer or gallery when open, else the view.
     pub fn scope(&self) -> Scope {
+        if self.tab.viewer().is_some() {
+            return Scope::Viewer;
+        }
         match self.tab.view() {
+            View::Thread if self.tab.gallery.is_some() => Scope::Gallery,
             View::Sites | View::Boards | View::Settings | View::Search => Scope::Lists,
             View::Catalog => Scope::Catalog,
             View::Thread => Scope::Thread,

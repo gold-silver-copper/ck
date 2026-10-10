@@ -15,7 +15,7 @@ expression: snapshot(&mut a)
       :               goto             go to a URL or site/board/thread     everywhere
       ]               next_tab         next tab                             everywhere
       [               prev_tab         previous tab                         everywhere
-      .               menu             what you can do with what's selected everywhere, image v…
+      .               menu             what you can do with what's selected everywhere, gallery…
       ctrl-w          close_tab        close the tab                        everywhere
       W               watched          the watched threads                  everywhere
 
