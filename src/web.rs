@@ -15,6 +15,10 @@ pub use protocol::{Reply, Request, Upload};
 
 const NAME: &str = "ck-web";
 
+/// What to say when ck-web answers in a way this ck can't read.
+const STALE: &str = "ck-web answered in a way this ck doesn't understand: it's another version. \
+                     If you built it, build it again (cargo build --release -p ck-web)";
+
 /// A running ck-web, shared by the threads that ask it things. It stops when the last clone
 /// is dropped (its stdin closes, and it's killed).
 #[derive(Clone)]
@@ -59,15 +63,16 @@ impl Helper {
         std::thread::spawn(move || {
             for line in BufReader::new(stdout).lines() {
                 let Ok(line) = line else { break };
-                // A line that isn't a reply (from a newer or older ck-web) is skipped.
-                match serde_json::from_str(&line) {
-                    Ok(view @ Reply::View { .. }) => on_view(view),
-                    Ok(reply) => {
+                // A line this ck can't read is from a ck-web of another version: what's asked
+                // fails, rather than waiting on an answer that won't come.
+                let reply = serde_json::from_str(&line).unwrap_or_else(|_| Reply::Failed { error: STALE.into() });
+                match reply {
+                    view @ Reply::View { .. } => on_view(view),
+                    reply => {
                         if let Some(tx) = crate::http::lock(&answers).take() {
                             let _ = tx.send(Some(reply));
                         }
                     }
-                    Err(_) => {}
                 }
             }
             if let Some(tx) = crate::http::lock(&answers).take() {
