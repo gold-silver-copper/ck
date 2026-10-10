@@ -57,7 +57,7 @@ impl Editor {
             KeyCode::Backspace if ctrl || alt => self.delete_to(self.word_left()),
             KeyCode::Char('u') if ctrl => self.delete_to(self.line_start()),
             KeyCode::Char('k') if ctrl => self.delete_to(self.line_end()),
-            KeyCode::Char(_) if ctrl => return false,
+            KeyCode::Char(_) if ctrl || alt => return false,
             KeyCode::Char(c) => self.insert(c.encode_utf8(&mut [0; 4])),
             KeyCode::Enter if self.multiline => self.insert("\n"),
             KeyCode::Backspace => self.delete_to(self.prev()),

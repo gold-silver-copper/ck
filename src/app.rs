@@ -1940,21 +1940,14 @@ fn list_move(code: KeyCode, cur: usize, len: usize) -> Option<usize> {
     }
 }
 
-/// A key in a one-line text field, as a shell takes it: backspace, ctrl-w (or ctrl- or
-/// alt-backspace) a word, ctrl-u the whole line, and typed characters; other keys (another
-/// ctrl- or alt- letter among them) do nothing.
+/// A key in a one-line text field, as the reply box's fields take it at their end:
+/// backspace, ctrl-w (or ctrl- or alt-backspace) a word, ctrl-u the line, and typed
+/// characters; other keys (another ctrl- or alt- letter among them) do nothing.
 fn edit_text(text: &mut String, key: KeyEvent) {
-    let (ctrl, alt) = (key.modifiers.contains(KeyModifiers::CONTROL), key.modifiers.contains(KeyModifiers::ALT));
-    match key.code {
-        KeyCode::Char('w') if ctrl => text.truncate(text.trim_end().trim_end_matches(|c: char| !c.is_whitespace()).len()),
-        KeyCode::Backspace if ctrl || alt => text.truncate(text.trim_end().trim_end_matches(|c: char| !c.is_whitespace()).len()),
-        KeyCode::Char('u') if ctrl => text.clear(),
-        KeyCode::Backspace => {
-            text.pop();
-        }
-        KeyCode::Char(c) if !ctrl && !alt => text.push(c),
-        _ => {}
-    }
+    let mut field = crate::editor::Editor::default();
+    field.set(text);
+    field.on_key(key);
+    field.text().clone_into(text);
 }
 
 /// The indices of the items whose `text` contains the filter (any case). The text is only
