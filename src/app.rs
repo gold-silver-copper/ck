@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::num::NonZeroUsize;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel};
@@ -20,7 +21,7 @@ use crate::download;
 use crate::filter::{Filters, Hidden};
 use crate::http;
 use crate::images::Images;
-use crate::keys::{Action, KeyMap, Scope};
+use crate::keys::{Action, Command, KeyMap, Nav, Scope};
 use crate::model::{Attachment, Board, FileKind, Link, Post, Thread, max_no, shrank};
 use crate::store::{Store, ThreadKey};
 use crate::theme::{self, ThemeDef, ThemeSetting};
@@ -324,24 +325,28 @@ enum Msg {
     Wake,
 }
 
-/// Keys typed toward a command, vim's way: a count (`10j`, `5G`), and `z` or `g` waiting for
-/// the key that finishes it (`zz`, `gg`).
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub struct Pending {
-    pub count: Option<usize>,
-    pub prefix: Option<char>,
+/// Keys typed toward a command, vim's way, waiting for the rest of it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Pending {
+    /// A count (`10`, for `10j`).
+    Count(NonZeroUsize),
+    /// `g` or `z`, waiting for its second key (`gg`, `zz`).
+    G,
+    Z,
+    /// `10g` went to the tenth post at once: a `g` next is vim's `10gg`, and does nothing
+    /// more. Not shown.
+    CountedG,
 }
 
-/// The prefix after `10g`, which went to post 10 at once: a `g` next finishes vim's `10gg`
-/// and does nothing more. Not shown.
-pub(crate) const GG_DONE: char = '\0';
-
 impl Pending {
-    /// As the footer shows it: "10", "z", "10g".
+    /// As the footer shows it: "10", "g", "z".
     pub fn shown(self) -> Option<String> {
-        let prefix = self.prefix.filter(|&p| p != GG_DONE);
-        let text = format!("{}{}", self.count.map(|n| n.to_string()).unwrap_or_default(), prefix.map(String::from).unwrap_or_default());
-        Some(text).filter(|t| !t.is_empty())
+        match self {
+            Pending::Count(n) => Some(n.to_string()),
+            Pending::G => Some("g".into()),
+            Pending::Z => Some("z".into()),
+            Pending::CountedG => None,
+        }
     }
 }
 
@@ -489,7 +494,7 @@ pub struct App {
     /// What's being typed, if anything.
     pub typing: Option<Typing>,
     /// Keys typed toward a command, as vim takes them (shown in the footer while they wait).
-    pub pending: Pending,
+    pub pending: Option<Pending>,
     pub keys: KeyMap,
     /// The last text copied to the clipboard, and the last URL opened.
     pub copied: Option<String>,
@@ -534,7 +539,7 @@ pub struct App {
 
 impl App {
     /// `keys` and `filters` are built from `cfg` by the caller, which reports their errors.
-    pub fn new(cfg: Config, keys: KeyMap, filters: Filters, picker: Option<ratatui_image::picker::Picker>, store: Store) -> Self {
+    pub fn new(cfg: Config, filters: Filters, picker: Option<ratatui_image::picker::Picker>, store: Store) -> Self {
         // ck 0.2's [theme] table of overrides becomes a theme of its own, "legacy".
         let mut themes = cfg.themes.clone();
         let theme_name = match &cfg.theme {
@@ -642,8 +647,8 @@ impl App {
             saved_at: Instant::now(),
             session_saved: Instant::now(),
             typing: None,
-            pending: Pending::default(),
-            keys,
+            pending: None,
+            keys: cfg.keys,
             copied: None,
             opened: None,
             config_path: Config::path(),

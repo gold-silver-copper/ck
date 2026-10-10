@@ -465,7 +465,7 @@ enum Act {
 impl std::fmt::Display for Act {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            Act::Key(k) => write!(f, "key {}", crate::keys::Key::from_event(k)),
+            Act::Key(k) => write!(f, "key {}", crate::keys::Key::from(*k)),
             Act::Mouse(kind, x, y, double) => write!(f, "mouse {kind:?} at {x},{y}{}", if *double { " (double)" } else { "" }),
             Act::Paste(t) => write!(f, "paste {t:?}"),
             Act::Goto(t) => write!(f, "goto {t:?}"),
@@ -486,7 +486,7 @@ impl std::fmt::Display for Act {
 
 /// Keys that do something somewhere, so they come up often.
 fn hot_keys() -> Vec<KeyEvent> {
-    let mut keys: Vec<KeyEvent> = crate::keys::ACTIONS.iter().filter_map(|&(_, _, k, ..)| k).map(|k| KeyEvent::new(k.code, k.mods)).collect();
+    let mut keys: Vec<KeyEvent> = crate::keys::Action::ALL.iter().filter_map(|a| a.default_key()).map(KeyEvent::from).collect();
     keys.extend(
         [
             KeyCode::Char('j'),
@@ -666,7 +666,7 @@ impl World {
             }
         }
         let filters = crate::filter::Filters::from_config(&cfg.filters, &cfg.hidden_words).unwrap();
-        let mut app = App::new(cfg, KeyMap::default(), filters, None, store);
+        let mut app = App::new(cfg, filters, None, store);
         app.config_path = Some(dir.join("config.toml"));
         app.download_dir = Some(dir.join("downloads").display().to_string());
         app.pages = Some(crate::pages::Pages::new(dir.join("cache/pages"), 4 << 20));

@@ -71,7 +71,7 @@ impl App {
     pub fn on_mouse(&mut self, ev: MouseEvent, now: Instant) {
         http::user_input();
         // The mouse drops a waiting count or prefix.
-        self.pending = Pending::default();
+        self.pending = None;
         let (before, top) = (self.shown(), self.modal());
         let (wheel, left, right, tabs) = self.mouse(top);
         let pos = Position::new(ev.column, ev.row);
@@ -269,7 +269,7 @@ impl App {
     /// A key for what's on top.
     fn on_modal_key(&mut self, modal: Modal, key: KeyEvent) {
         // A count or prefix is for the view, not what's on top of it.
-        self.pending = Pending::default();
+        self.pending = None;
         match modal {
             Modal::Confirm => self.on_confirm_key(key),
             Modal::Adding => self.on_adding_key(key),
@@ -284,12 +284,8 @@ impl App {
             },
             Modal::ImageSearch => self.on_image_search_key(key.code),
             Modal::Reply => self.on_reply_key(key),
-            Modal::Viewer => match self.keys.action(Scope::Viewer, &key) {
-                Some(action) => self.act(action),
-                None => self.on_viewer_key(key.code),
-            },
+            Modal::Viewer | Modal::Gallery => self.on_view_key(key),
             Modal::Preview => self.on_preview_key(key.code),
-            Modal::Gallery => self.on_gallery_key(key),
             Modal::Links => self.on_links_key(key.code),
             Modal::Goto => self.on_goto_key(key),
             Modal::SearchInput => self.on_search_input_key(key),
@@ -298,109 +294,100 @@ impl App {
         }
     }
 
-    /// A key for the view, with nothing on top: vim's way, a count before it (`10j`) and
-    /// `z` / `g` taking a second key (`zz`, `gg`).
+    /// A key for what has the keys with no popup on top: a view (vim's way, a count before it,
+    /// `10j`, and `z` / `g` taking a second key, `zz`, `gg`), the gallery or the viewer.
     fn on_view_key(&mut self, key: KeyEvent) {
-        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
-        let pending = std::mem::take(&mut self.pending);
-        // Esc drops a waiting count or prefix; a key that doesn't finish the prefix drops it and
-        // counts as itself.
-        if key.code == KeyCode::Esc && pending.shown().is_some() {
+        let pending = self.pending.take();
+        if self.finish_prefix(pending, key.code) {
             return;
         }
-        if let Some(prefix) = pending.prefix
-            && self.finish_prefix(prefix, key.code, pending.count)
-        {
-            return;
-        }
-        let n = pending.count.unwrap_or(1);
-        let action = self.keys.action(self.scope(), &key);
-        if let (None, KeyCode::Char(c), false) = (action, key.code, ctrl || key.modifiers.contains(KeyModifiers::ALT)) {
-            match c {
-                // A count: digits, where they aren't keys of their own (home's favorites); a
-                // 0 only after another.
-                '0'..='9' if self.tab.view() != View::Sites && (c != '0' || pending.count.is_some()) => {
-                    let count = pending.count.unwrap_or(0).saturating_mul(10).saturating_add(c as usize - '0' as usize);
-                    self.pending = Pending { count: Some(count.min(99_999)), prefix: None };
-                    return;
+        let count = match pending {
+            Some(Pending::Count(n)) => Some(n),
+            _ => None,
+        };
+        let scope = self.scope();
+        match self.keys.command(scope, key) {
+            Some(Command::Act(action)) => {
+                for _ in 0..if action.repeats() { count.map_or(1, NonZeroUsize::get) } else { 1 } {
+                    self.run_action(action);
                 }
-                // `5g`, `5G`: the fifth post (or entry) at once. A `g` right after `5g` is part
-                // of vim's `5gg`, already done.
-                'g' | 'G' if pending.count.is_some() => {
-                    self.go_to_entry(n);
-                    if c == 'g' {
-                        self.pending = Pending { count: None, prefix: Some(GG_DONE) };
+            }
+            Some(Command::Nav(nav)) if scope == Scope::Viewer => self.on_viewer_nav(nav),
+            Some(Command::Nav(nav)) if scope == Scope::Gallery => self.on_gallery_nav(nav),
+            Some(Command::Nav(nav)) => self.on_nav(nav, key, count),
+            None => {}
+        }
+    }
+
+    /// A fixed key in a view, `count` times over where it's a move.
+    fn on_nav(&mut self, nav: Nav, key: KeyEvent, count: Option<NonZeroUsize>) {
+        let view = self.tab.view();
+        let n = count.map_or(1, NonZeroUsize::get);
+        match nav {
+            Nav::Digit => {
+                let d = key.code.as_char().and_then(|c| c.to_digit(10)).map_or(0, |d| d as usize);
+                if view == View::Sites {
+                    // Home's digits are its favorites.
+                    if let Some(i) = d.checked_sub(1) {
+                        self.open_favorite(i);
                     }
-                    return;
+                } else {
+                    // A 0 alone isn't a count.
+                    self.pending = NonZeroUsize::new(count.map_or(0, NonZeroUsize::get).saturating_mul(10).saturating_add(d).min(99_999)).map(Pending::Count);
                 }
-                'g' => {
-                    self.pending = Pending { count: None, prefix: Some('g') };
-                    return;
-                }
-                'z' if self.tab.view() == View::Thread => {
-                    self.pending = Pending { count: None, prefix: Some('z') };
-                    return;
-                }
-                _ => {}
             }
-        }
-        if let Some(action) = action {
-            // Moves repeat with a count; anything else (a toggle) once.
-            let repeats = matches!(action, Action::NextMatch | Action::PrevMatch | Action::JumpBack | Action::JumpForward | Action::NextTab | Action::PrevTab | Action::NextPart | Action::PrevPart);
-            for _ in 0..if repeats { n } else { 1 } {
-                self.act(action);
+            // `5g`, `5G`: the fifth post (or entry) at once. A `g` right after `5g` is part of
+            // vim's `5gg`, already done.
+            Nav::G | Nav::Bottom if count.is_some() => {
+                self.go_to_entry(n);
+                if nav == Nav::G {
+                    self.pending = Some(Pending::CountedG);
+                }
             }
-            return;
-        }
-        match key.code {
-            KeyCode::F(5) => self.refresh(),
+            Nav::G => self.pending = Some(Pending::G),
+            Nav::Z => self.pending = Some(Pending::Z),
+            Nav::Refresh => self.refresh(),
             // Esc backs out a step: from a focused part to its post first.
-            KeyCode::Esc if self.focused().is_some() => {
+            Nav::Esc if self.focused().is_some() => {
                 if let Some(t) = &mut self.tab.thread {
                     t.focus = None;
                     t.layout = None;
                 }
             }
-            KeyCode::Esc if self.tab.view() == View::Thread && self.tab.thread.as_ref().is_some_and(|t| !t.search.is_empty()) => {
+            Nav::Esc if view == View::Thread && self.tab.thread.as_ref().is_some_and(|t| !t.search.is_empty()) => {
                 if let Some(t) = &mut self.tab.thread {
                     t.set_search(String::new());
                 }
             }
             // Out of a conversation, to the whole thread.
-            KeyCode::Esc if self.tab.view() == View::Thread && self.tab.thread.as_ref().is_some_and(|t| t.conversation.is_some()) => {
+            Nav::Esc if view == View::Thread && self.tab.thread.as_ref().is_some_and(|t| t.conversation.is_some()) => {
                 if let Some(t) = &mut self.tab.thread {
                     t.leave_conversation();
                 }
             }
-            KeyCode::Esc if !self.filter(self.tab.view()).is_empty() => self.edit_filter(self.tab.view(), String::clear),
-            KeyCode::Esc => self.back(),
+            Nav::Esc if !self.filter(view).is_empty() => self.edit_filter(view, String::clear),
+            Nav::Esc => self.back(),
             // A count stops at the grid's edge rather than going on to mean back.
-            _ if self.tab.view() == View::Catalog && self.on_grid_key(key.code) => {
+            _ if view == View::Catalog && self.on_grid_key(nav) => {
                 for _ in 1..n {
-                    if !self.on_grid_key(key.code) {
+                    if !self.on_grid_key(nav) {
                         break;
                     }
                 }
             }
-            KeyCode::Char(c @ '1'..='9') if self.tab.view() == View::Sites => self.open_favorite(c as usize - '1' as usize),
-            KeyCode::Char('h') | KeyCode::Left | KeyCode::Backspace => self.back(),
-            _ if self.tab.view() == View::Thread => self.on_thread_key(key.code, ctrl, n),
-            KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right => self.enter(),
-            code => {
-                let view = self.tab.view();
-                let step = match code {
-                    KeyCode::Char('j') | KeyCode::Down => 1,
-                    KeyCode::Char('k') | KeyCode::Up => -1,
-                    KeyCode::Char('e') if ctrl => 1,
-                    KeyCode::Char('y') if ctrl => -1,
-                    KeyCode::Char('d') if ctrl => 10,
-                    KeyCode::Char('u') if ctrl => -10,
-                    KeyCode::Char('f') if ctrl => 20,
-                    KeyCode::Char('b') if ctrl => -20,
-                    KeyCode::PageDown => 10,
-                    KeyCode::PageUp => -10,
-                    KeyCode::Home => isize::MIN / 2,
-                    KeyCode::Char('G') | KeyCode::End => isize::MAX / 2,
+            Nav::Left | Nav::Back => self.back(),
+            _ if view == View::Thread => self.on_thread_key(nav, n),
+            Nav::Open | Nav::Right => self.enter(),
+            _ => {
+                let step = match nav {
+                    Nav::Down | Nav::LineDown => 1,
+                    Nav::Up | Nav::LineUp => -1,
+                    Nav::HalfDown => 10,
+                    Nav::HalfUp => -10,
+                    Nav::PageDown => 20,
+                    Nav::PageUp => -20,
+                    Nav::Top => isize::MIN / 2,
+                    Nav::Bottom => isize::MAX / 2,
                     _ => return,
                 };
                 self.move_selection(view, step.saturating_mul(n as isize));
@@ -427,12 +414,7 @@ impl App {
 
     /// Run a command as its key would where you are (the menu runs its rows this way).
     pub(super) fn run_action(&mut self, action: Action) {
-        match self.modal() {
-            // The viewer's own `i` opens its file.
-            Some(Modal::Viewer) if action == Action::OpenFile => self.on_viewer_key(KeyCode::Char('i')),
-            Some(Modal::Gallery) => self.gallery_action(action),
-            _ => self.act(action),
-        }
+        if self.modal() == Some(Modal::Gallery) { self.gallery_action(action) } else { self.act(action) }
     }
 
     /// Run a (remappable) command.
@@ -454,6 +436,7 @@ impl App {
             Action::JumpBack if self.tab.view() != View::Thread || self.tab.thread.is_none() => self.travel(true),
             Action::JumpForward if self.tab.view() != View::Thread || self.tab.thread.is_none() => self.travel(false),
             Action::Watched => self.tab.navigate(View::Watched),
+            Action::OpenFile if self.tab.viewer().is_some() => self.on_viewer_nav(Nav::Open),
             // In archive search: the next page of results.
             Action::NextMatch if self.tab.view() == View::Search => {
                 if self.more_results() {
@@ -554,10 +537,10 @@ impl App {
         }
     }
 
-    /// Moving in the catalog grid: j/k by rows, h/l by columns (h in the first column goes
-    /// back, as in lists), as the grid was last drawn; before a grid's first frame, by one card.
-    /// Returns whether the key was one of those.
-    fn on_grid_key(&mut self, code: KeyCode) -> bool {
+    /// Moving in the catalog grid: down and up by rows, left and right by columns (left in
+    /// the first column goes back, as in lists), as the grid was last drawn; before a grid's
+    /// first frame, by one card. Returns whether the key was one of those.
+    fn on_grid_key(&mut self, nav: Nav) -> bool {
         let (cols, edges) = match self.drawn_cols() {
             Some(Some(cols)) => (cols as isize, true),
             None if self.layout() == CatalogLayout::Grid => (1, false),
@@ -565,12 +548,12 @@ impl App {
         };
         let len = self.visible_catalog().len();
         let cur = self.selected_row(View::Catalog).unwrap_or(0) as isize;
-        let delta = match code {
-            KeyCode::Char('j') | KeyCode::Down => cols,
-            KeyCode::Char('k') | KeyCode::Up => -cols,
-            KeyCode::Char('l') | KeyCode::Right if !edges || (cur + 1) % cols != 0 => 1,
-            KeyCode::Char('l') | KeyCode::Right => 0,
-            KeyCode::Char('h') | KeyCode::Left if !edges || cur % cols != 0 => -1,
+        let delta = match nav {
+            Nav::Down => cols,
+            Nav::Up => -cols,
+            Nav::Right if !edges || (cur + 1) % cols != 0 => 1,
+            Nav::Right => 0,
+            Nav::Left if !edges || cur % cols != 0 => -1,
             _ => return false,
         };
         // Down from the last full row goes to the last thread; past either end, nowhere.
@@ -582,40 +565,36 @@ impl App {
     }
 
     /// A thread's own key, `n` times over where it's a move.
-    fn on_thread_key(&mut self, code: KeyCode, ctrl: bool, n: usize) {
-        if code == KeyCode::Enter && self.take_saved_offer() {
+    fn on_thread_key(&mut self, nav: Nav, n: usize) {
+        if nav == Nav::Open && self.take_saved_offer() {
             return;
         }
         let Some(t) = &mut self.tab.thread else { return };
         let half = (t.viewport / 2).max(1) as isize;
         let times = n as isize;
-        match code {
-            KeyCode::Char('j') | KeyCode::Down if !ctrl => (0..n).for_each(|_| t.step(true)),
-            KeyCode::Char('k') | KeyCode::Up if !ctrl => (0..n).for_each(|_| t.step(false)),
-            KeyCode::Char('J') => t.scroll_lines(times),
-            KeyCode::Char('K') => t.scroll_lines(-times),
-            KeyCode::Char('e') if ctrl => t.scroll_lines(times),
-            KeyCode::Char('y') if ctrl => t.scroll_lines(-times),
-            KeyCode::Char('d') if ctrl => t.scroll_lines(half.saturating_mul(times)),
-            KeyCode::Char('u') if ctrl => t.scroll_lines(-half.saturating_mul(times)),
-            KeyCode::PageDown | KeyCode::Char(' ') => t.scroll_lines((half * 2 - 1).saturating_mul(times)),
-            KeyCode::Char('f') if ctrl => t.scroll_lines((half * 2 - 1).saturating_mul(times)),
-            KeyCode::PageUp => t.scroll_lines(-(half * 2 - 1).saturating_mul(times)),
-            KeyCode::Char('b') if ctrl => t.scroll_lines(-(half * 2 - 1).saturating_mul(times)),
-            KeyCode::Home => t.select_entry(0),
+        match nav {
+            Nav::Down => (0..n).for_each(|_| t.step(true)),
+            Nav::Up => (0..n).for_each(|_| t.step(false)),
+            Nav::LineDown => t.scroll_lines(times),
+            Nav::LineUp => t.scroll_lines(-times),
+            Nav::HalfDown => t.scroll_lines(half.saturating_mul(times)),
+            Nav::HalfUp => t.scroll_lines(-half.saturating_mul(times)),
+            Nav::PageDown => t.scroll_lines((half * 2 - 1).saturating_mul(times)),
+            Nav::PageUp => t.scroll_lines(-(half * 2 - 1).saturating_mul(times)),
+            Nav::Top => t.select_entry(0),
             // The very end of the thread, so a refresh's new posts come into view.
-            KeyCode::Char('G') | KeyCode::End => {
+            Nav::Bottom => {
                 t.leave_mark();
                 t.select_entry(usize::MAX);
                 t.scroll_to(Reveal::Bottom);
                 t.reveal = Some(Reveal::Bottom);
             }
-            KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right if t.focus.is_some() => {
+            Nav::Open | Nav::Right if t.focus.is_some() => {
                 if let Some(part) = t.focus.clone() {
                     self.activate(part);
                 }
             }
-            KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right => {
+            Nav::Open | Nav::Right => {
                 let quotes = t.current().map(|p| p.quotes.clone()).unwrap_or_default();
                 if !quotes.into_iter().any(|q| t.jump_to(q)) {
                     self.follow_link();
@@ -625,19 +604,19 @@ impl App {
         }
     }
 
-    /// `z` or `g` with its second key: `zz` / `zt` / `zb` put the selected post at the
-    /// screen's middle, top or bottom; `gg` goes to the top (or, with a count, that entry).
-    /// False if `code` isn't one of these.
-    fn finish_prefix(&mut self, prefix: char, code: KeyCode, count: Option<usize>) -> bool {
-        let at = match (prefix, code) {
-            (GG_DONE, KeyCode::Char('g')) => return true,
-            ('g', KeyCode::Char('g')) => {
-                self.go_to_entry(count.unwrap_or(1));
+    /// The key after a count or prefix: esc drops what was waiting, `gg` goes to the top,
+    /// `zz` / `zt` / `zb` put the selected post at the screen's middle, top or bottom. False
+    /// if it's none of these.
+    fn finish_prefix(&mut self, pending: Option<Pending>, code: KeyCode) -> bool {
+        let at = match (pending, code) {
+            (Some(Pending::Count(_) | Pending::G | Pending::Z), KeyCode::Esc) | (Some(Pending::CountedG), KeyCode::Char('g')) => return true,
+            (Some(Pending::G), KeyCode::Char('g')) => {
+                self.go_to_entry(1);
                 return true;
             }
-            ('z', KeyCode::Char('z' | '.')) => Place::Middle,
-            ('z', KeyCode::Char('t') | KeyCode::Enter) => Place::Top,
-            ('z', KeyCode::Char('b' | '-')) => Place::Bottom,
+            (Some(Pending::Z), KeyCode::Char('z' | '.')) => Place::Middle,
+            (Some(Pending::Z), KeyCode::Char('t') | KeyCode::Enter) => Place::Top,
+            (Some(Pending::Z), KeyCode::Char('b' | '-')) => Place::Bottom,
             _ => return false,
         };
         if let Some(t) = &mut self.tab.thread {
@@ -782,31 +761,24 @@ impl App {
         }
     }
 
-    fn on_viewer_key(&mut self, code: KeyCode) {
+    fn on_viewer_nav(&mut self, nav: Nav) {
         use crate::images::Crop;
         let Some(TabPopup::Viewer(v)) = &mut self.tab.popup else { return };
         let n = v.files.len();
+        let pan = |v: &Viewer, x, y| v.crop.moved(x, y, v.shown.unwrap_or_else(|| v.crop.guess_shown()));
+        // Zoomed in, the arrows and h/j/k/l move around, the page keys go to the other files,
+        // and esc fits it again.
         let zoomed = !v.crop.is_fit();
-        match code {
-            // Zoom: + and - (= is + without shift), 0 fits it again. Zoomed in, the arrows
-            // and h/j/k/l move around, page up / down go to the other files, and esc fits.
-            KeyCode::Char('+' | '=') => v.crop = v.crop.zoomed(true),
-            KeyCode::Char('-') => v.crop = v.crop.zoomed(false),
-            KeyCode::Char('0') => v.crop = Crop::FIT,
-            KeyCode::Esc if zoomed => v.crop = Crop::FIT,
-            KeyCode::Char('h') | KeyCode::Left if zoomed => v.crop = v.crop.moved(-1, 0, v.shown.unwrap_or_else(|| v.crop.guess_shown())),
-            KeyCode::Char('l') | KeyCode::Right if zoomed => v.crop = v.crop.moved(1, 0, v.shown.unwrap_or_else(|| v.crop.guess_shown())),
-            KeyCode::Char('k') | KeyCode::Up if zoomed => v.crop = v.crop.moved(0, -1, v.shown.unwrap_or_else(|| v.crop.guess_shown())),
-            KeyCode::Char('j') | KeyCode::Down if zoomed => v.crop = v.crop.moved(0, 1, v.shown.unwrap_or_else(|| v.crop.guess_shown())),
-            KeyCode::PageUp => {
-                v.index = (v.index + n - 1) % n;
-                v.crop = Crop::FIT;
-            }
-            KeyCode::PageDown => {
-                v.index = (v.index + 1) % n;
-                v.crop = Crop::FIT;
-            }
-            KeyCode::Esc | KeyCode::Char('q' | 'v') => {
+        match nav {
+            Nav::ZoomIn => v.crop = v.crop.zoomed(true),
+            Nav::ZoomOut => v.crop = v.crop.zoomed(false),
+            Nav::Fit => v.crop = Crop::FIT,
+            Nav::Esc if zoomed => v.crop = Crop::FIT,
+            Nav::Left if zoomed => v.crop = pan(v, -1, 0),
+            Nav::Right if zoomed => v.crop = pan(v, 1, 0),
+            Nav::Up if zoomed => v.crop = pan(v, 0, -1),
+            Nav::Down if zoomed => v.crop = pan(v, 0, 1),
+            Nav::Esc => {
                 // Back in the gallery, on the file last viewed; or in the thread, on its post.
                 if let Some(g) = &mut self.tab.gallery {
                     g.state.select(Some(v.index));
@@ -818,14 +790,20 @@ impl App {
                 }
                 self.tab.popup = None;
             }
-            KeyCode::Char('h' | 'k') | KeyCode::Left | KeyCode::Up => v.index = (v.index + n - 1) % n,
+            Nav::Left | Nav::Up | Nav::PageUp => {
+                v.index = (v.index + n - 1) % n;
+                v.crop = Crop::FIT;
+            }
             // Space pauses an animated GIF; otherwise it's the next file.
-            KeyCode::Char(' ') if v.files.get(v.index).is_some_and(|f| f.image().is_some_and(|u| self.images.toggle_pause(u))) => {
+            Nav::Play if v.files.get(v.index).is_some_and(|f| f.image().is_some_and(|u| self.images.toggle_pause(u))) => {
                 let paused = v.files.get(v.index).and_then(|f| f.image()).is_some_and(|u| self.images.is_paused(u));
                 self.info(if paused { "Paused (space plays)" } else { "Playing" });
             }
-            KeyCode::Char('l' | 'j' | ' ') | KeyCode::Right | KeyCode::Down => v.index = (v.index + 1) % n,
-            KeyCode::Char('i') | KeyCode::Enter => {
+            Nav::Right | Nav::Down | Nav::PageDown | Nav::Play => {
+                v.index = (v.index + 1) % n;
+                v.crop = Crop::FIT;
+            }
+            Nav::Open => {
                 if let Some(f) = v.files.get(v.index).cloned() {
                     self.open_file(&f);
                 }

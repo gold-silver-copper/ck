@@ -278,7 +278,7 @@ fn help_sections(keys: &KeyMap) -> Vec<(&'static str, Vec<(String, &'static str)
                 ("h / l, ← / →".into(), "previous / next file"),
                 ("space".into(), "pause an animated GIF"),
                 ("+ / - / 0".into(), "zoom in / out / fit"),
-                ("i".into(), "open externally"),
+                (k(Action::OpenFile), "open externally"),
                 (pair(Action::Copy, Action::CopyLink), "copy file URL / post link"),
                 (k(Action::Download), "save the file"),
                 (k(Action::ImageSearch), "reverse image search"),

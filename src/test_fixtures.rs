@@ -10,7 +10,6 @@ use ratatui::text::Line;
 
 use crate::app::{App, Catalog, Clock, MenuItem, Whole};
 use crate::config::Config;
-use crate::keys::KeyMap;
 use crate::markup::{Flavor, parse_html};
 use crate::model::{Attachment, Post, Thread};
 use crate::store::{Store, ThreadKey};
@@ -25,7 +24,7 @@ pub const NOW: i64 = 1_790_000_000;
 pub fn app_with(config: &str) -> App {
     let cfg: Config = toml::from_str(config).unwrap();
     let filters = crate::filter::Filters::from_config(&cfg.filters, &cfg.hidden_words).unwrap();
-    let mut app = App::new(cfg, KeyMap::default(), filters, None, Store::default());
+    let mut app = App::new(cfg, filters, None, Store::default());
     app.config_path = None;
     app
 }

@@ -12,7 +12,7 @@ use ratatui::crossterm::execute;
 use ratatui_image::picker::Picker;
 use ratatui_image::picker::cap_parser::QueryStdioOptions;
 
-use ck::{App, Config, DiskCache, Filters, ImagesMode, KeyMap, Pages, Store};
+use ck::{App, Config, DiskCache, Filters, ImagesMode, Pages, Store};
 
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -45,7 +45,6 @@ fn main() -> Result<()> {
         anyhow::bail!("can't start at {}: {e}", start_at.unwrap_or_default());
     }
     // Config errors are reported before the terminal is taken over.
-    let keys = KeyMap::new(&config.keys)?;
     let filters = Filters::from_config(&config.filters, &config.hidden_words)?;
     // The theme is checked now, so a bad one is reported before the terminal is taken over.
     ck::set_theme(ck::theme_from_config(config.theme.as_ref(), &config.themes)?);
@@ -56,7 +55,7 @@ fn main() -> Result<()> {
     let detected = (config.images != ImagesMode::Off).then(|| detect_images(config.images));
     let (picker, images_note) = detected.map_or((None, None), |(p, note)| (Some(p), note));
     ck::input_log::note(|| format!("images  {:?}", picker.as_ref().map(|p| p.protocol_type())));
-    let mut app = App::new(config, keys, filters, picker, store);
+    let mut app = App::new(config, filters, picker, store);
     if let Some(note) = images_note {
         app.info(note);
     }

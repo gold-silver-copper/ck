@@ -691,10 +691,9 @@ fn data_dir_once(seed: u64) {
         }
     }
     // The app starts on it, restores the session, draws and saves.
-    let mut app = crate::test_fixtures::test_app();
     let cfg: crate::config::Config = toml::from_str(crate::config::DEFAULT_CONFIG).unwrap();
     let filters = crate::filter::Filters::from_config(&cfg.filters, &cfg.hidden_words).unwrap();
-    app = crate::app::App::new(cfg, app.keys.clone(), filters, None, store);
+    let mut app = crate::app::App::new(cfg, filters, None, store);
     app.config_path = None;
     app.restore_session();
     // The Saved view, and each copy in it.
@@ -813,7 +812,7 @@ fn config_once(seed: u64) {
                 doc.remove(rng.pick(KEYS));
             }
             2 => {
-                let action = rng.pick(crate::keys::ACTIONS).1;
+                let action = rng.pick(crate::keys::Action::ALL).name();
                 doc["keys"][action] = odd_toml(&mut rng);
             }
             3 => {
@@ -878,7 +877,6 @@ fn config_once(seed: u64) {
     // As main does (and Config::load, which adds the built-in sites): each check may refuse
     // the config, none may panic.
     let Ok(cfg) = toml::from_str::<crate::config::Config>(&text).map_err(anyhow::Error::from).and_then(crate::config::Config::with_builtin_sites) else { return };
-    let Ok(keys) = crate::keys::KeyMap::new(&cfg.keys) else { return };
     if crate::filter::Filters::from_config(&cfg.filters, &cfg.hidden_words).is_err() || crate::theme::from_config(cfg.theme.as_ref(), &cfg.themes).is_err() {
         return;
     }
@@ -920,7 +918,7 @@ fn config_once(seed: u64) {
         std::fs::write(&path, &text).unwrap();
     }
     let filters = crate::filter::Filters::from_config(&cfg.filters, &cfg.hidden_words).unwrap();
-    let mut app = crate::app::App::new(cfg, keys, filters, None, crate::store::Store::default());
+    let mut app = crate::app::App::new(cfg, filters, None, crate::store::Store::default());
     app.config_path = Some(path);
     let mut term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 24)).unwrap();
     for key in [KeyCode::Enter, KeyCode::Char(','), KeyCode::Char('j'), KeyCode::Enter, KeyCode::Esc] {
