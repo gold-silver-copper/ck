@@ -5398,26 +5398,31 @@ fn a_post_goes_from_captcha_to_yours() {
     let c = reply_box(&mut app);
     assert!(c.problem.is_some() && matches!(c.stage, Stage::Writing));
     assert_eq!(c.comment.text(), "first");
-    // As the site would answer: a captcha to type, answered in the box.
+    // As the post on its way would ask: a captcha to type, answered in the box, the answer
+    // going back to it; ctrl-r asks for another.
     let to = c.to.clone();
-    let attempt = app.start_attempt(&to, Stage::Asking).unwrap();
+    let attempt = app.start_attempt(&to, Stage::Working).unwrap();
     let task = crate::captcha::Task::Text { prompt: "Type it".into(), image: Some("captcha:t".into()) };
     let challenge = crate::captcha::Challenge { id: "c".into(), expires: Instant::now() + Duration::from_secs(60), task, pictures: vec![("captcha:t".into(), image::DynamicImage::new_rgb8(2, 2))] };
-    app.on_captcha(&to, attempt, Ok(crate::captcha::Captcha::Challenge(challenge)));
-    assert!(matches!(reply_box(&mut app).stage, Stage::Solving(_)));
+    let (tx, rx) = std::sync::mpsc::channel();
+    app.asked(&to, attempt, super::posting::Asked::Solve(challenge.clone()), tx);
+    app.on_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL));
+    assert_eq!(rx.try_recv(), Ok(None));
+    let (tx, rx) = std::sync::mpsc::channel();
+    app.asked(&to, attempt, super::posting::Asked::Solve(challenge), tx);
     type_text(&mut app, "Ab1");
-    let Stage::Solving(s) = &reply_box(&mut app).stage else { panic!("not solving") };
-    assert_eq!(s.answer().as_deref(), Some("Ab1"));
-    // A stopped try's answer is dropped.
-    app.on_captcha(&to, attempt - 1, Err(anyhow::anyhow!("late")));
+    app.on_key(KeyEvent::from(KeyCode::Enter));
+    assert_eq!(rx.try_recv(), Ok(Some("Ab1".to_string())));
+    assert!(matches!(reply_box(&mut app).stage, Stage::Working));
+    // A stopped try's end is dropped.
+    app.sent(&to, attempt - 1, Err(anyhow::anyhow!("late")));
     assert!(reply_box(&mut app).problem.is_none());
     // The site refuses: the box says why, and keeps the post.
-    let attempt = app.start_attempt(&to, Stage::Sending).unwrap();
-    app.on_captcha(&to, attempt, Err(anyhow::anyhow!("You must wait longer.")));
+    app.sent(&to, attempt, Err(anyhow::anyhow!("You must wait longer.")));
     let c = reply_box(&mut app);
     assert_eq!((c.problem.as_deref(), c.comment.text()), (Some("You must wait longer."), "first"));
     // Then it's up: the box closes, and the post is yours.
-    app.posted(&to, 1, 3);
+    app.sent(&to, attempt, Ok(crate::post::Posted { thread: 1, no: 3 }));
     assert!(app.popup.is_none() && app.drafts.is_empty());
     let key = here(&app, "g", 1);
     assert_eq!(app.store.watched(&key).unwrap().mine(), [3]);
@@ -5459,7 +5464,7 @@ fn the_browser_view_has_a_pointer_for_the_keys() {
     let mut app = fourchan_thread(&[1]);
     app.act(Action::Reply);
     let to = reply_box(&mut app).to.clone();
-    app.start_attempt(&to, Stage::Asking);
+    app.start_attempt(&to, Stage::Working);
     // A 100x60 part of the page, from (10, 20).
     let mut png = std::io::Cursor::new(Vec::new());
     image::DynamicImage::new_rgb8(100, 60).write_to(&mut png, image::ImageFormat::Png).unwrap();

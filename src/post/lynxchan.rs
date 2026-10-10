@@ -4,45 +4,56 @@
 //! the same captcha, sent to `/renewBypass.js`. Older versions (endchan's) answer the form with
 //! a message page instead, linking to the post.
 
-use std::time::Instant;
-
 use std::sync::LazyLock;
+use std::time::Instant;
 
 use anyhow::{Context, Result, bail};
 use regex::Regex;
 use serde_json::Value;
 
-use super::{Answered, Draft, Poster, Sent, Where, said, work};
-use crate::captcha::{Captcha, Challenge, Task};
+use super::{Draft, Posted, Poster, Session, Where, said, work};
+use crate::captcha::{Challenge, Task};
 use crate::http::encode_segment as enc;
-use crate::web::{Fetch, Fetched, Helper, Upload};
+use crate::web::{Fetch, Fetched, Upload};
 
 pub struct Lynxchan {
     pub root: String,
 }
 
-/// The id of the captcha asked for a block bypass rather than a post.
-const BYPASS: &str = "bypass";
-
 impl Lynxchan {
-    /// A captcha's picture (`/captcha.js` sets its cookie); `id` says what it's for.
-    fn fresh_captcha(&self, web: &Helper, id: &str, board: &str) -> Result<Captcha> {
-        let r = web.fetch(Fetch::get(&format!("{}/captcha.js?boardUri={}&d={}", self.root, enc(board), super::next_key())))?;
-        let key = format!("captcha:lynxchan:{}", super::next_key());
-        let task = Task::Text { prompt: "Type the text in the picture".into(), image: Some(key.clone()) };
-        Ok(Captcha::Challenge(Challenge { id: id.into(), expires: super::after(Instant::now(), 300), task, pictures: vec![(key, r.image()?)] }))
+    /// The site's captcha, answered: its picture from `/captcha.js` (which sets its cookie),
+    /// asked for again until there's an answer.
+    fn captcha(&self, s: &Session, board: &str) -> Result<String> {
+        let (_, answer) = s.solve(|| {
+            let r = s.web.fetch(Fetch::get(&format!("{}/captcha.js?boardUri={}&d={}", self.root, enc(board), super::next_key())))?;
+            let key = format!("captcha:lynxchan:{}", super::next_key());
+            let task = Task::Text { prompt: "Type the text in the picture".into(), image: Some(key.clone()) };
+            Ok(Challenge { id: String::new(), expires: super::after(Instant::now(), 300), task, pictures: vec![(key, r.image()?)] })
+        })?;
+        Ok(answer.trim().to_string())
     }
-}
 
-impl Lynxchan {
+    /// A block bypass: the captcha, sent to `/renewBypass.js`, and the proof of work it may
+    /// come with (alogs' validation, kohlchan's hashcash).
+    fn bypass(&self, s: &Session, board: &str) -> Result<()> {
+        let answer = self.captcha(s, board)?;
+        let r = s.web.fetch(Fetch::post(&format!("{}/renewBypass.js?json=1", self.root), vec![("captcha".into(), answer)]))?;
+        let v = r.json()?;
+        match v.get("status").and_then(Value::as_str) {
+            Some("ok" | "finish") => self.validate(s, &r.cookies),
+            Some("hashcash") => self.hashcash(s),
+            _ => Err(said(v.get("data").and_then(Value::as_str).unwrap_or("The block bypass wasn't taken"))),
+        }
+    }
+
     /// A new block bypass that has to be validated first (its cookie carries the work: the
     /// session after its 24-character id, then the hash): the number found, sent to
     /// `/validateBypass.js`.
-    fn validate(&self, web: &Helper, cookies: &str) -> Result<()> {
+    fn validate(&self, s: &Session, cookies: &str) -> Result<()> {
         let bypass = cookies.split(';').filter_map(|c| c.trim().split_once('=')).find(|(k, _)| *k == "bypass").map(|(_, v)| percent_decoded(v)).unwrap_or_default();
         let (Some(session), Some(hash)) = (bypass.get(24..368), bypass.get(368..)) else { return Ok(()) };
-        let code = work::lynxchan_bypass(session, hash, VALIDATION_LIMIT).context("The site's block bypass has a proof of work ck didn't find the answer to")?;
-        let v = web.fetch(Fetch::post(&format!("{}/validateBypass.js?json=1", self.root), vec![("code".into(), code.to_string())]))?.json()?;
+        let code = work::lynxchan_bypass(s.work, session, hash).context("ck didn't find the answer to the site's proof of work in time (proof_of_work_seconds)")?;
+        let v = s.web.fetch(Fetch::post(&format!("{}/validateBypass.js?json=1", self.root), vec![("code".into(), code.to_string())]))?.json()?;
         match v.get("status").and_then(Value::as_str) {
             Some("ok") => Ok(()),
             _ => Err(said(v.get("data").and_then(Value::as_str).unwrap_or("The block bypass wasn't validated"))),
@@ -50,25 +61,22 @@ impl Lynxchan {
     }
 
     /// kohlchan's "hashcash" for a block bypass: the secret number an argon2 hash is of.
-    fn hashcash(&self, web: &Helper) -> Result<()> {
-        let v = web.fetch(Fetch::get(&format!("{}/addon.js/hashcash?action=get&json=1", self.root)))?.json()?;
+    fn hashcash(&self, s: &Session) -> Result<()> {
+        let v = s.web.fetch(Fetch::get(&format!("{}/addon.js/hashcash?action=get&json=1", self.root)))?.json()?;
         let data = v.get("data").cloned().unwrap_or_default();
         if data.get("solved").and_then(Value::as_bool) == Some(true) {
             return Ok(());
         }
         let hash = data.get("hash").and_then(Value::as_str).context("The site's proof of work came without its hash")?;
-        let difficulty = data.get("difficulty").and_then(crate::http::as_u64).unwrap_or(0).min(VALIDATION_LIMIT);
-        let secret = work::argon2_secret(hash, difficulty).context("ck didn't find the answer to the site's proof of work")?;
-        let v = web.fetch(Fetch::post(&format!("{}/addon.js/hashcash?action=solve&json=1", self.root), vec![("secret".into(), secret.to_string())]))?.json()?;
+        let difficulty = data.get("difficulty").and_then(crate::http::as_u64).unwrap_or(0);
+        let secret = work::argon2_secret(s.work, hash, difficulty).context("ck didn't find the answer to the site's proof of work in time (proof_of_work_seconds)")?;
+        let v = s.web.fetch(Fetch::post(&format!("{}/addon.js/hashcash?action=solve&json=1", self.root), vec![("secret".into(), secret.to_string())]))?.json()?;
         match v.get("status").and_then(Value::as_str) {
             Some("ok") => Ok(()),
             _ => Err(said(v.get("data").and_then(Value::as_str).unwrap_or("The proof of work wasn't taken"))),
         }
     }
 }
-
-/// The most numbers a proof of work is searched through.
-const VALIDATION_LIMIT: u64 = 1_000_000;
 
 /// A cookie's value with its `%XX` escapes undone.
 fn percent_decoded(v: &str) -> String {
@@ -94,35 +102,11 @@ impl Poster for Lynxchan {
         format!("{}/robots.txt", self.root)
     }
 
-    fn captcha(&self, web: &Helper, to: &Where) -> Result<Captcha> {
-        let board = web.fetch(Fetch::get(&format!("{}/{}/1.json", self.root, enc(&to.board))))?.json()?;
+    fn post(&self, s: &Session, to: &Where, draft: &Draft) -> Result<Posted> {
+        let board = s.web.fetch(Fetch::get(&format!("{}/{}/1.json", self.root, enc(&to.board))))?.json()?;
         // A board that doesn't say is asked as if it wanted one.
         let mode = board.get("captchaMode").and_then(Value::as_u64).unwrap_or(2);
-        if mode == 2 || (mode == 1 && to.new_thread()) {
-            return self.fresh_captcha(web, "post", &to.board);
-        }
-        Ok(super::no_captcha("post"))
-    }
-
-    fn answer(&self, web: &Helper, challenge: &Challenge, answer: &str) -> Result<Answered> {
-        if matches!(challenge.task, Task::None) {
-            return Ok(Answered::Done(Vec::new()));
-        }
-        let fields = vec![("captcha".to_string(), answer.trim().to_string())];
-        if challenge.id != BYPASS {
-            return Ok(Answered::Done(fields));
-        }
-        let r = web.fetch(Fetch::post(&format!("{}/renewBypass.js?json=1", self.root), fields))?;
-        let v = r.json()?;
-        match v.get("status").and_then(Value::as_str) {
-            Some("ok" | "finish") => self.validate(web, &r.cookies)?,
-            Some("hashcash") => self.hashcash(web)?,
-            _ => return Err(said(v.get("data").and_then(Value::as_str).unwrap_or("The block bypass wasn't taken"))),
-        }
-        Ok(Answered::Done(Vec::new()))
-    }
-
-    fn post(&self, web: &Helper, to: &Where, draft: &Draft, captcha: &[(String, String)]) -> Result<Sent> {
+        let wants = mode == 2 || (mode == 1 && to.new_thread());
         let mut fields = vec![("boardUri".to_string(), to.board.clone())];
         if !to.new_thread() {
             fields.push(("threadId".into(), to.thread.to_string()));
@@ -136,19 +120,31 @@ impl Poster for Lynxchan {
         if draft.spoiler && draft.file.is_some() {
             fields.push(("spoiler".into(), "true".into()));
         }
-        fields.extend(captcha.iter().cloned());
         let form = if to.new_thread() { "newThread" } else { "replyThread" };
         let url = format!("{}/{form}.js?json=1", self.root);
         let referer = match to.thread {
             0 => format!("{}/{}/", self.root, enc(&to.board)),
             t => format!("{}/{}/res/{t}.html", self.root, enc(&to.board)),
         };
-        let file = draft.file.as_ref().map(|p| Upload { field: "files".into(), path: p.display().to_string() });
-        let r = web.fetch(Fetch { file, ..Fetch::post(&url, fields) }.header("Referer", &referer))?;
-        match answered(to, &r)? {
-            Answer::Posted(thread, no) => Ok(Sent::Posted { thread, no }),
-            Answer::Bypass => Ok(Sent::Again(self.fresh_captcha(web, BYPASS, &to.board)?)),
-        }
+        let send = |captcha: Option<String>| {
+            let file = draft.file.as_ref().map(|p| Upload { field: "files".into(), path: p.display().to_string() });
+            let fields = [fields.as_slice(), captcha.map(|c| ("captcha".to_string(), c)).as_slice()].concat();
+            s.web.fetch(Fetch { file, ..Fetch::post(&url, fields) }.header("Referer", &referer))
+        };
+        let captcha = if wants { Some(self.captcha(s, &to.board)?) } else { None };
+        let (thread, no) = match answered(to, &send(captcha)?)? {
+            Answer::Posted(thread, no) => (thread, no),
+            // A block bypass first, then the post again (each captcha is taken once).
+            Answer::Bypass => {
+                self.bypass(s, &to.board)?;
+                let captcha = if wants { Some(self.captcha(s, &to.board)?) } else { None };
+                match answered(to, &send(captcha)?)? {
+                    Answer::Posted(thread, no) => (thread, no),
+                    Answer::Bypass => bail!("The site still wants a block bypass"),
+                }
+            }
+        };
+        Ok(Posted { thread, no })
     }
 }
 
@@ -176,10 +172,10 @@ fn answered(to: &Where, r: &Fetched) -> Result<Answer> {
 }
 
 /// An older version's answer: its message page, linking to the post when it went up
-/// ("Post created", `/b/res/1.html#2`), or saying what went wrong.
+/// ("Post created", `/b/res/1.html#2`), or its error page, saying what went wrong.
 fn message_page(r: &Fetched) -> Result<Answer> {
     static LINK: LazyLock<Option<Regex>> = LazyLock::new(|| Regex::new(r#"/res/(\d+)\.html#q?(\d+)"#).ok());
-    static LABEL: LazyLock<Option<Regex>> = LazyLock::new(|| Regex::new(r#"id="labelMessage"[^>]*>([^<]*)<"#).ok());
+    static LABEL: LazyLock<Option<Regex>> = LazyLock::new(|| Regex::new(r#"id="(?:labelMessage|errorLabel)"[^>]*>([^<]*)<"#).ok());
     if r.status < 400
         && let Some(c) = LINK.as_ref().and_then(|re| re.captures(&r.body))
         && let (Some(thread), Some(no)) = (c.get(1).and_then(|m| m.as_str().parse().ok()), c.get(2).and_then(|m| m.as_str().parse().ok()))
@@ -201,6 +197,31 @@ mod tests {
     }
 
     #[test]
+    fn a_reply_with_its_captcha_through_a_block_bypass_and_endchans_page() {
+        use super::super::fake::{Person, Site, session};
+        let mut png = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::new_rgb8(30, 10).write_to(&mut png, image::ImageFormat::Png).unwrap();
+        let picture = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, png.into_inner());
+        let site = Site::default()
+            .answers("/test/1.json", 200, r#"{"captchaMode":2,"threads":[]}"#)
+            .answers("/captcha.js", 200, &picture)
+            .answers("/replyThread.js?json=1", 200, r#"{"status":"bypassable"}"#)
+            .answers("/captcha.js", 200, &picture)
+            // No bypass cookie readable: nothing to validate.
+            .answers("/renewBypass.js?json=1", 200, r#"{"status":"ok","data":null}"#)
+            .answers("/captcha.js", 200, &picture)
+            .answers("/replyThread.js?json=1", 200, "fixture:lynxchan_endchan_post_created.html");
+        let person = Person::says(&[Some("f61801"), Some(" bypas "), Some("again1")]);
+        let to = Where { site: "endchan".into(), board: "test".into(), thread: 6520 };
+        let draft = Draft { comment: "hi".into(), password: "a long password".into(), ..Default::default() };
+        let lynx = Lynxchan { root: "https://endchan.net".into() };
+        assert_eq!(lynx.post(&session(&site, &person), &to, &draft).unwrap(), Posted { thread: 6520, no: 7934 });
+        assert_eq!(site.sent("/renewBypass.js").field("captcha"), Some("bypas"));
+        let sent = site.sent("/replyThread.js");
+        assert_eq!((sent.field("captcha"), sent.field("password"), sent.field("threadId")), (Some("again1"), Some("a long p"), Some("6520")));
+    }
+
+    #[test]
     fn cookies_are_read_unescaped() {
         assert_eq!(percent_decoded("ab%2Bc%3D%3D%zz"), "ab+c==%zz");
     }
@@ -216,7 +237,7 @@ mod tests {
         // An older version's message page: the post's link, or what went wrong.
         let created = r#"<span id="labelMessage">Post created.</span> <a id="linkRedirect" href="/test/res/6520.html#7934">"#;
         assert!(matches!(answered(&reply, &fetched(200, created)), Ok(Answer::Posted(6520, 7934))));
-        let wrong = r#"<title>Error 500</title><span id="labelMessage">Wrong captcha.</span>"#;
-        assert_eq!(answered(&reply, &fetched(500, wrong)).err().map(|e| e.to_string()).as_deref(), Some("Wrong captcha."));
+        let wrong = std::fs::read_to_string("tests/fixtures/lynxchan_endchan_error.html").unwrap();
+        assert_eq!(answered(&reply, &fetched(500, &wrong)).err().map(|e| e.to_string()).as_deref(), Some("Either a message or a file is required."));
     }
 }

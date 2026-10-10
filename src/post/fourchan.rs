@@ -6,10 +6,10 @@ use std::time::Instant;
 use anyhow::{Result, bail};
 use serde_json::Value;
 
-use super::{Answered, Draft, Poster, Sent, Where, said};
-use crate::captcha::{Captcha, Cell, Challenge, Step, Task, decode, inline_image};
+use super::{Draft, Posted, Poster, Session, Where, said};
+use crate::captcha::{Cell, Challenge, Step, Task, decode, inline_image};
 use crate::markup::strip_tags;
-use crate::web::{Fetch, Helper, Reply, Request, Upload};
+use crate::web::{Fetch, Upload};
 
 /// Where 4chan keeps the images of its newer captchas (as its script has it).
 const IMAGES: &str = "https://s.4cdn.org/image/temp/april2026";
@@ -25,18 +25,19 @@ impl Poster for Fourchan {
         Some(2000)
     }
 
-    fn captcha(&self, web: &Helper, to: &Where) -> Result<Captcha> {
-        match web.ask(&Request::Captcha { board: to.board.clone(), thread: to.thread })? {
-            Reply::Captcha { twister } => Ok(parse(&twister, Instant::now())),
-            other => bail!("ck-web answered {other:?}"),
-        }
-    }
-
-    fn answer(&self, _web: &Helper, challenge: &Challenge, answer: &str) -> Result<Answered> {
-        Ok(Answered::Done(answer_fields(challenge, answer)))
-    }
-
-    fn post(&self, web: &Helper, to: &Where, draft: &Draft, captcha: &[(String, String)]) -> Result<Sent> {
+    fn post(&self, s: &Session, to: &Where, draft: &Draft) -> Result<Posted> {
+        let (challenge, answer) = loop {
+            match parse(&s.web.fourchan_captcha(&to.board, to.thread)?, Instant::now()) {
+                Twister::Refused(why) => bail!(why),
+                Twister::Wait { until, message } => s.ask.wait(until, &message)?,
+                Twister::Challenge(c) if matches!(c.task, Task::None) => break (c, String::new()),
+                Twister::Challenge(c) => {
+                    if let Some(answer) = s.ask.solve(&c)? {
+                        break (c, answer);
+                    }
+                }
+            }
+        };
         let mut fields = vec![("mode".to_string(), "regist".to_string())];
         if !to.new_thread() {
             fields.push(("resto".into(), to.thread.to_string()));
@@ -50,12 +51,22 @@ impl Poster for Fourchan {
             fields.push(("spoiler".into(), "on".into()));
         }
         fields.push(("pwd".into(), draft.password.clone()));
-        fields.extend(captcha.iter().cloned());
+        fields.extend(answer_fields(&challenge, &answer));
         let url = format!("https://sys.4chan.org/{}/post", crate::http::encode_segment(&to.board));
         let file = draft.file.as_ref().map(|p| Upload { field: "upfile".into(), path: p.display().to_string() });
-        let r = web.fetch(Fetch { file, ..Fetch::post(&url, fields) }.header("Accept", "application/json"))?;
-        posted(r.status, &r.body).map(|(thread, no)| Sent::Posted { thread, no })
+        let r = s.web.fetch(Fetch { file, ..Fetch::post(&url, fields) }.header("Accept", "application/json"))?;
+        posted(r.status, &r.body).map(|(thread, no)| Posted { thread, no })
     }
+}
+
+/// What 4chan's captcha page said.
+#[derive(Debug)]
+enum Twister {
+    /// It won't give one now: why.
+    Refused(String),
+    /// Not for a while (posting too often): how long, and its message.
+    Wait { until: Instant, message: String },
+    Challenge(Challenge),
 }
 
 /// The form's fields for an answer. A picture's text goes as 4chan's form sends it: lower
@@ -92,15 +103,15 @@ fn posted(status: u16, body: &str) -> Result<(u64, u64)> {
 }
 
 /// What 4chan's captcha page said.
-fn parse(v: &Value, now: Instant) -> Captcha {
+fn parse(v: &Value, now: Instant) -> Twister {
     let str_of = |k: &str| v.get(k).and_then(Value::as_str).unwrap_or_default().to_string();
     let secs = |k: &str| v.get(k).and_then(Value::as_u64).unwrap_or(0);
     if let Some(e) = v.get("error").and_then(Value::as_str) {
-        return Captcha::Refused(strip_tags(e));
+        return Twister::Refused(strip_tags(e));
     }
     if secs("pcd") > 0 {
         let message = v.get("pcd_msg").and_then(Value::as_str).map_or_else(|| "Please wait a while.".into(), strip_tags);
-        return Captcha::Wait { until: super::after(now, secs("pcd")), message };
+        return Twister::Wait { until: super::after(now, secs("pcd")), message };
     }
     // Answers aren't taken in the last few seconds (as 4chan's script counts).
     let ttl = secs("ttl").max(10).saturating_sub(3);
@@ -111,7 +122,7 @@ fn parse(v: &Value, now: Instant) -> Captcha {
             None => Task::None,
         },
     };
-    Captcha::Challenge(Challenge { id: str_of("challenge"), expires: super::after(now, ttl), task, pictures: Vec::new() })
+    Twister::Challenge(Challenge { id: str_of("challenge"), expires: super::after(now, ttl), task, pictures: Vec::new() })
 }
 
 /// A slider step. Its words (`str`) are HTML, with the reference in them as an inline
@@ -157,7 +168,7 @@ mod tests {
 
     fn challenge(v: &Value) -> Solving {
         match parse(v, Instant::now()) {
-            Captcha::Challenge(c) => Solving::new(c),
+            Twister::Challenge(c) => Solving::new(c),
             other => panic!("not a challenge: {other:?}"),
         }
     }
@@ -203,8 +214,26 @@ mod tests {
     #[test]
     fn refusals_and_waits() {
         let now = Instant::now();
-        assert!(matches!(parse(&json!({"error": "You have to wait <b>a bit</b>."}), now), Captcha::Refused(e) if e == "You have to wait a bit."));
-        assert!(matches!(parse(&json!({"pcd": 30, "pcd_msg": "Slow down."}), now), Captcha::Wait { until, message } if until == now + std::time::Duration::from_secs(30) && message == "Slow down."));
+        assert!(matches!(parse(&json!({"error": "You have to wait <b>a bit</b>."}), now), Twister::Refused(e) if e == "You have to wait a bit."));
+        assert!(matches!(parse(&json!({"pcd": 30, "pcd_msg": "Slow down."}), now), Twister::Wait { until, message } if until == now + std::time::Duration::from_secs(30) && message == "Slow down."));
+    }
+
+    #[test]
+    fn a_post_waits_out_the_cooldown_then_answers_the_captcha() {
+        use super::super::fake::{Person, Site, session};
+        let site = Site::default()
+            .twister(json!({"pcd": 30, "pcd_msg": "Slow down."}))
+            .twister(json!({"challenge": "c1", "ttl": 60, "extTask": {"mode": 1, "str": "Type it"}}))
+            .twister(json!({"challenge": "c2", "ttl": 60, "extTask": {"mode": 1, "str": "Type it"}}))
+            .answers("sys.4chan.org/g/post", 200, r#"{"pid": 12, "tid": 7}"#);
+        // The first captcha is passed over for another.
+        let person = Person::says(&[None, Some("Ab 1")]);
+        let draft = Draft { comment: "hi".into(), password: "pw".into(), ..Default::default() };
+        let to = Where { site: "4chan".into(), board: "g".into(), thread: 7 };
+        assert_eq!(Fourchan.post(&session(&site, &person), &to, &draft).unwrap(), Posted { thread: 7, no: 12 });
+        assert_eq!(person.waited.borrow().as_slice(), ["Slow down."]);
+        let sent = site.sent("/g/post");
+        assert_eq!((sent.field("resto"), sent.field("com"), sent.field("t-challenge"), sent.field("t-response")), (Some("7"), Some("hi"), Some("c2"), Some("ab1")));
     }
 
     #[test]

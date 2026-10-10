@@ -489,13 +489,14 @@ pub struct App {
     pub active: usize,
     /// The last request id given out (ids are unique across tabs).
     next_id: u64,
-    /// ck-web, once started for posting, and the post it's working on.
+    /// ck-web, once started for posting.
     web: Option<crate::web::Helper>,
-    web_for: Option<posting::Where>,
     /// `web_helper`: where ck-web is.
     web_helper: Option<String>,
     /// What posts are sent with to delete them by (`post_password`, or one for this run).
     post_password: String,
+    /// How hard a site's proof of work is searched (`proof_of_work_seconds`, `_threads`).
+    work: crate::post::Work,
     /// Posts written and not sent, by where they go.
     drafts: HashMap<posting::Where, Compose>,
     /// The name and options last posted with.
@@ -632,9 +633,9 @@ impl App {
             active: 0,
             next_id: 0,
             web: None,
-            web_for: None,
             web_helper: cfg.web_helper.clone(),
             post_password: cfg.post_password.clone().unwrap_or_else(crate::post::random_password),
+            work: crate::post::Work::new(cfg.proof_of_work_seconds, cfg.proof_of_work_threads),
             drafts: HashMap::new(),
             poster: (String::new(), String::new()),
             awaiting: None,

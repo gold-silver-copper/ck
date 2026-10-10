@@ -390,7 +390,7 @@ fn fuzz_cache_long() {
 /// The real responses each engine's answers are made from.
 fn fixtures_for(kind: SiteKind) -> &'static [&'static str] {
     match kind {
-        SiteKind::Fourchan | SiteKind::Vichan => &[
+        SiteKind::Fourchan | SiteKind::Vichan | SiteKind::Kissu => &[
             "4chan_boards.json",
             "8kun_boards.json",
             "4chan_catalog.json",

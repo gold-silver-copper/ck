@@ -103,6 +103,13 @@ pub struct Config {
     /// new one each run).
     #[serde(default)]
     pub post_password: Option<String>,
+    /// How long a proof of work some sites ask before a post (alogs', kohlchan's) is searched,
+    /// in seconds (default 180), and on how many threads (default half the machine's, four at
+    /// most).
+    #[serde(default)]
+    pub proof_of_work_seconds: Option<u64>,
+    #[serde(default)]
+    pub proof_of_work_threads: Option<usize>,
     /// `[[filter]]`: hide or highlight threads and posts.
     #[serde(default, rename = "filter")]
     pub filters: Vec<crate::filter::FilterConfig>,
@@ -274,6 +281,9 @@ pub struct SiteConfig {
     /// Base URL for files, when the site serves them from another host (makaba, vichan).
     #[serde(default)]
     pub media_url: Option<String>,
+    /// vichan only: where posts go, when not to the site itself (8kun's sys host).
+    #[serde(default)]
+    pub post_url: Option<String>,
 }
 
 /// The engines, described in `backend::ENGINES`. (This order is the one serde lists them in
@@ -291,6 +301,8 @@ pub enum SiteKind {
     Jschan,
     /// 2ch.hk's engine.
     Makaba,
+    /// kissu's own engine, read as vichan.
+    Kissu,
 }
 
 impl SiteKind {
@@ -812,6 +824,7 @@ mod tests {
             thumb_ext: None,
             archive: None,
             media_url: None,
+            post_url: None,
         };
         let mut d = fresh();
         let a = site("a", Some(vec![BoardConfig::Uri("b".into())]));

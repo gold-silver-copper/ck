@@ -5,16 +5,6 @@ use std::time::Instant;
 
 use image::{DynamicImage, Rgba, RgbaImage};
 
-/// What a site said when asked for a captcha.
-#[derive(Debug)]
-pub enum Captcha {
-    /// It won't give one now: why.
-    Refused(String),
-    /// Not for a while (posting too often): how long, and its message.
-    Wait { until: Instant, message: String },
-    Challenge(Challenge),
-}
-
 #[derive(Debug, Clone)]
 pub struct Challenge {
     /// Its engine's, to go with the answer.

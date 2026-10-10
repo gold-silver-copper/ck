@@ -634,8 +634,9 @@ found" then means the API doesn't list it yet, and ck tries again). If 4chan ref
 soon, a wrong answer, a file too big), the box says why and keeps what you wrote: fix it and
 ctrl-s again. When a jschan or LynxChan site wants a "block bypass" first, the box shows its
 captcha for that, then sends the post. Some ask a proof of work with it (alogs, kohlchan's
-"hashcash"): ck works it out on a few threads (at most four, and half the machine's), which
-can take a moment. 8kun asks its own captcha once a day, after the post is sent. Posts go with a password (`post_password` in the
+"hashcash"): ck works it out on a few threads (by default half the machine's, four at most)
+for up to three minutes; `proof_of_work_seconds` and `proof_of_work_threads` in the config
+change that (alogs' takes longer). 8kun asks its own captcha once a day, after the post is sent. Posts go with a password (`post_password` in the
 config, else a new one each run), for deleting them on the site where it lets you.
 
 `esc` closes the box and keeps what's written, per thread, for the next `P` there (pressing

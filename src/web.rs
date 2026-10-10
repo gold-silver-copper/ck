@@ -85,7 +85,7 @@ impl Helper {
 
     /// Ask, and wait for the answer. A `Failed` comes back as an error, as does ck-web
     /// stopping or the asking being cancelled.
-    pub fn ask(&self, request: &Request) -> Result<Reply> {
+    fn ask(&self, request: &Request) -> Result<Reply> {
         let _turn = crate::http::lock(&self.0.turn);
         let (tx, rx) = channel();
         *crate::http::lock(&self.0.waiter) = Some(tx);
@@ -94,34 +94,6 @@ impl Helper {
             Ok(Some(Reply::Failed { error })) => bail!(error),
             Ok(Some(reply)) => Ok(reply),
             Ok(None) | Err(_) => bail!("ck-web stopped"),
-        }
-    }
-
-    /// Be on `url` (a page of the site posted to), opening it if it isn't the one open.
-    pub fn open(&self, url: &str) -> Result<()> {
-        if crate::http::lock(&self.0.page).as_deref() == Some(url) {
-            return Ok(());
-        }
-        self.ask(&Request::Open { url: url.to_string() })?;
-        *crate::http::lock(&self.0.page) = Some(url.to_string());
-        Ok(())
-    }
-
-    /// Send a request from the page: what came back.
-    pub fn fetch(&self, f: Fetch<'_>) -> Result<Fetched> {
-        let headers = f.headers.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
-        let request = Request::Fetch { method: f.method.into(), url: f.url.into(), headers, fields: f.fields, file: f.file, body: f.body };
-        match self.ask(&request)? {
-            Reply::Fetched { status, body, cookies } => Ok(Fetched { status, body, cookies }),
-            other => bail!("ck-web answered {other:?}"),
-        }
-    }
-
-    /// A captcha widget of a service's, done by a person in the browser view: its token.
-    pub fn widget(&self, provider: &str, sitekey: &str) -> Result<String> {
-        match self.ask(&Request::Widget { provider: provider.into(), sitekey: sitekey.into() })? {
-            Reply::Token { token } => Ok(token),
-            other => bail!("ck-web answered {other:?}"),
         }
     }
 
@@ -136,6 +108,53 @@ impl Helper {
         let line = serde_json::to_string(request)?;
         let mut stdin = crate::http::lock(&self.0.stdin);
         writeln!(stdin, "{line}").and_then(|()| stdin.flush()).context("ck-web has stopped")
+    }
+}
+
+/// What a post goes through to its site: ck-web (`Helper`), or answers recorded from the
+/// site (tests). Each call waits for the answer.
+pub trait Web {
+    /// Be on `url` (a page of the site posted to), opening it if it isn't the one open.
+    fn open(&self, url: &str) -> Result<()>;
+    /// Send a request from the page: what came back.
+    fn fetch(&self, f: Fetch<'_>) -> Result<Fetched>;
+    /// A captcha widget of a service's, done by a person in the browser view: its token.
+    fn widget(&self, provider: &str, sitekey: &str) -> Result<String>;
+    /// 4chan's captcha (its "twister"): it comes only in a frame of sys.4chan.org.
+    fn fourchan_captcha(&self, board: &str, thread: u64) -> Result<serde_json::Value>;
+}
+
+impl Web for Helper {
+    fn open(&self, url: &str) -> Result<()> {
+        if crate::http::lock(&self.0.page).as_deref() == Some(url) {
+            return Ok(());
+        }
+        self.ask(&Request::Open { url: url.to_string() })?;
+        *crate::http::lock(&self.0.page) = Some(url.to_string());
+        Ok(())
+    }
+
+    fn fetch(&self, f: Fetch<'_>) -> Result<Fetched> {
+        let headers = f.headers.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
+        let request = Request::Fetch { method: f.method.into(), url: f.url.into(), headers, fields: f.fields, file: f.file, body: f.body };
+        match self.ask(&request)? {
+            Reply::Fetched { status, body, cookies } => Ok(Fetched { status, body, cookies }),
+            other => bail!("ck-web answered {other:?}"),
+        }
+    }
+
+    fn widget(&self, provider: &str, sitekey: &str) -> Result<String> {
+        match self.ask(&Request::Widget { provider: provider.into(), sitekey: sitekey.into() })? {
+            Reply::Token { token } => Ok(token),
+            other => bail!("ck-web answered {other:?}"),
+        }
+    }
+
+    fn fourchan_captcha(&self, board: &str, thread: u64) -> Result<serde_json::Value> {
+        match self.ask(&Request::Captcha { board: board.into(), thread })? {
+            Reply::Captcha { twister } => Ok(twister),
+            other => bail!("ck-web answered {other:?}"),
+        }
     }
 }
 

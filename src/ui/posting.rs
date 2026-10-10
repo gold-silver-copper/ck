@@ -23,7 +23,7 @@ pub(super) fn draw_reply(f: &mut Frame, app: &mut App) {
         Stage::Writing => "ctrl-s post · tab next · esc keep for later",
         Stage::Offer => "y download · esc back",
         Stage::Installing { .. } => "esc keep for later",
-        Stage::Asking | Stage::Sending => "esc stop",
+        Stage::Working => "esc stop",
         Stage::Person(_) => "arrows move · enter click · esc stop",
         Stage::Waiting { .. } => "enter ask again · esc back",
         Stage::Solving(s) if s.expired(Instant::now()) => "enter new captcha · esc back",
@@ -72,8 +72,7 @@ pub(super) fn draw_reply(f: &mut Frame, app: &mut App) {
                 fill(f, Rect::new(body.x, body.y + 2, done.min(body.width.saturating_sub(2)), 1), t.primary);
             }
         }
-        Stage::Asking => say(f, format!("{spin} Getting a captcha from {}…", c.to.site)),
-        Stage::Sending => say(f, format!("{spin} Posting…")),
+        Stage::Working => say(f, format!("{spin} Posting to {}…", c.to.site)),
         Stage::Waiting { until, message } => {
             let left = until.saturating_duration_since(Instant::now()).as_secs();
             say(f, message.clone());

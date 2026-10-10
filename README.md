@@ -43,7 +43,8 @@ no refetching what hasn't changed.
 | kind        | engine                                         | built in                         |
 |-------------|------------------------------------------------|----------------------------------|
 | `4chan`     | the official 4chan API                         | 4chan                            |
-| `vichan`    | vichan, tinyboard, infinity                    | lainchan, wizchan, uboachan, smuglo.li, kissu, tvch, sushigirl, leftypol, 8kun |
+| `vichan`    | vichan, tinyboard, infinity                    | lainchan, wizchan, uboachan, smuglo.li, tvch, sushigirl, leftypol, 8kun |
+| `kissu`     | kissu's own engine (read as vichan)            | kissu                            |
 | `lynxchan`  | LynxChan                                       | endchan, kohlchan, alogs         |
 | `jschan`    | jschan                                         | zzzchan, trashchan, ptchan, erischan, junkuchan, nukechan |
 | `makaba`    | 2ch.hk's engine                                | 2ch                              |

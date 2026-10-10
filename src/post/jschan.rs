@@ -9,38 +9,29 @@ use anyhow::{Context, Result, bail};
 use image::DynamicImage;
 use serde_json::Value;
 
-use super::{Answered, Draft, Poster, Sent, Where, thread_in};
-use crate::captcha::{Captcha, Cell, Challenge, Task};
+use super::{Draft, Posted, Poster, Session, Where, thread_in};
+use crate::captcha::{Cell, Challenge, Task};
 use crate::http::encode_segment as enc;
-use crate::web::{Fetch, Fetched, Helper, Upload};
+use crate::web::{Fetch, Fetched, Upload};
 
 pub struct Jschan {
     pub root: String,
 }
 
-/// The id of the captcha asked for a block bypass rather than a post.
-const BYPASS: &str = "bypass";
-
 impl Jschan {
-    /// A captcha: its kind and question from the site's settings, its picture from
-    /// `/captcha` (which sets its cookie). `id` says what it's for.
-    fn fresh_captcha(&self, web: &Helper, id: &str, board: &str) -> Result<Captcha> {
-        let settings = web.fetch(Fetch::get(&format!("{}/settings.json", self.root)))?.json()?;
+    /// The fields of the site's captcha, once it's done: its kind and question from the
+    /// site's settings, its picture from `/captcha` (which sets its cookie), asked for again
+    /// until there's an answer; or a service's widget, its key in the board's page.
+    fn captcha(&self, s: &Session, board: &str) -> Result<Vec<(String, String)>> {
+        let settings = s.web.fetch(Fetch::get(&format!("{}/settings.json", self.root)))?.json()?;
         let options = settings.get("captchaOptions").cloned().unwrap_or_default();
-        // A service's captcha: its key is in the board's page, done in the browser view, and
-        // its token goes as the answer.
         if matches!(options.get("type").and_then(Value::as_str), Some("hcaptcha" | "google" | "yandex")) {
-            let page = web.fetch(Fetch::get(&format!("{}/{}/index.html", self.root, enc(board))))?.body;
+            let page = s.web.fetch(Fetch::get(&format!("{}/{}/index.html", self.root, enc(board))))?.body;
             let (provider, sitekey) = super::widget_in(&page).context("The site wants a captcha service's check, and ck couldn't find its key")?;
-            let token = web.widget(provider, &sitekey)?;
-            if id == BYPASS {
-                let r = web.fetch(Fetch::post(&format!("{}/forms/blockbypass", self.root), vec![("captcha".into(), token)]).header("x-using-xhr", "true"))?;
-                return if r.status >= 400 { Err(error(&r)) } else { Ok(super::solved(&[])) };
-            }
-            return Ok(super::solved(&[("captcha".into(), token)]));
+            return Ok(vec![("captcha".into(), s.web.widget(provider, &sitekey)?)]);
         }
-        let picture = web.fetch(Fetch::get(&format!("{}/captcha", self.root)))?;
-        Ok(Captcha::Challenge(challenge(id, &options, picture.image()?, Instant::now())?))
+        let (challenge, answer) = s.solve(|| challenge(&options, s.web.fetch(Fetch::get(&format!("{}/captcha", self.root)))?.image()?, Instant::now()))?;
+        Ok(answer_fields(&challenge.task, &answer))
     }
 }
 
@@ -49,33 +40,10 @@ impl Poster for Jschan {
         format!("{}/robots.txt", self.root)
     }
 
-    fn captcha(&self, web: &Helper, to: &Where) -> Result<Captcha> {
-        let board = web.fetch(Fetch::get(&format!("{}/{}/settings.json", self.root, enc(&to.board))))?.json()?;
-        let mode = board.get("captchaMode").and_then(Value::as_u64).unwrap_or(0);
-        if mode == 2 || (mode == 1 && to.new_thread()) {
-            return self.fresh_captcha(web, "post", &to.board);
-        }
-        Ok(super::no_captcha("post"))
-    }
-
-    fn answer(&self, web: &Helper, challenge: &Challenge, answer: &str) -> Result<Answered> {
-        if matches!(challenge.task, Task::None) {
-            return Ok(Answered::Done(super::solved_fields(challenge)));
-        }
-        let fields = answer_fields(&challenge.task, answer);
-        if challenge.id != BYPASS {
-            return Ok(Answered::Done(fields));
-        }
-        // The bypass is its own form; it sets a cookie the post then carries.
-        let r = web.fetch(Fetch::post(&format!("{}/forms/blockbypass", self.root), fields).header("x-using-xhr", "true"))?;
-        if r.status >= 400 {
-            return Err(error(&r));
-        }
-        Ok(Answered::Done(Vec::new()))
-    }
-
-    fn post(&self, web: &Helper, to: &Where, draft: &Draft, captcha: &[(String, String)]) -> Result<Sent> {
+    fn post(&self, s: &Session, to: &Where, draft: &Draft) -> Result<Posted> {
         let board = enc(&to.board);
+        let settings = s.web.fetch(Fetch::get(&format!("{}/{board}/settings.json", self.root)))?.json()?;
+        let mode = settings.get("captchaMode").and_then(Value::as_u64).unwrap_or(0);
         let mut fields = Vec::new();
         if !to.new_thread() {
             fields.push(("thread".to_string(), to.thread.to_string()));
@@ -84,22 +52,38 @@ impl Poster for Jschan {
         if draft.spoiler && draft.file.is_some() {
             fields.push(("spoiler_all".into(), "true".into()));
         }
-        fields.extend(captcha.iter().cloned());
+        let wants = mode == 2 || (mode == 1 && to.new_thread());
+        let mut captcha = if wants { self.captcha(s, &to.board)? } else { Vec::new() };
         let referer = match to.thread {
             0 => format!("{}/{board}/index.html", self.root),
             t => format!("{}/{board}/thread/{t}.html", self.root),
         };
-        let file = draft.file.as_ref().map(|p| Upload { field: "file".into(), path: p.display().to_string() });
         let url = format!("{}/forms/board/{board}/post", self.root);
-        let r = web.fetch(Fetch { file, ..Fetch::post(&url, fields) }.header("x-using-xhr", "true").header("Referer", &referer))?;
+        let send = |captcha: &[(String, String)]| {
+            let file = draft.file.as_ref().map(|p| Upload { field: "file".into(), path: p.display().to_string() });
+            let fields = [fields.as_slice(), captcha].concat();
+            s.web.fetch(Fetch { file, ..Fetch::post(&url, fields) }.header("x-using-xhr", "true").header("Referer", &referer))
+        };
+        let mut r = send(&captcha)?;
+        // A block bypass first: the same captcha, to its own form (it sets a cookie the post
+        // then carries), then the post again, with a new captcha if it wants one (each is
+        // taken once).
         if r.status == 403 && r.body.contains("block bypass") {
-            return Ok(Sent::Again(self.fresh_captcha(web, BYPASS, &to.board)?));
+            let bypass = self.captcha(s, &to.board)?;
+            let b = s.web.fetch(Fetch::post(&format!("{}/forms/blockbypass", self.root), bypass).header("x-using-xhr", "true"))?;
+            if b.status >= 400 {
+                return Err(error(&b));
+            }
+            if wants {
+                captcha = self.captcha(s, &to.board)?;
+            }
+            r = send(&captcha)?;
         }
         if r.status >= 400 {
             return Err(error(&r));
         }
         let (thread, no) = posted(to, &r.json()?)?;
-        Ok(Sent::Posted { thread, no })
+        Ok(Posted { thread, no })
     }
 }
 
@@ -116,7 +100,7 @@ fn answer_fields(task: &Task, answer: &str) -> Vec<(String, String)> {
 /// jschan's captcha from its settings (`captchaOptions`) and picture: a grid (one picture of
 /// `size` rows of `size` icons, picked by their order), a square grid ("grid2": arrows
 /// pointing at an icon, picked as cells), or text to read.
-fn challenge(id: &str, options: &Value, picture: DynamicImage, now: Instant) -> Result<Challenge> {
+fn challenge(options: &Value, picture: DynamicImage, now: Instant) -> Result<Challenge> {
     let expires = super::after(now, 300);
     let kind = options.get("type").and_then(Value::as_str).unwrap_or("text");
     let key = format!("captcha:jschan:{}", super::next_key());
@@ -127,7 +111,7 @@ fn challenge(id: &str, options: &Value, picture: DynamicImage, now: Instant) -> 
             let (size, question) = grid_options(options);
             let prompt = format!("{question}: the icons in order, row by row");
             let cells = (1..=u64::from(size)).flat_map(|row| (1..=u64::from(size)).map(move |n| Cell::Label(format!("row {row}, {}", ordinal(n))))).collect();
-            Ok(Challenge { id: id.into(), expires, task: Task::Grid { prompt, image: Some(key.clone()), cells, single: false }, pictures: vec![(key, picture)] })
+            Ok(Challenge { id: String::new(), expires, task: Task::Grid { prompt, image: Some(key.clone()), cells, single: false }, pictures: vec![(key, picture)] })
         }
         "grid2" => {
             // A square grid: its cells are squares of the picture, numbered in it (one picture
@@ -140,9 +124,9 @@ fn challenge(id: &str, options: &Value, picture: DynamicImage, now: Instant) -> 
                 crate::captcha::number(&mut numbered, n, col.saturating_mul(side).saturating_add(2), row.saturating_mul(side).saturating_add(2));
             }
             let cells = (0..size.saturating_mul(size)).map(|_| Cell::Label(String::new())).collect();
-            Ok(Challenge { id: id.into(), expires, task: Task::Grid { prompt, image: Some(key.clone()), cells, single: false }, pictures: vec![(key, DynamicImage::ImageRgba8(numbered))] })
+            Ok(Challenge { id: String::new(), expires, task: Task::Grid { prompt, image: Some(key.clone()), cells, single: false }, pictures: vec![(key, DynamicImage::ImageRgba8(numbered))] })
         }
-        "text" => Ok(Challenge { id: id.into(), expires, task: Task::Text { prompt: "Type the text in the picture".into(), image: Some(key.clone()) }, pictures: vec![(key, picture)] }),
+        "text" => Ok(Challenge { id: String::new(), expires, task: Task::Text { prompt: "Type the text in the picture".into(), image: Some(key.clone()) }, pictures: vec![(key, picture)] }),
         other => bail!("This site's captcha ({other}) isn't one ck can show yet: post from the browser"),
     }
 }
@@ -186,10 +170,42 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    fn png_b64() -> String {
+        let mut png = std::io::Cursor::new(Vec::new());
+        DynamicImage::new_rgb8(150, 150).write_to(&mut png, image::ImageFormat::Png).unwrap();
+        base64::Engine::encode(&base64::engine::general_purpose::STANDARD, png.into_inner())
+    }
+
+    #[test]
+    fn a_reply_on_a_board_with_a_captcha_then_a_block_bypass() {
+        use super::super::fake::{Person, Site, session};
+        let picture = png_b64();
+        let site = Site::default()
+            .answers("/meta/settings.json", 200, r#"{"captchaMode":2,"maxFiles":5}"#)
+            .answers("/settings.json", 200, "fixture:jschan_zzzchan_settings.json")
+            .answers("/captcha", 200, &picture)
+            .answers("/forms/board/meta/post", 403, r#"{"title":"Forbidden","message":"Please complete a block bypass to continue","frame":"/bypass_minimal.html"}"#)
+            .answers("/settings.json", 200, "fixture:jschan_zzzchan_settings.json")
+            .answers("/captcha", 200, &picture)
+            .answers("/forms/blockbypass", 200, r#"{"title":"Success"}"#)
+            .answers("/settings.json", 200, "fixture:jschan_zzzchan_settings.json")
+            .answers("/captcha", 200, &picture)
+            .answers("/forms/board/meta/post", 200, r#"{"postId":6307,"redirect":"/meta/thread/4378.html#6307"}"#);
+        let person = Person::says(&[Some("0100000000000000"), Some("1000000000000000"), Some("0010000000000001")]);
+        let to = Where { site: "zzzchan".into(), board: "meta".into(), thread: 4378 };
+        let draft = Draft { comment: "hi".into(), password: "pw".into(), ..Default::default() };
+        let jschan = Jschan { root: "https://zzzchan.xyz".into() };
+        assert_eq!(jschan.post(&session(&site, &person), &to, &draft).unwrap(), Posted { thread: 4378, no: 6307 });
+        let picks: Vec<_> = site.sent("/forms/board/meta/post").fields.into_iter().filter(|(k, _)| k == "captcha").map(|(_, v)| v).collect();
+        assert_eq!(picks, ["2", "15"]);
+        assert_eq!(site.sent("/forms/blockbypass").field("captcha"), Some("0"));
+        assert!(matches!(person.shown.borrow().first(), Some(Task::Grid { image: Some(_), .. })));
+    }
+
     #[test]
     fn a_grid_captcha_is_picked_by_the_icons_order() {
         let options = json!({"type": "grid", "grid": {"size": 4, "question": "Select the solid/filled icons"}});
-        let c = challenge("post", &options, DynamicImage::new_rgb8(150, 150), Instant::now()).unwrap();
+        let c = challenge(&options, DynamicImage::new_rgb8(150, 150), Instant::now()).unwrap();
         let Task::Grid { cells, image: Some(_), .. } = &c.task else { panic!("not a grid with its picture") };
         assert_eq!((cells.len(), c.pictures.len()), (16, 1));
         assert_eq!(cells.get(5), Some(&Cell::Label("row 2, 2nd".into())));
