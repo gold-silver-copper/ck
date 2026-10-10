@@ -344,12 +344,6 @@ impl App {
                 _ => {}
             }
         }
-        if self.tab.view() == View::Search && self.keys.keys(Action::NextMatch).contains(&crate::keys::Key::from_event(&key)) {
-            if self.more_results() {
-                self.load_search_page();
-            }
-            return;
-        }
         if let Some(action) = action {
             // Moves repeat with a count; anything else (a toggle) once.
             let repeats = matches!(action, Action::NextMatch | Action::PrevMatch | Action::JumpBack | Action::JumpForward | Action::NextTab | Action::PrevTab | Action::NextPart | Action::PrevPart);
@@ -455,6 +449,12 @@ impl App {
             Action::JumpBack if self.tab.view() != View::Thread || self.tab.thread.is_none() => self.travel(true),
             Action::JumpForward if self.tab.view() != View::Thread || self.tab.thread.is_none() => self.travel(false),
             Action::Watched => self.tab.navigate(View::Watched),
+            // In archive search: the next page of results.
+            Action::NextMatch if self.tab.view() == View::Search => {
+                if self.more_results() {
+                    self.load_search_page();
+                }
+            }
             Action::Filter => self.open_add_filter(),
             Action::Conversation => self.toggle_conversation(),
             Action::Poster => self.toggle_poster(),

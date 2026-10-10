@@ -1312,6 +1312,9 @@ fn archive_search_and_back() {
     assert_eq!(app.tab.req().unwrap(), req + 1);
     app.handle(answer(app.tab.req().unwrap(), |a, (page, r)| a.search_results(page, r), (2, Err(anyhow::anyhow!("You're searching too fast.")))));
     assert!(app.footer.get().is_some_and(|s| s.error && s.text.contains("too fast")));
+    // The menu's "more results" asks for it again, as n does.
+    run_menu_row(&mut app, "more results");
+    assert_eq!(app.tab.req().unwrap(), req + 2);
     // Enter: the thread, on the archive, with the post selected.
     app.pick_row(View::Search, 1);
     app.enter();

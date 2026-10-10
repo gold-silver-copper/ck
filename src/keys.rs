@@ -78,7 +78,7 @@ actions! {
     Watched, "watched", Some(Key::char('W')), &[Scope::Global], "the watched threads";
     Unread, "unread", Some(Key::char('U')), &[Scope::Thread], "jump to the first unread post";
     Preview, "preview", Some(Key::char('p')), &[Scope::Thread], "preview the quoted posts";
-    NextMatch, "next_match", Some(Key::char('n')), &[Scope::Thread], "next search match";
+    NextMatch, "next_match", Some(Key::char('n')), &[Scope::Thread, Scope::Lists], "next search match (archive search: more results)";
     PrevMatch, "prev_match", Some(Key::char('N')), &[Scope::Thread], "previous search match";
     Spoiler, "spoiler", Some(Key::char('s')), &[Scope::Thread], "show the post's spoilers";
     AllSpoilers, "all_spoilers", Some(Key::char('S')), &[Scope::Thread], "show all spoilers";
