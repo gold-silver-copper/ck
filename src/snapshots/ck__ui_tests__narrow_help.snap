@@ -6,19 +6,19 @@ expression: narrow(&mut a)
     Keys  j/k scroll · images: off · esc close
 
     Everywhere
-      j k gg G ^d ^u     move (10j),
-                         top/bottom, page
+      j k gg G           move (10j), top /
+                         bottom
+      ^d ^u ^f ^b ^e ^y  half page, page, line
       enter l / esc h    open / back
       u / ctrl-r / W     back / forward /
                          watched
       ., right-click     menu: what you can do
                          here
-      f                  label on-screen items
-                         to open
-      /                  filter (thread:
-                         search)
+      f / /              hint labels / filter,
+                         search
       r / o              reload / open in
                          browser
-      : / ,              go to a URL↓ more (j)
+      : / ,              go to a URL /
+                         settings   ↓ more (j)
 
  enter open   . more   ? help           1/26  3%

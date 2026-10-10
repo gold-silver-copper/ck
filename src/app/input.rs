@@ -299,9 +299,13 @@ impl App {
     fn on_view_key(&mut self, key: KeyEvent) {
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         let pending = std::mem::take(&mut self.pending);
-        // A key that doesn't finish the prefix drops it and counts as itself (esc only drops it).
+        // Esc drops a waiting count or prefix; a key that doesn't finish the prefix drops it and
+        // counts as itself.
+        if key.code == KeyCode::Esc && pending.shown().is_some() {
+            return;
+        }
         if let Some(prefix) = pending.prefix
-            && (key.code == KeyCode::Esc || self.finish_prefix(prefix, key.code, pending.count))
+            && self.finish_prefix(prefix, key.code, pending.count)
         {
             return;
         }
@@ -365,7 +369,7 @@ impl App {
             }
             KeyCode::Esc if !self.filter(self.tab.view()).is_empty() => self.edit_filter(self.tab.view(), String::clear),
             KeyCode::Esc => self.back(),
-            _ if self.tab.view() == View::Catalog && self.on_grid_key(key.code) => {}
+            _ if self.tab.view() == View::Catalog && (0..n).all(|_| self.on_grid_key(key.code)) => {}
             KeyCode::Char(c @ '1'..='9') if self.tab.view() == View::Sites => self.open_favorite(c as usize - '1' as usize),
             KeyCode::Char('h') | KeyCode::Left | KeyCode::Backspace => self.back(),
             _ if self.tab.view() == View::Thread => self.on_thread_key(key.code, ctrl, n),
@@ -430,7 +434,7 @@ impl App {
             Action::Search => self.typing = Some(Typing::ListFilter),
             Action::Reload => self.refresh(),
             Action::JumpBack if self.tab.view() != View::Thread => self.travel(true),
-            Action::JumpForward => self.travel(false),
+            Action::JumpForward if self.tab.view() != View::Thread => self.travel(false),
             Action::Watched => self.tab.navigate(View::Watched),
             Action::Filter => self.open_add_filter(),
             Action::Conversation => self.toggle_conversation(),
@@ -509,6 +513,7 @@ impl App {
             Action::OpenFile
             | Action::Replies
             | Action::JumpBack
+            | Action::JumpForward
             | Action::Unread
             | Action::Preview
             | Action::NextMatch
@@ -576,6 +581,7 @@ impl App {
             KeyCode::Home => t.select_entry(0),
             // The very end of the thread, so a refresh's new posts come into view.
             KeyCode::Char('G') | KeyCode::End => {
+                t.leave_mark();
                 t.select_entry(usize::MAX);
                 t.scroll_to(Reveal::Bottom);
                 t.reveal = Some(Reveal::Bottom);
@@ -620,6 +626,7 @@ impl App {
         let view = self.tab.view();
         match &mut self.tab.thread {
             Some(t) if view == View::Thread => {
+                t.leave_mark();
                 t.select_entry(n.saturating_sub(1));
                 t.scroll_to(Reveal::Jump);
             }
@@ -661,10 +668,15 @@ impl App {
                 }
                 None => self.info("No replies to this post"),
             },
-            // Back to the post jumped from; else to the thread before.
+            // Back to the post jumped from, or forward again; else to the thread before or after.
             Action::JumpBack => {
                 if !t.jump_back() {
                     self.travel(true);
+                }
+            }
+            Action::JumpForward => {
+                if !t.jump_forward() {
+                    self.travel(false);
                 }
             }
             Action::Unread => match (0..t.posts.len()).find(|&i| t.is_new(i)) {

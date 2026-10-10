@@ -6,12 +6,12 @@ expression: snapshot(&mut a)
                          Keys          j/k scroll · images: off · esc close
   ▌ ◉  Watched
     ◷  History           Everywhere
-    ▤  Saved               j k gg G ^d ^u     move (10j), top/bottom, page
-       4chan               enter l / esc h    open / back
-       lainchan            u / ctrl-r / W     back / forward / watched
-       wizchan             ., right-click     menu: what you can do here
-       uboachan            f                  label on-screen items to open
-       endchan             /                  filter (thread: search)
+    ▤  Saved               j k gg G           move (10j), top / bottom
+       4chan               ^d ^u ^f ^b ^e ^y  half page, page, line
+       lainchan            enter l / esc h    open / back
+       wizchan             u / ctrl-r / W     back / forward / watched
+       uboachan            ., right-click     menu: what you can do here
+       endchan             f / /              hint labels / filter, search
        kohlchan            r / o              reload / open in browser
        desuarchive         : / ,              go to a URL / settings
        zzzchan             [ / ] / ctrl-w     previous / next / close tab

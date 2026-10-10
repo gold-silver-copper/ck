@@ -350,7 +350,7 @@ impl App {
         let at = LINES.iter().position(|&l| l == self.catalog_lines).unwrap_or(0);
         self.catalog_lines = LINES.get(at + 1).copied().flatten();
         match self.catalog_lines {
-            Some(n) => self.save_config(&format!("{n} lines in catalog cards"), |d| d["catalog_lines"] = toml_edit::value(i64::from(n))),
+            Some(n) => self.save_config(&format!("{n} line{} in catalog cards", if n == 1 { "" } else { "s" }), |d| d["catalog_lines"] = toml_edit::value(i64::from(n))),
             None => self.save_config("catalog cards as tall as their thumbnails", |d| {
                 d.remove("catalog_lines");
             }),

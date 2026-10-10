@@ -641,6 +641,15 @@ fn vim_counts_prefixes_and_the_jump_list() {
     keys(&mut app, "gk");
     assert_eq!((at(&app), app.pending.shown()), (9, None));
     keys(&mut app, "j");
+    // Esc drops a waiting count, and only that.
+    keys(&mut app, "5");
+    app.on_key(KeyEvent::from(KeyCode::Esc));
+    assert_eq!((app.tab.view(), app.pending.shown()), (View::Thread, None));
+    // G was a jump: u comes back from it, and ctrl-r goes forward again.
+    keys(&mut app, "u");
+    assert_eq!(at(&app), 1);
+    app.on_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL));
+    assert_eq!(at(&app), 10);
     // W: the watched threads, the thread left on the jump list; u comes back to it, where
     // it was left.
     keys(&mut app, "W");

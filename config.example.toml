@@ -378,7 +378,7 @@ url = "https://arch.b4k.dev"
 #   Watched/History/Saved: remove = "x"
 #   catalog, thread, Watched/History/Saved, image viewer: copy = "y", copy_link = "Y"
 [keys]
-# watch = "W"
+# watch = "Q"
 # help = ["?", "f1"]
 
 # Hidden words: any post or thread with one of these words is hidden, everywhere. Plain

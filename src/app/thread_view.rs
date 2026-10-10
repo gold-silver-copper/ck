@@ -137,8 +137,9 @@ pub struct ThreadView {
     pub backlinks: Vec<Vec<u64>>,
     pub selected: usize,
     pub scroll: usize,
-    /// Where `u` goes back to, by post number.
+    /// Where `u` goes back to, by post number, and where `ctrl-r` goes forward to again.
     pub(super) jumps: Vec<u64>,
+    pub(super) ahead: Vec<u64>,
     /// Rendered layout, rebuilt by the UI when the width changes, from cached post lines.
     pub layout: Option<ThreadLayout>,
     pub cache: LineCache,
@@ -868,14 +869,34 @@ impl ThreadView {
 
     /// Select post `i`, with the selected one to come back to (`u`).
     pub(super) fn jump(&mut self, i: usize) {
-        self.jumps.extend(self.current().map(|p| p.no));
+        self.leave_mark();
         self.select(i);
+    }
+
+    /// The selected post, to come back to (`u`) from a jump about to be made.
+    pub(super) fn leave_mark(&mut self) {
+        self.jumps.extend(self.current().map(|p| p.no));
+        self.ahead.clear();
     }
 
     /// `u`: back to the last post jumped from that's still here. False if there's none.
     pub(super) fn jump_back(&mut self) -> bool {
-        while let Some(no) = self.jumps.pop() {
-            if self.select_post(no) {
+        self.retrace(true)
+    }
+
+    /// `ctrl-r`: forward again to where `u` came back from. False if there's none.
+    pub(super) fn jump_forward(&mut self) -> bool {
+        self.retrace(false)
+    }
+
+    /// Along the jump list one way, leaving the selected post on the other.
+    fn retrace(&mut self, back: bool) -> bool {
+        let here = self.current().map(|p| p.no);
+        let (from, to) = if back { (&mut self.jumps, &mut self.ahead) } else { (&mut self.ahead, &mut self.jumps) };
+        while let Some(no) = from.pop() {
+            if let Some(&i) = self.index.get(&no) {
+                to.extend(here);
+                self.select(i);
                 return true;
             }
         }

@@ -244,12 +244,12 @@ fn help_sections(keys: &KeyMap) -> Vec<(&'static str, Vec<(String, &'static str)
         (
             "Everywhere",
             vec![
-                ("j k gg G ^d ^u".into(), "move (10j), top/bottom, page"),
+                ("j k gg G".into(), "move (10j), top / bottom"),
+                ("^d ^u ^f ^b ^e ^y".into(), "half page, page, line"),
                 ("enter l / esc h".into(), "open / back"),
                 (format!("{} / {}", pair(Action::JumpBack, Action::JumpForward), k(Action::Watched)), "back / forward / watched"),
                 (format!("{}, right-click", k(Action::Menu)), "menu: what you can do here"),
-                (k(Action::Hints), "label on-screen items to open"),
-                (k(Action::Search), "filter (thread: search)"),
+                (pair(Action::Hints, Action::Search), "hint labels / filter, search"),
                 (pair(Action::Reload, Action::Browser), "reload / open in browser"),
                 (pair(Action::Goto, Action::Settings), "go to a URL / settings"),
                 (format!("{} / {} / {}", k(Action::PrevTab), k(Action::NextTab), k(Action::CloseTab)), "previous / next / close tab"),
@@ -301,13 +301,12 @@ fn help_sections(keys: &KeyMap) -> Vec<(&'static str, Vec<(String, &'static str)
         (
             "Thread",
             vec![
-                ("J K space, zz zt zb".into(), "scroll line/page; place post"),
+                ("J K space".into(), "scroll a line / a page"),
+                ("zz zt zb".into(), "post to middle / top / bottom"),
                 (pair(Action::NextPart, Action::PrevPart), "focus images, links, replies"),
                 ("enter, l".into(), "open focused / follow quote"),
-                (pair(Action::Preview, Action::Replies), "preview quotes / 1st reply"),
-                (pair(Action::JumpBack, Action::Unread), "jump back / first unread"),
-                (pair(Action::NextMatch, Action::PrevMatch), "next / previous match"),
-                (pair(Action::Spoiler, Action::AllSpoilers), "spoilers: post / all"),
+                (format!("{} / {}", pair(Action::Preview, Action::Replies), k(Action::Unread)), "preview / 1st reply / unread"),
+                (format!("{}, {}", pair(Action::NextMatch, Action::PrevMatch), pair(Action::Spoiler, Action::AllSpoilers)), "match next/prev; spoiler/all"),
                 (pair(Action::Expand, Action::Conversation), "expand / conversation"),
                 (pair(Action::Poster, Action::Media), "poster's posts / files only"),
                 (pair(Action::View, Action::Gallery), "view images / gallery"),

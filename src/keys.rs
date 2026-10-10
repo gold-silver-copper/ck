@@ -412,6 +412,14 @@ mod tests {
     }
 
     #[test]
+    fn the_manuals_example_loads() {
+        let doc = include_str!("../docs/manual.md");
+        let block = doc.split("```toml\n[keys]").nth(1).and_then(|b| b.split("```").next()).unwrap();
+        let cfg: crate::config::Config = toml::from_str(&format!("[keys]{block}")).unwrap();
+        KeyMap::new(&cfg.keys).unwrap();
+    }
+
+    #[test]
     fn overrides_and_errors() {
         let m = map(&[("watch", "Q")]).unwrap();
         assert_eq!(m.action(Scope::Thread, &ch('Q')), Some(Action::Watch));

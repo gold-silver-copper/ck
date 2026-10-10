@@ -907,7 +907,7 @@ mod tests_filters {
         edit_filters(&mut d, FilterEdit::Add(&f)).unwrap();
         let text = d.to_string();
         assert!(text.trim_end().ends_with("[[filter]]\npattern = \"x\"\nfield = \"name\"\naction = \"hide\""), "{text}");
-        assert!(text.contains("[keys]\n# watch = \"W\""), "{text}");
+        assert!(text.contains("[keys]\n# watch = \"Q\""), "{text}");
         // Taking it back leaves the file as it was.
         edit_filters(&mut d, FilterEdit::Remove(0, &f)).unwrap();
         assert_eq!(d.to_string(), DEFAULT_CONFIG);

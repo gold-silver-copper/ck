@@ -43,9 +43,9 @@ Navigation (fixed):
 |-------------------------|-----------------------------------------------|
 | `j`/`k`, arrows         | move (in a thread: next/previous post)        |
 | `gg`/`G`                | top / bottom                                  |
-| ctrl-d / ctrl-u         | half a page                                   |
-| ctrl-f / ctrl-b, space  | a page                                        |
-| `J`/`K`, ctrl-e / ctrl-y | scroll a thread by line                      |
+| ctrl-d / ctrl-u         | half a page (in a list, 10 rows)              |
+| ctrl-f / ctrl-b, space  | a page (in a list, 20 rows)                   |
+| `J`/`K`, ctrl-e / ctrl-y | scroll a thread by a line (in a list, move a row) |
 | `zz` / `zt` / `zb`      | in a thread: scroll the selected post to the middle / top / bottom of the screen |
 | `enter`, `l`            | open (in a thread: follow a `>>quote`, also into other threads and boards) |
 | `esc`, `h`, backspace   | back                                          |
@@ -55,13 +55,15 @@ As in vim, a count before a move repeats it: `10j` goes ten posts down, `5ctrl-d
 pages. `10G` (or `10g`) goes to the tenth post (in a list, the tenth row). A count also
 repeats `n`/`N`, `u`/ctrl-r and tab. While a count or a `z`/`g` waits for the rest of its
 command it shows at the right of the footer, next to where you are: the selected post of how
-many (in a list, the row), and how far down that is, as an editor's ruler does.
+many (in a list, the row), and how far down that is, as an editor's ruler does. `esc` drops
+a waiting count or prefix; another key drops it and does what it does.
 
-The jump list: `u` goes back (in a thread first to the post you jumped from, then to the
-thread before), ctrl-r forward again [`jump_back`, `jump_forward`]. Every thread you leave
+The jump list: `u` goes back (in a thread first to the post you jumped from, by a quote,
+`gg`, `G` or `10G`, then to the thread before), ctrl-r forward again the same way
+[`jump_back`, `jump_forward`]. Every thread you leave
 is on it, at the post you were on, whichever way you left (back to the catalog, to the
 watched threads, by a link), so the thread you just closed is one `u` away, also from the
-catalog. `W` shows the watched threads from anywhere [`watched`]. (Vim's ctrl-i is the same
+catalog. `W` shows the watched threads from anywhere but the image viewer and gallery [`watched`]. (Vim's ctrl-i is the same
 key as tab to a terminal, which focuses a post's parts here; so forward is ctrl-r, the
 redo to `u`'s undo.)
 
@@ -323,9 +325,9 @@ are saved in the config's `[keys]` section (only the keys you changed):
 
 ```toml
 [keys]
-watch = "W"
+watch = "Q"
 help = ["?", "f1"]
-reload = "ctrl-r"
+reload = ["r", "ctrl-l"]
 download_thread = "D"   # no key by default
 mine = []               # no key: only in the . menu
 ```
@@ -883,7 +885,7 @@ All settings are optional; see `config.example.toml` for every option with comme
 - `[[site]]`, `default_sites = false`: see [Adding sites](#adding-sites).
 - `archive = "desuarchive"` on a `[[site]]`: the archive for 404'd threads and `A` searches.
 - `[keys]`: `action = "key"`, `action = ["key", ...]`, or `action = []` for none (the `.`
-  menu only), e.g. `watch = "W"`; see
+  menu only), e.g. `watch = "Q"`; see
   [Remapping keys](#remapping-keys). Unknown actions, things that aren't keys, and two
   commands on one key in the same view are reported at startup.
 - `theme = "nord"`, `[themes.NAME]`, `color = "auto" | "truecolor" | "256"`: see
