@@ -5,30 +5,30 @@ expression: snapshot(&mut a)
  ck  Sites                                                                                 23 sites
                          Keys          j/k scroll · images: off · esc close
   ▌ ◉  Watched
-    ◷  History           Lists
-    ▤  Saved               pagedown           10 rows down
-       4chan               pageup             10 rows up
-       lainchan            n                  next search match (archive
-       wizchan                                search: more results)
-       uboachan            *                  favorite board: on / off
-       endchan             x                  remove the entry (home: a
-       kohlchan                               favorite)
-       desuarchive
-       zzzchan           Everywhere
-       2ch                 j, down            down (10j: ten)
-       smuglo.li           k, up              up
-       kissu               h, left            back (in a grid: left)
-       tvch                l, right           open (in a grid: right)
-       sushigirl           enter              open (in a thread: follow a
-       leftypol                               quote)
-       8kun                esc                back, close; drops a count
-       alogs               backspace          back
-       trashchan           f5                 reload
-       ptchan              home               top
-       erischan            g                  gg: top (10gg, 10g: the
-       junkuchan                              tenth)
-       nukechan            G, end             bottom (10G: the tenth)
-       palanq              0-9                a count (home: a favorite)
-       b4k                 ctrl-d             half a page down (a↓ more (j)
+    ◷  History           Everywhere
+    ▤  Saved               j k gg G           move (10j), top / bottom
+       4chan               ^d ^u ^f ^b ^e ^y  half page, page, line
+       lainchan            enter l / esc h    open / back
+       wizchan             u / ctrl-r / W     back / forward / watched
+       uboachan            ., right-click     menu: what you can do here
+       endchan             f / /              hint labels / filter, search
+       kohlchan            r / o              reload / open in browser
+       desuarchive         : / ,              go to a URL / settings
+       zzzchan             [ / ] / ctrl-w     previous / next / close tab
+       2ch                 q, ctrl-c          quit (mouse works too)
+       smuglo.li
+       kissu             Home screen
+       tvch                1-9 / *            open / favorite a board
+       sushigirl           x                  unfavorite, hide a site
+       leftypol            : link             add a site (any page of it)
+       8kun
+       alogs             Watched, History, Saved
+       trashchan           x                  remove (Saved: asks first)
+       ptchan              T / F              new tab / follow general
+       erischan            y / Y              copy subject+link / link
+       junkuchan
+       nukechan          Image viewer
+       palanq              h / l, ← / →       previous / next file
+       b4k                                                       ↓ more (j)
 
  enter open   . more   / filter   o browser   r reload   , settings   ? help              1/26  3%

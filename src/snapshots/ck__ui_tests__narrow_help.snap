@@ -5,20 +5,20 @@ expression: narrow(&mut a)
  ck  Sites                               23 sites
     Keys  j/k scroll · images: off · esc close
 
-    Lists
-      pagedown           10 rows down
-      pageup             10 rows up
-      n                  next search match
-                         (archive search: more
-                         results)
-      *                  favorite board: on /
-                         off
-      x                  remove the entry
-                         (home: a favorite)
-
     Everywhere
-      j, down            down (10j: ten)
-      k, up              up
-      h, left            back (in a ↓ more (j)
+      j k gg G           move (10j), top /
+                         bottom
+      ^d ^u ^f ^b ^e ^y  half page, page, line
+      enter l / esc h    open / back
+      u / ctrl-r / W     back / forward /
+                         watched
+      ., right-click     menu: what you can do
+                         here
+      f / /              hint labels / filter,
+                         search
+      r / o              reload / open in
+                         browser
+      : / ,              go to a URL /
+                                    ↓ more (j)
 
  enter open   . more   ? help           1/26  3%
