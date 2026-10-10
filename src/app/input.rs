@@ -89,7 +89,7 @@ impl App {
                 // `u` takes back a filter only right after it's added.
                 self.filter_undo = None;
                 match self.drawn().and_then(|d| d.tabs.iter().find(|(r, _)| r.contains(pos)).map(|&(_, i)| i)).filter(|_| tabs) {
-                    Some(i) => self.switch_tab(i),
+                    Some(i) => self.show_tab(i),
                     None => left(self, ev, now),
                 }
                 true

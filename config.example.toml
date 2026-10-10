@@ -363,7 +363,8 @@ url = "https://arch.b4k.dev"
 # Actions and their defaults:
 #   everywhere: quit = "q", help = "?", search = "/", reload = "r", browser = "o", settings = ",",
 #               goto = ":", next_tab = "]", prev_tab = "[", close_tab = "ctrl-w", menu = ".",
-#               watched = "W", jump_back = "u", jump_forward = "ctrl-r"
+#               jump_back = "u", jump_forward = "ctrl-r"
+#   everywhere but the image viewer and gallery: watched = "W"
 #   everywhere but the image viewer: hints = "f"
 #   catalog:    view = "v", watch = "w", sort = "s", compact = "c", links = "O", hide = "H",
 #               show_hidden = "Z", filter = "X", archive_search = "A"

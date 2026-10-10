@@ -120,7 +120,13 @@ impl App {
             self.info(format!("One tab: {} opens a thread in a new one", self.keys.key(crate::keys::Action::NewTab)));
             return;
         }
-        self.switch_tab(if forward { (self.active + 1) % n } else { (self.active + n - 1) % n });
+        self.show_tab(if forward { (self.active + 1) % n } else { (self.active + n - 1) % n });
+    }
+
+    /// Go to tab `i`, leaving what was said in the last one behind.
+    pub(super) fn show_tab(&mut self, i: usize) {
+        self.switch_tab(i);
+        self.footer.clear_seen();
     }
 
     /// Close the active tab (not the last one).
