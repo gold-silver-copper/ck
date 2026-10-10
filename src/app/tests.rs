@@ -621,6 +621,16 @@ fn copies_text_and_links() {
 }
 
 #[test]
+fn a_dead_thread_left_for_its_archive_is_on_the_jump_list() {
+    let mut app = fourchan_thread(&[1, 2, 3]);
+    app.tab.thread.as_mut().unwrap().select(1);
+    let dead = app.tab.here().unwrap();
+    app.tab.archive_offer = Some(ThreadKey { site: "desuarchive".into(), board: "g".into(), no: 1 });
+    app.act(Action::Archive);
+    assert_eq!(app.tab.trail.last(), Some(&dead));
+}
+
+#[test]
 fn vim_counts_prefixes_and_the_jump_list() {
     let mut app = fourchan_thread(&[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
     let at = |app: &App| app.tab.thread.as_ref().unwrap().current().unwrap().no;

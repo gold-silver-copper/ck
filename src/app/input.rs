@@ -512,6 +512,7 @@ impl App {
             Action::DownloadThread => self.ask_to_save(Saving::Files),
             Action::Archive => match self.tab.archive_offer.take() {
                 Some(key) => {
+                    self.leave_trail();
                     self.open_key(&key);
                     self.tab.return_to = None;
                 }
