@@ -1774,6 +1774,7 @@ impl App {
             View::Search => self.close_search(),
             View::Catalog => View::Boards,
             View::Thread => self.tab.return_to.take().unwrap_or(View::Catalog),
+            View::Watched => self.tab.watched_from.take().unwrap_or(View::Sites),
             _ => View::Sites,
         };
         self.tab.navigate(to);

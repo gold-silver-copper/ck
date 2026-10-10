@@ -631,6 +631,23 @@ fn a_dead_thread_left_for_its_archive_is_on_the_jump_list() {
 }
 
 #[test]
+fn esc_from_watched_goes_back_where_w_was_pressed() {
+    let mut app = fourchan_thread(&[1, 2, 3]);
+    for view in [View::Catalog, View::Settings, View::Thread] {
+        app.tab.navigate(view);
+        app.act(Action::Watched);
+        app.on_key(KeyEvent::from(KeyCode::Esc));
+        assert_eq!(app.tab.view(), if view == View::Settings { View::Catalog } else { view });
+    }
+    // Watched from the home screen goes home.
+    app.tab.navigate(View::Sites);
+    app.enter();
+    assert_eq!(app.tab.view(), View::Watched);
+    app.on_key(KeyEvent::from(KeyCode::Esc));
+    assert_eq!(app.tab.view(), View::Sites);
+}
+
+#[test]
 fn vim_counts_prefixes_and_the_jump_list() {
     let mut app = fourchan_thread(&[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
     let at = |app: &App| app.tab.thread.as_ref().unwrap().current().unwrap().no;

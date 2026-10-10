@@ -126,6 +126,8 @@ pub struct Tab {
     pub catalog_sort: Sort,
     /// Where `back` goes from a thread opened from Watched or History.
     pub return_to: Option<View>,
+    /// Where `back` goes from Watched shown with `W` (and threads opened from it).
+    pub watched_from: Option<View>,
     pub thread_checked: Instant,
     /// Background refreshes of the thread in a row that brought nothing (`refresh_backoff`).
     pub thread_quiet: u32,
@@ -200,6 +202,9 @@ impl Tab {
             && let Some(here) = self.here()
         {
             self.remember(here);
+        }
+        if !matches!(to, View::Watched | View::Thread) {
+            self.watched_from = None;
         }
         self.settings = false;
         self.view = to;
@@ -294,6 +299,7 @@ impl Tab {
             catalog_list: FilteredList::fresh(),
             catalog_sort: Sort::default(),
             return_to: None,
+            watched_from: None,
             thread_checked: now,
             thread_quiet: 0,
             site,

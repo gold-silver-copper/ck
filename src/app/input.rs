@@ -435,7 +435,11 @@ impl App {
             // Outside a thread, or on one that didn't load (yet): along the threads.
             Action::JumpBack if self.tab.view() != View::Thread || self.tab.thread.is_none() => self.travel(true),
             Action::JumpForward if self.tab.view() != View::Thread || self.tab.thread.is_none() => self.travel(false),
-            Action::Watched => self.tab.navigate(View::Watched),
+            Action::Watched => {
+                let from = self.tab.place_view();
+                self.tab.navigate(View::Watched);
+                self.tab.watched_from = Some(from).filter(|&v| v != View::Watched);
+            }
             Action::OpenFile if self.tab.viewer().is_some() => self.on_viewer_nav(Nav::Open),
             // In archive search: the next page of results.
             Action::NextMatch if self.tab.view() == View::Search => {
