@@ -68,7 +68,7 @@ impl App {
         match action {
             Action::View => self.view_from_gallery(cur),
             Action::Download => self.download_file(cur),
-            Action::DownloadThread | Action::Export | Action::Menu => self.act(action),
+            Action::DownloadThread | Action::Export | Action::Menu | Action::Help => self.act(action),
             Action::Copy => {
                 if let Some((_, f)) = g.files.get(cur) {
                     match f.link() {

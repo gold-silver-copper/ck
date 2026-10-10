@@ -78,7 +78,7 @@ macro_rules! actions {
 
 actions! {
     Quit, "quit", Some(Key::char('q')), &[Scope::Global], "quit";
-    Help, "help", Some(Key::char('?')), &[Scope::Global], "help";
+    Help, "help", Some(Key::char('?')), &[Scope::Global, Scope::Gallery, Scope::Viewer], "help";
     Settings, "settings", Some(Key::char(',')), &[Scope::Global], "settings: theme, colors, keys, …";
     Search, "search", Some(Key::char('/')), &[Scope::Global], "filter the list; search a thread";
     Reload, "reload", Some(Key::char('r')), &[Scope::Global], "reload";

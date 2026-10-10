@@ -7,7 +7,7 @@ expression: snapshot(&mut a)
 
     Everywhere
   ▌   q               quit             quit                                 Everywhere
-      ?               help             help                                 Everywhere
+      ?               help             help                                 Everywhere, Gallery…
       ,               settings         settings: theme, colors, keys, …     Everywhere
       /               search           filter the list; search a thread     Everywhere
       r               reload           reload                               Everywhere

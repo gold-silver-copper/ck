@@ -1317,6 +1317,9 @@ fn gallery_of_the_threads_files() {
     // d saves the one file.
     press(&mut app, KeyCode::Char('d'));
     assert_eq!((app.downloads.total, app.downloads.running), (1, 1));
+    // ? shows the help over it, as the footer says.
+    press(&mut app, KeyCode::Char('?'));
+    assert!(matches!(app.popup.take(), Some(Popup::Help(_))));
     // Esc: back to the thread, on the file's post.
     press(&mut app, KeyCode::Esc);
     assert!(app.tab.gallery.is_none());
