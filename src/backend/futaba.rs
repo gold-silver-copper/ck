@@ -141,7 +141,9 @@ impl Futaba {
             id: text("id"),
             flag,
             replies: as_u32(&v["replies"]),
-            images: as_u32(&v["images"]),
+            // vichan counts only the images of the index page's preview there, and the rest
+            // under `omitted_images`; 4chan counts them all.
+            images: as_u32(&v["images"]).map(|n| if self.is_4chan { n } else { n.saturating_add(as_u32(&v["omitted_images"]).unwrap_or(0)) }),
             sticky: as_bool(&v["sticky"]),
             board: own_board,
             locked: as_bool(&v["closed"]) || as_bool(&v["locked"]),
@@ -274,6 +276,8 @@ mod tests {
         let b = Futaba::vichan("https://lainchan.org".into(), Some("png".into()), None, None);
         let cat = b.parse_catalog("λ", &fixture("vichan_catalog.json"));
         assert_eq!(cat[0].subject.as_deref(), Some("Programming Employment"));
+        // The images under the index page's preview, and the ones left out of it.
+        assert_eq!((cat[0].replies, cat[0].images), (Some(91), Some(12)));
         let posts = b.parse_thread("λ", &fixture("vichan_thread.json"));
         assert_eq!(posts[0].no, 30364);
         // vichan marks deleted files with ext "deleted"; they're dropped.
