@@ -54,7 +54,7 @@ Navigation (fixed):
 | mouse                   | wheel scrolls, click selects, double-click opens, right-click opens the menu (over popups: below) |
 
 As in vim, a count before a move repeats it: `10j` goes ten posts down, `5ctrl-d` five half
-pages. `10G` (or `10g`) goes to the tenth post (in a list, the tenth row). A count also
+pages. `10G` (or `10g`, or `10` and end) goes to the tenth post (in a list, the tenth row). A count also
 repeats `n`/`N`, `u`/ctrl-r and tab. While a count or a `z`/`g` waits for the rest of its
 command it shows at the right of the footer, next to where you are: the selected post of how
 many (in a list, the row), and how far down that is, as an editor's ruler does. `esc` drops
@@ -64,8 +64,9 @@ The jump list: `u` goes back (in a thread first to the post you jumped from, by 
 `gg`, `G` or `10G`, then to the thread before), ctrl-r forward again the same way
 [`jump_back`, `jump_forward`]. Every thread you leave
 is on it, at the post you were on, whichever way you left (back to the catalog, to the
-watched threads, by a link), so the thread you just closed is one `u` away, also from the
-catalog. `W` shows the watched threads from anywhere but the image viewer and gallery [`watched`]. (Vim's ctrl-i is the same
+watched threads, by a link, to its archive with `a`), so the thread you just closed is one `u` away, also from the
+catalog. `W` shows the watched threads from anywhere but the image viewer and gallery, and `esc`
+there goes back to where you pressed it [`watched`]. (Vim's ctrl-i is the same
 key as tab to a terminal, which focuses a post's parts here; so forward is ctrl-r, the
 redo to `u`'s undo.)
 
@@ -137,7 +138,7 @@ ones for where you are.
 | `h`/`l`, arrows | previous / next file (animated GIFs play); from a thread, every file in it (or in the conversation shown) |
 | space | pause an animated GIF |
 | `+` / `-` / `0` | zoom in / out (up to 800%) / fit again; zoomed in, `h`/`j`/`k`/`l` and the arrows move around, page up / down change file, `esc` fits |
-| `i`  | open the file externally (its thumbnail, when that's all there is) |
+| `i`  | open the file externally (its thumbnail, when that's all there is) [`open_file`] |
 | `y` / `Y` | copy the file's URL (or its thumbnail's) / the post's link [`copy`, `copy_link`] |
 | `d`  | save the file [`download`] |
 | `R`  | reverse image search [`image_search`] |
@@ -342,8 +343,10 @@ A command without a key is still in the `.` menu where it applies.
 Keys are a character (`"w"`, `"W"`, `":"`), `ctrl-` or `alt-` with one, or a named key:
 `tab`, `shift-tab`, `enter`, `esc`, `backspace`, `delete`, `insert`, arrows (`up`, ...),
 `home`, `end`, `pageup`, `pagedown`, `space`, `f1`–`f12`. Navigation keys (the first
-table) are fixed, as are keys inside text inputs and popups. In the image viewer and the
-gallery only their own commands apply.
+table, and the viewer's and gallery's own) are fixed, as are keys inside text inputs and
+popups; ctrl-c always quits, and ctrl-i is tab, as terminals send it. In the image viewer
+and the gallery only their own commands apply. The `?` help lists every key that does
+something, from the same tables, starting with the ones for where you are.
 
 ## Filters and hiding
 
