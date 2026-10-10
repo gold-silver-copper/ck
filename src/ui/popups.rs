@@ -228,113 +228,13 @@ pub(super) fn draw_image_search(f: &mut Frame, app: &mut App) {
     app.drawn.popup = Some(hit);
 }
 
-/// Key help, by section, with the configured keys. Keep in sync with the manual (docs/manual.md).
-fn help_sections(keys: &KeyMap) -> Vec<(&'static str, Vec<(String, &'static str)>)> {
-    let k = |a| keys.label(a);
-    let pair = |a, b| format!("{} / {}", keys.label(a), keys.label(b));
-    // Saving more than a file is in the menu, unless given keys.
-    let bulk = [Action::DownloadPost, Action::DownloadThread, Action::Export];
-    let saves = if bulk.iter().all(|&a| keys.keys(a).is_empty()) {
-        format!("{} menu", keys.label(Action::Menu))
-    } else {
-        bulk.map(|a| if keys.keys(a).is_empty() { "-".to_string() } else { keys.label(a) }).join(" / ")
-    };
-    // In this order, the two columns split evenly (Everywhere to the viewer, then the rest).
-    vec![
-        (
-            "Everywhere",
-            vec![
-                ("j k gg G".into(), "move (10j), top / bottom"),
-                ("^d ^u ^f ^b ^e ^y".into(), "half page, page, line"),
-                ("enter l / esc h".into(), "open / back"),
-                (format!("{} / {}", pair(Action::JumpBack, Action::JumpForward), k(Action::Watched)), "back / forward / watched"),
-                (format!("{}, right-click", k(Action::Menu)), "menu: what you can do here"),
-                (pair(Action::Hints, Action::Search), "hint labels / filter, search"),
-                (pair(Action::Reload, Action::Browser), "reload / open in browser"),
-                (pair(Action::Goto, Action::Settings), "go to a URL / settings"),
-                (format!("{} / {} / {}", k(Action::PrevTab), k(Action::NextTab), k(Action::CloseTab)), "previous / next / close tab"),
-                (format!("{}, ctrl-c", k(Action::Quit)), "quit (mouse works too)"),
-            ],
-        ),
-        (
-            "Home screen",
-            vec![
-                (format!("1-9 / {}", k(Action::Favorite)), "open / favorite a board"),
-                (k(Action::Remove), "unfavorite, hide a site"),
-                (format!("{} link", k(Action::Goto)), "add a site (any page of it)"),
-            ],
-        ),
-        (
-            "Watched, History, Saved",
-            vec![
-                (k(Action::Remove), "remove (Saved: asks first)"),
-                (pair(Action::NewTab, Action::Follow), "new tab / follow general"),
-                (pair(Action::Copy, Action::CopyLink), "copy subject+link / link"),
-            ],
-        ),
-        (
-            "Image viewer",
-            vec![
-                ("h / l, ← / →".into(), "previous / next file"),
-                ("space".into(), "pause an animated GIF"),
-                ("+ / - / 0".into(), "zoom in / out / fit"),
-                (k(Action::OpenFile), "open externally"),
-                (pair(Action::Copy, Action::CopyLink), "copy file URL / post link"),
-                (k(Action::Download), "save the file"),
-                (k(Action::ImageSearch), "reverse image search"),
-                ("esc, q".into(), "close"),
-            ],
-        ),
-        (
-            "Catalog",
-            vec![
-                (k(Action::View), "view the OP's images"),
-                (format!("{} / {} / {}", k(Action::Watch), k(Action::NewTab), k(Action::Follow)), "watch / new tab / general"),
-                (k(Action::Favorite), "favorite this board"),
-                (pair(Action::Sort, Action::Compact), "sort / layout (grid, …)"),
-                (k(Action::Links), "the OP's links and files"),
-                (format!("{} / {}", pair(Action::Hide, Action::ShowHidden), k(Action::Filter)), "hide / show hidden / filter"),
-                (pair(Action::ArchiveSearch, Action::Reply), "search archive / new thread"),
-                (pair(Action::Copy, Action::CopyLink), "copy text / link"),
-            ],
-        ),
-        (
-            "Thread",
-            vec![
-                ("J K space".into(), "scroll a line / a page"),
-                ("zz zt zb".into(), "post to middle / top / bottom"),
-                (pair(Action::NextPart, Action::PrevPart), "focus images, links, replies"),
-                ("enter, l".into(), "open focused / follow quote"),
-                (format!("{} / {}", pair(Action::Preview, Action::Replies), k(Action::Unread)), "preview / 1st reply / unread"),
-                (format!("{}, {}", pair(Action::NextMatch, Action::PrevMatch), pair(Action::Spoiler, Action::AllSpoilers)), "match next/prev; spoiler/all"),
-                (pair(Action::Expand, Action::Conversation), "expand / conversation"),
-                (pair(Action::Poster, Action::Media), "poster's posts / files only"),
-                (pair(Action::View, Action::Gallery), "view images / gallery"),
-                (pair(Action::OpenFile, Action::ImageSearch), "open file / image search"),
-                (k(Action::Links), "the post's links and files"),
-                (k(Action::Download), "save the focused file (tab)"),
-                (saves, "save: post / all files / page"),
-                (format!("{} / {} / {}", k(Action::Watch), k(Action::NewTab), k(Action::Follow)), "watch / quote tab / general"),
-                (format!("{} / {}", pair(Action::Hide, Action::ShowHidden), k(Action::Filter)), "hide / show hidden / filter"),
-                (pair(Action::Reply, Action::Mine), "reply / mark as yours"),
-                (k(Action::Archive), "open a 404'd thread archived"),
-                (pair(Action::Copy, Action::CopyLink), "copy text / link"),
-            ],
-        ),
-    ]
-}
-
-/// The help section for where the user is, shown right after "Everywhere".
-fn help_here(app: &App) -> &'static str {
-    if app.tab.viewer().is_some() {
-        return "Image viewer";
-    }
-    match app.tab.view() {
-        View::Catalog => "Catalog",
-        View::Thread => "Thread",
-        View::Watched | View::History | View::Saved => "Watched, History, Saved",
-        _ => "Home screen",
-    }
+/// Every key, with yours, from the tables they work by: all of where you are, then
+/// everywhere, then the rest, each where it works first.
+fn help_sections(app: &App) -> Vec<(&'static str, Vec<(String, &'static str)>)> {
+    let here = app.scope();
+    let mut scopes = keys::SCOPES.to_vec();
+    scopes.sort_by_key(|&s| (s != here, s != Scope::Global));
+    scopes.into_iter().map(|s| (s.label(), app.keys.help(s, s == here))).filter(|(_, rows)| !rows.is_empty()).collect()
 }
 
 pub(super) fn draw_help(f: &mut Frame, app: &mut App) {
@@ -342,11 +242,7 @@ pub(super) fn draw_help(f: &mut Frame, app: &mut App) {
     // Keys take this many columns; what they do wraps in the rest.
     const KEYS: usize = 21;
     let t = theme();
-    let mut sections = help_sections(&app.keys);
-    if let Some(i) = sections.iter().position(|(title, _)| *title == help_here(app)) {
-        let here = sections.remove(i);
-        sections.insert(1.min(sections.len()), here);
-    }
+    let sections = help_sections(app);
     // What they do wraps to the column, or a narrow screen's panel (two columns always fit).
     let col = usize::from(COL.min(room(f, COL + 4, 0).0.saturating_sub(4)));
     let sections: Vec<Vec<Line>> = sections

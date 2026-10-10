@@ -20,7 +20,7 @@ use std::collections::HashMap;
 
 use crate::http;
 use crate::images::{Images, Kind, State};
-use crate::keys::{Action, KeyMap};
+use crate::keys::{self, Action, Scope};
 use crate::config::CatalogLayout;
 use crate::markup;
 use crate::model::{Attachment, Post};

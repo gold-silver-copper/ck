@@ -8,7 +8,7 @@ use ratatui::widgets::ListState;
 
 use super::{App, Popup, View, edit_text, list_move};
 use crate::config::{self, ColorMode, ImagesMode};
-use crate::keys::{Action, Key, Scope};
+use crate::keys::{Action, Key};
 use crate::theme::{self, ROLES, Theme, ThemeDef};
 
 /// One row of the settings screen: its label and hint, how its value reads, and what
@@ -307,16 +307,8 @@ pub enum SettingsPopup {
 /// The key editor's rows: `Err(title)` for groups (by an action's first scope),
 /// `Ok` for actions.
 pub fn key_rows() -> Vec<Result<Action, &'static str>> {
-    let groups = [
-        (Scope::Global, "Everywhere"),
-        (Scope::Lists, "Lists"),
-        (Scope::Catalog, "Catalog"),
-        (Scope::Thread, "Thread"),
-        (Scope::Saved, "Watched and History"),
-        (Scope::Viewer, "Image viewer"),
-    ];
     let mut out = Vec::new();
-    for (scope, title) in groups {
+    for scope in crate::keys::SCOPES {
         let actions: Vec<Action> = Action::ALL.iter().copied().filter(|a| a.scopes().first() == Some(&scope)).collect();
         if actions.is_empty() {
             continue;
@@ -324,7 +316,7 @@ pub fn key_rows() -> Vec<Result<Action, &'static str>> {
         if !out.is_empty() {
             out.push(Err(""));
         }
-        out.push(Err(title));
+        out.push(Err(scope.label()));
         out.extend(actions.into_iter().map(Ok));
     }
     out

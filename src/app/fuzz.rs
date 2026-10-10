@@ -486,40 +486,8 @@ impl std::fmt::Display for Act {
 
 /// Keys that do something somewhere, so they come up often.
 fn hot_keys() -> Vec<KeyEvent> {
-    let mut keys: Vec<KeyEvent> = crate::keys::Action::ALL.iter().filter_map(|a| a.default_key()).map(KeyEvent::from).collect();
-    keys.extend(
-        [
-            KeyCode::Char('j'),
-            KeyCode::Char('k'),
-            KeyCode::Char('h'),
-            KeyCode::Char('l'),
-            KeyCode::Char('g'),
-            KeyCode::Char('G'),
-            KeyCode::Char('J'),
-            KeyCode::Char('K'),
-            KeyCode::Char(' '),
-            KeyCode::Char('q'),
-            KeyCode::Enter,
-            KeyCode::Esc,
-            KeyCode::Tab,
-            KeyCode::BackTab,
-            KeyCode::Backspace,
-            KeyCode::Delete,
-            KeyCode::Up,
-            KeyCode::Down,
-            KeyCode::Left,
-            KeyCode::Right,
-            KeyCode::PageUp,
-            KeyCode::PageDown,
-            KeyCode::Home,
-            KeyCode::End,
-            KeyCode::F(5),
-            KeyCode::Char('+'),
-            KeyCode::Char('-'),
-            KeyCode::Char('0'),
-        ]
-        .map(KeyEvent::from),
-    );
+    let mut keys: Vec<KeyEvent> = crate::keys::KeyMap::default().every_key().map(KeyEvent::from).collect();
+    keys.push(KeyEvent::from(KeyCode::Delete));
     keys
 }
 
