@@ -473,7 +473,8 @@ impl App {
     fn on_keys_key(&mut self, key: KeyEvent, mut list: ListState, capture: Option<bool>) -> Option<SettingsPopup> {
         if let Some(add) = capture {
             if key.code != KeyCode::Esc {
-                self.bind_key(&list, Some((Key::from(key), add)));
+                let key = Key::from(key);
+                self.set_keys(&list, |now| Some(now.iter().copied().filter(|&k| add && k != key).chain([key]).collect()));
             }
             return Some(SettingsPopup::Keys { list, capture: None });
         }
@@ -483,11 +484,11 @@ impl App {
             KeyCode::Char('a') => Some(SettingsPopup::Keys { list, capture: Some(true) }),
             // No key: the action is left to the menu.
             KeyCode::Char('u') => {
-                self.unbind_key(&list);
+                self.set_keys(&list, |_| Some(Vec::new()));
                 Some(SettingsPopup::Keys { list, capture: None })
             }
             KeyCode::Char('x') | KeyCode::Delete => {
-                self.bind_key(&list, None);
+                self.set_keys(&list, |_| None);
                 Some(SettingsPopup::Keys { list, capture: None })
             }
             code => {
@@ -578,40 +579,18 @@ impl App {
         }
     }
 
-    /// Bind a key to the action selected in the key editor (replacing its keys, or added to
-    /// them), or with `None` reset it to the default; refused if it would clash.
-    fn bind_key(&mut self, list: &ListState, key: Option<(Key, bool)>) {
+    /// Change the keys of the action selected in the key editor to what `keys` makes of
+    /// them (`None`: the default; none: in the menu only), unless that would clash.
+    fn set_keys(&mut self, list: &ListState, keys: impl FnOnce(&[Key]) -> Option<Vec<Key>>) {
         let Some(action) = list.selected().and_then(|r| key_rows().get(r).copied()).and_then(Result::ok) else { return };
-        let name = action.name();
-        let keys = key.map(|(k, add)| {
-            let mut keys = if add { self.keys.keys(action).to_vec() } else { Vec::new() };
-            if !keys.contains(&k) {
-                keys.push(k);
-            }
-            keys
-        });
-        match self.keys.with(action, keys) {
+        match self.keys.with(action, keys(self.keys.keys(action))) {
             Ok(map) => {
                 self.keys = map;
                 let binding = self.keys.binding(action).map(<[Key]>::to_vec);
-                let what = format!("{name} = {}", self.keys.label(action));
-                self.save_config(&what, |d| config::set_key(d, name, binding.as_deref()));
+                let label = Some(self.keys.label(action)).filter(|l| !l.is_empty()).unwrap_or_else(|| "[] (in the menu)".into());
+                self.save_config(&format!("{} = {label}", action.name()), |d| config::set_key(d, action.name(), binding.as_deref()));
             }
             Err(e) => self.error(e),
-        }
-    }
-
-    /// Take every key away from the action selected in the key editor.
-    fn unbind_key(&mut self, list: &ListState) {
-        let Some(action) = list.selected().and_then(|r| key_rows().get(r).copied()).and_then(Result::ok) else { return };
-        let name = action.name();
-        if self.keys.keys(action).is_empty() {
-            return self.info(format!("{name} has no key (it's in the menu)"));
-        }
-        if let Ok(map) = self.keys.with(action, Some(Vec::new())) {
-            self.keys = map;
-            let binding = self.keys.binding(action).map(<[Key]>::to_vec);
-            self.save_config(&format!("{name} = [] (in the menu)"), |d| config::set_key(d, name, binding.as_deref()));
         }
     }
 
