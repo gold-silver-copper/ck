@@ -1754,6 +1754,12 @@ fn following_a_general() {
     app.pick_row(View::Watched, i);
     app.act(Action::Follow);
     assert_eq!(app.store.watched(&key(20)).unwrap().general, None);
+    // From History too, where the menu offers it.
+    app.tab.navigate(View::History);
+    let i = app.store.history.iter().position(|v| v.key == key(10)).unwrap();
+    app.pick_row(View::History, i);
+    run_menu_row(&mut app, "follow it as a general");
+    assert_eq!(app.store.watched(&key(10)).unwrap().general.as_deref(), Some("/lmg/"));
 }
 
 #[test]

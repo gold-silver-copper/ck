@@ -501,6 +501,8 @@ impl App {
             title = format!("No.{}", s.key.no);
             items.push(MenuItem::Enter("read the saved copy".into()));
             items.push(act(A::Remove, "remove the saved copy"));
+            items.push(act(A::NewTab, "open it in a new tab"));
+            items.push(act(A::Follow, "follow it as a general"));
             items.push(act(A::Copy, "copy its subject and link"));
             items.push(act(A::CopyLink, "copy its link"));
             items.push(act(A::Browser, "open it in the browser"));
