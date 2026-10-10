@@ -347,24 +347,7 @@ impl App {
             Nav::G => self.pending = Some(Pending::G),
             Nav::Z => self.pending = Some(Pending::Z),
             Nav::Refresh => self.refresh(),
-            // Esc backs out a step: from a focused part to its post first.
-            Nav::Esc if self.focused().is_some() => {
-                if let Some(t) = &mut self.tab.thread {
-                    t.focus = None;
-                    t.layout = None;
-                }
-            }
-            Nav::Esc if view == View::Thread && self.tab.thread.as_ref().is_some_and(|t| !t.search.is_empty()) => {
-                if let Some(t) = &mut self.tab.thread {
-                    t.set_search(String::new());
-                }
-            }
-            // Out of a conversation, to the whole thread.
-            Nav::Esc if view == View::Thread && self.tab.thread.as_ref().is_some_and(|t| t.conversation.is_some()) => {
-                if let Some(t) = &mut self.tab.thread {
-                    t.leave_conversation();
-                }
-            }
+            Nav::Esc if view == View::Thread && self.tab.thread.as_mut().is_some_and(ThreadView::back_out) => {}
             Nav::Esc if !self.filter(view).is_empty() => self.edit_filter(view, String::clear),
             Nav::Esc => self.back(),
             // A count stops at the grid's edge rather than going on to mean back.

@@ -1,4 +1,4 @@
-//! Every key the views take, from two tables: the fixed keys that move around (`nav`), and
+//! Every key the views take, from two tables: the fixed keys that move around (`FIXED`), and
 //! the commands (`Action`), remappable in the `[keys]` section of config.toml and on the
 //! Settings screen. `KeyMap` looks both up, and won't give a command a key that's taken where
 //! it applies, so what a key does and whether it can be rebound come from the same place.
@@ -229,12 +229,6 @@ impl From<KeyEvent> for Key {
     }
 }
 
-impl From<Key> for KeyEvent {
-    fn from(key: Key) -> Self {
-        KeyEvent::new(key.code, key.mods)
-    }
-}
-
 impl FromStr for Key {
     type Err = anyhow::Error;
 
@@ -380,15 +374,6 @@ pub enum Command {
     Act(Action),
 }
 
-impl Command {
-    fn name(self) -> &'static str {
-        match self {
-            Command::Nav(_) => "navigation",
-            Command::Act(a) => a.name(),
-        }
-    }
-}
-
 /// The commands' keys, and what every key does in each place: made together by `new`, which
 /// refuses a key that would do two things in one place.
 #[derive(Debug, Clone)]
@@ -413,12 +398,16 @@ impl KeyMap {
         }
         let fixed = FIXED.iter().map(|&(scopes, nav, keys, _)| (scopes, Command::Nav(nav), keys));
         let acts = Action::ALL.iter().map(|&a| (a.scopes(), Command::Act(a), keys.get(&a).map_or(&[][..], Vec::as_slice)));
+        let name = |c| match c {
+            Command::Nav(_) => "navigation",
+            Command::Act(a) => Action::name(a),
+        };
         let mut commands = HashMap::new();
         for place in SCOPES.into_iter().filter(|&s| s != Scope::Global) {
             for (_, command, keys) in fixed.clone().chain(acts.clone()).filter(|(scopes, ..)| scopes.iter().any(|s| s.covers(place))) {
                 for &key in keys {
                     if let Some(other) = commands.insert((place, key), command).filter(|&other| other != command) {
-                        bail!("`{}` and `{}` both use '{key}' in the {} view", command.name(), other.name(), place.label());
+                        bail!("`{}` and `{}` both use '{key}' in the {} view", name(command), name(other), place.label());
                     }
                 }
             }
@@ -428,8 +417,8 @@ impl KeyMap {
 
     /// Every key that does something somewhere, in the tables' order.
     #[cfg(test)]
-    pub fn every_key(&self) -> impl Iterator<Item = Key> {
-        FIXED.iter().flat_map(|f| f.2).chain(Action::ALL.iter().flat_map(|&a| self.keys(a))).copied()
+    pub fn every_key(&self) -> impl Iterator<Item = KeyEvent> {
+        FIXED.iter().flat_map(|f| f.2).chain(Action::ALL.iter().flat_map(|&a| self.keys(a))).map(|k| KeyEvent::new(k.code, k.mods))
     }
 
     /// What a key does in `place`.
