@@ -1,4 +1,6 @@
-# ck configuration. Copy to ~/.config/ck/config.toml and edit.
+# ck's built-in configuration, which also holds the built-in sites. Don't copy this file:
+# `ck --print-config > ~/.config/ck/config.toml` writes it without the [[site]] tables, so
+# the built-in sites stay up to date with ck.
 #
 # The built-in sites are always there (`ck --print-sites` prints them). To add another,
 # paste a link to it after `:` or in Settings › Sites, and ck works out the rest; or add a

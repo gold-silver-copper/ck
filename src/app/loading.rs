@@ -94,9 +94,18 @@ impl App {
             let res = crate::guard::result(|| http::background_at(now, || backend.boards(&|_| {})));
             later.run(move |app| {
                 app.boards_refreshing.remove(&site);
-                // A failed background refresh keeps the saved list; there's nothing to say.
-                if let Ok(b) = res {
-                    app.set_boards(site, b, true);
+                // A failed background refresh keeps the saved list, with nothing to say; with
+                // no list to keep, it says why there's none.
+                match res {
+                    Ok(b) => app.set_boards(site, b, true),
+                    Err(e) if app.sites.get(site).is_some_and(|s| s.boards.is_none()) => {
+                        if app.tab.site == site && app.tab.view() == View::Boards {
+                            app.load_failed(e);
+                        } else {
+                            app.error(e);
+                        }
+                    }
+                    Err(_) => {}
                 }
             });
         });

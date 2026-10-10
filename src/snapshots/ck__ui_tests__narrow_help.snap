@@ -19,6 +19,6 @@ expression: narrow(&mut a)
       r / o              reload / open in
                          browser
       : / ,              go to a URL /
-                         settings   ↓ more (j)
+                                    ↓ more (j)
 
  enter open   . more   ? help           1/26  3%

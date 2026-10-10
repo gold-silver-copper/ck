@@ -29,6 +29,6 @@ expression: snapshot(&mut a)
        junkuchan
        nukechan          Image viewer
        palanq              h / l, ← / →       previous / next file
-       b4k                 space              pause an animated G↓ more (j)
+       b4k                                                       ↓ more (j)
 
  enter open   . more   / filter   o browser   r reload   , settings   ? help              1/26  3%

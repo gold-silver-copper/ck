@@ -61,7 +61,12 @@ impl App {
 
     /// Thread `key` on its site's configured archive, if it has one.
     pub(super) fn archive_of(&self, key: &ThreadKey) -> Option<ThreadKey> {
-        let archive = self.site_named(&key.site)?.cfg.archive.clone().filter(|a| self.site_index(a).is_some())?;
+        let archive = self.site_named(&key.site)?.cfg.archive.clone()?;
+        let i = self.site_index(&archive)?;
+        // Not when the archive's boards are known and this isn't one of them.
+        if self.known_boards(i).is_some_and(|boards| !boards.iter().any(|b| b.uri == key.board)) {
+            return None;
+        }
         Some(ThreadKey { site: archive, ..key.clone() })
     }
 
