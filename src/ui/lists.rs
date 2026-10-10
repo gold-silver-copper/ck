@@ -218,6 +218,9 @@ pub(super) fn draw_catalog(f: &mut Frame, app: &mut App, area: Rect) {
     }
     let compact = layout == CatalogLayout::Compact;
     let thumbs = images && !compact;
+    // Lines of text a card shows, and its thumbnail (as tall as the card, its shape kept).
+    let text_rows = app.catalog_lines.map_or(if thumbs { CAT_THUMB.height - 1 } else { 1 }, |n| n.max(1));
+    let thumb = Size::new((text_rows + 1).max(CAT_THUMB.height) * CAT_THUMB.width / CAT_THUMB.height, (text_rows + 1).max(CAT_THUMB.height));
     let width = area.width.saturating_sub(PAD + 2) as usize;
     let visible = app.visible_catalog();
     let mut state = app.list_state(View::Catalog);
@@ -258,7 +261,7 @@ pub(super) fn draw_catalog(f: &mut Frame, app: &mut App, area: Rect) {
         if let Some(n) = app.new_replies(p) {
             meta.push(Span::styled(format!("+{n} "), bold(t.new)));
         }
-        let text_w = if thumbs { width.saturating_sub(CAT_THUMB.width as usize + 2) } else { width };
+        let text_w = if thumbs { width.saturating_sub(thumb.width as usize + 2) } else { width };
         // The counts in words, or (when that doesn't leave the subject room) as the grid
         // writes them, "R312 I58": on a narrow screen they shrink rather than vanish.
         let facts = |short: bool| {
@@ -297,20 +300,19 @@ pub(super) fn draw_catalog(f: &mut Frame, app: &mut App, area: Rect) {
             return vec![spread(head, meta, text_w)];
         }
         let mut lines = vec![spread(head, meta, text_w)];
-        let rows = if thumbs { CAT_THUMB.height as usize - 1 } else { 1 };
-        lines.extend(excerpt(p.plain_text(), dim(), text_w, rows));
+        lines.extend(excerpt(p.plain_text(), Style::new().fg(t.text), text_w, usize::from(text_rows)));
         if thumbs {
-            lines.resize(CAT_THUMB.height as usize, Line::raw(""));
-            lines = beside_tile(lines, CAT_THUMB.width + 1);
+            lines.resize(thumb.height as usize, Line::raw(""));
+            lines = beside_tile(lines, thumb.width + 1);
         }
         lines
     };
     let (height, gap, card) = if compact {
         (1, 0, None)
     } else if thumbs {
-        (CAT_THUMB.height, 1, Some(t.surface))
+        (thumb.height, 1, Some(t.surface))
     } else {
-        (2, 1, Some(t.surface))
+        (text_rows + 1, 1, Some(t.surface))
     };
     let highlighted = |k: usize| visible.get(k).is_some_and(|&i| app.tab.catalog.marks.highlight(i).is_some());
     app.drawn.body = draw_rows(f, area, visible.len(), &mut state, (height, gap), card, &highlighted, &mut build);
@@ -335,7 +337,7 @@ pub(super) fn draw_catalog(f: &mut Frame, app: &mut App, area: Rect) {
         let Some(file) = p.files.first() else { continue };
         let row = (k - offset) as u16 * per;
         if row < area.height {
-            let tile = Rect::new(area.x + PAD, area.y + row, CAT_THUMB.width, CAT_THUMB.height);
+            let tile = Rect::new(area.x + PAD, area.y + row, thumb.width, thumb.height);
             draw_tile(f, &mut app.images, file, p.files.len(), off, tile, area);
         } else if let Some(url) = file.thumb.as_ref().filter(|u| !off && http::is_media_host(u)) {
             app.images.want(url, Kind::Thumb);
@@ -522,11 +524,15 @@ fn draw_grid(f: &mut Frame, app: &mut App, area: Rect) {
 
 /// `text` wrapped to `width`, cut to `rows` lines with "…" if there's more.
 fn excerpt(text: &str, style: Style, width: usize, rows: usize) -> Vec<Line<'static>> {
-    let mut lines = markup::wrap(&Line::styled(text.to_string(), style), width);
+    // The style goes on the text, not the line: wrapping keeps only the text's.
+    let mut lines = markup::wrap(&Line::from(Span::styled(text.to_string(), style)), width);
     if lines.len() > rows {
         lines.truncate(rows);
-        let last = lines.pop().map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect::<String>() + "…").unwrap_or_default();
-        lines.push(Line::styled(truncate(&last, width), style));
+        // The last line shown ends in "…" to say there's more, styled as the lines above it.
+        if let Some(last) = lines.last_mut() {
+            let text: String = last.spans.iter().map(|s| s.content.as_ref()).collect::<String>() + "…";
+            *last = Line::from(Span::styled(truncate(&text, width), style));
+        }
     }
     lines
 }

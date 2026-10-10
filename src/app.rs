@@ -80,7 +80,7 @@ pub use search::Search;
 #[cfg(test)]
 pub use search::SavedSearch;
 pub use saving::Downloads;
-pub use thread_view::{LineCache, Media, Part, Reveal, Spot, ThreadLayout, ThreadView, parts};
+pub use thread_view::{LineCache, Media, Part, Place, Reveal, Spot, ThreadLayout, ThreadView, parts};
 #[cfg(test)]
 pub use thread_view::{CONVERSATION_MAX, conversation_of};
 pub use sites::{Adding, MySites, origin as site_origin};
@@ -324,6 +324,22 @@ enum Msg {
     Wake,
 }
 
+/// Keys typed toward a command, vim's way: a count (`10j`, `5G`), and `z` or `g` waiting for
+/// the key that finishes it (`zz`, `gg`).
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct Pending {
+    pub count: Option<usize>,
+    pub prefix: Option<char>,
+}
+
+impl Pending {
+    /// As the footer shows it: "10", "z", "10g".
+    pub fn shown(self) -> Option<String> {
+        let text = format!("{}{}", self.count.map(|n| n.to_string()).unwrap_or_default(), self.prefix.map(String::from).unwrap_or_default());
+        Some(text).filter(|t| !t.is_empty())
+    }
+}
+
 /// Sends what background work found back to the UI thread, to apply there in the order sent.
 #[derive(Clone)]
 struct Later(Sender<Msg>);
@@ -368,6 +384,8 @@ pub struct App {
     pub show_hidden_sites: bool,
     /// Watched threads come first in catalogs (`watched_first`).
     pub watched_first: bool,
+    /// Lines of text in catalog cards (`catalog_lines`; None: as fit beside the thumbnail).
+    pub catalog_lines: Option<u16>,
     /// The catalog layout for boards without their own (`catalog_layout` in the config).
     pub default_layout: CatalogLayout,
     /// The popup over the screen, if any: one at a time.
@@ -465,6 +483,8 @@ pub struct App {
     session_saved: Instant,
     /// What's being typed, if anything.
     pub typing: Option<Typing>,
+    /// Keys typed toward a command, as vim takes them (shown in the footer while they wait).
+    pub pending: Pending,
     pub keys: KeyMap,
     /// The last text copied to the clipboard, and the last URL opened.
     pub copied: Option<String>,
@@ -548,6 +568,7 @@ impl App {
             hidden_sites: cfg.hidden_sites.iter().cloned().collect(),
             show_hidden_sites: false,
             watched_first: cfg.watched_first,
+            catalog_lines: cfg.catalog_lines.map(|n| n.clamp(1, 20)),
             default_layout: store.settings.catalog_layout.unwrap_or(match store.settings.compact_catalog {
                 Some(true) => CatalogLayout::Compact,
                 Some(false) => CatalogLayout::Cards,
@@ -616,6 +637,7 @@ impl App {
             saved_at: Instant::now(),
             session_saved: Instant::now(),
             typing: None,
+            pending: Pending::default(),
             keys,
             copied: None,
             opened: None,
@@ -1437,14 +1459,37 @@ impl App {
     /// Remember the thread shown and its selected post, for `u` to come back to.
     fn leave_trail(&mut self) {
         if let Some(here) = self.trail_here() {
-            self.tab.trail.push(here);
+            self.tab.remember(here);
         }
     }
 
     /// The thread shown and its selected post, as `u` comes back to it.
     fn trail_here(&self) -> Option<Trail> {
-        let t = self.tab.thread.as_ref()?;
-        Some((t.key().clone(), t.current().map_or_else(|| t.key().no, |p| p.no)))
+        self.tab.here()
+    }
+
+    /// Along the tab's jump list: back to the thread left last (`u`), or forward again to
+    /// where that came from (`ctrl-r`); the thread shown goes on the other list.
+    fn travel(&mut self, back: bool) {
+        let here = self.tab.here();
+        let (from, to) = if back { (&mut self.tab.trail, &mut self.tab.ahead) } else { (&mut self.tab.ahead, &mut self.tab.trail) };
+        // Not the thread already shown.
+        while from.last().is_some_and(|(k, _)| here.as_ref().is_some_and(|(h, _)| h == k)) {
+            from.pop();
+        }
+        let Some((key, post)) = from.pop() else {
+            let what = if back { "Nothing to go back to" } else { "Nothing to go forward to" };
+            return self.info(what);
+        };
+        if let Some(here) = here {
+            to.retain(|(k, _)| *k != here.0);
+            to.push(here);
+        }
+        // Not a new way taken: what's ahead stays (opening a thread forgets it).
+        let (trail, ahead) = (self.tab.trail.clone(), self.tab.ahead.clone());
+        self.tab.thread = None;
+        self.open_thread_key(&key, Opening::at(Some(post)));
+        (self.tab.trail, self.tab.ahead) = (trail, ahead);
     }
 
     /// Go where a quote link leads: a thread (remembered for `u`), a board, or a post whose
@@ -1505,6 +1550,7 @@ impl App {
     fn open_thread_at(&mut self, board: Board, no: u64, open: Opening) {
         let key = ThreadKey { site: self.current_site().cfg.name.clone(), board: board.uri.clone(), no };
         self.tab.board = Some(board);
+        self.tab.ahead.clear();
         self.tab.thread = None;
         self.tab.navigate(View::Thread);
         self.tab.from_catalog = false;
@@ -1721,7 +1767,6 @@ impl App {
             _ => View::Sites,
         };
         self.tab.navigate(to);
-        self.tab.trail.clear();
         // Back to the catalog the thread was opened from (an overboard's, maybe).
         if to == View::Catalog && from_catalog {
             self.tab.board = self.tab.catalog.board().cloned();

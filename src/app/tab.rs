@@ -17,6 +17,9 @@ pub enum Then {
     Thread { open: Opening },
 }
 
+/// The most threads the jump list keeps.
+const JUMPS: usize = 100;
+
 /// How a thread being loaded is opened once it arrives.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Opening {
@@ -134,8 +137,10 @@ pub struct Tab {
     pub popup: Option<TabPopup>,
     /// The thread's files as a grid (`V`), over the thread.
     pub gallery: Option<Gallery>,
-    /// Threads left by following cross-thread links, for `u`.
+    /// The jump list: threads left (and the post selected in each), newest last, for `u`;
+    /// and those `u` went back from, for `ctrl-r` to go forward to again.
     pub trail: Vec<Trail>,
+    pub ahead: Vec<Trail>,
     /// The open thread was opened from the catalog (not by following a link).
     pub from_catalog: bool,
     /// After a thread 404'd: the same thread on the site's configured archive.
@@ -190,12 +195,34 @@ impl Tab {
             self.settings = true;
             return;
         }
+        // Leaving a thread puts it on the jump list.
+        if to != View::Thread
+            && let Some(here) = self.here()
+        {
+            self.remember(here);
+        }
         self.settings = false;
         self.view = to;
         self.moves = self.moves.wrapping_add(1);
         self.load = None;
         self.gallery = None;
         self.failed = None;
+    }
+
+    /// The thread shown and its selected post, as the jump list keeps it.
+    pub fn here(&self) -> Option<Trail> {
+        let t = self.thread.as_ref().filter(|_| self.view == View::Thread)?;
+        Some((t.key().clone(), t.current().map_or_else(|| t.key().no, |p| p.no)))
+    }
+
+    /// Put `here` on the jump list: each thread once, where it was left last, and the list
+    /// no longer than `JUMPS`.
+    pub fn remember(&mut self, here: Trail) {
+        self.trail.retain(|(k, _)| *k != here.0);
+        self.trail.push(here);
+        if self.trail.len() > JUMPS {
+            self.trail.remove(0);
+        }
     }
 
     /// How many times the tab has moved (see `navigate`), to tell one place from the next.
@@ -276,6 +303,7 @@ impl Tab {
             popup: None,
             gallery: None,
             trail: Vec::new(),
+            ahead: Vec::new(),
             from_catalog: false,
             archive_offer: None,
             saved_offer: None,

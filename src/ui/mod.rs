@@ -492,6 +492,15 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
     };
     let d = &app.downloads;
     let mut right = Vec::new();
+    // Keys waiting for the rest of their command (`10`, `z`), as vim shows them.
+    if let Some(keys) = app.pending.shown() {
+        right.extend([Span::styled(keys, bold(t.primary)), Span::raw("  ")]);
+    }
+    // Where you are, as an editor's ruler: the selected post (or row) of how many, and how
+    // far down that is.
+    if let Some((at, of)) = app.position() {
+        right.extend([Span::styled(format!("{at}/{of}  {}%", at.saturating_mul(100) / of.max(1)), Style::new().fg(t.on_bar)), Span::raw("  ")]);
+    }
     if d.running > 0 {
         right.extend([chip(format!("⇣ {}/{}", d.done + d.skipped + d.failed, d.total), t.text, t.surface_high), Span::raw(" ")]);
     }

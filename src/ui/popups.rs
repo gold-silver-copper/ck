@@ -244,14 +244,14 @@ fn help_sections(keys: &KeyMap) -> Vec<(&'static str, Vec<(String, &'static str)
         (
             "Everywhere",
             vec![
-                ("j k g G ^d ^u".into(), "move, top/bottom, page"),
+                ("j k gg G ^d ^u".into(), "move (10j), top/bottom, page"),
                 ("enter l / esc h".into(), "open / back"),
+                (format!("{} / {}", pair(Action::JumpBack, Action::JumpForward), k(Action::Watched)), "back / forward / watched"),
                 (format!("{}, right-click", k(Action::Menu)), "menu: what you can do here"),
                 (k(Action::Hints), "label on-screen items to open"),
                 (k(Action::Search), "filter (thread: search)"),
                 (pair(Action::Reload, Action::Browser), "reload / open in browser"),
-                (k(Action::Goto), "go to a URL or site/board"),
-                (k(Action::Settings), "settings: theme, keys, …"),
+                (pair(Action::Goto, Action::Settings), "go to a URL / settings"),
                 (format!("{} / {} / {}", k(Action::PrevTab), k(Action::NextTab), k(Action::CloseTab)), "previous / next / close tab"),
                 (format!("{}, ctrl-c", k(Action::Quit)), "quit (mouse works too)"),
             ],
@@ -301,7 +301,7 @@ fn help_sections(keys: &KeyMap) -> Vec<(&'static str, Vec<(String, &'static str)
         (
             "Thread",
             vec![
-                ("J / K, space".into(), "scroll by line / page"),
+                ("J K space, zz zt zb".into(), "scroll line/page; place post"),
                 (pair(Action::NextPart, Action::PrevPart), "focus images, links, replies"),
                 ("enter, l".into(), "open focused / follow quote"),
                 (pair(Action::Preview, Action::Replies), "preview quotes / 1st reply"),
@@ -309,8 +309,7 @@ fn help_sections(keys: &KeyMap) -> Vec<(&'static str, Vec<(String, &'static str)
                 (pair(Action::NextMatch, Action::PrevMatch), "next / previous match"),
                 (pair(Action::Spoiler, Action::AllSpoilers), "spoilers: post / all"),
                 (pair(Action::Expand, Action::Conversation), "expand / conversation"),
-                (k(Action::Poster), "the poster's posts (by ID)"),
-                (k(Action::Media), "posts with files / no images"),
+                (pair(Action::Poster, Action::Media), "poster's posts / files only"),
                 (pair(Action::View, Action::Gallery), "view images / gallery"),
                 (pair(Action::OpenFile, Action::ImageSearch), "open file / image search"),
                 (k(Action::Links), "the post's links and files"),

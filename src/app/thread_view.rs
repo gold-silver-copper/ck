@@ -190,6 +190,14 @@ pub struct ThreadView {
     pub media: Media,
 }
 
+/// Where `zz`, `zt` and `zb` put the selected entry on the screen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Place {
+    Top,
+    Middle,
+    Bottom,
+}
+
 /// How the selection comes into view.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Reveal {
@@ -822,6 +830,21 @@ impl ThreadView {
             _ => {}
         }
         self.scroll = self.scroll.min(len.saturating_sub(view));
+    }
+
+    /// `zz` / `zt` / `zb`: scroll so the selected entry is in the screen's middle, at its top,
+    /// or at its bottom (as far as the thread goes).
+    pub(super) fn place(&mut self, at: Place) {
+        let e = self.entry();
+        let Some((&start, &end, len)) = self.layout.as_ref().and_then(|l| Some((l.starts.get(e)?, l.starts.get(e + 1)?, l.len()))) else { return };
+        let view = self.viewport;
+        self.scroll = match at {
+            Place::Top => start,
+            Place::Middle => ((start + end) / 2).saturating_sub(view / 2),
+            Place::Bottom => end.saturating_sub(view),
+        }
+        .min(len.saturating_sub(view));
+        self.reveal = None;
     }
 
     /// Scroll by lines, then select the entry at the top of the view.

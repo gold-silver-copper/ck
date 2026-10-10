@@ -42,12 +42,28 @@ Navigation (fixed):
 | key                     | action                                        |
 |-------------------------|-----------------------------------------------|
 | `j`/`k`, arrows         | move (in a thread: next/previous post)        |
-| `g`/`G`                 | top / bottom                                  |
-| ctrl-d / ctrl-u, space  | page                                          |
-| `J`/`K`                 | scroll a thread by line                       |
+| `gg`/`G`                | top / bottom                                  |
+| ctrl-d / ctrl-u         | half a page                                   |
+| ctrl-f / ctrl-b, space  | a page                                        |
+| `J`/`K`, ctrl-e / ctrl-y | scroll a thread by line                      |
+| `zz` / `zt` / `zb`      | in a thread: scroll the selected post to the middle / top / bottom of the screen |
 | `enter`, `l`            | open (in a thread: follow a `>>quote`, also into other threads and boards) |
 | `esc`, `h`, backspace   | back                                          |
 | mouse                   | wheel scrolls, click selects, double-click opens, right-click opens the menu (over popups: below) |
+
+As in vim, a count before a move repeats it: `10j` goes ten posts down, `5ctrl-d` five half
+pages. `10G` (or `10g`) goes to the tenth post (in a list, the tenth row). A count also
+repeats `n`/`N`, `u`/ctrl-r and tab. While a count or a `z`/`g` waits for the rest of its
+command it shows at the right of the footer, next to where you are: the selected post of how
+many (in a list, the row), and how far down that is, as an editor's ruler does.
+
+The jump list: `u` goes back (in a thread first to the post you jumped from, then to the
+thread before), ctrl-r forward again [`jump_back`, `jump_forward`]. Every thread you leave
+is on it, at the post you were on, whichever way you left (back to the catalog, to the
+watched threads, by a link), so the thread you just closed is one `u` away, also from the
+catalog. `W` shows the watched threads from anywhere [`watched`]. (Vim's ctrl-i is the same
+key as tab to a terminal, which focuses a post's parts here; so forward is ctrl-r, the
+redo to `u`'s undo.)
 
 The mouse works on what's on top. Over a list popup (the menu, links, image search, the
 filter maker's choices, a settings picker) the wheel moves its rows; over the help, the
@@ -147,7 +163,7 @@ ones for where you are.
 | `enter`, `l` | on a focused part: view the image, go to the quoted post (it shows while focused), open the link, show the replies; on the post: follow its `>>quote`, also into other threads and boards |
 | `esc` | from a focused part back to the post |
 | `p` / `b` | preview the posts a post quotes / jump to the first reply [`preview`, `replies`] |
-| `u` / `U` | jump back (also to the previous thread) / to the first unread post [`jump_back`, `unread`] |
+| `u` / `U` | jump back (the post jumped from, then the thread before) / to the first unread post [`jump_back`, `unread`] |
 | `n` / `N` | next / previous search match [`next_match`, `prev_match`] |
 | `s` / `S` | show spoilers in the post / the whole thread [`spoiler`, `all_spoilers`] |
 | `e`  | show / hide the post's replies under it, indented; again on a reply goes a level deeper (up to 4) [`expand`] |
@@ -846,6 +862,9 @@ All settings are optional; see `config.example.toml` for every option with comme
   the data directory (`board_prefs.json`). In the grid, `h`/`l` move between columns
   (`h` in the first column goes back) and `j`/`k` between rows; without images it's
   shown as cards.
+- `catalog_lines = 5`: lines of each thread's text in a card; the card and its thumbnail
+  grow with them (unset: as many as fit beside the thumbnail). Settings › Preview lines
+  cycles through some.
 - `download_dir = "~/stuff/{site}/{board}/{thread}"`
 - `restore_session = false` to start at the site list instead of where you left off (the
   view, thread and selected post, catalog sort and filter, saved in the data directory

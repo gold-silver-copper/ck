@@ -73,7 +73,9 @@ actions! {
     Compact, "compact", Some(Key::char('c')), &[Scope::Catalog], "layout: cards, compact, grid";
     OpenFile, "open_file", Some(Key::char('i')), &[Scope::Thread], "open the file (videos in mpv)";
     Replies, "replies", Some(Key::char('b')), &[Scope::Thread], "jump to the first reply";
-    JumpBack, "jump_back", Some(Key::char('u')), &[Scope::Thread], "jump back (also to the last thread)";
+    JumpBack, "jump_back", Some(Key::char('u')), &[Scope::Lists, Scope::Catalog, Scope::Thread, Scope::Saved], "jump back: the post before, or the thread you left";
+    JumpForward, "jump_forward", Some(Key::ctrl('r')), &[Scope::Lists, Scope::Catalog, Scope::Thread, Scope::Saved], "jump forward again (after jumping back)";
+    Watched, "watched", Some(Key::char('W')), &[Scope::Global], "the watched threads";
     Unread, "unread", Some(Key::char('U')), &[Scope::Thread], "jump to the first unread post";
     Preview, "preview", Some(Key::char('p')), &[Scope::Thread], "preview the quoted posts";
     NextMatch, "next_match", Some(Key::char('n')), &[Scope::Thread], "next search match";
@@ -411,8 +413,8 @@ mod tests {
 
     #[test]
     fn overrides_and_errors() {
-        let m = map(&[("watch", "W")]).unwrap();
-        assert_eq!(m.action(Scope::Thread, &ch('W')), Some(Action::Watch));
+        let m = map(&[("watch", "Q")]).unwrap();
+        assert_eq!(m.action(Scope::Thread, &ch('Q')), Some(Action::Watch));
         assert_eq!(m.action(Scope::Thread, &ch('w')), None);
 
         let err = |pairs| map(pairs).unwrap_err().to_string();
@@ -440,12 +442,12 @@ mod tests {
 
     #[test]
     fn several_keys_per_action() {
-        let overrides = HashMap::from([("watch".to_string(), Binding::Many(vec!["W".into(), "alt-w".into()]))]);
+        let overrides = HashMap::from([("watch".to_string(), Binding::Many(vec!["Q".into(), "alt-w".into()]))]);
         let m = KeyMap::new(&overrides).unwrap();
-        assert_eq!(m.action(Scope::Catalog, &ch('W')), Some(Action::Watch));
+        assert_eq!(m.action(Scope::Catalog, &ch('Q')), Some(Action::Watch));
         assert_eq!(m.action(Scope::Catalog, &KeyEvent::new(KeyCode::Char('w'), KeyModifiers::ALT)), Some(Action::Watch));
-        assert_eq!(m.label(Action::Watch), "W, alt-w");
-        assert_eq!(m.binding(Action::Watch), Some(Binding::Many(vec!["W".into(), "alt-w".into()])));
+        assert_eq!(m.label(Action::Watch), "Q, alt-w");
+        assert_eq!(m.binding(Action::Watch), Some(Binding::Many(vec!["Q".into(), "alt-w".into()])));
         assert_eq!(m.binding(Action::Sort), None);
         // Conflicts are checked across every key of every action.
         let bad = HashMap::from([("sort".to_string(), Binding::Many(vec!["z".into(), "W".into()])), ("watch".to_string(), Binding::One("W".into()))]);

@@ -6,9 +6,11 @@ expression: narrow(&mut a)
     Keys  j/k scroll · images: off · esc close
 
     Everywhere
-      j k g G ^d ^u      move, top/bottom,
-                         page
+      j k gg G ^d ^u     move (10j),
+                         top/bottom, page
       enter l / esc h    open / back
+      u / ctrl-r / W     back / forward /
+                         watched
       ., right-click     menu: what you can do
                          here
       f                  label on-screen items
@@ -17,8 +19,6 @@ expression: narrow(&mut a)
                          search)
       r / o              reload / open in
                          browser
-      :                  go to a URL or
-                         site/board
-      ,                  settings: t↓ more (j)
+      : / ,              go to a URL↓ more (j)
 
- enter open   . more   / filter   ? help
+ enter open   . more   ? help           1/26  3%

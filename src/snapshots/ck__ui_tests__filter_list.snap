@@ -21,6 +21,7 @@ expression: snapshot(&mut a)
 
     Counts are for the open catalog and thread. Kept in the config as [[filter]] tables.
 
+
   Background refresh
     Open thread       every 10s                         How often the open thread updates
     Watched threads   every 60s                         How often each watched thread updates
@@ -30,5 +31,4 @@ expression: snapshot(&mut a)
 
   Sites
     Add a site        23 sites so far                   Paste a link to any page of it; ck finds…
-    Your sites        only the built-in ones            The ones you added, or built-in ones you…
- enter change   esc back   ? help
+ enter change   esc back   ? help                                                         1/24  4%

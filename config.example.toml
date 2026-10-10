@@ -123,6 +123,10 @@ catalog_layout = "cards"
 # threads a `top = true` filter highlights still come before them. Also in Settings.
 watched_first = false
 
+# Lines of each thread's text in catalog cards; the card and its thumbnail grow with them
+# (unset: as many as fit beside the thumbnail). Also in Settings › Preview lines.
+# catalog_lines = 5
+
 # Where saved files and pages go. {site}, {board} and {thread} are filled in, and {downloads}
 # is your Downloads folder. "~/" works too.
 # download_dir = "{downloads}/ck/{site}/{board}/{thread}"
