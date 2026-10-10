@@ -220,6 +220,9 @@ fn watched() {
     let mut a = app(false);
     a.tab.navigate(View::Watched);
     insta::assert_snapshot!(snapshot(&mut a));
+    // Narrow, the subjects give way: what's new and what died stay in sight.
+    let (text, _) = render_at(&mut a, 60, 10);
+    assert!(text.contains("2 new") && text.contains("archived/deleted") && text.contains("…"), "{text}");
 }
 
 #[test]
@@ -1596,6 +1599,13 @@ fn thread_gone_without_a_copy_offers_the_archive() {
     a.thread_gone(&ThreadKey { site: "4chan".into(), board: "g".into(), no: 901 });
     let text = &a.status().unwrap().text;
     assert_eq!(text, "Thread was deleted or archived: a opens it in desuarchive");
+    // Not when the archive is known not to keep the board.
+    let mut a = app(false);
+    a.tab.navigate(View::Thread);
+    let i = a.sites.iter().position(|s| s.cfg.name == "desuarchive").unwrap();
+    a.sites[i].boards = Some(vec![crate::model::Board { uri: "a".into(), title: String::new(), nsfw: None }]);
+    a.thread_gone(&ThreadKey { site: "4chan".into(), board: "g".into(), no: 901 });
+    assert_eq!(a.status().unwrap().text, "Thread was deleted or archived");
 }
 
 #[test]

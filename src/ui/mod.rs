@@ -511,6 +511,7 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
     let left_w = area.width.saturating_sub(right_w);
     // Hints fit with room to spare; a long message is cut a gap short of what's on the right.
     let (line, left_w) = if line.spans.is_empty() { (fit_hints(footer_hints(app), usize::from(left_w)), left_w) } else { (line, left_w.saturating_sub(if right_w > 0 { 2 } else { 0 })) };
+    let line = Line { spans: cut(line.spans, usize::from(left_w)), ..line };
     put(f, area.x, area.y, left_w, line);
     put(f, area.right().saturating_sub(right_w), area.y, right_w, Line::from(right));
 }
@@ -739,16 +740,20 @@ pub(super) fn list_panel<T>(
     foot: impl FnOnce(u16) -> Vec<Line<'static>>,
     mut row: impl FnMut(usize, &T, u16) -> Line<'static>,
 ) -> Hit {
-    let foot = foot(room(f, width, 0).0.saturating_sub(4));
+    let w = room(f, width, 0).0.saturating_sub(4);
+    let foot: Vec<_> = foot(w).into_iter().flat_map(|l| wrap_note(l, w)).collect();
     let below = if foot.is_empty() { 0 } else { cells(foot.len() + 1) };
-    let inner = panel(f, width, cells(items.len().max(1)).saturating_add(below).saturating_add(3), title, hint);
+    let empty = if items.is_empty() { wrap_note(Line::styled(empty.to_string(), dim()), w) } else { Vec::new() };
+    let inner = panel(f, width, cells(items.len().max(empty.len()).max(1)).saturating_add(below).saturating_add(3), title, hint);
     for (line, y) in foot.into_iter().rev().zip((inner.y..inner.bottom()).rev()) {
         put(f, inner.x, y, inner.width, line);
     }
     let area = Rect { height: inner.height.saturating_sub(below), ..inner };
     let first = window(state, items.len(), area.height as usize, 1);
-    if items.is_empty() && area.height > 0 {
-        put(f, area.x, area.y, area.width, Line::styled(empty.to_string(), dim()));
+    if items.is_empty() {
+        for (line, y) in empty.into_iter().zip(area.y..area.bottom()) {
+            put(f, area.x, y, area.width, line);
+        }
     }
     let sel = state.selected().filter(|_| painted);
     for ((k, item), y) in items.iter().enumerate().skip(first).zip(area.y..area.bottom()) {
@@ -800,14 +805,45 @@ fn draw_rows(
     Some(Hit::List { area, offset: off, item_height: per })
 }
 
-/// Left and right parts of a line, the right one pushed to `width`.
-fn spread(mut left: Vec<Span<'static>>, right: Vec<Span<'static>>, width: usize) -> Line<'static> {
-    let (lw, rw) = (markup::spans_columns(&left), markup::spans_columns(&right));
-    if lw + rw + 2 <= width {
-        left.push(Span::raw(" ".repeat(width - lw - rw)));
-        left.extend(right);
+/// Left and right parts of a line, the right one pushed to `width`. A left part too long is
+/// cut short (with "…") to keep the right one, unless that would leave it under 10 columns.
+fn spread(left: Vec<Span<'static>>, right: Vec<Span<'static>>, width: usize) -> Line<'static> {
+    let rw = markup::spans_columns(&right);
+    let room = width.saturating_sub(if rw > 0 { rw + 2 } else { 0 });
+    if room < 10 && markup::spans_columns(&left) > room {
+        return Line::from(left);
     }
-    Line::from(left)
+    let mut out = cut(left, room);
+    out.push(Span::raw(" ".repeat(width.saturating_sub(markup::spans_columns(&out) + rw))));
+    out.extend(right);
+    Line::from(out)
+}
+
+/// A note wrapped to `width`, keeping its style: wrapping keeps only the text's own, so the
+/// line's goes on the text first. A blank line stays one.
+fn wrap_note(line: Line<'static>, width: u16) -> Vec<Line<'static>> {
+    if line.spans.is_empty() {
+        return vec![line];
+    }
+    let style = line.style;
+    let spans: Vec<_> = line.spans.into_iter().map(|s| Span::styled(s.content, style.patch(s.style))).collect();
+    markup::wrap(&Line::from(spans), usize::from(width))
+}
+
+/// `spans` cut to `width` columns, ending in "…" if anything was cut.
+fn cut(spans: Vec<Span<'static>>, width: usize) -> Vec<Span<'static>> {
+    let mut out = Vec::new();
+    let mut used = 0usize;
+    for span in spans {
+        let w = markup::columns(&span.content);
+        if used + w > width {
+            out.push(Span::styled(truncate(&span.content, width.saturating_sub(used)), span.style));
+            break;
+        }
+        used += w;
+        out.push(span);
+    }
+    out
 }
 
 /// The tab chips under a panel that stays open over them (a tall preview reaches the tab

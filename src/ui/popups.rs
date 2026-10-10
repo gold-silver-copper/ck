@@ -394,7 +394,9 @@ pub(super) fn draw_help(f: &mut Frame, app: &mut App) {
         && left.len() > offset + area.height as usize
         && area.height > 0
     {
-        put(f, area.x, area.bottom() - 1, area.width, Line::styled("↓ more (j)", bold(t.primary)).right_aligned());
+        // Over the whole row, so no word of it runs into the marker.
+        let more = format!("{}↓ more (j)", " ".repeat(usize::from(area.width).saturating_sub(10)));
+        put(f, area.x, area.bottom() - 1, area.width, Line::styled(more, bold(t.primary)));
     }
 }
 
