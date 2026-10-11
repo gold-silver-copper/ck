@@ -48,7 +48,7 @@ impl App {
     pub fn refresh_saved(&mut self) {
         let (Some(off), Some(t)) = (self.tab.saved(), &self.tab.thread) else { return };
         if off.dead {
-            let x = self.keys.key(crate::keys::Action::Archive);
+            let x = self.keys.how(crate::keys::Action::Archive);
             let archive = if self.archive_of(t.key()).is_some() { format!(" ({x} looks in the archive)") } else { String::new() };
             self.info(format!("This is a saved copy from {}; the thread is gone{archive}", crate::ui::ago(off.saved, self.clock)));
             return;

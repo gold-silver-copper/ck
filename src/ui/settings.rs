@@ -119,7 +119,7 @@ fn draw_keys(f: &mut Frame, app: &App, list: &mut ListState, capture: Option<boo
                     Span::styled("   esc cancels", dim()),
                 ])
             }
-            _ => Line::styled("Changed keys are saved in [keys]; navigation keys are fixed. Without a key: in the . menu.", dim()),
+            _ => Line::styled("Changed keys are saved in [keys]; navigation keys are fixed. Without a key: on a letter in its menu (. h).", dim()),
         }]
     };
     // Group titles are never selected, so never painted.
@@ -133,7 +133,7 @@ fn draw_keys(f: &mut Frame, app: &App, list: &mut ListState, capture: Option<boo
         let scopes = action.scopes().iter().map(|s| s.label()).collect::<Vec<_>>().join(", ");
         let label = app.keys.label(action);
         let mut spans = match label.as_str() {
-            "" => vec![Span::styled(format!("  {}", pad("menu", 16)), dim())],
+            "" => vec![Span::styled(format!("  {}", col(&app.keys.how(action), 16)), dim())],
             _ => vec![Span::styled(format!("  {}", col(&label, 16)), key_style)],
         };
         // Narrow: just the key and what it does.
@@ -221,7 +221,7 @@ fn draw_my_sites(f: &mut Frame, m: &mut crate::app::MySites) {
 
 fn draw_filter_list(f: &mut Frame, app: &App, list: &mut ListState, counts: &[(usize, usize)]) {
     let t = theme();
-    let empty = format!("No filters yet. a adds one; {} on a post makes one like it.", app.keys.key(Action::Filter));
+    let empty = format!("No filters yet. a adds one; {} on a post makes one like it.", app.keys.how(Action::Filter));
     let note = "Counts are for the open catalog and thread. Kept in the config as [[filter]] tables.";
     let hint = "enter edit · space on/off · a add · x remove · esc close";
     list_panel(f, (110, "Filters", hint), list, &app.filter_cfgs, (&empty, true), |_| vec![Line::default(), Line::styled(note, dim())], |k, c, width| {

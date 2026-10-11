@@ -256,7 +256,7 @@ impl App {
     /// Every result found is hidden: say so, and how to see them.
     fn all_hidden(&self, n: usize) -> String {
         let results = if n == 1 { "1 result".to_string() } else { format!("{n} results") };
-        format!("{results}, all hidden ({} shows them)", self.keys.key(Action::ShowHidden))
+        format!("{results}, all hidden ({} shows them)", self.keys.how(Action::ShowHidden))
     }
 
     /// More results to load past the ones shown.

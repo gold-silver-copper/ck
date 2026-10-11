@@ -21,20 +21,33 @@ If-Modified-Since on every refetch, and no refetching the same page within 10 se
 
 You don't need to know many. Select something, then:
 
-- `.` (or right-click) lists everything you can do with it, each with its key, so the menu
-  is also how you learn the shortcuts;
+- `enter` does the obvious thing with it: opens a thread or board, shows a post's images (or,
+  without any, goes to the post it quotes), opens a dead thread's saved copy or its archive's;
+- `h`, `esc` or backspace goes back, like a browser's back button (see below);
+- `.` (or right-click) lists everything else you can do with it. Each row has its key, and
+  the less used ones are a letter in that menu: `.` then `H` hides a post, written `. H`
+  here;
+- `c` changes what the view shows: in a catalog its sort and layout, in a thread which posts
+  (a conversation, a poster's posts, only those with files);
 - in a thread, `tab` steps through the post's images, links and replies (the footer says
-  what the keys do to the focused one), `enter` opens it, `esc` goes back to the post;
+  what the keys do to the focused one), and `enter` opens the focused one;
 - `f` puts a label on everything on screen; type one to open it.
 
 `y` copies and `o` opens in the browser whatever is selected or focused: a post, a file, a
-link. `d` saves it.
+link. `d` saves it: the focused file, or all the post's files.
+
+Back goes the way you came. In a thread it first leaves a conversation, a poster's posts
+or a search; then goes back to the post you followed a quote from; then to the thread you
+followed a link from; then to where the thread was opened from (the catalog, the watched
+threads, ...). Every thread you leave, whichever way, is also on the tab's jump list:
+`. u` goes back to the thread you left last, at the post you were on, also from a catalog,
+and `. ctrl-r` forward again [`jump_back`, `jump_forward`].
 
 A list's selection stays on what it's on when the list changes behind it (a refresh,
 something hidden in another tab, `w` with watched threads first); if that goes, what's now
 in its place is selected. While the list is still loading (or failed to load), it goes back
 to the one that went if the list brings it back. A `.` menu runs on what it opened on: what
-it would do to that does nothing (saying so) if that has gone. Sorting (`s`) and typing or
+it would do to that does nothing (saying so) if that has gone. Sorting and typing or
 clearing a filter go back to the top.
 
 Navigation (fixed):
@@ -49,26 +62,16 @@ Navigation (fixed):
 | ctrl-e / ctrl-y         | scroll a thread by a line (in a list, move a row) |
 | `J`/`K`                 | in a thread: scroll by a line                 |
 | `zz` / `zt` / `zb`      | in a thread: scroll the selected post to the middle / top / bottom of the screen |
-| `enter`, `l`            | open (in a thread: follow a `>>quote`, also into other threads and boards) |
-| `esc`, `h`, backspace   | back                                          |
+| `enter`, `l`            | open, as above                                |
+| `esc`, `h`, backspace   | back, as above                                |
 | mouse                   | wheel scrolls, click selects, double-click opens, right-click opens the menu (over popups: below) |
 
 As in vim, a count before a move repeats it: `10j` goes ten posts down, `5ctrl-d` five half
 pages. `10G` (or `10g`, or `10` and end) goes to the tenth post (in a list, the tenth row). A count also
-repeats `n`/`N`, `u`/ctrl-r and tab. While a count or a `z`/`g` waits for the rest of its
+repeats `n`/`N` and tab. While a count or a `z`/`g` waits for the rest of its
 command it shows at the right of the footer, next to where you are: the selected post of how
 many (in a list, the row), and how far down that is, as an editor's ruler does. `esc` drops
 a waiting count or prefix; another key drops it and does what it does.
-
-The jump list: `u` goes back (in a thread first to the post you jumped from, by a quote,
-`gg`, `G` or `10G`, then to the thread before), ctrl-r forward again the same way
-[`jump_back`, `jump_forward`]. Every thread you leave
-is on it, at the post you were on, whichever way you left (back to the catalog, to the
-watched threads, by a link, to its archive with `a`), so the thread you just closed is one `u` away, also from the
-catalog. `W` shows the watched threads from anywhere but the image viewer and gallery, and `esc`
-there goes back to where you pressed it [`watched`]. (Vim's ctrl-i is the same
-key as tab to a terminal, which focuses a post's parts here; so forward is ctrl-r, the
-redo to `u`'s undo.)
 
 The mouse works on what's on top. Over a list popup (the menu, links, image search, the
 filter maker's choices, a settings picker) the wheel moves its rows; over the help, the
@@ -102,12 +105,11 @@ ones for where you are.
 | key  | action |
 |------|--------|
 | `/`  | filter the list; in a thread, search it [`search`] |
-| `r` / `o` | reload / open the board or thread in a browser [`reload`, `browser`] |
+| `R` / `o` | reload / open the board or thread in a browser [`reload`, `browser`] |
 | `:`  | go to a URL or a site/board/thread, see [Going to a URL](#going-to-a-url) [`goto`] |
-| `u` / ctrl-r | back / forward along the jump list, see above [`jump_back`, `jump_forward`] |
-| `W`  | the watched threads (not in the image viewer or gallery) [`watched`] |
+| `W`  | the watched threads (not in the image viewer or gallery); `esc` there goes back to where you pressed it [`watched`] |
 | `,`  | settings: theme, colors, keys, and more [`settings`] |
-| `.`, right-click | what you can do with what's selected, with each one's key [`menu`] |
+| `.`, right-click | everything you can do with what's selected, with each one's key [`menu`] |
 | `f`  | label what's on screen (posts, images, links, rows); type a label to open it (what it was put on, even if a refresh has moved it; if it's gone, ck says so) [`hints`] |
 | `]` / `[` | next / previous tab [`next_tab`, `prev_tab`] |
 | ctrl-w | close the tab [`close_tab`] |
@@ -121,15 +123,15 @@ ones for where you are.
 | `1`–`9` | open a favorite board (home screen) |
 | `*`  | favorite board on / off (also in a catalog) [`favorite`] |
 | `x`  | on the home screen: take a favorite off, forget a recent board, hide / show a site [`remove`] |
+| `. a` | add a site from a link to any page of it [`add_site`] |
 
 **Watched, History, Saved**
 
 | key  | action |
 |------|--------|
 | `x`  | remove the entry; in Saved, press it twice to delete the copy [`remove`] |
-| `T`  | open the thread in a new tab [`new_tab`] |
-| `F`  | follow / stop following as a general [`follow`] |
-| `y` / `Y` | copy the subject and link / the link [`copy`, `copy_link`] |
+| `y`  | copy the subject and link [`copy`] |
+| `. T` / `. F` | open the thread in a new tab / follow it as a general [`new_tab`, `follow`] |
 
 **Image viewer**
 
@@ -138,28 +140,20 @@ ones for where you are.
 | `h`/`l`, arrows | previous / next file (animated GIFs play); from a thread, every file in it (or in the conversation shown) |
 | space | pause an animated GIF |
 | `+` / `-` / `0` | zoom in / out (up to 800%) / fit again; zoomed in, `h`/`j`/`k`/`l` and the arrows move around, page up / down change file, `esc` fits |
-| `i`  | open the file externally (its thumbnail, when that's all there is) [`open_file`] |
-| `y` / `Y` | copy the file's URL (or its thumbnail's) / the post's link [`copy`, `copy_link`] |
+| `enter` | open the file externally, videos in mpv if it's installed (its thumbnail, when that's all there is) |
+| `y`  | copy the file's URL (or its thumbnail's) [`copy`] |
 | `d`  | save the file [`download`] |
-| `R`  | reverse image search [`image_search`] |
-| `esc`, `q` | close |
+| `esc`, `q`, `v` | close |
 
 **Catalog**
 
 | key  | action |
 |------|--------|
-| `v`  | image viewer for the OP's files [`view`] |
-| `w` / `T` | watch / unwatch the thread; open it in a new tab [`watch`, `new_tab`] |
-| `F`  | follow the thread as a general [`follow`] |
+| `w`  | watch / unwatch the thread [`watch`] |
+| `c`  | sort (bump order, most replies, newest, oldest), layout (cards, compact, grid) and hidden threads, each remembered per board [`show`] |
+| `r`  | start a thread (see Posting) [`reply`] |
+| `y`  | copy the OP's subject and text [`copy`] |
 | `*`  | favorite this board on / off [`favorite`] |
-| `s`  | cycle the sort: bump order, most replies, newest, oldest (remembered per board) [`sort`] |
-| `c`  | cycle the layout: cards, compact (a line per thread), grid (thumbnails in columns), remembered per board [`compact`] |
-| `O`  | the OP's links and files [`links`] |
-| `H` / `Z` | hide / unhide the thread; show hidden threads, dimmed [`hide`, `show_hidden`] |
-| `X`  | hide or highlight threads like this one: by subject, image or file name (a filter) [`filter`] |
-| `A`  | search the board's archive [`archive_search`] |
-| `P`  | start a thread (see Posting) [`reply`] |
-| `y` / `Y` | copy the OP's subject and text / the thread's link [`copy`, `copy_link`] |
 
 **Thread**
 
@@ -167,29 +161,28 @@ ones for where you are.
 |------|--------|
 | `J`/`K`, space | scroll by line / page |
 | tab / shift-tab | focus the post's next / previous poster ID, image, link or reply (then on into the next post) [`next_part`, `prev_part`] |
-| `enter`, `l` | on a focused part: view the image, go to the quoted post (it shows while focused), open the link, show the replies; on the post: follow its `>>quote`, also into other threads and boards |
-| `esc` | from a focused part back to the post |
-| `p` / `b` | preview the posts a post quotes / jump to the first reply [`preview`, `replies`] |
-| `u` / `U` | jump back (the post jumped from, then the thread before) / to the first unread post [`jump_back`, `unread`] |
+| `enter`, `l` | on a focused part: view the image, go to the quoted post (it shows while focused), open the link, show the replies; on the post: view its images, else follow its `>>quote`, also into other threads and boards |
+| `esc` | from a focused part back to the post; then back, as above |
+| `c`  | which posts: a conversation, a poster's posts, only those with files, hidden posts, spoilers (below) [`show`] |
+| `r`  | reply, quoting the post (see Posting) [`reply`] |
+| `w`  | watch / unwatch [`watch`] |
+| `p`  | preview the posts a post quotes [`preview`] |
 | `n` / `N` | next / previous search match [`next_match`, `prev_match`] |
-| `s` / `S` | show spoilers in the post / the whole thread [`spoiler`, `all_spoilers`] |
-| `e`  | show / hide the post's replies under it, indented; again on a reply goes a level deeper (up to 4) [`expand`] |
-| `c`  | the post's conversation alone: what it replies to and the replies to it; `esc` (or `c`) shows the whole thread again [`conversation`] |
-| `I`  | on a board with poster IDs: that poster's posts alone; `esc` (or `I`) shows the whole thread again [`poster`] |
-| `M`  | in turn: only the posts with files (and the OP), every post with its images hidden, every post again [`media`] |
-| `v` / `V` | image viewer from the post's files on through the thread's / gallery of every file in the thread [`view`, `gallery`] |
-| `i` / `R` | open the post's file (videos in mpv if it's installed) / reverse image search [`open_file`, `image_search`] |
-| `O`  | the post's links: quotes of other threads, web links, files; `enter` opens, `y` copies [`links`] |
-| `d`  | save the focused file (`tab` to it first); in the gallery, the selected one [`download`] |
-| `.` menu | save all the post's files / all the thread's files / the thread as a page; the last two ask first [`download_post`, `download_thread`, `export`: no key unless you give one] |
-| `w` / `T` | watch / unwatch; follow the quote `enter` would follow in a new tab [`watch`, `new_tab`] |
-| `H` / `Z` | hide / unhide the post; show hidden posts [`hide`, `show_hidden`] |
-| `X`  | hide or highlight posts like this one: by poster ID, name and tripcode, flag, image, file name, or (on the OP) subject (a filter) [`filter`] |
-| `P`  | reply, quoting the post (see Posting); the menu also replies quoting its text [`reply`, `quote`] |
-| `m`  | mark the post as yours, to be told about replies [`mine`] |
-| `F`  | follow the thread as a general: when it dies or fills up, the next one is watched [`follow`] |
-| `a`  | after a 404: open the thread in the site's archive [`archive`] |
-| `y` / `Y` | copy the post's text (a focused part: its URL) / the post's link [`copy`, `copy_link`] |
+| `V`  | gallery of every file in the thread [`gallery`] |
+| `d`  | save the focused file, or all the post's files; in the gallery, the selected one [`download`] |
+| `y`  | copy the post's text (a focused part: its URL) [`copy`] |
+
+In the `.` menu of a thread, by their letters: `v` the image viewer, `i` open the post's
+file outside ck, `b` the first reply, `U` the first unread post, `e` show / hide the
+post's replies under it (indented; again on a reply goes a level deeper, up to 4), `s` the
+post's spoilers, `m` mark the post as yours (to be told about replies), `Q` reply quoting
+its text, `T` follow its quote in a new tab, `F` follow the thread as a general (when it
+dies or fills up, the next one is watched), `Y` copy the post's link, `O` its links and
+files, `H` hide / unhide it, `X` hide or highlight posts like it (by poster ID, name and
+tripcode, flag, image, file name, or on the OP subject: a filter), `L` reverse image
+search, `D` save all the thread's files, `E` save the thread as a page (both ask first),
+`a` after a 404, the thread in the site's archive. A catalog's menu has most of these for
+its threads, and `A` to search the board's archive.
 
 ### Where the selected post sits
 
@@ -197,7 +190,7 @@ While you read down a thread with `j`, the selected post doesn't creep to the bo
 once it would come within `scroll_margin` of it (a fraction of the screen, 0.3 by default),
 the thread scrolls so the post starts about a third of the way down, with what came before
 it above and what comes next below. Reading up with `k` does the same at the top. Jumps
-(following a quote, `u`, `U`, `n`, a search hit, a hint) land there too. `scroll_margin =
+(following a quote, going back, `. U`, `n`, a search hit, a hint) land there too. `scroll_margin =
 0.5` keeps the selected post centered, and `0` lets it reach the edges (scrolling as little
 as possible, as before); Settings › Reading position cycles through them.
 
@@ -207,8 +200,8 @@ While you read the last post of a thread (it's selected and the end of the threa
 screen), posts a refresh brings come into view: the first new one is selected, placed as
 `j` would place it, and `j` reads on through the rest. Hidden posts are passed over, and in
 a conversation only new posts that belong to it count. Reading anywhere else, nothing
-moves; the top bar says how many new posts are below ("3 new, 2 below ↓"), and `U` goes to
-the first. Hidden posts aren't new there either (nor in the terminal title) until `Z` shows
+moves; the top bar says how many new posts are below ("3 new, 2 below ↓"), and `. U` goes to
+the first. Hidden posts aren't new there either (nor in the terminal title) until `c Z` shows
 them. `follow_new_posts = false` (or Settings › Background refresh › Reading the end)
 turns it off. A thread in another tab follows when you come back to it and it refreshes.
 
@@ -224,15 +217,15 @@ and pages.
 
 ### Conversations
 
-`c` on a post shows just its conversation: the post, what it quotes in the thread (and
+`c` then `C` on a post shows just its conversation: the post, what it quotes in the thread (and
 what those quote, on up), and the replies to it (and the replies to those, on down), in
 thread order. Other replies to the posts it quotes aren't in it, and since everyone quotes
 the OP, the OP's replies only count when it's the OP's conversation. Replies are indented
 by how far down they are; the post itself is marked "conversation", and the top bar says
 "Conversation of No.123" with how many posts. Everything works as in the whole thread:
 `tab` and the menu, quotes (one to a post outside the conversation leaves it and goes
-there), search (within the conversation), `e`, previews, the gallery (its files). New
-replies that belong in it appear as the thread refreshes. `esc` or `c` goes back to the
+there), search (within the conversation), `. e`, previews, the gallery (its files). New
+replies that belong in it appear as the thread refreshes. `esc` goes back to the
 whole thread, scrolled where it was, and tabs and the next start remember a conversation
 that was open. At most 500 posts are shown, the nearest ones; the footer says when there
 are more.
@@ -245,9 +238,9 @@ it has in the thread: `ID:Ab3dEf+g (4)`. Its color comes from the ID, so one pos
 look alike (under the `mono` theme, only the text). A country or board flag shows next to
 it, as its two-letter code (`US`) or, for a board's own flags, its name.
 
-`I` on a post (or `enter` on its ID, focused with `tab`, clicked, or picked with `f`) shows
+`c I` on a post (or `enter` on its ID, focused with `tab`, clicked, or picked with `f`) shows
 that poster's posts alone, as a conversation shows its posts: the top bar says "Posts by
-ID:…", everything works as in the whole thread, and `esc` or `I` goes back. It isn't
+ID:…", everything works as in the whole thread, and `esc` goes back. It isn't
 remembered across starts (IDs are the thread's alone). Filters can catch IDs and flags too
 (see Filters).
 
@@ -261,12 +254,12 @@ needs `set -g set-clipboard on`. On a local machine ck also uses `pbcopy`, `wl-c
 
 ### Posts with files, or no images
 
-`M` shows only the posts with files (and the OP: it's the thread), the way a conversation
+`c M` shows only the posts with files (and the OP: it's the thread), the way a conversation
 shows its posts: `j`/`k` and search go through those, and the top bar says "with
 files". New posts with files appear as the thread refreshes, and going to a
-quoted post without one shows every post again. `M` again shows every post with its images
+quoted post without one shows every post again. `c M` again shows every post with its images
 hidden, the way a board with images off has them ("image off" in their place, the layout
-the same, nothing asked for), and the bar says "images hidden"; `M` once more shows
+the same, nothing asked for), and the bar says "images hidden"; `c M` once more shows
 everything. It's for that thread, while it's open; in a conversation, the conversation
 still shows all its posts. (On a board you always want without images, see Images on or
 off per board.)
@@ -291,7 +284,7 @@ one brings it back.
 
 ### Tabs
 
-`T` opens the selected thread in a new tab, next to the current one (in a thread, the
+`. T` opens the selected thread in a new tab, next to the current one (in a thread, the
 quoted thread `enter` would go to). Each tab has its own place: view, board, catalog,
 thread, and jump trail. The tabs show as chips under the top bar when there's more than
 one; `]` and `[` move between them (or click one), `ctrl-w` closes one (not
@@ -319,7 +312,7 @@ nothing else is being typed starts this by itself), or type a short form. A site
 | `saved`, `watched`, `history` | that list                                   |
 
 `tab` completes site and board names. In a one-line box (`:`, `/`, the fields of Settings
-and the filter maker) ctrl-w takes back a word and ctrl-u the whole line. `esc` (or `u` from a thread) goes back to where you
+and the filter maker) ctrl-w takes back a word and ctrl-u the whole line. `esc` goes back to where you
 were (from Settings: to the place under them). `ck URL` (or `ck 4chan/g`) starts there.
 
 ### Remapping keys
@@ -333,12 +326,13 @@ are saved in the config's `[keys]` section (only the keys you changed):
 [keys]
 watch = "Q"
 help = ["?", "f1"]
-reload = ["r", "ctrl-l"]
-download_thread = "D"   # no key by default
-mine = []               # no key: only in the . menu
+reload = ["R", "ctrl-l"]
+hide = "H"              # on a letter in the . menu by default
+download = []           # no key: only in the . menu
 ```
 
-A command without a key is still in the `.` menu where it applies.
+A command without a key is still in the `.` menu where it applies (those about what the
+view shows in the `c` menu), on its letter unless a key you've given uses it there.
 
 Keys are a character (`"w"`, `"W"`, `":"`), `ctrl-` or `alt-` with one, or a named key:
 `tab`, `shift-tab`, `enter`, `esc`, `backspace`, `delete`, `insert`, arrows (`up`, ...),
@@ -346,19 +340,20 @@ Keys are a character (`"w"`, `"W"`, `":"`), `ctrl-` or `alt-` with one, or a nam
 table, and the viewer's and gallery's own) are fixed, as are keys inside text inputs and
 popups; ctrl-c always quits, and ctrl-i is tab, as terminals send it. In the image viewer
 and the gallery only their own commands apply. The `?` help lists every key that does
-something, from the same tables, starting with the ones for where you are.
+something, from the same tables, starting with the ones for where you are, and the
+menus' letters after them.
 
 ## Filters and hiding
 
-`H` hides the selected catalog thread or thread post; `Z` shows hidden ones again
-(dimmed and marked) so they can be unhidden with another `H`. Hidden posts collapse to
+`. H` hides the selected catalog thread or thread post; `c Z` shows hidden ones again
+(dimmed and marked) so they can be unhidden with another `. H`. Hidden posts collapse to
 one line, so replies to them still make sense. They're marked just "hidden", not why
-(that would show what a filter or hidden word hides); `H` on one says why. Until `Z`
+(that would show what a filter or hidden word hides); `. H` on one says why. Until `c Z`
 shows them, they're left out of the thread's search and gallery too (`V` and the footer
 and `.` menu offer the gallery only when it has files to show; when only hidden posts have
 files, `V` says so), a quote of one previews
 only "hidden" (with `p` or focused), saving all the thread's files leaves theirs out, and
-hidden threads aren't counted as new in the catalog's header. Hiding, `Z` and filter
+hidden threads aren't counted as new in the catalog's header. Hiding, `c Z` and filter
 changes apply to every tab at once, and Watched's counts of new posts and replies to you
 (and the tabs and terminal title) follow at once for the threads refreshed since ck
 started (one that 404'd stays at nothing new). What you hide is remembered per board in
@@ -368,10 +363,10 @@ the data directory.
 thread, posts that quote a hidden post, and the posts that quote those, on down, collapse
 too. `recursive = true` on a `[[filter]]` does that for
 what the filter hides (also in Settings › Filters, as "Replies"). Unhiding the post they
-reply to shows them again; `H` on one of them says which post that is. The OP never
+reply to shows them again; `. H` on one of them says which post that is. The OP never
 counts (everyone quotes it), and catalogs aren't affected.
 
-Filters hide or highlight automatically. The quickest way to make one is `X` (or "hide or
+Filters hide or highlight automatically. The quickest way to make one is `. X` ("hide or
 highlight posts like it…" in the `.` menu) on a post or catalog thread: it offers what
 the post can be caught by (its poster ID, its name with the tripcode, the tripcode alone,
 its flag, its image's MD5, its file's name, and an OP's subject; never the site's
@@ -447,8 +442,8 @@ words, on every site and board: plain words (no regex), in any case, as whole wo
 (`cat` hides "Cat pics", not "concatenate"; `c++` and `:^)` work as typed), with any spaces
 between the words of a phrase. They're looked for in the subject, the comment (spoilers
 too), the name and file names. What they hide is hidden like anything else: collapsed to a
-line, shown by `Z` marked "hidden", counted in the catalog's header. Settings ›
-Filters › Hidden words lists them (`a` adds one, `x` removes one), and `w` in a post's `X`
+line, shown by `c Z` marked "hidden", counted in the catalog's header. Settings ›
+Filters › Hidden words lists them (`a` adds one, `x` removes one), and `w` in a post's `. X`
 adds a word from it (the thread's search to start with). Either way it's saved at once, and
 `u` right after takes it back.
 
@@ -469,7 +464,7 @@ The open thread refreshes in the background every 10 seconds and watched threads
 60 seconds (change with `refresh_thread_secs` / `refresh_watched_secs`; those are also the
 minimums). A quiet thread is refreshed less often: each refresh that brings no new post
 makes the next wait half as long again, up to ten times the interval (no more than 10
-minutes, unless the interval itself is longer); new posts, opening the thread or `r` start
+minutes, unless the interval itself is longer); new posts, opening the thread or `R` start
 over. `refresh_backoff = false` (or Settings › Background refresh › Quiet threads) keeps
 the intervals fixed.
 
@@ -482,7 +477,7 @@ none of them has been refreshed for a while (20 minutes, or two rounds if they'r
 Other engines have no such list, and show nothing.
 
 Posts that arrived since your last visit are marked "new", and a "new posts" line sits
-between the last post you'd read and the first new one; `U` jumps to the first one.
+between the last post you'd read and the first new one; `. U` jumps to the first one.
 
 A post the moderators delete while the thread is open stays where it was, marked
 "deleted" (the top bar counts them: "1 deleted"); its quotes, replies, previews and
@@ -491,10 +486,10 @@ open thread: saved copies, exports and post counts are the thread as the site ha
 answer with fewer than half the posts last known (shown, or counted for a watched thread)
 is more likely broken than mass deletion: it's shown as it came, without keeping what it
 left out, and the status line says so. It isn't a visit, doesn't change the watch list's
-counts, and doesn't replace the saved copy (nor does `e`, `w` or `m` while it's shown).
+counts, and doesn't replace the saved copy (nor does `. e`, `w` or `. m` while it's shown).
 The answer after it is judged against it, so a real mass deletion is taken one refresh
 later. An answer with no posts, or with another thread than the one asked for (as a site
-might answer a reply's number), is a failed load (`r` tries again); in the background it
+might answer a reply's number), is a failed load (`R` tries again); in the background it
 leaves a watched thread as it was. FoolFuuka and LynxChan error answers that say "not
 found" count as gone, like a 404 (on LynxChan, for boards and catalogs too); others show
 their text.
@@ -526,7 +521,7 @@ thread view, read offline: the top bar says "saved 2h ago" (and "dead"), nothing
 refreshed or fetched, and everything else works (replies, search, the menu, the gallery).
 Images come from the thread's download folder when you saved them, and
 thumbnails from the thumbnail cache; the rest show as placeholders. On a copy of a thread
-that's still up, `r` opens the live thread. `x` (twice) deletes a copy; unwatching a thread
+that's still up, `R` opens the live thread. `x` (twice) deletes a copy; unwatching a thread
 keeps it.
 
 `:saved WORDS` (or "search inside the saved threads…" in the Saved view's `.` menu) searches
@@ -536,7 +531,7 @@ spoilers left out). Results come in as the copies are read, newest copy first, w
 each is and the words highlighted; `enter` opens the copy on that post, with the search set
 so `n` / `N` go through it, and `esc` comes back. A copy still on screen after `esc` leaves
 the results (back to where the search started) stays its own site's thread, and the tab is
-on its site and board: every key, `u` and links in it included, acts from there. 500 MB of copies take about a second and a half.
+on its site and board: every key and link in it included, acts from there. 500 MB of copies take about a second and a half.
 
 When the thread you open has 404'd and there's a copy, ck offers it ("a saved copy from
 2h ago: enter opens it"), and a thread that dies while you read it becomes its copy.
@@ -547,16 +542,16 @@ watched threads alone take more; and in a run where `watched.json` couldn't be r
 
 ### Following a general
 
-Generals are threads that start over when they fill up (/lmg/, /hsg/, …). `F` on one (in
+Generals are threads that start over when they fill up (/lmg/, /hsg/, …). `. F` on one (in
 its thread, the catalog, or Watched) follows it: it's watched, and when it 404s or 4chan
 says it hit its bump limit, ck looks for the next thread whose subject has the same
 `/tag/` (or, without a tag, the same subject minus its number) in that board's catalog.
-The newest match that isn't hidden (by hand, a filter or a hidden word, whatever `Z`
+The newest match that isn't hidden (by hand, a filter or a hidden word, whatever `c Z`
 says) is watched and followed instead, and you're notified; a hidden one is passed over,
 even for an older match. A thread that died
 is dropped from Watched; one that's only full stays until it dies. The search is one
 background catalog request, repeated at most every 10 minutes while nothing is found.
-Watched shows "follows /lmg/" on followed threads; `F` again stops following.
+Watched shows "follows /lmg/" on followed threads; `. F` again stops following.
 
 ### What's new in a catalog
 
@@ -594,20 +589,20 @@ when some of them reply to your posts. The title from before is put back when ck
 (terminals that can't do that are left with an empty one). `set_title = false` (or
 Settings › Terminal title) leaves the title alone.
 
-Posts you send from ck are marked as yours (see Posting). For the rest, `m` marks the
+Posts you send from ck are marked as yours (see Posting). For the rest, `. m` marks the
 selected post as yours (and watches the thread). Replies to it are counted in Watched ("1 reply to you"),
 quotes of it read `>>123 (You)`, and they get their own notification. The marks show in
 every tab at once; unwatching the thread (`w`, or `x` in Watched) forgets them.
 
 ck keeps its state as JSON in `$XDG_DATA_HOME/ck` (default `~/.local/share/ck`):
 `watched.json`, `history.json`, `recent_boards.json`, `board_prefs.json` (each board's
-sort and layout), `hidden.json` (what you hid with `H`), `seen.json` (catalog threads
+sort and layout), `hidden.json` (what you hid with `. H`), `seen.json` (catalog threads
 seen, for "new" and `+N`), `session.json` (your tabs, for the next start), and `saved.json`
 with `threads/` (saved threads). A file ck can't read (say, permissions) is left alone,
 and ck warns at start that changes to it won't be saved that run; a corrupt one is moved
 to `<name>.json.corrupt`. Board
 lists fetched from sites are saved there too (`boards/`), so a site's boards show up
-instantly next time; they're refreshed quietly in the background once a day, and `r` in
+instantly next time; they're refreshed quietly in the background once a day, and `R` in
 the Boards view refreshes them now. Lists that come in several pages (LynxChan and
 jschan board lists, FoolFuuka catalogs) show each page as it arrives.
 
@@ -622,9 +617,9 @@ older ck is not, and can be deleted by hand.
 ## Posting
 
 ck posts on every site but the archives: 4chan, and vichan, LynxChan, jschan and 2ch sites.
-`P` in a thread opens the reply box, quoting the selected post (`>>123`)
+`r` in a thread opens the reply box, quoting the selected post (`>>123`)
 unless it's the opening post; the menu's "reply quoting its text" quotes its text too
-(`>line`). `P` in a catalog starts a new thread on the board.
+(`>line`). `r` in a catalog starts a new thread on the board.
 
 The box has the post's fields: name, options (`sage`, …), the subject for a new thread,
 the comment, a file (a path; `~/` works) and whether to spoiler it. `tab` and shift-tab go
@@ -665,8 +660,8 @@ for up to three minutes; `proof_of_work_seconds` and `proof_of_work_threads` in 
 change that (alogs' takes longer). 8kun asks its own captcha once a day, after the post is sent. Posts go with a password (`post_password` in the
 config, else a new one each run), for deleting them on the site where it lets you.
 
-`esc` closes the box and keeps what's written, per thread, for the next `P` there (pressing
-`P` on other posts adds their quotes). Drafts last until ck quits.
+`esc` closes the box and keeps what's written, per thread, for the next `r` there (pressing
+`r` on other posts adds their quotes). Drafts last until ck quits.
 
 ### ck-web, and Cloudflare
 
@@ -705,28 +700,28 @@ needs an app bundle, which isn't made yet.
 
 ## Searching archives
 
-`A` in a catalog searches the board's posts on a FoolFuuka archive: the site itself if
+`. A` in a catalog searches the board's posts on a FoolFuuka archive: the site itself if
 it's one (desuarchive, palanq, b4k), or the archive configured for it with `archive`
 (4chan's boards use desuarchive in the default config). Results show each post with its
 thread; `enter` opens the thread on the archive with the post selected, `esc` goes back.
 Each page of 25 results is one request; going down past the last one (or `n`) loads the
 next. Archives limit how often you can search; when they say no, ck shows their message.
 Posts your filters or hidden words hide, or that you've hidden, are left out of the
-results (the title says how many) until `Z` shows them, marked "hidden"; this goes for
+results (the title says how many) until `c Z` shows them, marked "hidden"; this goes for
 `:saved` searches too, where replies to hidden posts are left out as in their thread
 (`recursive_hiding`, or a `recursive` filter).
 
 ## Images
 
-Catalog and thread views show thumbnails, and `v` opens a full-screen viewer. ck asks the
+Catalog and thread views show thumbnails, and `enter` on a post opens a full-screen viewer. ck asks the
 terminal which image protocol it supports (kitty, sixel, iTerm2) and falls back to unicode
 half-blocks, which work everywhere. The detected protocol is shown in the `?` help's
 title bar. Thumbnails are skipped in terminals narrower than 60 columns.
 
 Animated GIFs play in the viewer, at up to 20 frames a second (frames are prepared in the
 background, and scaled down if a long GIF would take too much memory). Videos open
-externally with `i`. When the site or archive has only a file's thumbnail, the viewer
-shows it and says so; `i` and `y` in the viewer, and `o` and `y` on the focused file in a
+externally with `enter` in the viewer (`. i` in a thread). When the site or archive has only a file's thumbnail, the viewer
+shows it and says so; `enter` and `y` in the viewer, and `o` and `y` on the focused file in a
 thread, act on the thumbnail's address and say so, and `d` says there's no file to save.
 A spoilered file the archive didn't keep has no thumbnail either: the viewer, and opening,
 copying or saving it, say neither is available. The menu offers only what there is.
@@ -752,8 +747,8 @@ at the top of your config.
 "images on this board: on → off" in the `.` menu of a catalog, a thread or the Boards list
 turns a board's images off (or back on; the action is `board_images`, without a key until
 you give it one). With images off on a board, ck asks for none of its images: thumbnails
-show "image off" in their place, the layout stays the same, `v` says images are off instead
-of opening the viewer, and the top bar says "images off". Opening a file with `i`, links,
+show "image off" in their place, the layout stays the same, `enter` says images are off instead
+of opening the viewer, and the top bar says "images off". Opening a file with `. i`, links,
 copying and downloads still work. On an overboard each thread follows its own board,
 unless the overboard has a setting of its own.
 
@@ -766,7 +761,7 @@ Boards' settings are kept in the data directory with their sort and layout.
 
 ### Reverse image search
 
-`R` lists search engines for the selected post's images (for videos, their thumbnail) or
+`. L` lists search engines for the selected post's images (for videos, their thumbnail) or
 the image in the viewer; `enter` opens the search in the browser, `y` copies its link.
 ck itself sends nothing anywhere. The engines can be replaced in the config; `{url}`
 becomes the image's address:
@@ -780,13 +775,12 @@ url = "https://saucenao.com/search.php?url={url}"
 ## Downloads
 
 Only one key saves files: `d`, which saves the file in front of you (one you've focused
-with `tab`, the one in the image viewer, or the one selected in the gallery). On a post
-with nothing focused it says how instead of saving anything. The `.` menu saves more: all
-of a post's files, all of the thread's ("save all the thread's files…": the whole
-thread's, even in a conversation, but not hidden posts' unless `Z` shows them), or the
+with `tab`, the one in the image viewer, or the one selected in the gallery), or on a post
+with nothing focused, all the post's files. The `.` menu saves more: all of the thread's ("save all the thread's files…": the whole
+thread's, even in a conversation, but not hidden posts' unless `c Z` shows them), or the
 thread as a page ("save the thread as a page…"). The last two first say what they'll
 write (how many files, about how big) and where; `enter` saves, anything else cancels. To
-have keys for these, give `download_post`, `download_thread` or `export` one (see
+have keys of their own for these, give `download_thread` or `export` one (see
 [Remapping keys](#remapping-keys)); they still ask first.
 
 Files go into `~/Downloads/ck/{site}/{board}/{thread}/` (your system's Downloads folder).
@@ -868,7 +862,7 @@ All settings are optional; see `config.example.toml` for every option with comme
 - `watched_first = true` puts watched threads first in catalogs (see
   [What's new in a catalog](#whats-new-in-a-catalog)).
 - `catalog_layout = "cards" | "compact" | "grid"`: the default layout (also in Settings).
-  `c` in a catalog and `s` set that board's own layout and sort, which are remembered in
+  `c` in a catalog sets that board's own layout and sort, which are remembered in
   the data directory (`board_prefs.json`). In the grid, `h`/`l` move between columns
   (`h` in the first column goes back) and `j`/`k` between rows; without images it's
   shown as cards.
@@ -879,7 +873,7 @@ All settings are optional; see `config.example.toml` for every option with comme
 - `restore_session = false` to start at the site list instead of where you left off (the
   view, thread and selected post, catalog sort and filter, saved in the data directory
   as `session.json`; a thread or catalog that failed to load is kept as it was asked
-  for, and `r` tries it again the same way). `ck URL` always starts at the URL.
+  for, and `R` tries it again the same way). `ck URL` always starts at the URL.
 - `favorites = ["4chan/g", ...]`, `hidden_sites = ["wizchan", ...]`: see
   [The home screen](#the-home-screen).
 - `notify = "auto" | "bell" | "off"`, `notify_command = [...]`: see
@@ -891,7 +885,7 @@ All settings are optional; see `config.example.toml` for every option with comme
 - `[[image_search]]`: reverse image search engines, see
   [Reverse image search](#reverse-image-search).
 - `[[site]]`, `default_sites = false`: see [Adding sites](#adding-sites).
-- `archive = "desuarchive"` on a `[[site]]`: the archive for 404'd threads and `A` searches.
+- `archive = "desuarchive"` on a `[[site]]`: the archive for 404'd threads and `. A` searches.
 - `[keys]`: `action = "key"`, `action = ["key", ...]`, or `action = []` for none (the `.`
   menu only), e.g. `watch = "Q"`; see
   [Remapping keys](#remapping-keys). Unknown actions, things that aren't keys, and two
@@ -944,7 +938,7 @@ thumb_ext = "png"   # only if the site renders every thumbnail as png (vichan's 
 ```
 
 A site can name a FoolFuuka archive with `archive = "desuarchive"`. When one of its
-threads 404s, ck offers to open it there (`a`).
+threads 404s, ck offers to open it there (`enter`, or `. a` while the thread is still on screen).
 
 Config files from earlier versions of ck hold a copy of every built-in site (ck used to read
 only the sites in the file). Those copies still work (each replaces the built-in site of its name); delete
@@ -976,7 +970,7 @@ Nothing here leaves the machine: fake sites answer on `*.invalid` hosts or on 12
   again. Threads die for good now and then: a watched thread that was ever loaded must
   keep its saved copy, and a dead thread's copy being read is never fetched. A filter
   added from a post must catch it, and after any filter change the marks and the config
-  agree with the filters in use. A conversation shows exactly its posts, and `M` the posts
+  agree with the filters in use. A conversation shows exactly its posts, and `c M` the posts
   with files. A post shown before a refresh of the same thread is still there after it
   (or marked deleted), unless the refresh came back with fewer than half the posts last
   known, and a deleted post is never new. The fake sites now and then answer with no posts

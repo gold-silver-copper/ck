@@ -729,7 +729,7 @@ impl World {
             Act::Filter(k, opts) => {
                 // (A popup already open was made from a post that may since have been replaced.)
                 let fresh = app.filter_add().is_none();
-                app.on_key(KeyEvent::from(KeyCode::Char('X')));
+                app.act(crate::keys::Action::Filter);
                 let Some((n, post)) = app.filter_add().map(|a| (a.candidates.len(), a.post)) else { return };
                 for _ in 0..k % n.max(1) {
                     app.on_key(KeyEvent::from(KeyCode::Char('j')));

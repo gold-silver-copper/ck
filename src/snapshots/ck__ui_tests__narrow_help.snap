@@ -15,10 +15,10 @@ expression: narrow(&mut a)
                          off
       x                  remove the entry
                          (home: a favorite)
-
-    Everywhere
-      j, down            down (10j: ten)
-      k, up              up
+      . B                images on this board:
+                         on / off
+      . a                add a site from a
+                         link to any page of
                                     ↓ more (j)
 
  enter open   . more   ? help           1/26  3%

@@ -56,20 +56,24 @@ To add another site running one of these, paste a link to it after `:`.
 
 You need few. With something selected:
 
-- `.` (or right-click) lists what you can do with it, each with its key;
-- `tab` steps through a post's images, links and replies, and `enter` opens one;
+- `enter` does the obvious thing: opens a thread, shows a post's images, follows a quote;
+- `h` or `esc` goes back, like a browser's back button;
+- `.` (or right-click) lists everything else you can do with it, the less used on a letter
+  there (`.` then `H` hides a post);
+- `c` changes what's shown: a catalog's sort and layout, a thread's conversation or
+  poster's posts;
+- `tab` steps through a post's images, links and replies;
 - `f` labels everything on screen: type a label to open it;
 - `?` lists every key, starting with the ones for where you are.
 
 | key | action | key | action |
 |-----|--------|-----|--------|
-| `j`/`k`, `gg`/`G` | move (`10j`), top / bottom | `v` / `V` | image viewer / gallery |
-| `enter`, `esc` | open, back | `w` / `W` | watch a thread / the watched ones |
-| `u` / ctrl-r | jump list: back / forward | `zz` / `zt` / `zb` | the post to the middle / top / bottom |
-| `:` | go to a URL or `site/board/thread` | `T`, `]` / `[` | new tab, next / previous |
-| `/` | filter the list, search a thread | `H` / `Z` / `X` | hide, show hidden, make a filter |
-| `c` | layout (catalog), conversation (thread) | `,` | settings |
-| `s` | sort (catalog) | `q` | quit |
+| `j`/`k`, `gg`/`G` | move (`10j`), top / bottom | `w` / `W` | watch a thread / the watched ones |
+| `enter`, `h` | open, back | `r` | reply |
+| `/`, `n` | filter the list, search a thread | `V` | gallery |
+| `:` | go to a URL or `site/board/thread` | `d` / `y` | save / copy |
+| `]` / `[` | next / previous tab | `,` | settings |
+| `zz` / `zt` / `zb` | the post to the middle / top / bottom | `q` | quit |
 
 Every key can be remapped, in Settings or the config.
 

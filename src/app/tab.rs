@@ -124,7 +124,8 @@ pub struct Tab {
     pub board_list: FilteredList,
     pub catalog_list: FilteredList,
     pub catalog_sort: Sort,
-    /// Where `back` goes from a thread opened from Watched or History.
+    /// Where `back` goes from a thread opened from Watched or History, or by a link in
+    /// another thread (`View::Thread`).
     pub return_to: Option<View>,
     /// Where `back` goes from Watched shown with `W` (and threads opened from it).
     pub watched_from: Option<View>,
@@ -217,13 +218,13 @@ impl Tab {
     /// The thread shown and its selected post, as the jump list keeps it.
     pub fn here(&self) -> Option<Trail> {
         let t = self.thread.as_ref().filter(|_| self.view == View::Thread)?;
-        Some((t.key().clone(), t.current().map_or_else(|| t.key().no, |p| p.no)))
+        Some(Trail { key: t.key().clone(), post: t.current().map_or_else(|| t.key().no, |p| p.no), back: self.return_to })
     }
 
     /// Put `here` on the jump list: each thread once, where it was left last, and the list
     /// no longer than `JUMPS`.
     pub fn remember(&mut self, here: Trail) {
-        self.trail.retain(|(k, _)| *k != here.0);
+        self.trail.retain(|t| t.key != here.key);
         self.trail.push(here);
         if self.trail.len() > JUMPS {
             self.trail.remove(0);

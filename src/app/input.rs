@@ -347,7 +347,7 @@ impl App {
             Nav::G => self.pending = Some(Pending::G),
             Nav::Z => self.pending = Some(Pending::Z),
             Nav::Refresh => self.refresh(),
-            Nav::Esc if view == View::Thread && self.tab.thread.as_mut().is_some_and(ThreadView::back_out) => {}
+            Nav::Esc | Nav::Left | Nav::Back if view == View::Thread => self.back_in_thread(),
             Nav::Esc if !self.filter(view).is_empty() => self.edit_filter(view, String::clear),
             Nav::Esc => self.back(),
             // A count stops at the grid's edge rather than going on to mean back.
@@ -416,8 +416,12 @@ impl App {
             Action::Search => self.typing = Some(Typing::ListFilter),
             Action::Reload => self.refresh(),
             // Outside a thread, or on one that didn't load (yet): along the threads.
-            Action::JumpBack if self.tab.view() != View::Thread || self.tab.thread.is_none() => self.travel(true),
-            Action::JumpForward if self.tab.view() != View::Thread || self.tab.thread.is_none() => self.travel(false),
+            Action::JumpBack if self.tab.view() != View::Thread || self.tab.thread.is_none() => {
+                self.travel(true);
+            }
+            Action::JumpForward if self.tab.view() != View::Thread || self.tab.thread.is_none() => {
+                self.travel(false);
+            }
             Action::Watched => {
                 let from = self.tab.place_view();
                 self.tab.navigate(View::Watched);
@@ -444,6 +448,7 @@ impl App {
                 _ => self.open_viewer(),
             },
             Action::Menu => self.open_menu(),
+            Action::Show => self.open_show_menu(),
             Action::Hints => self.open_hints(),
             Action::NextPart => self.step_part(true),
             Action::PrevPart => self.step_part(false),
@@ -495,7 +500,6 @@ impl App {
             }
             Action::Compact => self.cycle_layout(),
             Action::Download => self.save_here(),
-            Action::DownloadPost => self.download(false),
             Action::DownloadThread => self.ask_to_save(Saving::Files),
             Action::Archive => match self.tab.archive_offer.take() {
                 Some(key) => {
@@ -552,9 +556,27 @@ impl App {
         true
     }
 
+    /// Back in a thread, like a browser's: out of a conversation or search, to the post a
+    /// quote was followed from, to the thread a link was followed from, then to where it was
+    /// opened from.
+    fn back_in_thread(&mut self) {
+        let Some(t) = &mut self.tab.thread else { return self.back() };
+        if t.back_out() {
+            return;
+        }
+        if t.jump_back() {
+            return self.footer.clear_seen();
+        }
+        self.back();
+    }
+
     /// A thread's own key, `n` times over where it's a move.
     fn on_thread_key(&mut self, nav: Nav, n: usize) {
-        if nav == Nav::Open && self.take_saved_offer() {
+        // A thread that's gone: enter opens its saved copy, else the archive's.
+        if matches!(nav, Nav::Open | Nav::Right) && self.tab.thread.is_none() {
+            if !self.take_saved_offer() && self.tab.archive_offer.is_some() {
+                self.act(Action::Archive);
+            }
             return;
         }
         let Some(t) = &mut self.tab.thread else { return };
@@ -572,7 +594,6 @@ impl App {
             Nav::Top => t.select_entry(0),
             // The very end of the thread, so a refresh's new posts come into view.
             Nav::Bottom => {
-                t.leave_mark();
                 t.select_entry(usize::MAX);
                 t.scroll_to(Reveal::Bottom);
                 t.reveal = Some(Reveal::Bottom);
@@ -582,6 +603,8 @@ impl App {
                     self.activate(part);
                 }
             }
+            // Nothing focused: the post's images, else the post it quotes, else its link.
+            Nav::Open | Nav::Right if t.current().is_some_and(|p| !p.files.is_empty()) => self.view_file(0),
             Nav::Open | Nav::Right => {
                 let quotes = t.current().map(|p| p.quotes.clone()).unwrap_or_default();
                 if !quotes.into_iter().any(|q| t.jump_to(q)) {
@@ -618,7 +641,6 @@ impl App {
         let view = self.tab.view();
         match &mut self.tab.thread {
             Some(t) if view == View::Thread => {
-                t.leave_mark();
                 t.select_nth(n);
                 t.scroll_to(Reveal::Jump);
             }

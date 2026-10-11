@@ -66,7 +66,7 @@ impl App {
 
     pub(super) fn go(&mut self, target: Target) {
         let from_thread = self.tab.place_view() == View::Thread;
-        // `u` comes back to the thread this was opened from.
+        // Back comes back to the thread this was opened from.
         if from_thread && target.thread.is_some() {
             self.leave_trail();
         }
@@ -79,9 +79,7 @@ impl App {
             (Some(no), post) => {
                 self.switch_site(target.site);
                 self.open_thread_at(self.find_board(&uri), no, Opening::at(post));
-                if !from_thread {
-                    self.tab.return_to = Some(back_to);
-                }
+                self.tab.return_to = Some(back_to);
             }
             (None, Some(post)) => {
                 // A post without its thread (FoolFuuka's /post/ links): ask the engine of the

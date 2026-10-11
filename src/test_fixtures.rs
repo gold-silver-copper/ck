@@ -135,16 +135,23 @@ pub fn type_text(app: &mut App, text: &str) {
     }
 }
 
-/// Run the menu row labeled `label`.
+/// Run the menu row labeled `label`, in the `.` menu or else the `c` one.
 pub fn run_menu_row(app: &mut App, label: &str) {
-    app.on_key(KeyEvent::from(KeyCode::Char('.')));
-    let m = app.menu_mut().expect("a menu");
-    let labels: Vec<String> = m.items.iter().map(|it| match it {
-        MenuItem::Enter(l) | MenuItem::Act(_, l) => l.clone(),
-    }).collect();
-    let i = labels.iter().position(|l| l == label).unwrap_or_else(|| panic!("no {label:?} in {labels:?}"));
-    m.list.select(Some(i));
-    app.on_key(KeyEvent::from(KeyCode::Enter));
+    let mut seen = Vec::new();
+    for key in ['.', 'c'] {
+        app.on_key(KeyEvent::from(KeyCode::Char(key)));
+        let Some(m) = app.menu_mut() else { continue };
+        let labels: Vec<String> = m.items.iter().map(|it| match it {
+            MenuItem::Enter(l) | MenuItem::Act(_, l) => l.clone(),
+        }).collect();
+        if let Some(i) = labels.iter().position(|l| l == label) {
+            m.list.select(Some(i));
+            return app.on_key(KeyEvent::from(KeyCode::Enter));
+        }
+        seen.extend(labels);
+        app.on_key(KeyEvent::from(KeyCode::Esc));
+    }
+    panic!("no {label:?} in {seen:?}");
 }
 
 /// Handle messages until nothing is loading (or `until` holds).

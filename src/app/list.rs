@@ -261,9 +261,11 @@ mod tests {
         app.on_key(KeyEvent::from(KeyCode::Char('.')));
         app.show_catalog(nos(&[2, 3]));
         let m = app.menu_mut().unwrap();
-        let sort = m.items.iter().position(|it| matches!(it, MenuItem::Act(Action::Sort, _))).unwrap();
-        m.list.select(Some(sort));
+        let show = m.items.iter().position(|it| matches!(it, MenuItem::Act(Action::Show, _))).unwrap();
+        m.list.select(Some(show));
         app.on_key(KeyEvent::from(KeyCode::Enter));
+        // `c`'s menu, whose sort is on its letter.
+        app.on_key(KeyEvent::from(KeyCode::Char('s')));
         assert_ne!(app.tab.catalog_sort, crate::app::Sort::Bump);
     }
 

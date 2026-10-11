@@ -35,27 +35,15 @@ fn size(bytes: u64) -> String {
 }
 
 impl App {
-    /// `d`: the viewer's file, the gallery's (see `on_gallery_key`) or the focused one. On a
-    /// post with nothing focused it says how, rather than saving all the post's files.
+    /// `d`: the viewer's file, the gallery's (see `on_gallery_key`) or the focused one; on a
+    /// post with nothing focused, all its files.
     pub(super) fn save_here(&mut self) {
         if self.tab.viewer().is_some() {
             return self.save_viewed();
         }
-        if self.download_focused() {
-            return;
+        if !self.download_focused() {
+            self.download(false);
         }
-        let Some(p) = self.selected_post() else { return };
-        let msg = match p.files.len() {
-            0 => "Post has no file".to_string(),
-            n => format!(
-                "{} to a file, then {} saves it ({} saves {})",
-                self.keys.how(Action::NextPart),
-                self.keys.how(Action::Download),
-                self.keys.how(Action::DownloadPost),
-                if n == 1 { "the post's file" } else { "all the post's files" }
-            ),
-        };
-        self.info(msg);
     }
 
     /// Save one file of a post into its thread's folder.

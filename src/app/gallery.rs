@@ -36,7 +36,7 @@ impl App {
     /// `none`, or that only hidden posts (of those in view, `in_view`) have files that are `wanted`.
     pub(super) fn no_files(&self, none: &str, in_view: bool, wanted: fn(&Attachment) -> bool) -> String {
         let hidden = self.tab.thread.as_ref().is_some_and(|t| t.posts.iter().enumerate().any(|(i, p)| p.files.iter().any(wanted) && (!in_view || t.in_view(i))));
-        if hidden { format!("Only hidden posts have files ({} shows them)", self.keys.key(Action::ShowHidden)) } else { none.to_string() }
+        if hidden { format!("Only hidden posts have files ({} shows them)", self.keys.how(Action::ShowHidden)) } else { none.to_string() }
     }
 
     pub(super) fn on_gallery_nav(&mut self, nav: Nav) {

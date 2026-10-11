@@ -1,6 +1,5 @@
 ---
 source: src/ui_tests.rs
-assertion_line: 687
 expression: snapshot(&mut a)
 ---
  ck   op.png    800x600  ·  121 KB  ·  1 of 2
@@ -32,4 +31,4 @@ expression: snapshot(&mut a)
 
 
 
- h/l previous / next   +/- zoom   i open externally   d save   esc close
+ h/l previous / next   +/- zoom   enter open externally   d save   esc close

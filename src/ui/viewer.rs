@@ -70,7 +70,7 @@ pub(super) fn draw_viewer(f: &mut Frame, app: &mut App) {
     } else {
         let save = app.keys.key(Action::Download);
         let mut keys: Vec<(&str, &str)> = if crop.is_fit() {
-            vec![("h/l", "previous / next"), ("+/-", "zoom"), ("i", "open externally"), (&save, "save"), ("esc", "close")]
+            vec![("h/l", "previous / next"), ("+/-", "zoom"), ("enter", "open externally"), (&save, "save"), ("esc", "close")]
         } else {
             vec![("h/j/k/l", "move"), ("+/-", "zoom"), ("pgup/pgdn", "previous / next"), ("0, esc", "fit")]
         };
@@ -89,10 +89,10 @@ pub(super) fn draw_viewer(f: &mut Frame, app: &mut App) {
     if file.image().is_none() || thumb_only {
         let hint = match file.ext().to_uppercase() {
             _ if file.url.is_none() && file.thumb.is_none() => "Neither the file nor its thumbnail is available here.".to_string(),
-            _ if file.url.is_none() => "Only the thumbnail is available here. Press i to open it externally.".to_string(),
+            _ if file.url.is_none() => "Only the thumbnail is available here. Press enter to open it externally.".to_string(),
             _ if file.is_image() => format!("Not downloaded: showing the saved thumbnail ({} downloads it).", app.keys.key(Action::Download)),
-            e if e.is_empty() => "Showing the thumbnail. Press i to open the file externally.".to_string(),
-            e => format!("{e} files can't be shown here; showing the thumbnail. Press i to open it externally."),
+            e if e.is_empty() => "Showing the thumbnail. Press enter to open the file externally.".to_string(),
+            e => format!("{e} files can't be shown here; showing the thumbnail. Press enter to open it externally."),
         };
         put(f, inner.x, inner.bottom().saturating_sub(1), inner.width, Line::styled(hint, dim()).centered());
         inner.height = inner.height.saturating_sub(2);
