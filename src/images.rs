@@ -87,6 +87,9 @@ impl Animation {
 pub enum Kind {
     Thumb,
     Full,
+    /// A captcha's picture: full size, and scaled up to fill its area, since it's to be read
+    /// (half-blocks especially need the cells).
+    Captcha,
 }
 
 impl Kind {
@@ -94,8 +97,13 @@ impl Kind {
     fn alloc(self) -> u64 {
         match self {
             Kind::Thumb => THUMB_ALLOC,
-            Kind::Full => FULL_ALLOC,
+            Kind::Full | Kind::Captcha => FULL_ALLOC,
         }
+    }
+
+    /// Whether it's scaled up to fill its area when it's smaller.
+    fn fills(self) -> bool {
+        self != Kind::Full
     }
 }
 
@@ -340,18 +348,10 @@ impl Images {
         }
     }
 
-    /// `img`, not from the cache (a captcha, a page), encoded to fit in `size` cells now;
-    /// with `grow`, as big as fits.
-    pub fn encode_now(&self, img: &DynamicImage, size: Size, grow: bool) -> Option<Protocol> {
-        let picker = self.picker.as_ref()?;
-        if !grow {
-            return encode(picker, img, size, false).ok();
-        }
-        if picker.protocol_type() == ProtocolType::Halfblocks {
-            return halfblocks(img, size, picker.font_size(), true).ok();
-        }
-        let (w, h) = pixels(size, picker.font_size());
-        picker.new_protocol(shrink(img, w, h, true), size, Resize::Fit(None)).ok()
+    /// `img`, not from the cache (a captcha, a page), encoded now as big as fits in `size`
+    /// cells.
+    pub fn encode_now(&self, img: &DynamicImage, size: Size) -> Option<Protocol> {
+        encode(self.picker.as_ref()?, img, size, true).ok()
     }
 
     pub fn enabled(&self) -> bool {
@@ -461,7 +461,7 @@ impl Images {
             if (protos.is_empty() || settled || new_part)
                 && let Some(enc) = &self.encode
             {
-                let _ = enc.send(EncodeJob::One(url.to_string(), view, img.clone(), kind == Kind::Thumb));
+                let _ = enc.send(EncodeJob::One(url.to_string(), view, img.clone(), kind.fills()));
                 *pending = Some(view);
             }
         }
@@ -627,7 +627,7 @@ fn worker(q: &Queue, tx: &Sender<Done>, encode: &Sender<EncodeJob>, wake: &dyn F
         }
         // Encode right away for the size the UI asked for, saving a round trip.
         let pending = match (&res, size) {
-            (Ok((img, _)), Some(size)) => encode.send(EncodeJob::One(url.clone(), (size, Crop::FIT), img.clone(), kind == Kind::Thumb)).is_ok().then_some((size, Crop::FIT)),
+            (Ok((img, _)), Some(size)) => encode.send(EncodeJob::One(url.clone(), (size, Crop::FIT), img.clone(), kind.fills())).is_ok().then_some((size, Crop::FIT)),
             _ => None,
         };
         if tx.send(Done::Fetched(url, res, pending)).is_err() {
@@ -958,10 +958,10 @@ mod tests {
 
     /// Poll until `get` stops saying the image is being rendered (up to 10s: a debug build
     /// on a busy machine is slow).
-    fn settle(im: &mut Images, url: &str, size: Size) -> bool {
+    fn settle(im: &mut Images, url: &str, size: Size, kind: Kind) -> bool {
         for _ in 0..1000 {
             im.poll();
-            if !matches!(im.get(url, size, Kind::Full), State::Rendering) {
+            if !matches!(im.get(url, size, kind), State::Rendering) {
                 return true;
             }
             std::thread::sleep(Duration::from_millis(10));
@@ -977,7 +977,7 @@ mod tests {
         let start = Instant::now();
         assert!(matches!(im.get("u", Size::new(100, 30), Kind::Full), State::Rendering));
         assert!(start.elapsed() < Duration::from_millis(5), "{:?}", start.elapsed());
-        assert!(settle(&mut im, "u", Size::new(100, 30)));
+        assert!(settle(&mut im, "u", Size::new(100, 30), Kind::Full));
         let State::Ready(p) = im.get("u", Size::new(100, 30), Kind::Full) else { panic!("not ready") };
         assert!(p.size().width <= 100 && p.size().height <= 30);
 
@@ -990,6 +990,21 @@ mod tests {
         im.get("u", Size::new(110, 32), Kind::Full);
         let Some(Slot::Ready { pending, .. }) = im.slots.get("u") else { panic!() };
         assert_eq!(*pending, Some((Size::new(110, 32), Crop::FIT)));
+    }
+
+    #[test]
+    fn a_captcha_is_scaled_up_to_be_read() {
+        // A small picture stays its size as a full image, and fills the area as a captcha.
+        let mut im = Images::with_picker(Picker::halfblocks());
+        let size = Size::new(80, 20);
+        let mut width = |url, kind| {
+            im.insert_decoded(url, DynamicImage::new_rgb8(300, 60));
+            assert!(settle(&mut im, url, size, kind));
+            let State::Ready(p) = im.get(url, size, kind) else { panic!("not ready") };
+            p.size().width
+        };
+        assert!(width("full", Kind::Full) < 40);
+        assert_eq!(width("captcha", Kind::Captcha), 80);
     }
 
     #[test]
@@ -1029,7 +1044,7 @@ mod tests {
         let mut im = Images::with_picker(Picker::halfblocks());
         im.insert_decoded("u", DynamicImage::new_rgb8(400, 300));
         let size = Size::new(40, 20);
-        assert!(settle(&mut im, "u", size));
+        assert!(settle(&mut im, "u", size, Kind::Full));
         let fitted = match im.get("u", size, Kind::Full) {
             State::Ready(p) => p.size(),
             _ => panic!("not ready"),

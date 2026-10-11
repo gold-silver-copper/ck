@@ -34,7 +34,12 @@ pub(super) fn draw_reply(f: &mut Frame, app: &mut App) {
         },
     };
     let area = f.area();
-    let inner = panel(f, 100, area.height.saturating_sub(2).min(32), &where_to, hint);
+    // A captcha or the browser view gets the whole screen, to be read.
+    let (w, h) = match c.stage {
+        Stage::Solving(_) | Stage::Person(_) => (area.width, area.height),
+        _ => (100, area.height.saturating_sub(2).min(32)),
+    };
+    let inner = panel(f, w, h, &where_to, hint);
     if inner.height < 3 {
         return;
     }
@@ -88,7 +93,7 @@ pub(super) fn draw_reply(f: &mut Frame, app: &mut App) {
                     let cell = c.view_at.map_or((8, 16), |v| (v.width / u32::from(v.area.width.max(1)), v.height / u32::from(v.area.height.max(1))));
                     let at = c.pointer.map(|(x, y)| (x.saturating_sub(*left), y.saturating_sub(*top)));
                     let key = c.frames << 32 | at.map_or(0, |(x, y)| u64::from(x) << 16 | u64::from(y));
-                    if let Some(area) = art(f, images, &mut c.art, key, || Cow::Owned(with_pointer(img, at, cell)), view, true) {
+                    if let Some(area) = art(f, images, &mut c.art, key, || Cow::Owned(with_pointer(img, at, cell)), view) {
                         c.view_at = Some(ViewAt { area, left: *left, top: *top, width: img.width(), height: img.height() });
                     }
                 }
@@ -189,18 +194,18 @@ fn draw_captcha(f: &mut Frame, images: &mut Images, c: &mut Compose, area: Rect)
             put(f, area.x, area.y, area.width, Line::styled(title, dim()));
             put(f, area.x, area.y + 1, area.width, Line::styled(truncate(&step.text, area.width as usize), Style::new().fg(t.text)));
             // The shape to find on the left, beside the strip the slider's on, to compare.
-            let height = area.height.saturating_sub(5).min(12);
+            let height = area.height.saturating_sub(5);
             let side = (area.width / 4).min(24);
             let (find, strip) = (Rect::new(area.x, area.y + 4, side, height), Rect::new(area.x + side + 2, area.y + 4, area.width.saturating_sub(side + 2), height));
             put(f, find.x, find.y - 1, find.width, Line::styled("Find this", bold(t.primary)));
             let at = format!("← {} of {} →  in this one? enter", s.slide + 1, step.items.len());
             put(f, strip.x, strip.y - 1, strip.width, Line::styled(at, bold(t.primary)));
             if let Some(img) = &step.reference {
-                art(f, images, &mut c.side_art, s.step as u64, || Cow::Borrowed(img), find, true);
+                art(f, images, &mut c.side_art, s.step as u64, || Cow::Borrowed(img), find);
             }
             if let Some(img) = step.items.get(s.slide) {
                 let key = (s.step as u64) << 32 | s.slide as u64;
-                art(f, images, &mut c.art, key, || Cow::Borrowed(img), strip, true);
+                art(f, images, &mut c.art, key, || Cow::Borrowed(img), strip);
             }
         }
         Task::Text { prompt, image } => {
@@ -284,9 +289,10 @@ fn with_pointer(img: &DynamicImage, at: Option<(u32, u32)>, cell: (u32, u32)) ->
     DynamicImage::ImageRgb8(out)
 }
 
-/// A captcha's picture by its URL (fetched like any other) or the key it came with.
+/// A captcha's picture by its URL (fetched like any other) or the key it came with, as big as
+/// fits.
 fn url_image(f: &mut Frame, images: &mut Images, url: &str, area: Rect) {
-    match images.get(url, Size::new(area.width, area.height), Kind::Full) {
+    match images.get(url, Size::new(area.width, area.height), Kind::Captcha) {
         State::Ready(p) => {
             let s = p.size();
             f.render_widget(Image::new(p), Rect::new(area.x, area.y, s.width, s.height).intersection(area));
@@ -297,22 +303,20 @@ fn url_image(f: &mut Frame, images: &mut Images, url: &str, area: Rect) {
 }
 
 /// Draw `img` (made only when it's to be encoded) in `area`, encoded once for `key` and the
-/// area; where it was drawn. The
-/// browser view (`grow`) is made as big as fits, centered; a captcha's pictures are drawn as
-/// they are, if they fit.
-fn art<'a>(f: &mut Frame, images: &Images, cache: &mut Option<Art>, key: u64, img: impl FnOnce() -> Cow<'a, DynamicImage>, area: Rect, grow: bool) -> Option<Rect> {
+/// area, as big as fits and centered; where it was drawn.
+fn art<'a>(f: &mut Frame, images: &Images, cache: &mut Option<Art>, key: u64, img: impl FnOnce() -> Cow<'a, DynamicImage>, area: Rect) -> Option<Rect> {
     if area.is_empty() {
         return None;
     }
     if cache.as_ref().is_none_or(|a| a.key != key || a.area != area) {
-        *cache = images.encode_now(&img(), Size::new(area.width, area.height), grow).map(|proto| Art { key, area, proto });
+        *cache = images.encode_now(&img(), Size::new(area.width, area.height)).map(|proto| Art { key, area, proto });
     }
     let Some(a) = cache.as_ref() else {
         put(f, area.x, area.y, area.width, Line::styled("Images are off: turn them on in Settings to see this", Style::new().fg(theme().error)));
         return None;
     };
     let s = a.proto.size();
-    let x = if grow { area.x + area.width.saturating_sub(s.width) / 2 } else { area.x };
+    let x = area.x + area.width.saturating_sub(s.width) / 2;
     let r = Rect::new(x, area.y, s.width, s.height).intersection(area);
     f.render_widget(Image::new(&a.proto), r);
     Some(r)
