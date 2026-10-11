@@ -10,23 +10,23 @@ expression: snapshot(&mut a)
       ?               help             help                                 Everywhere, Gallery…
       ,               settings         settings: theme, colors, keys, …     Everywhere
       /               search           filter the list; search a thread     Everywhere
-      r               reload           reload                               Everywhere
+      R               reload           reload                               Everywhere
       o               browser          open in the browser                  Everywhere
       :               goto             go to a URL or site/board/thread     Everywhere
       ]               next_tab         next tab                             Everywhere
       [               prev_tab         previous tab                         Everywhere
-      .               menu             what you can do with what's selected Everywhere, Gallery…
+      .               menu             everything you can do with what's s… Everywhere, Gallery…
       f               hints            label what's on screen; type a labe… Everywhere
-      ctrl-w          close_tab        close the tab                        Everywhere
-      u               jump_back        jump back: the post before, or the … Everywhere
-      ctrl-r          jump_forward     jump forward again (after jumping b… Everywhere
       W               watched          the watched threads                  Everywhere
+      ctrl-w          close_tab        close the tab                        Everywhere
+      . u             jump_back        back to the thread you left          Everywhere
+      . ctrl-r        jump_forward     forward again, after going back      Everywhere
 
     Lists
       *               favorite         favorite board: on / off             Lists, Catalog
-      menu            add_site         add a site from a link to any page … Lists
-      menu            update_boards    read a vichan site's board list aga… Lists
-      menu            board_images     images on this board: on / off       Lists, Catalog, Thr…
+      . B             board_images     images on this board: on / off       Lists, Catalog, Thr…
+      . a             add_site         add a site from a link to any page … Lists
+      . U             update_boards    read a vichan site's board list aga… Lists
 
 
     Press the new key for quit   esc cancels

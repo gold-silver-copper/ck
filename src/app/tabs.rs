@@ -5,8 +5,14 @@ use super::{App, LinksPanel, Opening, Preview, Tab, View, Viewer, thread_subject
 use crate::model::Board;
 use crate::store::ThreadKey;
 
-/// A thread left for another, for `u` to come back to, and its selected post.
-pub type Trail = (ThreadKey, u64);
+/// A thread left for another, to come back to: its selected post, and where back went from
+/// it (`View::Thread`: the thread it was opened from).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Trail {
+    pub key: ThreadKey,
+    pub post: u64,
+    pub back: Option<View>,
+}
 
 /// Tabs open at once, at most.
 pub const MAX_TABS: usize = 9;
@@ -117,7 +123,7 @@ impl App {
     pub fn cycle_tab(&mut self, forward: bool) {
         let n = self.tabs.len();
         if n < 2 {
-            self.info(format!("One tab: {} opens a thread in a new one", self.keys.key(crate::keys::Action::NewTab)));
+            self.info(format!("One tab: {} opens a thread in a new one", self.keys.how(crate::keys::Action::NewTab)));
             return;
         }
         self.show_tab(if forward { (self.active + 1) % n } else { (self.active + n - 1) % n });

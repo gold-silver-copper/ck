@@ -572,9 +572,9 @@ fn key_editor_rebinds_saves_and_refuses_clashes() {
     assert!(text.contains(r#"watch = ["Q", "alt-w"]"#), "{text}");
     // A key another command uses in the same view is refused.
     press(&mut app, KeyCode::Enter);
-    press(&mut app, KeyCode::Char('v'));
+    press(&mut app, KeyCode::Char('V'));
     assert_eq!(app.keys.label(Action::Watch), "Q, alt-w");
-    assert!(app.footer.get().is_some_and(|s| s.error && s.text.contains("'v'")), "{:?}", app.footer.get());
+    assert!(app.footer.get().is_some_and(|s| s.error && s.text.contains("'V'")), "{:?}", app.footer.get());
     // x resets to the default, which removes the entry.
     press(&mut app, KeyCode::Char('x'));
     assert!(app.keys.is_default(Action::Watch));
@@ -607,7 +607,7 @@ fn copies_text_and_links() {
     app.act(Action::View);
     app.on_key(KeyEvent::from(KeyCode::Char('y')));
     assert_eq!(app.copied.as_deref(), Some("https://i.4cdn.org/g/1.png"));
-    app.on_key(KeyEvent::from(KeyCode::Char('Y')));
+    app.act(Action::CopyLink);
     assert_eq!(app.copied.as_deref(), Some("https://boards.4chan.org/g/thread/1#p2"));
     app.tab.popup = None;
     // Catalog: subject and text; a thread link.
@@ -675,17 +675,49 @@ fn vim_counts_prefixes_and_the_jump_list() {
     keys(&mut app, "5");
     app.on_key(KeyEvent::from(KeyCode::Esc));
     assert_eq!((app.tab.view(), app.pending.and_then(Pending::shown)), (View::Thread, None));
-    // G was a jump: u comes back from it, and ctrl-r goes forward again.
-    keys(&mut app, "u");
-    assert_eq!(at(&app), 1);
-    app.on_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL));
-    assert_eq!(at(&app), 10);
-    // W: the watched threads, the thread left on the jump list; u comes back to it, where
-    // it was left.
+    // G isn't a jump to come back from: back leaves the thread.
+    assert!(!app.tab.thread.as_mut().unwrap().jump_back());
+    // W: the watched threads, the thread left on the jump list; the menu's u comes back to
+    // it, where it was left.
     keys(&mut app, "W");
     assert_eq!(app.tab.view(), View::Watched);
-    keys(&mut app, "u");
+    keys(&mut app, ".u");
     assert_eq!((app.tab.view(), app.tab.pending_thread.as_ref().unwrap().no, app.tab.opening().select), (View::Thread, 1, Some(10)));
+}
+
+#[test]
+fn back_goes_the_way_you_came() {
+    let mut app = fourchan_thread(&[1, 2, 3]);
+    let back = |app: &mut App| app.on_key(KeyEvent::from(KeyCode::Char('h')));
+    // From a quote followed: to the post it was followed from.
+    let t = app.tab.thread.as_mut().unwrap();
+    t.select(2);
+    assert!(t.jump_to(1));
+    back(&mut app);
+    assert_eq!(app.tab.thread.as_ref().unwrap().current().unwrap().no, 3);
+    // From a thread a link led to: that thread, at its post; then where it was opened from.
+    app.follow(&crate::model::Link { board: None, thread: Some(9), post: None });
+    assert_eq!(app.tab.pending_thread.as_ref().unwrap().no, 9);
+    back(&mut app);
+    assert_eq!((app.tab.view(), app.tab.pending_thread.as_ref().unwrap().no, app.tab.opening().select), (View::Thread, 1, Some(3)));
+    back(&mut app);
+    assert_eq!(app.tab.view(), View::Catalog);
+}
+
+#[test]
+fn enter_on_a_post_shows_its_images_else_follows_its_quote() {
+    let mut app = fourchan_thread(&[1, 2]);
+    app.images = crate::images::Images::offline();
+    let t = app.tab.thread.as_mut().unwrap();
+    t.posts[1].files = vec![Attachment::at("https://i.4cdn.org/g/2.png")];
+    t.posts[1].quotes = vec![1];
+    t.select(1);
+    app.on_key(KeyEvent::from(KeyCode::Enter));
+    assert_eq!(app.tab.viewer().map(|v| v.files.len()), Some(1));
+    app.on_key(KeyEvent::from(KeyCode::Esc));
+    app.tab.thread.as_mut().unwrap().posts[1].files.clear();
+    app.on_key(KeyEvent::from(KeyCode::Enter));
+    assert_eq!(app.tab.thread.as_ref().unwrap().current().unwrap().no, 1);
 }
 
 #[test]
@@ -757,7 +789,8 @@ fn a_post_on_another_site_moves_the_tab_once_found() {
     assert_eq!(app.tab.site, 0);
     settle_until(&mut app, |a| a.tab.pending_thread.as_ref().is_some_and(|k| k.no == 3));
     assert_eq!((app.tab.site, app.tab.board.as_ref().unwrap().uri.as_str(), app.tab.opening().select), (1, "b", Some(77)));
-    assert_eq!(app.tab.trail, [(ThreadKey { site: "a".into(), ..tkey("x", 1) }, 2)]);
+    let trail: Vec<_> = app.tab.trail.iter().map(|t| (t.key.clone(), t.post)).collect();
+    assert_eq!(trail, [(ThreadKey { site: "a".into(), ..tkey("x", 1) }, 2)]);
     crate::http::serve_test_host(host, None);
 }
 
@@ -1172,9 +1205,10 @@ fn keys_before_a_changed_grid_is_drawn_move_by_one_card() {
     assert_eq!(at(&app), 2);
     press(&mut app, 'h');
     assert_eq!((app.tab.view(), at(&app)), (View::Catalog, 1));
-    // Out of the grid (c) and a key in one batch: the cards step one by one.
+    // Out of the grid (c l) and a key in one batch: the cards step one by one.
     draw_at(&mut app, 70, 30);
     press(&mut app, 'c');
+    press(&mut app, 'l');
     assert_ne!(app.layout(), CatalogLayout::Grid);
     press(&mut app, 'j');
     assert_eq!(at(&app), 2);
@@ -1298,7 +1332,7 @@ fn gallery_of_the_threads_files() {
     press(&mut app, KeyCode::Enter);
     assert_eq!((app.tab.viewer().unwrap().files.len(), app.tab.viewer().unwrap().index), (3, 2));
     press(&mut app, KeyCode::Char('h'));
-    press(&mut app, KeyCode::Char('Y'));
+    app.act(Action::CopyLink);
     assert_eq!(app.copied.as_deref(), Some("http://127.0.0.1:3/x/res/1.html#3"));
     press(&mut app, KeyCode::Esc);
     assert!(app.tab.viewer().is_none());
@@ -1424,7 +1458,7 @@ fn a_file_with_only_its_thumbnail_is_never_taken_for_the_file() {
     assert_eq!(app.status().unwrap().text, "Only the thumbnail is available; there's no file to save");
     app.on_key(KeyEvent::from(KeyCode::Char('y')));
     assert_eq!((app.copied.as_deref(), app.status().unwrap().text.as_str()), (Some(thumb), "Copied thumbnail URL: https://i.example/1s.jpg"));
-    app.on_key(KeyEvent::from(KeyCode::Char('i')));
+    app.on_key(KeyEvent::from(KeyCode::Enter));
     assert_eq!(app.opened.as_deref(), Some(thumb));
     assert!(app.status().unwrap().text.starts_with("Only the thumbnail is available"));
     // The same file focused in the thread: `o` and `d` say so too.
@@ -1440,7 +1474,7 @@ fn a_file_with_only_its_thumbnail_is_never_taken_for_the_file() {
     let items = &app.menu().unwrap().items;
     let label = |a: Action| items.iter().find_map(|i| if let MenuItem::Act(x, l) = i { (*x == a).then(|| l.to_string()) } else { None });
     assert_eq!(label(Action::Copy).as_deref(), Some("copy the thumbnail's URL"));
-    assert!([Action::Download, Action::DownloadPost, Action::DownloadThread].iter().all(|&a| label(a).is_none()), "{items:?}");
+    assert!([Action::Download, Action::DownloadThread].iter().all(|&a| label(a).is_none()), "{items:?}");
     app.popup = None;
     // A spoilered file the archive didn't keep has neither: everything says so, and `o`
     // and `y` don't fall back to the post.
@@ -1477,7 +1511,7 @@ fn reverse_image_search() {
     assert!(app.image_search_panel().is_none());
     // In the viewer: the file shown.
     app.act(Action::View);
-    app.on_key(KeyEvent::from(KeyCode::Char('R')));
+    app.act(Action::ImageSearch);
     assert_eq!(app.image_search_panel().unwrap().rows.len(), 4);
     app.on_key(KeyEvent::from(KeyCode::Char('y')));
     assert_eq!(app.copied.as_deref(), Some("https://saucenao.com/search.php?url=https%3A%2F%2Fi.example%2Fa.png"));
@@ -1604,8 +1638,8 @@ fn new_tabs_switching_closing_and_the_session() {
     app.handle(answer(app.tab.req().unwrap(), App::catalog_arrived, Ok((1..=3).map(|no| Post { no, ..Default::default() }).collect())));
     app.pick_row(View::Catalog, 1);
     let key = |c| KeyEvent::from(KeyCode::Char(c));
-    // T: thread 2 in a new tab after this one.
-    app.on_key(key('T'));
+    // A new tab, for thread 2, after this one.
+    app.act(Action::NewTab);
     assert_eq!((app.tabs.len(), app.active, app.tab.view(), app.tab.pending_thread.as_ref().unwrap().no), (2, 1, View::Thread, 2));
     assert_eq!(app.tab_label(0), "/x/");
     // ] / [ switch; each tab keeps its place.
@@ -1929,7 +1963,7 @@ fn tab_focuses_parts_and_the_verbs_follow_it() {
     tab(&mut app, false);
     app.on_key(KeyEvent::from(KeyCode::Enter));
     assert_eq!((selected(&app), focus(&app)), (0, None));
-    app.on_key(KeyEvent::from(KeyCode::Char('u')));
+    app.on_key(KeyEvent::from(KeyCode::Char('h')));
     assert_eq!(selected(&app), 1);
     // A file in the viewer, at that file.
     tab(&mut app, false);
@@ -2459,7 +2493,7 @@ fn i_shows_a_posters_posts_until_esc() {
     assert_eq!(t.id_count("aa"), 2);
     t.scroll = 5;
     t.select(1);
-    app.on_key(KeyEvent::from(KeyCode::Char('I')));
+    app.act(Action::Poster);
     assert_eq!(shown(&app), [2, 5]);
     assert!(app.footer.get().unwrap().text.contains("2 posts by ID:bb"), "{:?}", app.footer.get());
     // A refresh keeps it, with the poster's new posts.
@@ -2727,18 +2761,17 @@ fn saving_needs_a_target_or_asks_first() {
     app.handle(answer(app.tab.req().unwrap(), thread_arrived, arrived(posts)));
     let press = |app: &mut App, c: char| app.on_key(KeyEvent::from(KeyCode::Char(c)));
     let total = |app: &App| app.downloads.total;
-    // d on a post with nothing focused saves nothing, and says how.
+    // d on a post with nothing focused saves its files.
     press(&mut app, 'd');
-    assert_eq!(total(&app), 0);
-    assert!(app.footer.get().unwrap().text.starts_with("tab to a file, then d saves it (the . menu saves"), "{:?}", app.footer.get());
-    // D and E aren't keys any more.
+    assert_eq!(total(&app), 1);
+    // D and E are letters in the menu, not keys.
     press(&mut app, 'D');
     press(&mut app, 'E');
-    assert!(app.confirm().is_none() && total(&app) == 0);
+    assert!(app.confirm().is_none() && total(&app) == 1);
     // Focused, d saves the file.
     app.on_key(KeyEvent::from(KeyCode::Tab));
     press(&mut app, 'd');
-    assert_eq!(total(&app), 1);
+    assert_eq!(total(&app), 2);
     app.on_key(KeyEvent::from(KeyCode::Esc));
     // All the thread's files: from the menu, which asks, saying what and where.
     run_menu_row(&mut app, "save all the thread's files…");
@@ -2747,27 +2780,27 @@ fn saving_needs_a_target_or_asks_first() {
     assert!(c.lines[1].starts_with("to ") && c.lines[1].ends_with(&super::settings::tilde(&dir.path().display().to_string())));
     // Anything but enter cancels.
     press(&mut app, 'j');
-    assert!(app.confirm().is_none() && total(&app) == 1);
+    assert!(app.confirm().is_none() && total(&app) == 2);
     assert_eq!(app.footer.get().unwrap().text, "Not saved");
     // So does a click.
     run_menu_row(&mut app, "save all the thread's files…");
     app.begin_frame();
     app.on_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 0, 0), Instant::now());
-    assert!(app.confirm().is_none() && total(&app) == 1);
+    assert!(app.confirm().is_none() && total(&app) == 2);
     run_menu_row(&mut app, "save all the thread's files…");
     app.on_key(KeyEvent::from(KeyCode::Enter));
-    assert!(app.confirm().is_none() && total(&app) == 4);
+    assert!(app.confirm().is_none() && total(&app) == 5);
     // One post's files, from the menu: no question.
     app.tab.thread.as_mut().unwrap().select(1);
     run_menu_row(&mut app, "save the post's files");
-    assert_eq!(total(&app), 6);
-    // In the viewer, d saves the file shown.
-    press(&mut app, 'v');
+    assert_eq!(total(&app), 7);
+    // In the viewer (enter), d saves the file shown.
+    app.on_key(KeyEvent::from(KeyCode::Enter));
     assert!(app.tab.viewer().is_some());
     press(&mut app, 'd');
-    assert_eq!(total(&app), 7);
-    run_menu_row(&mut app, "save it");
     assert_eq!(total(&app), 8);
+    run_menu_row(&mut app, "save it");
+    assert_eq!(total(&app), 9);
 }
 
 #[test]
@@ -3278,7 +3311,7 @@ fn searching_saved_threads_leaves_out_hidden_posts() {
     app.goto_str("saved crab");
     settle_until(&mut app, |a| a.tab.search.as_ref().unwrap().saved.as_ref().unwrap().finished);
     assert!(shown(&app).is_empty());
-    assert_eq!(app.footer.get().unwrap().text, "1 result, all hidden (Z shows them)");
+    assert_eq!(app.footer.get().unwrap().text, "1 result, all hidden (c Z shows them)");
 }
 
 #[test]
@@ -3588,7 +3621,7 @@ fn a_failed_load_stays_on_screen_in_plain_words() {
     app.goto_str("a/x");
     settle_until(&mut app, |a| a.tab.loading().is_none());
     let failed = app.tab.failed.clone().unwrap();
-    assert_eq!(failed, "Couldn't reach 127.0.0.1:5 (connection refused). r tries again");
+    assert_eq!(failed, "Couldn't reach 127.0.0.1:5 (connection refused). R tries again");
     // Long after the footer's message has gone, it's still where the threads would be.
     expired(&mut app);
     let screen = draw_at(&mut app, 100, 30);
@@ -3937,7 +3970,7 @@ fn m_shows_posts_with_files_then_hides_images() {
     t.set_search("t".into());
     run_menu_row(&mut app, "only the posts with files");
     assert_eq!((media(&app), shown(&app)), (Media::Files, vec![1, 2, 4]));
-    assert_eq!(app.footer.get().unwrap().text, "3 posts with files; M again shows all, images hidden");
+    assert_eq!(app.footer.get().unwrap().text, "3 posts with files; c M again shows all, images hidden");
     // The selected post had none: the next one that has is selected. Search finds what's
     // shown (not "three").
     let t = app.tab.thread.as_ref().unwrap();
@@ -3963,7 +3996,7 @@ fn m_shows_posts_with_files_then_hides_images() {
     app.tab.thread.as_mut().unwrap().select(1);
     app.act(Action::View);
     assert!(app.tab.viewer().is_none());
-    assert!(app.footer.get().unwrap().text.starts_with("Images are hidden in this thread (M shows them)"));
+    assert!(app.footer.get().unwrap().text.starts_with("Images are hidden in this thread (c M shows them)"));
     app.act(Action::Media);
     assert!(media(&app) == Media::All && app.thread_images_on());
     // In a conversation, its posts whatever they have; leaving it, those with files.
@@ -4041,10 +4074,10 @@ fn the_menu_offers_no_gallery_when_only_hidden_posts_have_files() {
     app.rehide(|a| a.store.toggle_hidden("a", "x", 2));
     // The gallery has nothing to show, and says why; so the menu doesn't offer it.
     app.act(Action::Gallery);
-    assert_eq!(app.footer.get().map(|s| s.text.as_str()), Some("Only hidden posts have files (Z shows them)"));
+    assert_eq!(app.footer.get().map(|s| s.text.as_str()), Some("Only hidden posts have files (c Z shows them)"));
     expired(&mut app);
     app.act(Action::DownloadThread);
-    assert_eq!(app.footer.get().map(|s| s.text.as_str()), Some("Only hidden posts have files (Z shows them)"));
+    assert_eq!(app.footer.get().map(|s| s.text.as_str()), Some("Only hidden posts have files (c Z shows them)"));
     app.on_key(KeyEvent::from(KeyCode::Char('.')));
     let m = app.menu().unwrap();
     let has = |a: Action| m.items.iter().any(|i| matches!(i, MenuItem::Act(x, _) if *x == a));
@@ -4062,7 +4095,7 @@ fn only_hidden_thumbnails_are_not_files_to_save() {
     app.tab.navigate(View::Thread);
     app.rehide(|a| a.store.toggle_hidden("a", "x", 2));
     app.act(Action::Gallery);
-    assert_eq!(app.status().map(|s| s.text.as_str()), Some("Only hidden posts have files (Z shows them)"));
+    assert_eq!(app.status().map(|s| s.text.as_str()), Some("Only hidden posts have files (c Z shows them)"));
     app.footer = Footer::default();
     app.act(Action::DownloadThread);
     assert_eq!(app.status().map(|s| s.text.as_str()), Some("Thread has no files to save"));
@@ -5121,7 +5154,7 @@ fn a_saved_thread_of_another_site_left_on_screen_by_closing_its_search_is_still_
     let watched: Vec<&ThreadKey> = app.store.all_watched().iter().map(|w| &w.key).collect();
     assert_eq!(watched, [&theirs]);
     // `u` would come back to it, and `X` makes a filter for b's /y/.
-    assert_eq!(app.trail_here(), Some((theirs.clone(), 7)));
+    assert_eq!(app.trail_here().map(|t| (t.key, t.post)), Some((theirs.clone(), 7)));
     app.open_add_filter();
     let Some(Popup::AddFilter(a)) = &app.popup else { panic!("no filter popup") };
     assert_eq!((a.site.as_str(), a.board.as_str()), ("b", "y"));

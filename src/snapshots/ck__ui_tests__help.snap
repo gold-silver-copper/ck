@@ -13,22 +13,22 @@ expression: snapshot(&mut a)
        uboachan            *                  favorite board: on / off
        endchan             x                  remove the entry (home: a
        kohlchan                               favorite)
-       desuarchive
-       zzzchan           Everywhere
-       2ch                 j, down            down (10j: ten)
-       smuglo.li           k, up              up
-       kissu               h, left            back (in a grid: left)
-       tvch                l, right           open (in a grid: right)
-       sushigirl           enter              open (in a thread: follow a
-       leftypol                               quote)
-       8kun                esc                back, close; drops a count
-       alogs               backspace          back
-       trashchan           f5                 reload
-       ptchan              home               top
-       erischan            g                  gg: top (10gg, 10g: the
-       junkuchan                              tenth)
-       nukechan            G, end             bottom (10G: the tenth)
-       palanq              0-9                a count (home: a favorite)
+       desuarchive         . B                images on this board: on /
+       zzzchan                                off
+       2ch                 . a                add a site from a link to any
+       smuglo.li                              page of it
+       kissu               . U                read a vichan site's board
+       tvch                                   list again from its pages
+       sushigirl
+       leftypol          Everywhere
+       8kun                j, down            down (10j: ten)
+       alogs               k, up              up
+       trashchan           h, left            back (in a grid: left)
+       ptchan              l, right           open (in a grid: right)
+       erischan            enter              open (a post: its images,
+       junkuchan                              else its quote)
+       nukechan            esc                back the way you came, close;
+       palanq                                 drops a count
        b4k                                                       ↓ more (j)
 
- enter open   . more   / filter   o browser   r reload   , settings   ? help              1/26  3%
+ enter open   . more   / filter   o browser   R reload   , settings   ? help              1/26  3%

@@ -586,21 +586,19 @@ fn footer_hints(app: &App) -> Vec<(String, &'static str)> {
             None if app.tab.thread.as_ref().is_some_and(|t| t.conversation.is_some()) => {
                 let c = app.tab.thread.as_ref().and_then(|t| t.conversation.as_ref());
                 let capped = c.is_some_and(|c| c.capped);
-                let back = if c.is_some_and(|c| c.poster.is_some()) { Action::Poster } else { Action::Conversation };
                 let mut hints = vec![
                     ("j/k".into(), "post"),
                     (k(Action::NextPart), "images & links"),
                     (k(Action::Menu), "more"),
-                    ("enter".into(), "quote"),
-                    (format!("esc/{}", k(back)), "whole thread"),
+                    ("esc".into(), "whole thread"),
                 ];
                 if capped {
                     hints.push(("".into(), "the nearest 500 posts"));
                 }
                 hints
             }
-            // What the selected post has comes first: its images, the quote enter follows,
-            // its conversation; then what's always there.
+            // What enter does with the selected post comes first, then what else it has;
+            // then what's always there.
             None => {
                 let Some(t) = app.tab.thread.as_ref() else { return vec![(k(Action::Help), "help")] };
                 let post = t.current();
@@ -610,9 +608,8 @@ fn footer_hints(app: &App) -> Vec<(String, &'static str)> {
                 let talks = post.is_some_and(|p| t.backlinks.get(t.selected).is_some_and(|b| !b.is_empty()) || p.quotes.iter().any(|q| t.index.contains_key(q)));
                 let mut hints = vec![("j/k".into(), "post")];
                 if files {
-                    hints.push((k(Action::View), "view image"));
-                }
-                if quotes {
+                    hints.push(("enter".into(), "view image"));
+                } else if quotes {
                     hints.push(("enter".into(), "quote"));
                 }
                 // The menu lists everything else, with its keys.
@@ -620,14 +617,13 @@ fn footer_hints(app: &App) -> Vec<(String, &'static str)> {
                 if parts {
                     hints.push((k(Action::NextPart), "images & links"));
                 }
-                if talks {
-                    hints.push((k(Action::Conversation), "conversation"));
-                }
                 if quotes {
                     hints.push((k(Action::Preview), "preview quote"));
                 }
-                if app.can_jump_back() {
-                    hints.push((k(Action::JumpBack), "back"));
+                hints.push((k(Action::Show), if talks { "conversation…" } else { "show…" }));
+                hints.push(("h".into(), "back"));
+                if app.can_post() {
+                    hints.push((k(Action::Reply), "reply"));
                 }
                 hints.push((k(Action::Hints), "hints"));
                 hints.push((k(Action::Search), "search"));
@@ -641,16 +637,12 @@ fn footer_hints(app: &App) -> Vec<(String, &'static str)> {
         View::Catalog => {
             let op = app.selected_post();
             let mut hints = vec![("enter".into(), "open")];
-            if op.is_some_and(|p| !p.files.is_empty()) {
-                hints.push((k(Action::View), "view image"));
-            }
             hints.push((k(Action::Watch), if op.is_some_and(|p| app.catalog_watching(p)) { "unwatch" } else { "watch" }));
             hints.extend([
                 (k(Action::Search), "filter"),
                 (k(Action::Menu), "more"),
+                (k(Action::Show), "sort & layout"),
                 (k(Action::Hints), "hints"),
-                (k(Action::Sort), "sort"),
-                (k(Action::Compact), "layout"),
                 (k(Action::Reload), "reload"),
             ]);
             hints

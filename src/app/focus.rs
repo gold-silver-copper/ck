@@ -1,6 +1,6 @@
 //! Context: the focused part of a post (`tab`), what `enter` and the verbs do with it, the
-//! menu of everything that can be done with what's selected (`.`, right-click), and link
-//! hints (`f`) that label what's on screen to jump to it.
+//! menu of everything that can be done with what's selected (`.`, right-click) and of what the
+//! view shows (`c`), and link hints (`f`) that label what's on screen to jump to it.
 
 use std::time::Instant;
 
@@ -10,7 +10,7 @@ use ratatui::widgets::ListState;
 
 use super::{App, Hit, Media, Part, Popup, RowKey, SiteRow, TabPopup, View, Viewer, list_move};
 use crate::download;
-use crate::keys::{Action, Command};
+use crate::keys::Action;
 use crate::model::{Attachment, Link, Target};
 use crate::ui::{INDENT, PAD};
 
@@ -195,6 +195,43 @@ impl App {
         self.popup = Some(Popup::Menu(Menu { title, items, list: ListState::default().with_selected(Some(0)), on }));
     }
 
+    /// `c`: what the view shows, its layout and order in the catalog, which posts in a thread.
+    pub(super) fn open_show_menu(&mut self) {
+        use Action as A;
+        let mut items = Vec::new();
+        let hidden = self.hiding.show();
+        match (self.tab.view(), &self.tab.thread) {
+            (View::Catalog, _) => {
+                let (sort, layout) = (self.tab.catalog_sort, self.layout());
+                items.push(MenuItem::Act(A::Sort, format!("sort by {} (now {})", sort.next().as_str(), sort.as_str())));
+                items.push(MenuItem::Act(A::Compact, format!("{} layout (now {})", layout.next().as_str(), layout.as_str())));
+                items.push(act(A::ShowHidden, if hidden { "leave out hidden threads" } else { "show hidden threads" }));
+            }
+            (View::Thread, Some(t)) => {
+                let Some(p) = t.current() else { return };
+                let by_poster = t.conversation.as_ref().is_some_and(|c| c.poster.is_some());
+                if t.conversation.is_some() {
+                    items.push(act(A::Conversation, "the whole thread again"));
+                } else if t.backlinks.get(t.selected).map_or(0, Vec::len) + p.quotes.iter().filter(|q| t.index.contains_key(q)).count() > 0 {
+                    items.push(act(A::Conversation, "this post's conversation alone"));
+                }
+                if let Some(id) = p.id.as_deref().filter(|_| !by_poster) {
+                    items.push(act(A::Poster, &format!("only this poster's posts (ID:{id}, {})", t.id_count(id))));
+                }
+                let media = match t.media.next() {
+                    Media::Files => "only the posts with files",
+                    Media::NoImages => "all posts, images hidden",
+                    Media::All => "all posts and images again",
+                };
+                items.push(act(A::Media, media));
+                items.push(act(A::ShowHidden, if hidden { "leave out hidden posts" } else { "show hidden posts" }));
+                items.push(act(A::AllSpoilers, if t.reveal_all { "hide spoilers" } else { "show all spoilers" }));
+            }
+            _ => return,
+        }
+        self.popup = Some(Popup::Menu(Menu { title: "Show".into(), items, list: ListState::default().with_selected(Some(0)), on: None }));
+    }
+
     /// `enter` here, in a few words, when it does something.
     fn enter_label(&self) -> Option<String> {
         let t = self.tab.thread.as_ref()?;
@@ -215,6 +252,8 @@ impl App {
             Some(Part::Replies) => "show the replies under it".into(),
             Some(Part::Poster) if t.conversation.as_ref().is_some_and(|c| c.poster.is_some()) => "the whole thread again".into(),
             Some(Part::Poster) => format!("only ID:{}'s posts", p.id.as_deref().unwrap_or_default()),
+            None if !p.files.is_empty() && self.images.enabled() => "view its images".into(),
+            None if !p.files.is_empty() => "open its file".into(),
             None if p.quotes.iter().any(|q| t.index.contains_key(q)) => "go to the post it quotes".into(),
             None if self.outgoing_link().is_some() => "follow its link".into(),
             None => return None,
@@ -293,7 +332,7 @@ impl App {
         if !p.files.is_empty() {
             items.push(act(A::View, "view the post's images"));
             if !matches!(focus, Some(Part::File(_))) && p.files.iter().any(|f| f.url.is_some()) {
-                items.push(act(A::DownloadPost, if p.files.len() == 1 { "save the post's file" } else { "save the post's files" }));
+                items.push(act(A::Download, if p.files.len() == 1 { "save the post's file" } else { "save the post's files" }));
             }
         }
         if focus.is_none() {
@@ -325,23 +364,7 @@ impl App {
         let hidden = t.marks.why_hidden(t.selected).is_some();
         items.push(act(A::Hide, if hidden { "unhide it" } else { "hide it" }));
         items.push(act(A::Filter, "hide or highlight posts like it…"));
-        let by_poster = t.conversation.as_ref().is_some_and(|c| c.poster.is_some());
-        if let Some(id) = p.id.as_deref().filter(|_| !by_poster) {
-            items.push(act(A::Poster, &format!("only this poster's posts (ID:{id}, {})", t.id_count(id))));
-        }
-        if t.conversation.is_some() {
-            items.push(act(A::Conversation, "the whole thread again"));
-        } else if t.backlinks.get(t.selected).map_or(0, Vec::len) + p.quotes.iter().filter(|q| t.index.contains_key(q)).count() > 0 {
-            items.push(act(A::Conversation, "its conversation alone"));
-        }
-        items.push(act(
-            A::Media,
-            match t.media.next() {
-                Media::Files => "only the posts with files",
-                Media::NoImages => "all posts, images hidden",
-                Media::All => "all posts and images again",
-            },
-        ));
+        items.push(act(A::Show, "show: a conversation, a poster's posts, files only…"));
         items.push(act(A::Watch, if self.store.watched(t.key()).is_some() { "stop watching the thread" } else { "watch the thread" }));
         items.push(act(A::Follow, "follow the thread as a general"));
         if t.gallery_files().next().is_some() {
@@ -352,6 +375,9 @@ impl App {
         }
         if self.can_jump_back() {
             items.push(act(A::JumpBack, "go back"));
+        }
+        if !t.ahead.is_empty() || !self.tab.ahead.is_empty() {
+            items.push(act(A::JumpForward, "go forward again"));
         }
         if (0..t.posts.len()).any(|i| t.is_new(i)) {
             items.push(act(A::Unread, "the first unread post"));
@@ -398,11 +424,7 @@ impl App {
             items.push(act(A::Browser, "open it in the browser"));
         }
         let rows = items.len();
-        items.push(act(A::ShowHidden, if self.hiding.show() { "leave out hidden threads" } else { "show hidden threads" }));
-        let sort = self.tab.catalog_sort;
-        items.push(MenuItem::Act(A::Sort, format!("sort by {} (now {})", sort.next().as_str(), sort.as_str())));
-        let layout = self.layout();
-        items.push(MenuItem::Act(A::Compact, format!("{} layout (now {})", layout.next().as_str(), layout.as_str())));
+        items.push(act(A::Show, "show: sort, layout, hidden threads…"));
         if self.can_post() {
             items.push(act(A::Reply, "start a thread"));
         }
@@ -525,9 +547,18 @@ impl App {
         (String::new(), rows)
     }
 
-    /// What every menu ends with: the tabs, and the ways out.
+    /// What every menu ends with: the threads left, the tabs, and the ways out.
     fn everywhere_menu(&self, items: &mut Vec<MenuItem>) {
         use Action as A;
+        // A thread's own menu has these already.
+        if self.tab.view() != View::Thread {
+            if !self.tab.trail.is_empty() {
+                items.push(act(A::JumpBack, "back to the thread you left"));
+            }
+            if !self.tab.ahead.is_empty() {
+                items.push(act(A::JumpForward, "forward again"));
+            }
+        }
         if self.tabs.len() > 1 {
             items.push(act(A::NextTab, "next tab"));
             items.push(act(A::PrevTab, "previous tab"));
@@ -543,15 +574,12 @@ impl App {
     pub fn menu_key(&self, item: &MenuItem) -> String {
         match item {
             MenuItem::Enter(_) => "enter".into(),
-            MenuItem::Act(a, _) => self.keys.key(*a),
+            MenuItem::Act(a, _) => self.keys.menu_key(*a),
         }
     }
 
     pub(super) fn on_menu_key(&mut self, key: KeyEvent) {
-        let action = match self.keys.command(self.scope(), key) {
-            Some(Command::Act(a)) => Some(a),
-            _ => None,
-        };
+        let action = self.keys.in_menu(self.scope(), key);
         let Some(Popup::Menu(m)) = &mut self.popup else { return };
         let cur = m.list.selected().unwrap_or(0);
         if let Some(to) = list_move(key.code, cur, m.items.len()) {
@@ -566,7 +594,7 @@ impl App {
                 let row = m.items.iter().position(|it| matches!(it, MenuItem::Act(a, _) if Some(*a) == action));
                 match (action, row) {
                     (_, Some(i)) => self.run_menu_item(i),
-                    (Some(Action::Menu), None) => self.popup = None,
+                    (Some(Action::Menu | Action::Show), None) => self.popup = None,
                     _ => {}
                 }
             }

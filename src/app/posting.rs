@@ -301,7 +301,7 @@ pub enum Quoting {
 impl App {
     /// Whether ck can post where you are: a site whose engine it posts to, live (not a
     /// saved copy).
-    pub(super) fn can_post(&self) -> bool {
+    pub(crate) fn can_post(&self) -> bool {
         crate::post::poster(&self.current_site().cfg).is_some() && self.tab.saved().is_none()
     }
 

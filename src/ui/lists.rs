@@ -404,7 +404,7 @@ pub(super) fn draw_search(f: &mut Frame, app: &mut App, area: Rect) {
     };
     let hit = draw_rows(f, area, visible.len(), &mut state, (3, 1), Some(t.surface), &|_| false, &mut build);
     if hit.is_none() && app.tab.loading().is_none() {
-        empty(f, area, if s.hits.is_empty() { "No results".to_string() } else { format!("All hidden ({} shows them)", app.keys.key(Action::ShowHidden)) }.as_str());
+        empty(f, area, if s.hits.is_empty() { "No results".to_string() } else { format!("All hidden ({} shows them)", app.keys.how(Action::ShowHidden)) }.as_str());
     }
     // Below the last card: more to load.
     if more && let Some(Hit::List { offset, item_height, .. }) = hit {

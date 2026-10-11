@@ -1159,7 +1159,7 @@ impl App {
         }
         let (no, hidden) = (key.no, self.rehide(|a| a.store.toggle_hidden(&key.site, &key.board, key.no)));
         self.save_now();
-        let show = self.keys.key(Action::ShowHidden);
+        let show = self.keys.how(Action::ShowHidden);
         self.info(if hidden { format!("Hid {what} {no} ({show} shows hidden ones)") } else { format!("Unhid {what} {no}") });
     }
 
@@ -1226,9 +1226,11 @@ impl App {
     /// and otherwise `enter` opens it.
     pub(crate) fn thread_gone(&mut self, key: &ThreadKey) {
         self.tab.archive_offer = self.archive_of(key);
-        let in_archive = self.tab.archive_offer.as_ref().map(|a| format!("{} opens it in {}", self.keys.key(Action::Archive), a.site));
         let saved = self.store.saved(key).map(|m| m.saved);
         let shown = self.tab.thread.as_ref().is_some_and(|t| t.key() == key);
+        // With nothing else for enter to do, it opens the archive's copy.
+        let how = if shown || saved.is_some() { self.keys.how(Action::Archive) } else { "enter".into() };
+        let in_archive = self.tab.archive_offer.as_ref().map(|a| format!("{how} opens it in {}", a.site));
         let text = match saved {
             Some(at) if shown => {
                 self.tab.copy = Some(ThreadCopy::Saved(Offline { saved: at, dead: true }));
@@ -1301,7 +1303,7 @@ impl App {
             Ok(n) => {
                 let capped = t.conversation.as_ref().is_some_and(|c| c.capped);
                 let esc = if capped { format!(" (the nearest {n}; there are more)") } else { String::new() };
-                self.info(format!("{}{esc}; esc or {} shows the whole thread", plural_posts(n), self.keys.key(Action::Conversation)));
+                self.info(format!("{}{esc}; esc shows the whole thread", plural_posts(n)));
             }
             Err(e) => self.info(e),
         }
@@ -1317,7 +1319,7 @@ impl App {
         match t.enter_poster() {
             Ok(n) => {
                 let id = t.conversation.as_ref().and_then(|c| c.poster.clone()).unwrap_or_default();
-                self.info(format!("{} by ID:{id}; esc or {} shows the whole thread", plural_posts(n), self.keys.key(Action::Poster)));
+                self.info(format!("{} by ID:{id}; esc shows the whole thread", plural_posts(n)));
             }
             Err(e) => self.info(e),
         }
@@ -1329,7 +1331,7 @@ impl App {
         let next = t.media.next();
         let n = t.set_media(next);
         let talking = t.conversation.is_some();
-        let again = self.keys.key(Action::Media);
+        let again = self.keys.how(Action::Media);
         self.info(match next {
             Media::Files if talking => format!("Only posts with files, once you leave the conversation; {again} again hides images"),
             Media::Files => format!("{} with files; {again} again shows all, images hidden", plural_posts(n)),
@@ -1478,28 +1480,30 @@ impl App {
         self.tab.here()
     }
 
-    /// Along the tab's jump list: back to the thread left last (`u`), or forward again to
-    /// where that came from (`ctrl-r`); the thread shown goes on the other list.
-    fn travel(&mut self, back: bool) {
+    /// Along the tab's jump list: back to the thread left last, or forward again to where
+    /// that came from; the thread shown goes on the other list. False if there's none.
+    fn travel(&mut self, back: bool) -> bool {
         let here = self.tab.here();
         let (from, to) = if back { (&mut self.tab.trail, &mut self.tab.ahead) } else { (&mut self.tab.ahead, &mut self.tab.trail) };
         // Not the thread already shown.
-        while from.last().is_some_and(|(k, _)| here.as_ref().is_some_and(|(h, _)| h == k)) {
+        while from.last().is_some_and(|t| here.as_ref().is_some_and(|h| h.key == t.key)) {
             from.pop();
         }
-        let Some((key, post)) = from.pop() else {
-            let what = if back { "Nothing to go back to" } else { "Nothing to go forward to" };
-            return self.info(what);
+        let Some(there) = from.pop() else {
+            self.info(if back { "Nothing to go back to" } else { "Nothing to go forward to" });
+            return false;
         };
         if let Some(here) = here {
-            to.retain(|(k, _)| *k != here.0);
+            to.retain(|t| t.key != here.key);
             to.push(here);
         }
         // Not a new way taken: what's ahead stays (opening a thread forgets it).
         let (trail, ahead) = (self.tab.trail.clone(), self.tab.ahead.clone());
         self.tab.thread = None;
-        self.open_thread_key(&key, Opening::at(Some(post)));
+        self.open_thread_key(&there.key, Opening::at(Some(there.post)));
         (self.tab.trail, self.tab.ahead) = (trail, ahead);
+        self.tab.return_to = there.back;
+        true
     }
 
     /// Go where a quote link leads: a thread (remembered for `u`), a board, or a post whose
@@ -1512,10 +1516,14 @@ impl App {
         };
         match (link.thread, link.post) {
             (Some(no), post) => {
-                if self.tab.view() == View::Thread {
+                let from_thread = self.tab.view() == View::Thread;
+                if from_thread {
                     self.leave_trail();
                 }
                 self.open_thread_at(target, no, Opening::at(post));
+                if from_thread {
+                    self.tab.return_to = Some(View::Thread);
+                }
             }
             (None, None) => {
                 // A board link: open its catalog.
@@ -1538,9 +1546,13 @@ impl App {
     fn thread_found(&mut self, site: usize, board: Board, post: u64, trail: Option<Trail>, res: Result<Option<u64>>) {
         match res {
             Ok(Some(no)) => {
+                let from_thread = trail.is_some();
                 self.tab.trail.extend(trail);
                 self.switch_site(site);
                 self.open_thread_at(board, no, Opening::at(Some(post)));
+                if from_thread {
+                    self.tab.return_to = Some(View::Thread);
+                }
             }
             Ok(None) => {
                 self.error(format!("Post {post} isn't in this thread, and this site can't say which thread it's in"));
@@ -1578,7 +1590,8 @@ impl App {
 
     fn open_viewer(&mut self) {
         if !self.images.enabled() {
-            self.info("Images are off (images = \"off\" in the config); i opens the file");
+            let open = self.keys.how(Action::OpenFile);
+            self.info(format!("Images are off (images = \"off\" in the config); {open} opens the file"));
             return;
         }
         if self.images_off_here() {
@@ -1769,11 +1782,15 @@ impl App {
         if self.tab.close_settings() {
             return;
         }
+        // A thread opened by a link in another goes back to that one.
+        if self.tab.view() == View::Thread && self.tab.return_to == Some(View::Thread) && self.travel(true) {
+            return;
+        }
         let from_catalog = self.tab.from_catalog;
         let to = match self.tab.view() {
             View::Search => self.close_search(),
             View::Catalog => View::Boards,
-            View::Thread => self.tab.return_to.take().unwrap_or(View::Catalog),
+            View::Thread => self.tab.return_to.take().filter(|&v| v != View::Thread).unwrap_or(View::Catalog),
             View::Watched => self.tab.watched_from.take().unwrap_or(View::Sites),
             _ => View::Sites,
         };

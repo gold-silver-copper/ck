@@ -3,32 +3,32 @@ source: src/ui_tests.rs
 expression: snapshot(&mut a)
 ---
  ck  4chan  ›  /g/  ›  Snapshot thread                                 5 posts  ·  2 new, 2 below ↓
-                             No.1001             enter run · esc close
+                    No.1001                                enter run · esc close
 
-    Anonymous   OP  2026-09▌ enter  go to the post it quotes
-    Snapshot thread          y      copy the post's text
-    op.png  800x600 · 121 K  Y      copy the post's link
-                             o      open the post in the browser
-    A thread for snapshot t  O      list its links and files
-    It has a few replies.    p      preview the posts it quotes
-                             b      go to the first reply
-    Replies  >>1001          e      show its replies under it
-                             P      reply to it
-                                    reply quoting its text
-  ▌                          m      mark it as yours
-  ▌ Anonymous  2026-09-21 1  H      hide it
-  ▌                          X      hide or highlight posts like it…
-  ▌ >>1000 (OP)              c      its conversation alone
-  ▌ >implying                M      only the posts with files
-  ▌                          w      stop watching the thread
-  ▌ Replies  >>1003          F      follow the thread as a general
-  ▌                          V      all the thread's files
-                                    save all the thread's files…
-                             U      the first unread post
-    Anonymous  2026-09-21 1  /      search the thread
-                             f      pick a link or post by its label
-    Code:                           images on this board: on → off
-    fn main() {                     save the thread as a page…
-        println!("snapshot"  r      reload
+    Anonymous   OP▌ enter  go to the post it quotes
+    Snapshot threa  y      copy the post's text
+    op.png  800x60  Y      copy the post's link
+                    o      open the post in the browser
+    A thread for s  O      list its links and files
+    It has a few r  p      preview the posts it quotes
+                    b      go to the first reply
+    Replies  >>100  e      show its replies under it
+                    r      reply to it
+                    Q      reply quoting its text
+  ▌                 m      mark it as yours
+  ▌ Anonymous  202  H      hide it
+  ▌                 X      hide or highlight posts like it…
+  ▌ >>1000 (OP)     c      show: a conversation, a poster's posts, files only…
+  ▌ >implying       w      stop watching the thread
+  ▌                 F      follow the thread as a general
+  ▌ Replies  >>100  V      all the thread's files
+  ▌                 D      save all the thread's files…
+                    U      the first unread post
+                    /      search the thread
+    Anonymous  202  f      pick a link or post by its label
+                    B      images on this board: on → off
+    Code:           E      save the thread as a page…
+    fn main() {     R      reload
+        println!("  :      go to a URL or site/board/thread
     }
- j/k post   enter quote   . more   tab images & links   c conversation   ? help           2/5  40%
+ j/k post   enter quote   . more   tab images & links   p preview quote   ? help          2/5  40%

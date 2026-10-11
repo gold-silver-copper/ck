@@ -291,6 +291,7 @@ fn add_filter_popup() {
     let t = a.tab.thread.as_mut().unwrap();
     t.posts[0].poster = "Named !Trip".into();
     t.posts[0].files[0].md5 = Some("u8Vh17KxaDvUJ6bBcmE/eg==".into());
+    a.on_key(KeyEvent::from(KeyCode::Char('.')));
     a.on_key(KeyEvent::from(KeyCode::Char('X')));
     a.on_key(KeyEvent::from(KeyCode::Char('s')));
     insta::assert_snapshot!(snapshot(&mut a));
@@ -338,6 +339,7 @@ fn conversation() {
     let mut a = thread_app(false);
     a.tab.thread.as_mut().unwrap().select(1);
     a.on_key(KeyEvent::from(KeyCode::Char('c')));
+    a.on_key(KeyEvent::from(KeyCode::Char('C')));
     insta::assert_snapshot!(snapshot(&mut a));
 }
 
@@ -345,7 +347,7 @@ fn conversation() {
 fn only_posts_with_files_or_no_images() {
     use crate::app::Media;
     use ratatui::crossterm::event::{KeyCode, KeyEvent};
-    let m = |a: &mut App| a.on_key(KeyEvent::from(KeyCode::Char('M')));
+    let m = |a: &mut App| ['c', 'M'].into_iter().for_each(|c| a.on_key(KeyEvent::from(KeyCode::Char(c))));
     // A long thread, every third post with a file, read from the middle.
     let mut a = long_thread_app(300);
     a.images = Images::offline();
@@ -415,6 +417,7 @@ fn deleted_post() {
     assert_layout_exact(&mut a);
     a.tab.thread.as_mut().unwrap().select(1);
     a.on_key(KeyEvent::from(KeyCode::Char('c')));
+    a.on_key(KeyEvent::from(KeyCode::Char('C')));
     let (text, _) = render(&mut a);
     assert!(text.contains(" deleted ") && text.contains("No.1003"), "{text}");
     assert_layout_exact(&mut a);
@@ -461,7 +464,7 @@ fn poster_ids_and_flags() {
     let (text, _) = render(&mut a);
     let t = a.tab.thread.as_ref().unwrap();
     assert_eq!(t.entries.iter().map(|e| t.posts[e.post].no).collect::<Vec<_>>(), [487211102, 487211390]);
-    assert!(text.contains("Posts by ID:Zq9Wx2Lp") && text.contains("esc or I shows the whole thread"), "{text}");
+    assert!(text.contains("Posts by ID:Zq9Wx2Lp") && text.contains("esc shows the whole thread"), "{text}");
     assert_layout_exact(&mut a);
 }
 
@@ -504,6 +507,7 @@ fn the_unread_line_keeps_long_threads_exact() {
     (t.new_after, t.margin) = (2250, 0.3);
     render(&mut a);
     // U: the first new post, with the line right above it, all laid out exactly.
+    a.on_key(KeyEvent::from(KeyCode::Char('.')));
     a.on_key(KeyEvent::from(KeyCode::Char('U')));
     let (text, _) = render(&mut a);
     assert_eq!(row_of(&text, "new posts").unwrap() + 2, row_of(&text, "No.2251").unwrap(), "{text}");
@@ -516,6 +520,7 @@ fn the_unread_line_keeps_long_threads_exact() {
         a.on_key(KeyEvent::from(KeyCode::Char('K')));
         render(&mut a);
     }
+    a.on_key(KeyEvent::from(KeyCode::Char('.')));
     a.on_key(KeyEvent::from(KeyCode::Char('U')));
     let (text, _) = render(&mut a);
     assert_eq!(row_of(&text, "new posts").unwrap() + 2, row_of(&text, "No.2251").unwrap(), "{text}");
@@ -709,6 +714,7 @@ fn j_and_k_read_tall_posts_whole() {
     // In a conversation too.
     key(&mut a, 'j');
     key(&mut a, 'c');
+    key(&mut a, 'C');
     assert!(a.tab.thread.as_ref().unwrap().conversation.is_some());
     let text = key(&mut a, 'j');
     assert!(selected(&a) == 3001 && text.contains("↓ more") || text.contains("↑"), "{text}");
@@ -998,8 +1004,10 @@ fn catalog_new_threads_and_replies() {
 #[test]
 fn replies_inline() {
     let mut a = thread_app(true);
+    a.on_key(ratatui::crossterm::event::KeyEvent::from(ratatui::crossterm::event::KeyCode::Char('.')));
     a.on_key(ratatui::crossterm::event::KeyEvent::from(ratatui::crossterm::event::KeyCode::Char('e')));
     a.on_key(ratatui::crossterm::event::KeyEvent::from(ratatui::crossterm::event::KeyCode::Char('j')));
+    a.on_key(ratatui::crossterm::event::KeyEvent::from(ratatui::crossterm::event::KeyCode::Char('.')));
     a.on_key(ratatui::crossterm::event::KeyEvent::from(ratatui::crossterm::event::KeyCode::Char('e')));
     insta::assert_snapshot!(snapshot(&mut a));
     insta::assert_snapshot!("replies_inline_backgrounds", bg_map(&mut a));
@@ -1069,7 +1077,7 @@ fn hidden_search_results() {
         a.rehide(|a| a.store.toggle_hidden("desuarchive", "g", no));
     }
     let text = render(&mut a).0;
-    assert!(text.contains("All hidden (Z shows them)"), "{text}");
+    assert!(text.contains("All hidden (c Z shows them)"), "{text}");
 }
 
 #[test]
@@ -1212,6 +1220,7 @@ fn thread_lines_are_cached_but_never_stale() {
     a.tab.thread.as_mut().unwrap().set_search(String::new());
     // Spoilers shown on one post.
     a.tab.thread.as_mut().unwrap().selected = 3;
+    a.on_key(KeyEvent::from(KeyCode::Char('.')));
     a.on_key(KeyEvent::from(KeyCode::Char('s')));
     let (text, _) = render(&mut a);
     assert!(text.contains("secret and"), "{text}");
@@ -1596,7 +1605,7 @@ fn thread_gone_without_a_copy_offers_the_archive() {
     a.tab.navigate(View::Thread);
     a.thread_gone(&ThreadKey { site: "4chan".into(), board: "g".into(), no: 901 });
     let text = &a.status().unwrap().text;
-    assert_eq!(text, "Thread was deleted or archived: a opens it in desuarchive");
+    assert_eq!(text, "Thread was deleted or archived: enter opens it in desuarchive");
     // Not when the archive is known not to keep the board.
     let mut a = app(false);
     a.tab.navigate(View::Thread);
@@ -1649,6 +1658,7 @@ fn hidden_spoilers_selection_and_focus_dont_rely_on_color() {
     t.selected = 2;
     let (text, _) = render(&mut a);
     assert!(!text.contains("secret") && text.contains("plain ░░░░░░ text"), "{text}");
+    a.on_key(ratatui::crossterm::event::KeyEvent::from(ratatui::crossterm::event::KeyCode::Char('c')));
     a.on_key(ratatui::crossterm::event::KeyEvent::from(ratatui::crossterm::event::KeyCode::Char('S')));
     assert!(render(&mut a).0.contains("plain secret text"));
     // The selected post has a bar drawn as a glyph, not only a background.
@@ -1736,19 +1746,19 @@ fn huge_counts_from_the_data_files_dont_overflow() {
 fn footer_offers_what_the_selected_post_has() {
     let footer = |a: &mut App| render(a).0.lines().last().unwrap().to_string();
     let mut a = thread_app(false);
-    // The OP has a file: v views it.
+    // The OP has a file: enter views it.
     a.tab.thread.as_mut().unwrap().selected = 0;
     let f = footer(&mut a);
-    assert!(f.contains("v view image") && !f.contains("enter quote"), "{f}");
+    assert!(f.contains("enter view image") && !f.contains("enter quote"), "{f}");
     // A reply quoting the OP, without files: enter follows the quote.
     let t = a.tab.thread.as_mut().unwrap();
     let i = t.posts.iter().position(|p| p.files.is_empty() && !p.quotes.is_empty()).unwrap();
     t.select(i);
     let f = footer(&mut a);
     assert!(f.contains("enter quote") && !f.contains("view image"), "{f}");
-    // The catalog: v views the OP's image.
+    // The catalog: enter opens the thread.
     let mut a = catalog_app(false);
-    assert!(footer(&mut a).contains("v view image"));
+    assert!(footer(&mut a).contains("enter open"));
 }
 
 #[test]
@@ -2057,6 +2067,7 @@ fn the_add_filter_popup_draws_only_inside_its_panel_on_a_short_screen() {
     p.id = Some("abcd1234".into());
     p.flag = Some(crate::model::Flag { code: "US".into(), name: "United States".into() });
     p.files[0].md5 = Some("u8Vh17KxaDvUJ6bBcmE/eg==".into());
+    a.on_key(KeyEvent::from(KeyCode::Char('.')));
     a.on_key(KeyEvent::from(KeyCode::Char('X')));
     let Some(Popup::AddFilter(f)) = &a.popup else { panic!("no add-filter popup") };
     assert_eq!(f.candidates.len(), 7);
@@ -2075,7 +2086,7 @@ fn the_add_filter_popup_draws_only_inside_its_panel_on_a_short_screen() {
 fn reply_box() {
     use ratatui::crossterm::event::{KeyCode, KeyEvent};
     let mut a = thread_app(false);
-    a.on_key(KeyEvent::from(KeyCode::Char('P')));
+    a.on_key(KeyEvent::from(KeyCode::Char('r')));
     type_text(&mut a, "hello");
     insta::assert_snapshot!(snapshot(&mut a));
 }
