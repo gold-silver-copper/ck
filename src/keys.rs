@@ -407,13 +407,12 @@ pub enum Command {
     Act(Action),
 }
 
-/// The commands' keys, and what every key does in each place and in its menus: made together
-/// by `new`, which refuses a key that would do two things in one place.
+/// The commands' keys, and what every key does in each place: made together by `new`, which
+/// refuses a key that would do two things in one place.
 #[derive(Debug, Clone)]
 pub struct KeyMap {
     keys: HashMap<Action, Vec<Key>>,
     commands: HashMap<(Scope, Key), Command>,
-    menus: HashMap<(Scope, Key), Action>,
     /// The letters in use: those of actions without keys of their own, where no key is.
     letters: HashMap<Action, Key>,
 }
@@ -421,7 +420,7 @@ pub struct KeyMap {
 impl Default for KeyMap {
     fn default() -> Self {
         // The defaults don't clash (a test checks).
-        Self::new(HashMap::new()).unwrap_or_else(|_| Self { keys: HashMap::new(), commands: HashMap::new(), menus: HashMap::new(), letters: HashMap::new() })
+        Self::new(HashMap::new()).unwrap_or_else(|_| Self { keys: HashMap::new(), commands: HashMap::new(), letters: HashMap::new() })
     }
 }
 
@@ -439,30 +438,21 @@ impl KeyMap {
             Command::Act(a) => Action::name(a),
         };
         let mut commands = HashMap::new();
-        let mut menus = HashMap::new();
         for place in SCOPES.into_iter().filter(|&s| s != Scope::Global) {
             for (_, command, keys) in fixed.clone().chain(acts.clone()).filter(|(scopes, ..)| scopes.iter().any(|s| s.covers(place))) {
                 for &key in keys {
                     if let Some(other) = commands.insert((place, key), command).filter(|&other| other != command) {
                         bail!("`{}` and `{}` both use '{key}' in the {} view", name(command), name(other), place.label());
                     }
-                    if let Command::Act(a) = command {
-                        menus.insert((place, key), a);
-                    }
                 }
             }
         }
-        // In a menu, an action without a key of its own is on its letter, unless a key is
-        // there in any place it applies (given in `[keys]`: that wins).
+        // An action without a key of its own is on its letter in menus, unless a command's key
+        // is that in any place it applies (given in `[keys]`: that wins).
         let applies = |a: Action| SCOPES.into_iter().filter(move |&p| p != Scope::Global && a.scopes().iter().any(|s| s.covers(p)));
-        let mut letters = HashMap::new();
-        for &a in Action::ALL.iter().filter(|a| keys.get(a).is_none_or(Vec::is_empty)) {
-            if let Some(letter) = a.letter().filter(|&l| applies(a).all(|p| !menus.contains_key(&(p, l)))) {
-                menus.extend(applies(a).map(|p| ((p, letter), a)));
-                letters.insert(a, letter);
-            }
-        }
-        Ok(Self { keys, commands, menus, letters })
+        let taken = |a: Action, l: Key| applies(a).any(|p| matches!(commands.get(&(p, l)), Some(Command::Act(_))));
+        let letters = Action::ALL.iter().filter(|a| keys.get(a).is_none_or(Vec::is_empty)).filter_map(|&a| Some((a, a.letter().filter(|&l| !taken(a, l))?))).collect();
+        Ok(Self { keys, commands, letters })
     }
 
     /// Every key that does something somewhere, in the tables' order.
@@ -476,9 +466,9 @@ impl KeyMap {
         self.commands.get(&(place, key.into())).copied()
     }
 
-    /// The action a key runs in a menu in `place`: by its key, or its letter.
-    pub fn in_menu(&self, place: Scope, key: impl Into<Key>) -> Option<Action> {
-        self.menus.get(&(place, key.into())).copied()
+    /// Whether `key` runs an action's menu row: one of its keys, or its letter.
+    pub fn runs(&self, action: Action, key: Key) -> bool {
+        self.keys(action).contains(&key) || self.letter(action) == Some(key)
     }
 
     /// The key that runs an action in its menu, as its row shows it; empty when it has none.
@@ -599,9 +589,7 @@ mod tests {
         assert_eq!(on(&m, Scope::Saved, 'q'), Some(Command::Act(Action::Quit)));
         // The less used are on letters in their menu, the same letter in different places.
         assert_eq!(on(&m, Scope::Thread, 's'), None);
-        assert_eq!(m.in_menu(Scope::Catalog, KeyEvent::from(KeyCode::Char('s'))), Some(Action::Sort));
-        assert_eq!(m.in_menu(Scope::Thread, KeyEvent::from(KeyCode::Char('s'))), Some(Action::Spoiler));
-        assert_eq!(m.in_menu(Scope::Thread, KeyEvent::from(KeyCode::Char('w'))), Some(Action::Watch));
+        assert!(m.runs(Action::Sort, Key::char('s')) && m.runs(Action::Spoiler, Key::char('s')) && m.runs(Action::Watch, Key::char('w')));
         assert_eq!((m.how(Action::Hide), m.how(Action::Sort), m.how(Action::Watch)), (". H".into(), "c s".into(), "w".into()));
         assert_eq!(on(&m, Scope::Lists, 'z'), None);
         assert_eq!(on(&m, Scope::Thread, 'z'), Some(Command::Nav(Nav::Z)));
@@ -614,11 +602,16 @@ mod tests {
 
     #[test]
     fn every_default_letter_works() {
-        // None gives way to a key or another letter, nor is one the menus move or close with.
+        // None gives way to a key, none is another's where both apply, and none is a key the
+        // menus move or close with.
         let m = KeyMap::default();
+        let places = |a: Action| SCOPES.into_iter().filter(move |&p| p != Scope::Global && a.scopes().iter().any(|s| s.covers(p)));
         for &a in Action::ALL {
             assert!(a.default_key().is_some() || m.letter(a).is_some(), "{a:?} has no letter");
             assert!(m.letter(a).is_none_or(|l| !"jkgGq".chars().any(|c| l == Key::char(c))), "{a:?}");
+            for &b in Action::ALL.iter().filter(|&&b| b != a && places(a).any(|p| places(b).any(|q| q == p))) {
+                assert!(m.letter(a).is_none() || m.letter(a) != m.letter(b), "{a:?} and {b:?}");
+            }
         }
     }
 
@@ -645,7 +638,7 @@ mod tests {
         assert_eq!(on(&m, Scope::Thread, 'Q'), Some(Command::Act(Action::Watch)));
         assert_eq!(on(&m, Scope::Thread, 'w'), None);
         // A key given wins over a menu letter, which then isn't one.
-        assert_eq!(m.in_menu(Scope::Thread, KeyEvent::from(KeyCode::Char('Q'))), Some(Action::Watch));
+        assert!(m.runs(Action::Watch, Key::char('Q')) && !m.runs(Action::Quote, Key::char('Q')));
         assert_eq!(m.how(Action::Quote), "the . menu");
 
         let err = |pairs| map(pairs).unwrap_err().to_string();

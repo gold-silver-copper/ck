@@ -10,7 +10,7 @@ use ratatui::widgets::ListState;
 
 use super::{App, Hit, Media, Part, Popup, RowKey, SiteRow, TabPopup, View, Viewer, list_move};
 use crate::download;
-use crate::keys::Action;
+use crate::keys::{Action, Command, Key};
 use crate::model::{Attachment, Link, Target};
 use crate::ui::{INDENT, PAD};
 
@@ -579,7 +579,8 @@ impl App {
     }
 
     pub(super) fn on_menu_key(&mut self, key: KeyEvent) {
-        let action = self.keys.in_menu(self.scope(), key);
+        let pressed = Key::from(key);
+        let closes = matches!(self.keys.command(self.scope(), pressed), Some(Command::Act(Action::Menu | Action::Show)));
         let Some(Popup::Menu(m)) = &mut self.popup else { return };
         let cur = m.list.selected().unwrap_or(0);
         if let Some(to) = list_move(key.code, cur, m.items.len()) {
@@ -589,15 +590,12 @@ impl App {
         match key.code {
             KeyCode::Enter | KeyCode::Right => self.run_menu_item(cur),
             KeyCode::Esc | KeyCode::Left | KeyCode::Char('q') => self.popup = None,
-            _ => {
-                // A row's own key runs it.
-                let row = m.items.iter().position(|it| matches!(it, MenuItem::Act(a, _) if Some(*a) == action));
-                match (action, row) {
-                    (_, Some(i)) => self.run_menu_item(i),
-                    (Some(Action::Menu | Action::Show), None) => self.popup = None,
-                    _ => {}
-                }
-            }
+            // A row runs on the key it shows (or another of its action's keys).
+            _ => match m.items.iter().position(|it| matches!(it, MenuItem::Act(a, _) if self.keys.runs(*a, pressed))) {
+                Some(i) => self.run_menu_item(i),
+                None if closes => self.popup = None,
+                None => {}
+            },
         }
     }
 
