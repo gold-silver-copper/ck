@@ -55,8 +55,8 @@ pub(crate) mod config;
 pub(crate) mod disk_cache;
 pub(crate) mod download;
 pub(crate) mod editor;
-// It drives ck in tmux.
-#[cfg(all(test, unix))]
+#[cfg(test)]
+#[cfg(unix)] // it drives ck in tmux
 mod e2e;
 pub(crate) mod export;
 pub(crate) mod filter;
