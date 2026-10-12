@@ -2098,7 +2098,9 @@ fn video_command(player: Option<&[String]>, has_mpv: impl FnOnce() -> bool, url:
 }
 
 pub fn on_path(program: &str) -> bool {
-    std::env::var_os("PATH").is_some_and(|paths| std::env::split_paths(&paths).any(|dir| dir.join(program).is_file()))
+    // (On Windows, `program.exe`.)
+    let exe = format!("{program}{}", std::env::consts::EXE_SUFFIX);
+    std::env::var_os("PATH").is_some_and(|paths| std::env::split_paths(&paths).any(|dir| dir.join(&exe).is_file()))
 }
 
 /// Where j/k (or the arrows) move one row and g/G (or home/end) jump to the ends of a list

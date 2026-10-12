@@ -39,6 +39,7 @@ jobs:
           - { os: ubuntu-22.04-arm, target: linux-aarch64 }
           - { os: macos-15, target: macos-aarch64 }
           - { os: macos-15-intel, target: macos-x86_64 }
+          - { os: windows-latest, target: windows-x86_64 }
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -49,6 +50,7 @@ jobs:
         run: brew install ninja
       - run: cargo build --release -p ck-web
       - name: Bundle
+        shell: bash
         run: |
           name="ck-web-${TAG#ck-web-v}-${{ matrix.target }}"
           mkdir -p "$name"
@@ -56,6 +58,11 @@ jobs:
           if [ "$RUNNER_OS" = macOS ]; then
             sh ck-web/bundle-macos.sh
             mv "$r/ck-web.app" "$name/"
+          elif [ "$RUNNER_OS" = Windows ]; then
+            # Chromium's files, as cef-dll-sys copied them next to the program.
+            mkdir -p "$name/locales"
+            cp $r/ck-web.exe $r/*.dll $r/*.pak $r/*.bin $r/icudtl.dat $r/vk_swiftshader_icd.json "$name/"
+            cp $r/locales/en-US.pak "$name/locales/"
           else
             mkdir -p "$name/locales"
             cp $r/ck-web $r/libcef.so $r/libvk_swiftshader.so $r/libvulkan.so.1 $r/vk_swiftshader_icd.json \
@@ -65,6 +72,6 @@ jobs:
             strip "$name/ck-web" "$name/libcef.so" "$name/libvk_swiftshader.so" "$name/libvulkan.so.1"
           fi
           tar -C "$name" -czf "$name.tar.gz" .
-          shasum -a 256 "$name.tar.gz" > "$name.tar.gz.sha256"
+          { shasum -a 256 "$name.tar.gz" || sha256sum "$name.tar.gz"; } > "$name.tar.gz.sha256"
           ls -l "$name.tar.gz"
           gh release upload "$TAG" "$name.tar.gz" "$name.tar.gz.sha256" --clobber

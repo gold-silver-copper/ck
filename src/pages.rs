@@ -1,4 +1,4 @@
-//! The last copy of each catalog and thread opened, in `$XDG_CACHE_HOME/ck/pages`: the API
+//! The last copy of each catalog and thread opened, in `pages` in ck's cache folder: the API
 //! responses as fetched (see `http::Copy`), so opening one again shows it at once (parsed
 //! from the copy, without a request) while it's refreshed, and so the first request after a
 //! restart can ask `If-Modified-Since`. A cache: bounded, and safe to delete.

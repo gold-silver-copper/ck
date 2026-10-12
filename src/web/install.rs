@@ -8,17 +8,24 @@ use anyhow::{Context, Result, ensure};
 use sha2::{Digest, Sha256};
 
 /// The ck-web this ck talks to: its release is `ck-web-v{VERSION}`.
-pub const VERSION: &str = "0.3.1";
+pub const VERSION: &str = "0.4.0";
 const RELEASES: &str = "https://github.com/gold-silver-copper/ck/releases/download";
 /// Each system's bundle, with its SHA-256 (from the release's `.sha256` files).
 const BUNDLES: &[(&str, &str)] = &[
-    ("linux-x86_64", "720f9a202bb958707f330dfb60a0593a076ea11976817b9c96f736072e7eeccc"),
-    ("linux-aarch64", "2df66220b07866deb5441031ddbabb6e34a66e01b762858b82eb8c41c987654c"),
-    ("macos-x86_64", "954b99a5f272c60ab1617a1b237699c4e7262496d7982e03ac9ac0fc6a99bd9f"),
-    ("macos-aarch64", "5442c9ca7330d49703cf8e5ede78d75242a44605284076868e65d7796893bd6c"),
+    ("linux-x86_64", "74fb7e793d54495a939c361852fff357b75fdf264376909fcf98d4eafae1eede"),
+    ("linux-aarch64", "2eb5874694c0cfd7105817ec15510fe47bf1853b84dd2dd44c75c7526ff59931"),
+    ("macos-x86_64", "4e56ed9f3ff7329a863490bf14629a12a7372e0070a6977c656ca45358ea2a80"),
+    ("macos-aarch64", "aa67cf940c2be68a02e9789e54ef2692cb87bd414ec1574d1049b38a38fcfaa9"),
+    ("windows-x86_64", "36d545d3795acc77186844513d9b4450f35086c7c108e836edea4f84f34efe3c"),
 ];
 /// ck-web's program in a bundle: on macOS, in its app.
-pub const PROGRAM: &str = if cfg!(target_os = "macos") { "ck-web.app/Contents/MacOS/ck-web" } else { "ck-web" };
+pub const PROGRAM: &str = if cfg!(target_os = "macos") {
+    "ck-web.app/Contents/MacOS/ck-web"
+} else if cfg!(windows) {
+    "ck-web.exe"
+} else {
+    "ck-web"
+};
 /// About how big a bundle is, in megabytes, to say before downloading it.
 pub const SIZE_MB: u64 = 150;
 

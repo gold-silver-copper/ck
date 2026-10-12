@@ -329,7 +329,9 @@ impl Web {
     fn send(&mut self, reply: &Reply) {
         let Some(out) = &mut self.out else { return };
         let Ok(line) = serde_json::to_string(reply) else { return };
-        if writeln!(out, "{line}").and_then(|()| out.flush()).is_err() {
+        // In one write, so a line CEF prints can't land inside it (on Windows it can print to
+        // the same pipe).
+        if out.write_all(format!("{line}\n").as_bytes()).and_then(|()| out.flush()).is_err() {
             self.out = None;
         }
     }
@@ -533,39 +535,49 @@ fn free_profile(base: &std::path::Path) -> Option<(PathBuf, std::fs::File)> {
     (0..10).find_map(|n| {
         let dir = if n == 0 { base.to_path_buf() } else { base.with_file_name(format!("{}-{n}", base.file_name()?.to_string_lossy())) };
         std::fs::create_dir_all(&dir).ok()?;
-        // The folder itself is locked (flock works on a folder opened for reading).
-        let lock = std::fs::File::open(&dir).ok()?;
+        let lock = profile_lock(&dir).ok()?;
         lock.try_lock().ok()?;
         // A browser that doesn't take that lock (an older ck-web) may hold it all the same.
         (!chromium_in(&dir)).then_some((dir, lock))
     })
 }
 
-/// Whether a running Chromium has the profile at `dir`: its `SingletonLock` names the host
-/// and process ("host-1234"), and that process is alive.
-fn chromium_in(dir: &std::path::Path) -> bool {
-    let Ok(link) = std::fs::read_link(dir.join("SingletonLock")) else { return false };
-    let pid = link.to_string_lossy().rsplit_once('-').and_then(|(_, pid)| pid.parse::<i32>().ok());
-    pid.is_some_and(|pid| pid > 0 && alive(pid))
-}
-
+/// What's locked for a profile: on Unix the folder itself (flock works on a folder opened for
+/// reading), so older ck-webs see it; on Windows, which can't lock a folder, a file in it.
 #[cfg(unix)]
-fn alive(pid: i32) -> bool {
-    // SAFETY: signal 0 sends nothing; it only asks whether the process is there.
-    unsafe { libc::kill(pid, 0) == 0 }
+fn profile_lock(dir: &std::path::Path) -> std::io::Result<std::fs::File> {
+    std::fs::File::open(dir)
 }
 
 #[cfg(not(unix))]
-fn alive(_pid: i32) -> bool {
+#[allow(clippy::disallowed_methods)] // a lock, kept empty: nothing lands in it
+fn profile_lock(dir: &std::path::Path) -> std::io::Result<std::fs::File> {
+    std::fs::File::options().create(true).truncate(false).write(true).open(dir.join("ck-web.lock"))
+}
+
+/// Whether a running Chromium has the profile at `dir`: its `SingletonLock` names the host
+/// and process ("host-1234"), and that process is alive.
+#[cfg(unix)]
+fn chromium_in(dir: &std::path::Path) -> bool {
+    let Ok(link) = std::fs::read_link(dir.join("SingletonLock")) else { return false };
+    let pid = link.to_string_lossy().rsplit_once('-').and_then(|(_, pid)| pid.parse::<i32>().ok());
+    // SAFETY: signal 0 sends nothing; it only asks whether the process is there.
+    pid.is_some_and(|pid| pid > 0 && unsafe { libc::kill(pid, 0) == 0 })
+}
+
+/// Every ck-web on Windows takes the lock: none came before it there.
+#[cfg(not(unix))]
+fn chromium_in(_dir: &std::path::Path) -> bool {
     false
 }
 
-/// Whether Chromium's sandbox can start: it needs user namespaces, which Ubuntu (since
-/// 23.10) and some kernels keep from programs like this one. Without them it runs unsandboxed
-/// (it only ever loads 4chan's pages and its captchas').
+/// Whether Chromium's sandbox can start. On Linux it needs user namespaces, which Ubuntu
+/// (since 23.10) and some kernels keep from programs like this one. On Windows it needs ck-web
+/// started by CEF's bootstrap.exe, which it isn't (`Cargo.toml`). Without it, Chromium runs
+/// unsandboxed (it only ever loads the sites' pages and their captchas').
 fn sandbox_works() -> bool {
     let read = |p: &str| std::fs::read_to_string(p).map(|s| s.trim().to_string()).ok();
-    read("/proc/sys/kernel/apparmor_restrict_unprivileged_userns").as_deref() != Some("1") && read("/proc/sys/kernel/unprivileged_userns_clone").as_deref() != Some("0")
+    cfg!(unix) && read("/proc/sys/kernel/apparmor_restrict_unprivileged_userns").as_deref() != Some("1") && read("/proc/sys/kernel/unprivileged_userns_clone").as_deref() != Some("0")
 }
 
 /// ck's requests, a line each, read on their own thread. The channel closes with stdin.
@@ -603,7 +615,18 @@ fn take_stdout() -> Option<Box<dyn Write>> {
     }
 }
 
-#[cfg(not(unix))]
+/// On Windows: stdout's handle, copied so CEF's other processes don't get it, with the
+/// process's stdout pointed at stderr for what starts or prints from here on. (CEF's library,
+/// loaded before `main`, keeps the stdout it found: `Web::send` writes a reply in one go, and
+/// ck skips lines that aren't replies.)
+#[cfg(windows)]
 fn take_stdout() -> Option<Box<dyn Write>> {
-    Some(Box::new(std::io::stdout()))
+    use std::os::windows::io::{AsHandle, AsRawHandle};
+    use windows_sys::Win32::System::Console::{STD_OUTPUT_HANDLE, SetStdHandle};
+    let out = std::io::stdout().as_handle().try_clone_to_owned().ok()?;
+    // SAFETY: stderr's handle stays open for the whole run, as stdout's did.
+    if unsafe { SetStdHandle(STD_OUTPUT_HANDLE, std::io::stderr().as_raw_handle()) } == 0 {
+        return None;
+    }
+    Some(Box::new(std::fs::File::from(out)))
 }

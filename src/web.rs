@@ -63,6 +63,10 @@ impl Helper {
         std::thread::spawn(move || {
             for line in BufReader::new(stdout).lines() {
                 let Ok(line) = line else { break };
+                // Not a reply at all: something Chromium printed (it can, on Windows).
+                if !line.starts_with('{') {
+                    continue;
+                }
                 // A line this ck can't read is from a ck-web of another version: what's asked
                 // fails, rather than waiting on an answer that won't come.
                 let reply = serde_json::from_str(&line).unwrap_or_else(|_| Reply::Failed { error: STALE.into() });

@@ -412,7 +412,7 @@ dependencies = [
 
 [[package]]
 name = "ck-web"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "base64 0.22.1",
  "cef",
@@ -423,6 +423,7 @@ dependencies = [
  "objc2-app-kit",
  "serde",
  "serde_json",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

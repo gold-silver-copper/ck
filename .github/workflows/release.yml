@@ -1,0 +1,88 @@
+name: ck release
+
+# ck for each system, attached to the release `vX.Y.Z` (crates.io gets it from `cargo publish`,
+# by hand). A version with a suffix (`v1.0.0-rc.1`) is a prerelease: never the latest.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  TAG: ${{ github.ref_name }}
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: The tag is ck's version
+        run: grep -qx "version = \"${TAG#v}\"" Cargo.toml
+      - run: >
+          gh release view "$TAG" ||
+          gh release create "$TAG" --title "ck ${TAG#v}" --generate-notes
+          $( [[ "$TAG" == *-* ]] && echo --prerelease )
+
+  build:
+    needs: release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The oldest Ubuntu runners: ck runs on systems as old as their glibc.
+          - { os: ubuntu-22.04, target: linux-x86_64 }
+          - { os: ubuntu-22.04-arm, target: linux-aarch64 }
+          - { os: macos-15, target: macos-aarch64 }
+          - { os: macos-15-intel, target: macos-x86_64 }
+          - { os: windows-latest, target: windows-x86_64 }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo build --release --locked -p ck
+      - name: Package
+        shell: bash
+        run: |
+          name="ck-${TAG#v}-${{ matrix.target }}"
+          mkdir "$name"
+          cp README.md LICENSE-APACHE LICENSE-MIT config.example.toml "$name/"
+          if [ "$RUNNER_OS" = Windows ]; then
+            cp target/release/ck.exe "$name/"
+            file="$name.zip"
+            7z a -bso0 "$file" "$name"
+          else
+            cp target/release/ck "$name/"
+            strip "$name/ck"
+            file="$name.tar.gz"
+            tar -czf "$file" "$name"
+          fi
+          { shasum -a 256 "$file" || sha256sum "$file"; } > "$file.sha256"
+          ls -l "$file"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: |
+            ck-*.tar.gz
+            ck-*.zip
+            ck-*.sha256
+          if-no-files-found: error
+
+  # Only here can the release be written to, apart from making it.
+  upload:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+      - run: gh release upload "$TAG" ck-* --clobber --repo "$GITHUB_REPOSITORY"

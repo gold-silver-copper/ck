@@ -12,6 +12,11 @@
 
     cargo install ck
 
+Or download ck for Linux, macOS or Windows from the
+[latest release](https://github.com/gold-silver-copper/ck/releases/latest), each file with
+its SHA-256 beside it. On Windows, run it in Windows Terminal (see the
+[manual](docs/manual.md#windows)).
+
 Run `ck`, or `ck 4chan/g` (or any thread or board URL) to start there.
 
 A terminal browser for imageboards, built with [ratatui](https://ratatui.rs): 4chan,
@@ -28,7 +33,7 @@ terminal. (Click the tour for [the video](ck-demo.webm), with controls.)
   drafts, the site's captcha answered in the terminal, and Cloudflare's check clicked there
   too; your posts are marked as yours. Log in with a 4chan Pass or a 2ch passcode
   (ctrl-p) to skip the captcha. The first post downloads ck-web, the browser ck posts
-  through (about 150 MB, once; Linux and macOS).
+  through (about 150 MB, once; Linux, macOS and Windows).
 - **Watched threads** refresh in the background and notify you of new posts and replies to
   yours. They're saved as they go, so a thread that dies can still be read offline.
 - **Filters** and hidden words hide or highlight threads and posts.
@@ -88,7 +93,8 @@ default, with every option explained:
 
     mkdir -p ~/.config/ck && ck --print-config > ~/.config/ck/config.toml
 
-`ck --help` shows where the config, data and caches live. The [manual](docs/manual.md)
+`ck --help` shows where the config, data and caches live (on Windows the config is
+`%APPDATA%\ck\config.toml`). The [manual](docs/manual.md)
 covers every key, option and feature in detail.
 
 ## Development

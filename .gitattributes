@@ -1,0 +1,3 @@
+# Files are checked out as they are stored (LF), on Windows too: the tests compare text
+# with fixtures and snapshots byte for byte.
+* -text

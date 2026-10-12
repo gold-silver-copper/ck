@@ -1,6 +1,7 @@
 # ck's built-in configuration, which also holds the built-in sites. Don't copy this file:
-# `ck --print-config > ~/.config/ck/config.toml` writes it without the [[site]] tables, so
-# the built-in sites stay up to date with ck.
+# `ck --print-config > ~/.config/ck/config.toml` (on Windows, to %APPDATA%\ck\config.toml;
+# `ck --help` says where) writes it without the [[site]] tables, so the built-in sites stay up
+# to date with ck.
 #
 # The built-in sites are always there (`ck --print-sites` prints them). To add another,
 # paste a link to it after `:` or in Settings › Sites, and ck works out the rest; or add a
@@ -62,7 +63,7 @@ notify = "auto"
 # video_player = ["/Applications/IINA.app/Contents/MacOS/iina-cli", "--no-stdin", "{url}"]
 
 # Where ck-web, the browser helper ck posts through, is, if you built your own (by
-# default: the one ck downloads, then next to ck, then on the PATH).
+# default: the one ck downloads, then next to ck, then on the PATH). On Windows it's ck-web.exe.
 # web_helper = "~/ck/target/release/ck-web"
 #
 # A 4chan Pass or a 2ch passcode has no setting here: log in with ctrl-p in the reply box. The
@@ -150,7 +151,7 @@ watched_first = false
 # catalog_lines = 5
 
 # Where saved files and pages go. {site}, {board} and {thread} are filled in, and {downloads}
-# is your Downloads folder. "~/" works too.
+# is your Downloads folder. "~/" works too (and "~\" on Windows).
 # download_dir = "{downloads}/ck/{site}/{board}/{thread}"
 
 [[site]]
