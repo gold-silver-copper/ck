@@ -577,7 +577,7 @@ their text.
 ### Opening what you've seen before
 
 ck keeps the last copy of each catalog and thread you open in its cache directory
-(`$XDG_CACHE_HOME/ck/pages`, at most `page_cache_mb`, 100 MB by default). Opening one again
+(`$XDG_CACHE_HOME/ck/pages`; on Windows, [elsewhere](#windows), at most `page_cache_mb`, 100 MB by default). Opening one again
 shows that copy at once, marked "cached 3m ago" in the top bar, and the same request as
 always refreshes it in place, keeping your place. It's never an extra request: the copy
 also lets the first request after a restart ask whether anything changed, so an unchanged
@@ -679,7 +679,8 @@ selected post as yours (and watches the thread). Replies to it are counted in Wa
 quotes of it read `>>123 (You)`, and they get their own notification. The marks show in
 every tab at once; unwatching the thread (`w`, or `x` in Watched) forgets them.
 
-ck keeps its state as JSON in `$XDG_DATA_HOME/ck` (default `~/.local/share/ck`):
+ck keeps its state as JSON in `$XDG_DATA_HOME/ck` (default `~/.local/share/ck`; on Windows
+`%LOCALAPPDATA%\ck\data`):
 `watched.json`, `history.json`, `recent_boards.json`, `board_prefs.json` (each board's
 sort and layout), `hidden.json` (what you hid with `. H`), `seen.json` (catalog threads
 seen, for "new" and `+N`), `session.json` (your tabs, for the next start), `positions.json` (where you left each
@@ -782,13 +783,14 @@ the first time you send a post. ck doesn't come with it (Chromium is too big for
 the first ctrl-s asks to download it, about 150 MB, from ck's releases on GitHub (the
 `ck-web-v…` ones, built by the repository's workflow). ck checks the download against the
 SHA-256 it has for that version, and won't use one that differs, then unpacks it in
-`$XDG_DATA_HOME/ck/web/<version>` (default `~/.local/share/ck/web`). A ck that needs a newer
+`web/<version>` in ck's data folder (default `~/.local/share/ck/web`). A ck that needs a newer
 ck-web downloads it the same way, and the older one goes. It loads a page on the site's own
 domain with nothing on it (its `robots.txt`: no ads, no scripts of the site's), gets the
 captcha there and sends the post from there, as the site's own reply form would, with
 Chromium's sandbox on (where the system allows it: Ubuntu since 23.10 keeps it from
-programs like ck-web, which then runs without it). Its profile (cookies, Cloudflare's pass)
-is kept in `$XDG_CACHE_HOME/ck/web`, with a pass's login, so the next post usually skips the
+programs like ck-web, which then runs without it, and on Windows it needs ck-web started by a
+launcher of CEF's, which it isn't). Its profile (cookies, Cloudflare's pass)
+is kept in `$XDG_CACHE_HOME/ck/web` (`%LOCALAPPDATA%\ck\web` on Windows), with a pass's login, so the next post usually skips the
 check; a second ck running at once uses `web-1`.
 
 When Cloudflare (or 4chan's occasional hCaptcha, or DDoS-Guard) wants a person, the box
@@ -803,9 +805,10 @@ lets these load even on sites whose pages forbid other hosts' scripts (it loads 
 the site's pages and the captcha). A bot check that works itself out (ptch.net's) shows a
 moment, then goes.
 
-The download is for Linux and macOS (x86_64 and ARM each). Elsewhere, or to use your own
-build, build it from the repository with `cargo build --release -p ck-web` (it needs cmake
-and ninja) and point `web_helper` at `target/release/ck-web`, or run ck from that folder.
+The download is for Linux and macOS (x86_64 and ARM each), and Windows (x86_64). Elsewhere,
+or to use your own build, build it from the repository with `cargo build --release -p
+ck-web` (it needs cmake and ninja) and point `web_helper` at `target/release/ck-web`
+(`ck-web.exe` on Windows), or run ck from that folder.
 On macOS, Chromium only runs from an app: `sh ck-web/bundle-macos.sh` then makes
 `target/release/ck-web.app`, and `web_helper` points at
 `target/release/ck-web.app/Contents/MacOS/ck-web`. If ck-web stops (a library Chromium needs
@@ -845,7 +848,8 @@ copying or saving it, say neither is available. The menu offers only what there 
 
 Images load in the background through the same rate limiter as everything else, only for
 what's on screen (or about to be), and are kept in a bounded in-memory cache. Thumbnails
-are also cached on disk in `$XDG_CACHE_HOME/ck/thumbs` (default `~/.cache/ck/thumbs`, at
+are also cached on disk in `$XDG_CACHE_HOME/ck/thumbs` (default `~/.cache/ck/thumbs`, and
+`%LOCALAPPDATA%\ck\cache\thumbs` on Windows, at
 most 200 MB, least recently used first out), so revisiting a catalog or thread shows them
 at once without any requests. On sites whose images share the page's rate limit, visible
 thumbnails load top to bottom and nothing is prefetched ahead of them.
@@ -1027,6 +1031,33 @@ All settings are optional; see `config.example.toml` for every option with comme
 - `theme = "nord"`, `[themes.NAME]`, `color = "auto" | "truecolor" | "256"`: see
   [Themes and settings](#themes-and-settings). A ck 0.2 `[theme]` table of colors still
   works, on top of the default theme.
+
+## Windows
+
+Download `ck-<version>-windows-x86_64.zip` from the
+[latest release](https://github.com/gold-silver-copper/ck/releases/latest) and put `ck.exe`
+somewhere on your `PATH`, or `cargo install ck` (that needs Visual Studio's C++ build tools,
+as any Rust program on Windows does). Run it in Windows Terminal, which comes with Windows
+11: the old console window draws ck's colours and borders poorly. Windows Terminal (1.22 and
+later) shows sixel images; if ck finds no image protocol there, `images = "sixel"` names it
+(otherwise ck uses half-blocks).
+
+Where ck keeps its files on Windows, unless the `XDG_…` variables are set:
+
+- the config: `%APPDATA%\ck\config.toml` (in cmd, `mkdir %APPDATA%\ck` then
+  `ck --print-config > %APPDATA%\ck\config.toml` writes the default one);
+- its state, saved threads and ck-web: `%LOCALAPPDATA%\ck\data`;
+- thumbnails and the last copy of pages: `%LOCALAPPDATA%\ck\cache`;
+- ck-web's browser profile (cookies, a pass's login): `%LOCALAPPDATA%\ck\web`.
+
+`ck --help` prints them. A path in the config may start with `~\` as well as `~/`.
+
+What's different there:
+
+- Closing the window ends ck at once, without the save `q` does. What you do is saved as
+  you go (watched threads and history within two seconds, your tabs within half a minute),
+  so at most that is lost. On Linux and macOS, closing the terminal saves first.
+- ck-web runs without Chromium's sandbox (see [ck-web, and Cloudflare](#ck-web-and-cloudflare)).
 
 ## Adding sites
 

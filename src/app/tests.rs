@@ -17,7 +17,7 @@ fn mouse(kind: MouseEventKind, column: u16, row: u16) -> MouseEvent {
 
 #[test]
 fn finds_programs_on_path() {
-    assert!(super::on_path("sh"));
+    assert!(super::on_path(if cfg!(windows) { "cmd" } else { "sh" }));
     assert!(!super::on_path("ck-no-such-program"));
 }
 

@@ -550,6 +550,7 @@ fn profile_lock(dir: &std::path::Path) -> std::io::Result<std::fs::File> {
 }
 
 #[cfg(not(unix))]
+#[allow(clippy::disallowed_methods)] // a lock, kept empty: nothing lands in it
 fn profile_lock(dir: &std::path::Path) -> std::io::Result<std::fs::File> {
     std::fs::File::options().create(true).truncate(false).write(true).open(dir.join("ck-web.lock"))
 }
