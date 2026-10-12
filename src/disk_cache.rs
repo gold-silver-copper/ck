@@ -1,4 +1,4 @@
-//! A bounded on-disk cache of thumbnail bytes, keyed by URL, in $XDG_CACHE_HOME/ck/thumbs.
+//! A bounded on-disk cache of thumbnail bytes, keyed by URL, in `thumbs` in ck's cache folder.
 //! Thumbnails never change at a given URL, so a hit needs no request at all.
 
 use crate::http::lock;
@@ -19,10 +19,7 @@ pub struct DiskCache {
 
 impl DiskCache {
     pub fn default_dir() -> Option<PathBuf> {
-        let base = std::env::var_os("XDG_CACHE_HOME")
-            .map(PathBuf::from)
-            .or_else(|| dirs::home_dir().map(|h| h.join(".cache")))?;
-        Some(base.join("ck").join("thumbs"))
+        Some(crate::config::folder(crate::config::Folder::Cache)?.join("thumbs"))
     }
 
     pub fn new(dir: PathBuf, budget: u64) -> Self {

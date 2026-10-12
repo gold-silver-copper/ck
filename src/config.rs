@@ -136,12 +136,46 @@ pub struct Config {
     pub default_sites: bool,
 }
 
-/// A path from the config or typed in, with `~/` for the home directory.
+/// A path from the config or typed in, with `~/` for the home directory (`~\` too, on Windows).
 pub fn expand_home(path: &str) -> std::path::PathBuf {
-    match (path.strip_prefix("~/"), dirs::home_dir()) {
+    let rest = path.strip_prefix("~/").or_else(|| path.strip_prefix("~\\").filter(|_| cfg!(windows)));
+    match (rest, dirs::home_dir()) {
         (Some(rest), Some(home)) => home.join(rest),
         _ => std::path::PathBuf::from(path),
     }
+}
+
+/// The kinds of files ck keeps, each in a folder of its own.
+#[derive(Debug, Clone, Copy)]
+pub enum Folder {
+    Config,
+    /// Watched threads, history, saved threads, ck-web.
+    Data,
+    /// Thumbnails and the last copy of pages.
+    Cache,
+}
+
+/// Where ck keeps a kind of file: in `ck` under `$XDG_CONFIG_HOME`, `$XDG_DATA_HOME` or
+/// `$XDG_CACHE_HOME` when set. Otherwise `~/.config/ck`, `~/.local/share/ck` and `~/.cache/ck`,
+/// and on Windows `%APPDATA%\ck`, `%LOCALAPPDATA%\ck\data` and `%LOCALAPPDATA%\ck\cache`
+/// (`%LOCALAPPDATA%\ck\web` is ck-web's browser profile).
+pub fn folder(kind: Folder) -> Option<PathBuf> {
+    let (var, home) = match kind {
+        Folder::Config => ("XDG_CONFIG_HOME", ".config"),
+        Folder::Data => ("XDG_DATA_HOME", ".local/share"),
+        Folder::Cache => ("XDG_CACHE_HOME", ".cache"),
+    };
+    if let Some(base) = std::env::var_os(var) {
+        return Some(PathBuf::from(base).join("ck"));
+    }
+    if cfg!(windows) {
+        return match kind {
+            Folder::Config => dirs::config_dir().map(|d| d.join("ck")),
+            Folder::Data => dirs::data_local_dir().map(|d| d.join("ck").join("data")),
+            Folder::Cache => dirs::cache_dir().map(|d| d.join("ck").join("cache")),
+        };
+    }
+    Some(dirs::home_dir()?.join(home).join("ck"))
 }
 
 fn default_true() -> bool {
@@ -725,10 +759,7 @@ impl Config {
     }
 
     pub fn path() -> Option<PathBuf> {
-        let base = std::env::var_os("XDG_CONFIG_HOME")
-            .map(PathBuf::from)
-            .or_else(|| dirs::home_dir().map(|h| h.join(".config")))?;
-        Some(base.join("ck").join("config.toml"))
+        Some(folder(Folder::Config)?.join("config.toml"))
     }
 
     /// Load the user config if it exists, otherwise the built-in defaults. Its sites come
@@ -807,6 +838,24 @@ mod tests {
         }
         let c: Config = toml::from_str("video_player = [\"vlc\", \"--fullscreen\"]").unwrap();
         assert_eq!(c.video_player, Some(vec!["vlc".to_string(), "--fullscreen".to_string()]));
+    }
+
+    // On Windows the data and cache folders share %LOCALAPPDATA% with ck-web's browser
+    // profile: ck-web's old bundles (in the data folder) are removed, and the profile with them
+    // if they overlapped.
+    #[cfg(windows)]
+    #[test]
+    fn windows_folders_dont_overlap() {
+        if ["XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME"].iter().any(|v| std::env::var_os(v).is_some()) {
+            return;
+        }
+        let profile = dirs::cache_dir().unwrap().join("ck").join("web");
+        let folders = [Folder::Config, Folder::Data, Folder::Cache].map(|k| folder(k).unwrap());
+        for (i, a) in folders.iter().chain([&profile]).enumerate() {
+            for b in folders.iter().chain([&profile]).skip(i + 1) {
+                assert!(!a.starts_with(b) && !b.starts_with(a), "{} and {}", a.display(), b.display());
+            }
+        }
     }
 
     #[cfg(unix)]

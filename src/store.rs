@@ -1,4 +1,4 @@
-//! Watched threads and history, saved as JSON in $XDG_DATA_HOME/ck (~/.local/share/ck).
+//! Watched threads and history, saved as JSON in ck's data folder (`config::folder`).
 
 use std::path::{Path, PathBuf};
 
@@ -327,10 +327,7 @@ struct SavedBoards {
 
 impl Store {
     pub fn dir() -> Option<PathBuf> {
-        let base = std::env::var_os("XDG_DATA_HOME")
-            .map(PathBuf::from)
-            .or_else(|| dirs::home_dir().map(|h| h.join(".local").join("share")))?;
-        Some(base.join("ck"))
+        crate::config::folder(crate::config::Folder::Data)
     }
 
     /// Load everything from `dir`. Problems are returned as messages, never fatal: a corrupt

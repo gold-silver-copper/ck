@@ -18,7 +18,13 @@ const BUNDLES: &[(&str, &str)] = &[
     ("macos-aarch64", "5442c9ca7330d49703cf8e5ede78d75242a44605284076868e65d7796893bd6c"),
 ];
 /// ck-web's program in a bundle: on macOS, in its app.
-pub const PROGRAM: &str = if cfg!(target_os = "macos") { "ck-web.app/Contents/MacOS/ck-web" } else { "ck-web" };
+pub const PROGRAM: &str = if cfg!(target_os = "macos") {
+    "ck-web.app/Contents/MacOS/ck-web"
+} else if cfg!(windows) {
+    "ck-web.exe"
+} else {
+    "ck-web"
+};
 /// About how big a bundle is, in megabytes, to say before downloading it.
 pub const SIZE_MB: u64 = 150;
 
