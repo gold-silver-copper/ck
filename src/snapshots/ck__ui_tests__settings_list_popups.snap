@@ -9,19 +9,19 @@ expression: "shots.join(\"\\n=====\\n\")"
     Colors            as the theme has them        Change any color of the current theme
     Color depth       auto (24-bit)                24-bit color, or the nearest of 256
     R  Your sites                        a add · r update a vichan site's boards · x remove · esc close
-    T                                                                                                     …
-    T  None yet: only the built-in sites. a adds one from a link to it.                                  w…
-
+    T                                                                                                    w…
+       None yet: only the built-in sites. a adds one from a link to it.
   Cat
-    D  Kept in the config as [[site]] tables; the built-in sites are always there too.
-    P                                                                                                    o…
-    Watched first     in the sort's order          Threads you watch at the top of catalogs
+    D
+    P  Kept in the config as [[site]] tables; the built-in sites are always there too.                   o…
+    W
     Images            on                           Thumbnails and the image viewer (after a restart)
     NSFW boards       images shown                 Images on boards the site marks NSFW
     Board images      none                         Boards with their own image setting (. menu on a board)
+    Filters           0 filters, 0 hidden by hand  Hide or highlight by pattern; X adds one from a post
 
     Theme: material  ·  Live preview while choosing
- enter change   / filter   esc back   ? help                                                        1/26  3%
+ enter change   / filter   esc back   ? help                                                        1/25  4%
 
 =====
  ck  Settings
@@ -31,19 +31,19 @@ expression: "shots.join(\"\\n=====\\n\")"
     Colors            as the theme has them        Change any color of the current theme
     C  Your sites                        a add · r update a vichan site's boards · x remove · esc close
     R
-    T  one               vichan     https://one.example                                           added   …
-    T  lainchan          vichan     https://lainchan.example                       changes the built-in  w…
-     ▌ three             vichan     https://three.example                            x again removes it
-  Cat
+    T  one               vichan     https://one.example                                           added  w…
+       lainchan          vichan     https://lainchan.example                       changes the built-in
+  Cat▌ three             vichan     https://three.example                            x again removes it
     D
-    P  Kept in the config as [[site]] tables; the built-in sites are always there too.                   o…
-    W
-    Images            on                           Thumbnails and the image viewer (after a restart)
+    P                                                                                                    o…
+    W  Kept in the config as [[site]] tables; the built-in sites are always there too.
+    I
     NSFW boards       images shown                 Images on boards the site marks NSFW
     Board images      none                         Boards with their own image setting (. menu on a board)
+    Filters           0 filters, 0 hidden by hand  Hide or highlight by pattern; X adds one from a post
 
     Theme: material  ·  Live preview while choosing
- enter change   / filter   esc back   ? help                                                        1/26  3%
+ enter change   / filter   esc back   ? help                                                        1/25  4%
 
 =====
  ck  Settings
@@ -53,15 +53,15 @@ expression: "shots.join(\"\\n=====\\n\")"
     Colors  Board images                     x back to the default · esc close  heme
     Color                                                                       56
     Readin  None: every board follows the default. A board's . menu changes     ed pos…
-    Text w  it.                                                                 ads an…
-    Termin                                                                      are ne…
-            Boards the site marks NSFW follow the NSFW boards setting; the
-  Catalog   rest show images.
-    Defaul
-    Preview lines     as fit beside the thum…  How much of each thread a card shows (i…
+    Termin  it.                                                                 are ne…
+
+  Catalog   Boards the site marks NSFW follow the NSFW boards setting; the
+    Defaul  rest show images.
+    Previe                                                                      ows (i…
+    Watched first     in the sort's order      Threads you watch at the top of catalogs
 
     Theme: material  ·  Live preview while choosing
- enter change   / filter   esc back   ? help                                    1/26  3%
+ enter change   / filter   esc back   ? help                                    1/25  4%
 
 =====
  ck  Settings
@@ -71,15 +71,15 @@ expression: "shots.join(\"\\n=====\\n\")"
     Colors  Board images                     x back to the default · esc close  heme
     Color                                                                       56
     Readin  4chan/b                                                 images off  ed pos…
-    Text w▌ 4chan/g                                                  images on  ads an…
-    Termin                                                                      are ne…
-            Boards the site marks NSFW follow the NSFW boards setting; the
-  Catalog   rest show images.
-    Defaul
-    Preview lines     as fit beside the thum…  How much of each thread a card shows (i…
+    Termin▌ 4chan/g                                                  images on  are ne…
+
+  Catalog   Boards the site marks NSFW follow the NSFW boards setting; the
+    Defaul  rest show images.
+    Previe                                                                      ows (i…
+    Watched first     in the sort's order      Threads you watch at the top of catalogs
 
     Theme: material  ·  Live preview while choosing
- enter change   / filter   esc back   ? help                                    1/26  3%
+ enter change   / filter   esc back   ? help                                    1/25  4%
 
 =====
  ck  Settings
@@ -89,15 +89,15 @@ expression: "shots.join(\"\\n=====\\n\")"
     Colors  Hidden words                          a add · x remove · esc close  heme
     Color                                                                       56
     Readin  None yet. a adds one; so does w in a post's X.                      ed pos…
-    Text w                                                                      ads an…
     Termin                                                                      are ne…
-            Whole words, any case. Kept in the config as hidden_words.
-  Catalog
-    Default layout    cards                    c in a catalog sets a board's own
+
+  Catalog   Whole words, any case. Kept in the config as hidden_words.
+    Defaul
     Preview lines     as fit beside the thum…  How much of each thread a card shows (i…
+    Watched first     in the sort's order      Threads you watch at the top of catalogs
 
     Theme: material  ·  Live preview while choosing
- enter change   / filter   esc back   ? help                                    1/26  3%
+ enter change   / filter   esc back   ? help                                    1/25  4%
 
 =====
  ck  Settings
@@ -107,15 +107,15 @@ expression: "shots.join(\"\\n=====\\n\")"
     Colors                                                                      heme
     Color   crypto                                                              56
     Readin▌ free money                                                          ed pos…
-    Text w  λ                                                                   ads an…
-    Termin                                                                      are ne…
+    Termin  λ                                                                   are ne…
 
-  Catalog   Whole words, any case. Kept in the config as hidden_words.
-    Defaul
-    Preview lines     as fit beside the thum…  How much of each thread a card shows (i…
+  Catalog
+    Defaul  Whole words, any case. Kept in the config as hidden_words.
+    Previe                                                                      ows (i…
+    Watched first     in the sort's order      Threads you watch at the top of catalogs
 
     Theme: material  ·  Live preview while choosing
- enter change   / filter   esc back   ? help                                    1/26  3%
+ enter change   / filter   esc back   ? help                                    1/25  4%
 
 =====
  ck  Settings
@@ -125,15 +125,15 @@ expression: "shots.join(\"\\n=====\\n\")"
     Colors                                                                      heme
     Color   crypto                                                              56
     Readin  free money                                                          ed pos…
-    Text w  λ                                                                   ads an…
-    Termin                                                                      are ne…
-            New  spa▏
-  Catalog   Whole words, any case. Kept in the config as hidden_words.
-    Defaul
-    Preview lines     as fit beside the thum…  How much of each thread a card shows (i…
+    Termin  λ                                                                   are ne…
+
+  Catalog   New  spa▏
+    Defaul  Whole words, any case. Kept in the config as hidden_words.
+    Previe                                                                      ows (i…
+    Watched first     in the sort's order      Threads you watch at the top of catalogs
 
     Theme: material  ·  Live preview while choosing
- enter change   / filter   esc back   ? help                                    1/26  3%
+ enter change   / filter   esc back   ? help                                    1/25  4%
 
 =====
  ck  Settings
@@ -143,15 +143,15 @@ expression: "shots.join(\"\\n=====\\n\")"
     Colors  word19                                                              heme
     Color   word20                                                              56
     Readin  word21                                                              ed pos…
-    Text w  word22                                                              ads an…
-    Termin  word23                                                              are ne…
-            word24
-  Catalog ▌ word25
-    Defaul
+    Termin  word22                                                              are ne…
+            word23
+  Catalog   word24
+    Defaul▌ word25
     Previe                                                                      ows (i…
+    Watche                                                                      atalogs
             Whole words, any case. Kept in the config as hidden_words.
     Theme:
- enter change   / filter   esc back   ? help                                    1/26  3%
+ enter change   / filter   esc back   ? help                                    1/25  4%
 
 =====
  ck  Settings
@@ -161,12 +161,12 @@ expression: "shots.join(\"\\n=====\\n\")"
     Colors  word19                                                              heme
     Color   word20                                                              56
     Readin  word21                                                              ed pos…
-    Text w  word22                                                              ads an…
-    Termin  word23                                                              are ne…
-            word24
-  Catalog   word25
-    Defaul
-    Previe  New  x▏                                                             ows (i…
+    Termin  word22                                                              are ne…
+            word23
+  Catalog   word24
+    Defaul  word25
+    Previe                                                                      ows (i…
+    Watche  New  x▏                                                             atalogs
             Whole words, any case. Kept in the config as hidden_words.
     Theme:
- enter change   / filter   esc back   ? help                                    1/26  3%
+ enter change   / filter   esc back   ? help                                    1/25  4%

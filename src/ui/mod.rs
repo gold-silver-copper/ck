@@ -962,15 +962,6 @@ pub(crate) fn shorten_name(name: &str, width: usize) -> String {
     format!("{start}…{end}")
 }
 
-/// `area` at most `width` wide (`text_width`; 0: as it is), centered: long lines are hard
-/// to read.
-fn readable(width: u16, area: Rect) -> Rect {
-    match width {
-        w if w > 0 && area.width > w => Rect { x: area.x + (area.width - w) / 2, width: w, ..area },
-        _ => area,
-    }
-}
-
 /// `s` padded with spaces to `width` cells (as drawn); never cut.
 pub(crate) fn pad(s: &str, width: usize) -> String {
     format!("{s}{}", " ".repeat(width.saturating_sub(markup::columns(s))))

@@ -6070,18 +6070,15 @@ fn quotes_of_other_threads_are_marked_and_previewed() {
     assert_eq!(app.tab.view(), View::Thread);
 }
 
-/// A thread is at most `text_width` columns wide, centered.
+/// A thread takes the whole width of a wide screen.
 #[test]
-fn a_thread_on_a_wide_screen_keeps_to_its_width() {
+fn a_thread_on_a_wide_screen_takes_its_width() {
     let mut app = thread_app_of(5);
     draw_at(&mut app, 200, 30);
     let area = |app: &App| match app.drawn().and_then(|d| d.body) {
         Some(Hit::Thread { area, .. }) => area,
         _ => Rect::default(),
     };
-    assert_eq!((area(&app).width, area(&app).x > 20), (140, true));
-    app.text_width = 0;
-    draw_at(&mut app, 200, 30);
     assert!(area(&app).width > 190);
 }
 
@@ -6110,10 +6107,8 @@ fn esc_clears_the_settings_filter_then_closes_them() {
     app.on_key(KeyEvent::from(KeyCode::Char('/')));
     type_text(&mut app, "lines");
     app.on_key(KeyEvent::from(KeyCode::Enter));
-    // Name matches first: enter changes Preview lines, not Text width.
-    let before = app.text_width;
     app.on_key(KeyEvent::from(KeyCode::Enter));
-    assert_eq!((app.text_width, app.catalog_lines), (before, Some(1)));
+    assert_eq!(app.catalog_lines, Some(1));
     app.on_key(KeyEvent::from(KeyCode::Esc));
     assert_eq!((app.tab.view(), app.filter(View::Settings)), (View::Settings, ""));
     app.on_key(KeyEvent::from(KeyCode::Esc));

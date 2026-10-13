@@ -493,8 +493,6 @@ pub struct App {
     pub pages: Option<crate::pages::Pages>,
     /// `scroll_margin`: where the selected post sits while reading (a fraction of the screen).
     pub scroll_margin: f32,
-    /// `text_width`: the most columns threads and catalogs take (0: the screen's).
-    pub text_width: u16,
     /// The config's `[[filter]]` tables, as last read or written (`filters` is made from them).
     pub filter_cfgs: Vec<crate::filter::FilterConfig>,
     /// `hidden_words`: posts with one are hidden everywhere.
@@ -668,7 +666,6 @@ impl App {
             hidden_words: cfg.hidden_words.clone(),
             filter_cfgs: cfg.filters.clone(),
             scroll_margin: if cfg.scroll_margin.is_finite() { cfg.scroll_margin.clamp(0.0, 0.5) } else { 0.3 },
-            text_width: cfg.text_width,
             pages: crate::pages::Pages::default_dir()
                 .filter(|_| !cfg!(test) && cfg.page_cache_mb > 0)
                 .map(|d| crate::pages::Pages::new(d, cfg.page_cache_mb.saturating_mul(1024 * 1024))),
@@ -777,8 +774,7 @@ impl App {
         let all: Vec<_> = settings::settings().collect();
         let filter = &self.settings_list.filter;
         let mut shown = filtered(filter, &all, |s| format!("{} {} {}", s.label, s.hint, (s.value)(self)));
-        // Those whose name has it first: `/lines` is Preview lines, not Text width (whose
-        // hint says "long lines"), so enter changes the one meant.
+        // Those whose name has it first, so enter changes the one meant.
         let needle = filter.to_lowercase();
         shown.sort_by_key(|&i| !all.get(i).is_some_and(|s| s.label.to_lowercase().contains(&needle)));
         shown

@@ -16,7 +16,6 @@ pub(super) fn draw_thread(f: &mut Frame, app: &mut App, area: Rect) {
         return;
     };
     let th = theme();
-    let area = super::readable(app.text_width, area);
     // A taller or shorter screen: the selection stays in view.
     if t.viewport != area.height as usize {
         t.viewport = area.height as usize;
