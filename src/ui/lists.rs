@@ -255,7 +255,6 @@ pub(super) fn draw_catalog(f: &mut Frame, app: &mut App, area: Rect) {
         draw_grid(f, app, area);
         return;
     }
-    let area = super::readable(app.text_width, area);
     let compact = layout == CatalogLayout::Compact;
     let thumbs = images && !compact;
     // Lines of text a card shows, and its thumbnail (as tall as the card, its shape kept).
@@ -419,7 +418,6 @@ const WATCHING: &str = "◉ ";
 /// Archive search results: each post with its thread, as cards.
 pub(super) fn draw_search(f: &mut Frame, app: &mut App, area: Rect) {
     let t = theme();
-    let area = super::readable(app.text_width, area);
     let mut state = app.list_state(View::Search);
     let Some(s) = &app.tab.search else { return };
     // Saved threads: how far the search has got, above the results.

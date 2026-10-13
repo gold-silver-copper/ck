@@ -113,11 +113,6 @@ page_cache_mb = 100
 # 0 lets it reach the edge. Also in Settings.
 scroll_margin = 0.3
 
-# Threads, catalogs (cards and compact) and search results are at most this many columns
-# wide, centered on a wider screen: long lines are hard to read. 0 uses the whole width.
-# Also in Settings.
-text_width = 140
-
 # Reading the last post of a thread, posts a refresh brings come into view: the first new one
 # is selected, as `j` would. Elsewhere in the thread nothing moves, and the top bar says how
 # many new posts are below. Also in Settings.

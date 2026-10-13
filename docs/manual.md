@@ -209,11 +209,6 @@ it above and what comes next below. Reading up with `k` does the same at the top
 0.5` keeps the selected post centered, and `0` lets it reach the edges (scrolling as little
 as possible, as before); Settings › Reading position cycles through them.
 
-On a wide screen threads, catalogs (in cards and compact) and search results are at most
-`text_width` columns wide (140 by default), centered: long lines are hard to read. `0` uses
-the whole width; Settings › Text width cycles through 100, 120, 140, 160 and that. The grid
-uses the whole width, with wider cards when there's room.
-
 ### Reading the end of a thread
 
 While you read the last post of a thread (it's selected and the end of the thread is on
