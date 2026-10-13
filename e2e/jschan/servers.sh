@@ -112,8 +112,12 @@ start() {
     (cd "$dir" && npx gulp reset >"$run/reset-$name.log" 2>&1) || { tail -n 30 "$run/reset-$name.log"; exit 1; }
     node "$HERE/seed.js" accounts "$dir"
     # Not production: Node serves the pages and files itself, with no nginx in front.
+    # In a session of their own where there's setsid (not macOS): WSL1 ends the processes of
+    # the session they were started in when it ends.
+    local detach
+    detach=$(command -v setsid || true)
     for js in server worker; do
-      (cd "$dir" && NODE_ENV=development exec node "$js.js" </dev/null >"$run/$name-$js.log" 2>&1) &
+      (cd "$dir" && NODE_ENV=development exec $detach node "$js.js" </dev/null >"$run/$name-$js.log" 2>&1) &
       echo $! >"$run/$name-$js.pid"
     done
     wait_port "$name" "$port" || { tail -n 30 "$run/$name-server.log"; exit 1; }

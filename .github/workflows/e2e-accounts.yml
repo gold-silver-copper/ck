@@ -105,6 +105,7 @@ jobs:
       - name: Log in, post, log out
         shell: bash
         run: |
+          for url in $CK_E2E_JSCHAN; do curl -fsS -o /dev/null "$url/robots.txt" || { echo "$url is down"; exit 1; }; done
           export CK_WEB="$PWD/target/debug/ck-web.exe" CK_WEB_PROFILE="$RUNNER_TEMP/profile"
           cargo test -p ck --lib -- --ignored jschan_accounts --nocapture
       - if: failure()
