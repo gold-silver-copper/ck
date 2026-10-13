@@ -281,6 +281,12 @@ pub struct ThreadLayout {
 }
 
 impl ThreadLayout {
+    /// What entries show may have changed, but not which entries there are: each is laid
+    /// out again as it comes near (the line cache keeps what didn't change).
+    pub fn stale(&mut self) {
+        self.exact.iter_mut().for_each(|x| *x = false);
+    }
+
     /// A layout of these blocks, all exact (tests).
     #[cfg(test)]
     pub fn of_blocks(width: u16, blocks: Vec<Rc<[Line<'static>]>>) -> Self {
@@ -424,7 +430,10 @@ impl ThreadView {
             m
         };
         self.search = query;
-        self.layout = None;
+        // Only highlights change: no new estimates of the whole thread.
+        if let Some(l) = &mut self.layout {
+            l.stale();
+        }
     }
 
     /// Lowercase searchable text of a post: name, subject, files and body (hidden spoilers excluded).

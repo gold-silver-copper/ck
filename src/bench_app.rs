@@ -7,8 +7,9 @@
 //!   cargo build --release && cargo test --release -- --ignored bench_app --nocapture --test-threads=1
 //!
 //! `BENCH_RUNS` (default 3): runs, each step's median reported. `BENCH_POSTS` (default
-//! 1500): the long thread's posts. `BENCH_PROFILE=<file>`: one run under samply (`cargo
-//! install samply`), its profile saved to the file (`samply load <file>` opens it).
+//! 1500): the long thread's posts. `BENCH_PROFILE=<command>`: one run, with a profiler
+//! attached to ck once it's up: `{pid}` in the command is ck's, e.g.
+//! `BENCH_PROFILE='perf record -g -o ck.data -p {pid}'`; it should end when ck does.
 //! Needs tmux.
 
 use std::collections::HashMap;
@@ -292,7 +293,7 @@ fn past(n: u64, of: u64) -> impl Fn(&str) -> bool {
 }
 
 /// One run of the session; its steps' costs and ck's memory at the end.
-fn run(ck: &Path, port: u16, posts: u64, profile: Option<&Path>) -> (Vec<(&'static str, Cost)>, (u64, u64)) {
+fn run(ck: &Path, port: u16, posts: u64, profile: Option<&str>) -> (Vec<(&'static str, Cost)>, (u64, u64)) {
     let dir = tempfile::tempdir().unwrap();
     let config = format!(
         "notify = \"off\"\nrestore_session = false\nrefresh_thread_secs = 10\ndownload_dir = \"{}\"\n\n[[site]]\nname = \"vichan\"\nkind = \"vichan\"\nurl = \"http://127.0.0.1:{port}\"\nboards = [\"g\"]\n",
@@ -301,10 +302,7 @@ fn run(ck: &Path, port: u16, posts: u64, profile: Option<&Path>) -> (Vec<(&'stat
     let mut env = scratch(dir.path(), &config);
     env.push(("CK_INPUT_LOG".into(), dir.path().join("input.log").display().to_string()));
     let tmux = Tmux { socket: format!("ck-bench-{}", std::process::id()) };
-    let mut cmd = command(ck, &env, &[]);
-    if let Some(p) = profile {
-        cmd = format!("samply record --save-only --unstable-presymbolicate -o '{}' -- {cmd}", p.display());
-    }
+    let cmd = command(ck, &env, &[]);
     let start = Instant::now();
     tmux.launch(&format!("{cmd}; echo CK_EXIT=$?; sleep 600"), (120, 40));
     tmux.run(&["set", "-s", "escape-time", "0"]);
@@ -314,6 +312,12 @@ fn run(ck: &Path, port: u16, posts: u64, profile: Option<&Path>) -> (Vec<(&'stat
         pid = ck_pid(&tmux);
     }
     let mut s = Session { tmux, dir: dir.path().to_path_buf(), pid: pid.expect("ck didn't start"), costs: Vec::new() };
+    let mut profiler = profile.map(|p| {
+        let cmd = p.replace("{pid}", &s.pid.to_string());
+        let child = std::process::Command::new("sh").args(["-c", &cmd]).stdout(std::process::Stdio::null()).spawn().expect("the profiler");
+        std::thread::sleep(Duration::from_millis(500));
+        child
+    });
     while !s.frame().contains("vichan") {
         assert!(start.elapsed() < Duration::from_secs(10), "ck didn't draw:\n{}", s.tmux.screen());
         std::thread::sleep(Duration::from_millis(1));
@@ -367,12 +371,8 @@ fn run(ck: &Path, port: u16, posts: u64, profile: Option<&Path>) -> (Vec<(&'stat
     }
     s.costs.push(("quit (saving)", Cost { wall: quit.elapsed(), ..Cost::default() }));
     assert!(s.tmux.screen().contains("CK_EXIT=0"), "ck didn't quit cleanly:\n{}", s.tmux.screen());
-    if profile.is_some() {
-        // samply writes the profile after ck exits.
-        let wrote = Instant::now();
-        while !profile.is_some_and(Path::exists) && wrote.elapsed() < Duration::from_secs(60) {
-            std::thread::sleep(Duration::from_millis(100));
-        }
+    if let Some(profiler) = &mut profiler {
+        let _ = profiler.wait();
     }
     // The last run's log, to see what ck did when.
     let _ = std::fs::copy(dir.path().join("input.log"), std::env::temp_dir().join("ck-bench-input.log"));
@@ -394,7 +394,7 @@ fn bench_app() {
     }
     let env = |k: &str, d: u64| std::env::var(k).ok().and_then(|v| v.parse().ok()).unwrap_or(d);
     let posts = env("BENCH_POSTS", 1500);
-    let profile = std::env::var_os("BENCH_PROFILE").map(PathBuf::from);
+    let profile = std::env::var("BENCH_PROFILE").ok();
     let runs = if profile.is_some() { 1 } else { env("BENCH_RUNS", 3) };
     let (port, site) = serve(posts);
     let results: Vec<_> = (0..runs).map(|_| run(&ck, port, posts, profile.as_deref())).collect();
@@ -414,7 +414,5 @@ fn bench_app() {
     let (peak, rss) = results.iter().map(|r| r.1).max().unwrap_or_default();
     eprintln!("{:<46} {:>9} {total:>9.1?}", "all", "");
     eprintln!("memory: peak {} MB, at the end {} MB", peak >> 10, rss >> 10);
-    if let Some(p) = profile {
-        eprintln!("profile: {} (samply load it)", p.display());
-    }
+
 }
