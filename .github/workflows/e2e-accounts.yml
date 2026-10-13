@@ -78,18 +78,15 @@ jobs:
       - name: Servers' install
         shell: wsl-bash {0}
         run: CK_E2E=$HOME/ck-e2e e2e/jschan/servers.sh install --packages
-      # Started from a wsl.exe that stays: WSL1 ends a session's processes with it. (wsl.exe
-      # gives what follows `--` to the distribution's shell as one command line.)
-      - name: Servers
+      # WSL1 ends an instance (and the servers in it) once no wsl.exe is left: one stays,
+      # asleep, while the servers start in the next step and the test runs.
+      - name: Keep WSL running
         shell: pwsh
-        run: |
-          Start-Process wsl.exe -ArgumentList '-- CK_E2E=$HOME/ck-e2e e2e/jschan/servers.sh start > $HOME/start.log 2>&1; sleep 7200' -WindowStyle Hidden
-          for ($i = 0; $i -lt 180; $i++) {
-            if ((Test-NetConnection 127.0.0.1 -Port 7101 -WarningAction SilentlyContinue).TcpTestSucceeded) { break }
-            Start-Sleep 2
-          }
-          wsl -- bash -c 'cat $HOME/start.log'
-          if (-not (Test-NetConnection 127.0.0.1 -Port 7101 -WarningAction SilentlyContinue).TcpTestSucceeded) { exit 1 }
+        run: Start-Process wsl.exe -ArgumentList '-- sleep 7200' -WindowStyle Hidden
+      - name: Servers
+        shell: wsl-bash {0}
+        timeout-minutes: 15
+        run: CK_E2E=$HOME/ck-e2e e2e/jschan/servers.sh start
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo build -p ck-web
@@ -100,4 +97,4 @@ jobs:
           cargo test -p ck --lib -- --ignored jschan_accounts --nocapture
       - if: failure()
         shell: wsl-bash {0}
-        run: tail -n 40 $HOME/start.log $HOME/ck-e2e/run/*.log || true
+        run: tail -n 40 $HOME/ck-e2e/run/*.log || true
