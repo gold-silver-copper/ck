@@ -21,9 +21,10 @@ NODE_VERSION=20.18.0
 MONGO_VERSION=7.0.14
 REDIS_VERSION=7.2.5
 MONGO_PORT=27117
-# name, the pinned commit's archive, the commit, port, Redis port
+# name, the pinned commit's archive, the commit, port, Redis port. (jschan from its own mirror
+# on GitHub: gitgud.io, its home, times out building archives now and then.)
 SERVERS=(
-  "jschan https://gitgud.io/fatchan/jschan/-/archive/COMMIT/jschan-COMMIT.tar.gz c0d50eb168501d7e0ac8fd9c516901c6dbfc5270 7100 6479"
+  "jschan https://github.com/fatchan/jschan/archive/COMMIT.tar.gz c0d50eb168501d7e0ac8fd9c516901c6dbfc5270 7100 6479"
   "ptchina https://github.com/l29utp0/ptchina/archive/COMMIT.tar.gz 045d02d641acb1949e7f71916f4b465f3f950328 7101 6480"
 )
 
@@ -32,7 +33,7 @@ arch=$(uname -m)
 export PATH="$CK_E2E/node/bin:$CK_E2E/mongodb/bin:$CK_E2E/redis/src:$PATH"
 
 # Download $1 into $2 (a folder, made fresh), unpacking a .tar.gz/.tgz one level down. (curl
-# tries again after a server's passing errors, gitgud.io's 524s among them.)
+# tries again after a server's passing errors.)
 fetch() {
   rm -rf "$2" && mkdir -p "$2"
   curl -fsSL --retry 5 --retry-delay 5 "$1" | tar -xz -C "$2" --strip-components=1
