@@ -15,9 +15,9 @@ expression: narrow(&mut a)
                          off
       x                  remove the entry
                          (home: a favorite)
-      . B                images on this board:
+      B                  images on this board:
                          on / off
-      . a                add a site from a
+      a                  add a site from a
                          link to any page of
                                     ↓ more (j)
 

@@ -24,9 +24,8 @@ You don't need to know many. Select something, then:
 - `enter` does the obvious thing with it: opens a thread or board, shows a post's images (or,
   without any, goes to the post it quotes), opens a dead thread's saved copy or its archive's;
 - `h`, `esc` or backspace goes back, like a browser's back button (see below);
-- `.` (or right-click) lists everything else you can do with it. Each row has its key, and
-  the less used ones are a letter in that menu: `.` then `H` hides a post, written `. H`
-  here;
+- `.` (or right-click) lists everything else you can do with it, each row with its key:
+  `x` hides a post, `e` shows its replies under it (`e` again hides them);
 - `c` changes what the view shows: in a catalog its sort and layout, in a thread which posts
   (a conversation, a poster's posts, only those with files);
 - in a thread, `tab` steps through the post's images, links and replies (the footer says
@@ -42,7 +41,7 @@ followed a link from; then to where the thread was opened from (the catalog, the
 threads, ...). As in vim, ctrl-o goes back where you jumped from: in a thread, the post you
 followed a quote (or `'a`, `n`, ...) from; else, and from a catalog, the thread you left
 last, at the post you were on: every thread you leave, whichever way, is on the tab's jump
-list. `. ctrl-r` goes forward again [`jump_back`, `jump_forward`]. ctrl-^ opens the thread you
+list. `ctrl-r` goes forward again [`jump_back`, `jump_forward`]. ctrl-^ opens the thread you
 read before this one, where you left it; again, it comes back [`alternate`].
 
 Marks are vim's: `ma` marks the selected post as `a`, and `'a` comes back to it (`` ` `` works
@@ -138,7 +137,7 @@ ones for where you are.
 | `1`–`9` | open a favorite board (home screen) |
 | `*`  | favorite board on / off (also in a catalog) [`favorite`] |
 | `x`  | on the home screen: take a favorite off, forget a recent board, hide / show a site (`u` right after undoes it) [`remove`] |
-| `. a` | add a site from a link to any page of it [`add_site`] |
+| `a` | add a site from a link to any page of it [`add_site`] |
 
 **Watched, History, Saved**
 
@@ -146,7 +145,7 @@ ones for where you are.
 |------|--------|
 | `x`  | remove the entry (`u` right after puts it back); in Saved, press it twice to delete the copy [`remove`] |
 | `y`  | copy the subject and link [`copy`] |
-| `. T` / `. F` | open the thread in a new tab / follow it as a general [`new_tab`, `follow`] |
+| `T` / `F` | open the thread in a new tab / follow it as a general [`new_tab`, `follow`] |
 
 **Image viewer**
 
@@ -187,16 +186,16 @@ ones for where you are.
 | `d`  | save the focused file, or all the post's files; in the gallery, the selected one [`download`] |
 | `y`  | copy the post's text (a focused part: its URL) [`copy`] |
 
-In the `.` menu of a thread, by their letters: `v` the image viewer, `i` open the post's
+In a thread, on these keys (also listed, with them, in the `.` menu): `v` the image viewer, `i` open the post's
 file outside ck, `b` the first reply, `U` the first unread post, `e` show / hide the
 post's replies under it (indented; again on a reply goes a level deeper, up to 4), `s` the
-post's spoilers, `m` mark the post as yours (to be told about replies), `Q` reply quoting
+post's spoilers, `P` mark the post as yours (to be told about replies), `Q` reply quoting
 its text, `T` follow its quote in a new tab, `F` follow the thread as a general (when it
 dies or fills up, the next one is watched), `Y` copy the post's link, `O` its links and
-files, `H` hide / unhide it, `X` hide or highlight posts like it (by poster ID, name and
-tripcode, flag, image, file name, or on the OP subject: a filter), `L` reverse image
+files, `x` hide / unhide it, `X` hide or highlight posts like it (by poster ID, name and
+tripcode, flag, image, file name, or on the OP subject: a filter), `A` reverse image
 search, `D` save all the thread's files, `E` save the thread as a page (both ask first),
-`a` after a 404, the thread in the site's archive. A catalog's menu has most of these for
+`a` after a 404, the thread in the site's archive. A catalog has most of these for
 its threads, and `A` to search the board's archive.
 
 ### Where the selected post sits
@@ -205,7 +204,7 @@ While you read down a thread with `j`, the selected post doesn't creep to the bo
 once it would come within `scroll_margin` of it (a fraction of the screen, 0.3 by default),
 the thread scrolls so the post starts about a third of the way down, with what came before
 it above and what comes next below. Reading up with `k` does the same at the top. Jumps
-(following a quote, going back, `. U`, `n`, a search hit, a hint) land there too. `scroll_margin =
+(following a quote, going back, `U`, `n`, a search hit, a hint) land there too. `scroll_margin =
 0.5` keeps the selected post centered, and `0` lets it reach the edges (scrolling as little
 as possible, as before); Settings › Reading position cycles through them.
 
@@ -215,7 +214,7 @@ While you read the last post of a thread (it's selected and the end of the threa
 screen), posts a refresh brings come into view: the first new one is selected, placed as
 `j` would place it, and `j` reads on through the rest. Hidden posts are passed over, and in
 a conversation only new posts that belong to it count. Reading anywhere else, nothing
-moves; the top bar says how many new posts are below ("3 new, 2 below ↓"), and `. U` goes to
+moves; the top bar says how many new posts are below ("3 new, 2 below ↓"), and `U` goes to
 the first. Hidden posts aren't new there either (nor in the terminal title) until `c Z` shows
 them. `follow_new_posts = false` (or Settings › Background refresh › Reading the end)
 turns it off. A thread in another tab follows when you come back to it and it refreshes.
@@ -259,7 +258,7 @@ the OP, the OP's replies only count when it's the OP's conversation. Replies are
 by how far down they are; the post itself is marked "conversation", and the top bar says
 "Conversation of No.123" with how many posts. Everything works as in the whole thread:
 `tab` and the menu, quotes (one to a post outside the conversation leaves it and goes
-there), search (within the conversation), `. e`, previews, the gallery (its files). New
+there), search (within the conversation), `e`, previews, the gallery (its files). New
 replies that belong in it appear as the thread refreshes. `esc` goes back to the
 whole thread, scrolled where it was, and tabs and the next start remember a conversation
 that was open. At most 500 posts are shown, the nearest ones; the footer says when there
@@ -328,7 +327,7 @@ one brings it back.
 
 ### Tabs
 
-`. T` opens the selected thread in a new tab, next to the current one (in a thread, the
+`T` opens the selected thread in a new tab, next to the current one (in a thread, the
 quoted thread `enter` would go to). Each tab has its own place: view, board, catalog,
 thread, and jump trail. The tabs show as chips under the top bar when there's more than
 one, their titles whole while they fit and the longest cut first when they don't (a board
@@ -399,12 +398,13 @@ are saved in the config's `[keys]` section (only the keys you changed):
 watch = "Q"
 help = ["?", "f1"]
 reload = ["R", "ctrl-l"]
-hide = "alt-h"          # on a letter in the . menu by default
+hide = "alt-h"          # x by default
 download = []           # no key: only in the . menu
 ```
 
 A command without a key is still in the `.` menu where it applies (those about what the
-view shows in the `c` menu), on its letter unless a key you've given uses it there.
+view shows in the `c` menu), on its letter unless a key you've given uses it there. A `.`
+menu letter also works without the menu, where no other key is that.
 
 Keys are a character (`"w"`, `"W"`, `":"`), `ctrl-` or `alt-` with one, or a named key:
 `tab`, `shift-tab`, `enter`, `esc`, `backspace`, `delete`, `insert`, arrows (`up`, ...),
@@ -417,10 +417,10 @@ menus' letters after them.
 
 ## Filters and hiding
 
-`. H` hides the selected catalog thread or thread post (`u` right after takes it back); `c Z` shows hidden ones again
-(dimmed and marked) so they can be unhidden with another `. H`. Hidden posts collapse to
+`x` hides the selected catalog thread or thread post (`u` right after takes it back); `c Z` shows hidden ones again
+(dimmed and marked) so they can be unhidden with another `x`. Hidden posts collapse to
 one line, so replies to them still make sense. They're marked just "hidden", not why
-(that would show what a filter or hidden word hides); `. H` on one says why. Until `c Z`
+(that would show what a filter or hidden word hides); `x` on one says why. Until `c Z`
 shows them, they're left out of the thread's search and gallery too (`V` and the footer
 and `.` menu offer the gallery only when it has files to show; when only hidden posts have
 files, `V` says so), a quote of one previews
@@ -435,10 +435,10 @@ the data directory.
 thread, posts that quote a hidden post, and the posts that quote those, on down, collapse
 too. `recursive = true` on a `[[filter]]` does that for
 what the filter hides (also in Settings › Filters, as "Replies"). Unhiding the post they
-reply to shows them again; `. H` on one of them says which post that is. The OP never
+reply to shows them again; `x` on one of them says which post that is. The OP never
 counts (everyone quotes it), and catalogs aren't affected.
 
-Filters hide or highlight automatically. The quickest way to make one is `. X` ("hide or
+Filters hide or highlight automatically. The quickest way to make one is `X` ("hide or
 highlight posts like it…" in the `.` menu) on a post or catalog thread: it offers what
 the post can be caught by (its poster ID, its name with the tripcode, the tripcode alone,
 its flag, its image's MD5, its file's name, and an OP's subject; never the site's
@@ -516,7 +516,7 @@ words, on every site and board: plain words (no regex), in any case, as whole wo
 between the words of a phrase. They're looked for in the subject, the comment (spoilers
 too), the name and file names. What they hide is hidden like anything else: collapsed to a
 line, shown by `c Z` marked "hidden", counted in the catalog's header. Settings ›
-Filters › Hidden words lists them (`a` adds one, `x` removes one), and `w` in a post's `. X`
+Filters › Hidden words lists them (`a` adds one, `x` removes one), and `w` in a post's `X`
 adds a word from it (the thread's search to start with). Either way it's saved at once, and
 `u` right after takes it back.
 
@@ -552,7 +552,7 @@ none of them has been refreshed for a while (20 minutes, or two rounds if they'r
 Other engines have no such list, and show nothing.
 
 Posts that arrived since your last visit are marked "new", and a "new posts" line sits
-between the last post you'd read and the first new one; `. U` jumps to the first one.
+between the last post you'd read and the first new one; `U` jumps to the first one.
 
 A post the moderators delete while the thread is open stays where it was, marked
 "deleted" (the top bar counts them: "1 deleted"); its quotes, replies, previews and
@@ -561,7 +561,7 @@ open thread: saved copies, exports and post counts are the thread as the site ha
 answer with fewer than half the posts last known (shown, or counted for a watched thread)
 is more likely broken than mass deletion: it's shown as it came, without keeping what it
 left out, and the status line says so. It isn't a visit, doesn't change the watch list's
-counts, and doesn't replace the saved copy (nor does `. e`, `w` or `. m` while it's shown).
+counts, and doesn't replace the saved copy (nor does `e`, `w` or `P` while it's shown).
 The answer after it is judged against it, so a real mass deletion is taken one refresh
 later. An answer with no posts, or with another thread than the one asked for (as a site
 might answer a reply's number), is a failed load (`R` tries again); in the background it
@@ -617,7 +617,7 @@ watched threads alone take more; and in a run where `watched.json` couldn't be r
 
 ### Following a general
 
-Generals are threads that start over when they fill up (/lmg/, /hsg/, …). `. F` on one (in
+Generals are threads that start over when they fill up (/lmg/, /hsg/, …). `F` on one (in
 its thread, the catalog, or Watched) follows it: it's watched, and when it 404s or 4chan
 says it hit its bump limit, ck looks for the next thread whose subject has the same
 `/tag/` (or, without a tag, the same subject minus its number) in that board's catalog.
@@ -626,7 +626,7 @@ says) is watched and followed instead, and you're notified; a hidden one is pass
 even for an older match. A thread that died
 is dropped from Watched; one that's only full stays until it dies. The search is one
 background catalog request, repeated at most every 10 minutes while nothing is found.
-Watched shows "follows /lmg/" on followed threads; `. F` again stops following.
+Watched shows "follows /lmg/" on followed threads; `F` again stops following.
 
 ### What's new in a catalog
 
@@ -669,7 +669,7 @@ when some of them reply to your posts. The title from before is put back when ck
 (terminals that can't do that are left with an empty one). `set_title = false` (or
 Settings › Terminal title) leaves the title alone.
 
-Posts you send from ck are marked as yours (see Posting). For the rest, `. m` marks the
+Posts you send from ck are marked as yours (see Posting). For the rest, `P` marks the
 selected post as yours (and watches the thread). Replies to it are counted in Watched ("1 reply to you"),
 quotes of it read `>>123 (You)`, and they get their own notification. The marks show in
 every tab at once; unwatching the thread (`w`, or `x` in Watched) forgets them.
@@ -677,7 +677,7 @@ every tab at once; unwatching the thread (`w`, or `x` in Watched) forgets them.
 ck keeps its state as JSON in `$XDG_DATA_HOME/ck` (default `~/.local/share/ck`; on Windows
 `%LOCALAPPDATA%\ck\data`):
 `watched.json`, `history.json`, `recent_boards.json`, `board_prefs.json` (each board's
-sort and layout), `hidden.json` (what you hid with `. H`), `seen.json` (catalog threads
+sort and layout), `hidden.json` (what you hid with `x`), `seen.json` (catalog threads
 seen, for "new" and `+N`), `session.json` (your tabs, for the next start), `positions.json` (where you left each
 thread), `recall.json`
 (the lines typed after `:` and `/`, and your marks), and `saved.json`
@@ -817,7 +817,7 @@ is missing, say), the box shows the last thing it said.
 
 ## Searching archives
 
-`. A` in a catalog searches the board's posts on a FoolFuuka archive: the site itself if
+`A` in a catalog searches the board's posts on a FoolFuuka archive: the site itself if
 it's one (desuarchive, palanq, b4k), or the first of the archives configured for it with
 `archives` that keeps the board. Results show each post with its thread, from a little before the
 first word searched for, every place one is highlighted. `enter` opens the thread with the
@@ -841,7 +841,7 @@ that's a picture of at most 4 MB; otherwise the tile shows ✗.
 
 Animated GIFs play in the viewer, at up to 20 frames a second (frames are prepared in the
 background, and scaled down if a long GIF would take too much memory). Videos open
-externally with `enter` in the viewer (`. i` in a thread). When the site or archive has only a file's thumbnail, the viewer
+externally with `enter` in the viewer (`i` in a thread). When the site or archive has only a file's thumbnail, the viewer
 shows it and says so; `enter` and `y` in the viewer, and `o` and `y` on the focused file in a
 thread, act on the thumbnail's address and say so, and `d` says there's no file to save.
 A spoilered file the archive didn't keep has no thumbnail either: the viewer, and opening,
@@ -870,7 +870,7 @@ at the top of your config.
 turns a board's images off (or back on; the action is `board_images`, without a key until
 you give it one). With images off on a board, ck asks for none of its images: thumbnails
 show "image off" in their place, the layout stays the same, `enter` says images are off instead
-of opening the viewer, and the top bar says "images off". Opening a file with `. i`, links,
+of opening the viewer, and the top bar says "images off". Opening a file with `i`, links,
 copying and downloads still work. On an overboard each thread follows its own board,
 unless the overboard has a setting of its own.
 
@@ -883,7 +883,7 @@ Boards' settings are kept in the data directory with their sort and layout.
 
 ### Reverse image search
 
-`. L` lists search engines for the selected post's images (for videos, their thumbnail) or
+`A` lists search engines for the selected post's images (for videos, their thumbnail) or
 the image in the viewer; `enter` opens the search in the browser, `y` copies its link.
 ck itself sends nothing anywhere. The engines can be replaced in the config; `{url}`
 becomes the image's address:
@@ -1024,7 +1024,7 @@ All settings are optional; see `config.example.toml` for every option with comme
   [Reverse image search](#reverse-image-search).
 - `[[site]]`, `default_sites = false`: see [Adding sites](#adding-sites).
 - `archives = ["desuarchive", "palanq", "b4k"]` on a `[[site]]`: the archives for 404'd threads
-  and `. A` searches, the first that keeps the board.
+  and `A` searches, the first that keeps the board.
 - `[keys]`: `action = "key"`, `action = ["key", ...]`, or `action = []` for none (the `.`
   menu only), e.g. `watch = "Q"`; see
   [Remapping keys](#remapping-keys). Unknown actions, things that aren't keys, and two
@@ -1104,10 +1104,10 @@ thumb_ext = "png"   # only if the site renders every thumbnail as png (vichan's 
 ```
 
 A site can name FoolFuuka archives with `archives = ["desuarchive", "palanq", "b4k"]` (4chan
-does). Each keeps some boards: archive search (`. A`) and a thread that 404s use the first
+does). Each keeps some boards: archive search (`A`) and a thread that 404s use the first
 that keeps the board, as its board list says; when a list isn't known yet, the search asks for
 it first, and says so if none keeps the board. When one of its threads 404s, ck offers to open
-it there (`enter`, or `. a` while the thread is still on screen).
+it there (`enter`, or `a` while the thread is still on screen).
 
 Config files from earlier versions of ck hold a copy of every built-in site (ck used to read
 only the sites in the file). Those copies still work (each replaces the built-in site of its name); delete

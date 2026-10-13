@@ -65,8 +65,8 @@ You need few. With something selected:
 
 - `enter` does the obvious thing: opens a thread, shows a post's images, follows a quote;
 - `h` or `esc` goes back, like a browser's back button;
-- `.` (or right-click) lists everything else you can do with it, the less used on a letter
-  there (`.` then `H` hides a post);
+- `.` (or right-click) lists everything else you can do with it, each with its key (`x`
+  hides a post, `e` shows its replies under it);
 - `c` changes what's shown: a catalog's sort and layout, a thread's conversation or
   poster's posts;
 - `tab` steps through a post's images, links and replies;

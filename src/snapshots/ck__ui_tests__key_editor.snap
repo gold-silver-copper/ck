@@ -20,15 +20,15 @@ expression: snapshot(&mut a)
       W               watched          the watched threads                  Everywhere
       ctrl-w          close_tab        close the tab                        Everywhere
       ctrl-o          jump_back        back where you jumped from: the pos… Everywhere
-      . ctrl-r        jump_forward     forward again, after going back      Everywhere
+      ctrl-r          jump_forward     forward again, after going back      Everywhere
       ctrl-^          alternate        the thread you read before this one… Everywhere
 
     Lists
       *               favorite         favorite board: on / off             Lists, Catalog
-      . B             board_images     images on this board: on / off       Lists, Catalog, Thr…
-      . a             add_site         add a site from a link to any page … Lists
+      B               board_images     images on this board: on / off       Lists, Catalog, Thr…
+      a               add_site         add a site from a link to any page … Lists
 
     Changed keys are saved in [keys]; navigation keys are fixed. Without a key: on a letter in
     its menu (. h).
 
- enter change   / filter   esc back   ? help                                           26/26  100%
+ enter change   / filter   esc back   ? help                                           25/25  100%

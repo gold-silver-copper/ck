@@ -55,7 +55,8 @@ pub const SCOPES: [Scope; 7] = [Scope::Global, Scope::Lists, Scope::Catalog, Sco
 
 /// Where an action is to be had by default: on a key of its own where it works, or on a
 /// letter in a menu (the `.` menu, or for what the view shows, the `c` menu), the less used
-/// ones. Given a key in `[keys]`, an action's on that key, and its menu row shows it.
+/// ones. A `.` menu letter is a key too, where nothing else has it. Given a key in `[keys]`,
+/// an action's on that key, and its menu row shows it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Bind {
     Key(Key),
@@ -129,15 +130,15 @@ actions! {
     Unread, "unread", menu('U'), &[Scope::Thread], "jump to the first unread post";
     Expand, "expand", menu('e'), &[Scope::Thread], "show / hide the post's replies under it";
     Spoiler, "spoiler", menu('s'), &[Scope::Thread], "show the post's spoilers";
-    Mine, "mine", menu('m'), &[Scope::Thread], "mark the post as yours (notified of replies)";
+    Mine, "mine", menu('P'), &[Scope::Thread], "mark the post as yours (notified of replies)";
     Quote, "quote", menu('Q'), &[Scope::Thread], "reply quoting the post's text";
     NewTab, "new_tab", menu('T'), &[Scope::Catalog, Scope::Thread, Scope::Saved], "open the thread (or link) in a new tab";
     Follow, "follow", menu('F'), &[Scope::Catalog, Scope::Thread, Scope::Saved], "follow as a general: watch its next thread";
     CopyLink, "copy_link", menu('Y'), &[Scope::Catalog, Scope::Thread, Scope::Saved, Scope::Gallery, Scope::Viewer], "copy the link";
     Links, "links", menu('O'), &[Scope::Catalog, Scope::Thread], "the post's links and files";
-    Hide, "hide", menu('H'), &[Scope::Catalog, Scope::Thread], "hide / unhide the thread or post";
+    Hide, "hide", menu('x'), &[Scope::Catalog, Scope::Thread], "hide / unhide the thread or post";
     Filter, "filter", menu('X'), &[Scope::Catalog, Scope::Thread], "hide or highlight posts like this one (a filter)";
-    ImageSearch, "image_search", menu('L'), &[Scope::Thread, Scope::Viewer], "reverse image search";
+    ImageSearch, "image_search", menu('A'), &[Scope::Thread, Scope::Viewer], "reverse image search";
     DownloadThread, "download_thread", menu('D'), &[Scope::Thread, Scope::Gallery], "save all the thread's files (asks first)";
     Export, "export", menu('E'), &[Scope::Thread, Scope::Gallery], "save the thread as a page, HTML and JSON (asks first)";
     Archive, "archive", menu('a'), &[Scope::Thread], "open a 404'd thread in the archive";
@@ -427,6 +428,11 @@ const FIXED: &[(&[Scope], Nav, &[Key], &str)] = &[
     (&[Scope::Viewer], Nav::Play, &[Key::char(' ')], "pause an animated GIF, or the next file"),
 ];
 
+/// The views an action works in.
+fn places(a: Action) -> impl Iterator<Item = Scope> {
+    SCOPES.into_iter().filter(move |&p| p != Scope::Global && a.scopes().iter().any(|s| s.covers(p)))
+}
+
 /// What a key does somewhere: a fixed move, or a command.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Command {
@@ -476,9 +482,14 @@ impl KeyMap {
         }
         // An action without a key of its own is on its letter in menus, unless a command's key
         // is that in any place it applies (given in `[keys]`: that wins).
-        let applies = |a: Action| SCOPES.into_iter().filter(move |&p| p != Scope::Global && a.scopes().iter().any(|s| s.covers(p)));
-        let taken = |a: Action, l: Key| applies(a).any(|p| matches!(commands.get(&(p, l)), Some(Command::Act(_))));
-        let letters = Action::ALL.iter().filter(|a| keys.get(a).is_none_or(Vec::is_empty)).filter_map(|&a| Some((a, a.letter().filter(|&l| !taken(a, l))?))).collect();
+        let taken = |a: Action, l: Key| places(a).any(|p| matches!(commands.get(&(p, l)), Some(Command::Act(_))));
+        let letters: HashMap<Action, Key> = Action::ALL.iter().filter(|a| keys.get(a).is_none_or(Vec::is_empty)).filter_map(|&a| Some((a, a.letter().filter(|&l| !taken(a, l))?))).collect();
+        // A `.` menu letter works without the menu too, where no other key is that.
+        for (&a, &l) in letters.iter().filter(|(a, _)| !a.shows()) {
+            for p in places(a) {
+                commands.entry((p, l)).or_insert(Command::Act(a));
+            }
+        }
         Ok(Self { keys, commands, letters })
     }
 
@@ -518,12 +529,14 @@ impl KeyMap {
         self.keys(action).iter().map(Key::to_string).collect::<Vec<_>>().join(", ")
     }
 
-    /// How to get to an action, for messages and help: its key, its menu's key then its
-    /// letter (`. h`), or its menu.
+    /// How to get to an action, for messages and help: its key, its letter where that works
+    /// as a key, its menu's key then its letter (`c s`), or its menu.
     pub fn how(&self, action: Action) -> String {
         let menu = self.keys(if action.shows() { Action::Show } else { Action::Menu }).first();
+        let direct = |l: Key| places(action).all(|p| self.command(p, l) == Some(Command::Act(action)));
         match (self.keys(action).first(), menu, self.letter(action)) {
             (Some(k), ..) => k.to_string(),
+            (None, _, Some(l)) if direct(l) => l.to_string(),
             (None, Some(m), Some(l)) => format!("{m} {l}"),
             (None, Some(m), None) => format!("the {m} menu"),
             (None, None, _) => "the menu (right-click)".into(),
@@ -541,7 +554,7 @@ impl KeyMap {
 
     /// Help's rows for `scope`, with its fixed keys first: what works there first of all, or
     /// with `all`, all that does but what works everywhere. Those in a menu come last, as
-    /// their menu's key then their letter (`. h`).
+    /// their menu's key then their letter (`c s`).
     pub fn help(&self, scope: Scope, all: bool) -> Vec<(String, &'static str)> {
         let listed = |scopes: &[Scope]| scopes.first() == Some(&scope) || (all && scopes.first() != Some(&Scope::Global) && scopes.contains(&scope));
         let fixed = FIXED.iter().filter(|f| listed(f.0)).map(|&(_, _, keys, what)| match keys {
@@ -614,10 +627,12 @@ mod tests {
         assert_eq!(on(&m, Scope::Catalog, 'c'), Some(Command::Act(Action::Show)));
         assert_eq!(on(&m, Scope::Thread, 'r'), Some(Command::Act(Action::Reply)));
         assert_eq!(on(&m, Scope::Saved, 'q'), Some(Command::Act(Action::Quit)));
-        // The less used are on letters in their menu, the same letter in different places.
-        assert_eq!(on(&m, Scope::Thread, 's'), None);
+        // The less used are on letters in their menu, the same letter in different places; a
+        // `.` menu letter is a key too, a `c` menu one isn't.
+        assert_eq!(on(&m, Scope::Thread, 's'), Some(Command::Act(Action::Spoiler)));
+        assert_eq!(on(&m, Scope::Catalog, 's'), None);
         assert!(m.runs(Action::Sort, Key::char('s')) && m.runs(Action::Spoiler, Key::char('s')) && m.runs(Action::Watch, Key::char('w')));
-        assert_eq!((m.how(Action::Hide), m.how(Action::Sort), m.how(Action::Watch)), (". H".into(), "c s".into(), "w".into()));
+        assert_eq!((m.how(Action::Hide), m.how(Action::Sort), m.how(Action::Watch)), ("x".into(), "c s".into(), "w".into()));
         assert_eq!(on(&m, Scope::Lists, 'z'), None);
         assert_eq!(on(&m, Scope::Thread, 'z'), Some(Command::Nav(Nav::Z)));
         // Global keys don't apply in the image viewer and gallery, which have their own.
@@ -711,11 +726,11 @@ mod tests {
 
     #[test]
     fn actions_without_keys() {
-        // Saving all the thread's files or the page has no key by default: it's in the menu.
+        // Saving the page has no key by default: it's on its letter, in the menu and out.
         let m = KeyMap::default();
         assert!(m.keys(Action::Export).is_empty() && m.key(Action::Export).is_empty());
-        assert_eq!(on(&m, Scope::Thread, 'E'), None);
-        assert_eq!((m.how(Action::Export), m.menu_key(Action::Export)), (". E".into(), "E".into()));
+        assert_eq!(on(&m, Scope::Thread, 'E'), Some(Command::Act(Action::Export)));
+        assert_eq!((m.how(Action::Export), m.menu_key(Action::Export)), ("E".into(), "E".into()));
         assert_eq!(m.how(Action::Download), "d");
         assert_eq!(m.binding(Action::Export), None);
         // `[]` takes a key away; it's kept as `[]`, and the key is free.
@@ -727,7 +742,7 @@ mod tests {
         // Given a key, it works like any other.
         let m = map(&[("export", "E")]).unwrap();
         assert_eq!(on(&m, Scope::Thread, 'E'), Some(Command::Act(Action::Export)));
-        let m = map(&[("menu", "alt-m")]).unwrap().with(Action::Menu, Some(vec![])).unwrap();
-        assert_eq!(m.how(Action::Export), "the menu (right-click)");
+        let m = map(&[("show", "alt-c")]).unwrap().with(Action::Show, Some(vec![])).unwrap();
+        assert_eq!(m.how(Action::Sort), "the menu (right-click)");
     }
 }

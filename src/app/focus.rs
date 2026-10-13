@@ -599,7 +599,7 @@ impl App {
             _ => match m.items.iter().position(|it| matches!(it, MenuItem::Act(a, _) if self.keys.runs(*a, pressed))) {
                 Some(i) => self.run_menu_item(i),
                 None if closes => self.popup = None,
-                // A command left out of the menu as it does nothing here (`. U` with nothing
+                // A command left out of the menu as it does nothing here (`U` with nothing
                 // unread) runs anyway, to say why.
                 None => {
                     let scope = self.scope();
