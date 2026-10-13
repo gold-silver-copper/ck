@@ -78,11 +78,12 @@ jobs:
       - name: Servers' install
         shell: wsl-bash {0}
         run: CK_E2E=$HOME/ck-e2e e2e/jschan/servers.sh install --packages
-      # Started from a wsl.exe that stays: WSL1 ends a session's processes with it.
+      # Started from a wsl.exe that stays: WSL1 ends a session's processes with it. (wsl.exe
+      # gives what follows `--` to the distribution's shell as one command line.)
       - name: Servers
         shell: pwsh
         run: |
-          Start-Process wsl.exe -ArgumentList '--', 'bash', '-c', 'CK_E2E=$HOME/ck-e2e e2e/jschan/servers.sh start > $HOME/start.log 2>&1; sleep 7200' -WindowStyle Hidden
+          Start-Process wsl.exe -ArgumentList '-- CK_E2E=$HOME/ck-e2e e2e/jschan/servers.sh start > $HOME/start.log 2>&1; sleep 7200' -WindowStyle Hidden
           for ($i = 0; $i -lt 180; $i++) {
             if ((Test-NetConnection 127.0.0.1 -Port 7101 -WarningAction SilentlyContinue).TcpTestSucceeded) { break }
             Start-Sleep 2
