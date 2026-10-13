@@ -61,7 +61,7 @@ mod marks;
 mod list;
 pub use list::FilteredList;
 mod posting;
-pub use posting::{Art, Compose, Field, PassForm, Stage, ViewAt, grid_cols};
+pub use posting::{Art, Compose, Field, LoginForm, Stage, ViewAt, grid_cols};
 mod saved;
 mod saving;
 mod board_images;

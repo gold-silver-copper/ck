@@ -2,7 +2,8 @@
 //! the site wants a person.
 
 use super::*;
-use crate::app::{Art, Compose, Field, PassForm, Stage, ViewAt, grid_cols};
+use crate::app::{Art, Compose, Field, LoginForm, Stage, ViewAt, grid_cols};
+use crate::post::Login;
 use std::time::Instant;
 use crate::captcha::{Cell, Solving, Task};
 use crate::editor::Editor;
@@ -20,10 +21,10 @@ pub(super) fn draw_reply(f: &mut Frame, app: &mut App) {
         no => format!("Reply to /{}/ No.{no}", c.to.board),
     };
     let hint = match &c.stage {
-        Stage::Writing if c.pass.is_some() => "ctrl-s post · ctrl-p pass · esc keep draft",
+        Stage::Writing if c.login.is_some() => "ctrl-s post · ctrl-p log in · esc keep draft",
         Stage::Writing => "ctrl-s post · tab next · esc keep for later",
-        Stage::Pass(form) if form.logged_in => "y log out · esc back",
-        Stage::Pass(_) => "enter log in · tab next · esc back",
+        Stage::Login(form) if form.logged_in => "y log out · esc back",
+        Stage::Login(_) => "enter log in · tab next · esc back",
         Stage::Offer => "y download · esc back",
         Stage::Installing { .. } => "esc keep for later",
         Stage::Working => "esc stop",
@@ -83,7 +84,11 @@ pub(super) fn draw_reply(f: &mut Frame, app: &mut App) {
             }
         }
         Stage::Working => say(f, format!("{spin} {}…", c.doing)),
-        Stage::Pass(form) => draw_pass(f, form, c.pass.unwrap_or_default(), &c.to.site, body),
+        Stage::Login(form) => {
+            if let Some(login) = &c.login {
+                draw_login(f, form, login.as_ref(), &c.to.site, body);
+            }
+        }
         Stage::Waiting { until, message } => {
             let left = until.saturating_duration_since(Instant::now()).as_secs();
             say(f, message.clone());
@@ -110,17 +115,20 @@ pub(super) fn draw_reply(f: &mut Frame, app: &mut App) {
     }
 }
 
-/// Logging in with the site's pass: what it asks for, as dots; or, logged in, whether to log
-/// out.
-fn draw_pass(f: &mut Frame, form: &PassForm, name: &str, site: &str, area: Rect) {
+/// Logging in to the site: what it asks for, as dots; or, logged in, whether to log out.
+fn draw_login(f: &mut Frame, form: &LoginForm, login: &dyn Login, site: &str, area: Rect) {
     let t = theme();
+    let name = login.name();
     let text = |f: &mut Frame, row: u16, s: String| put(f, area.x, area.y + row, area.width, Line::styled(truncate(&s, area.width as usize), Style::new().fg(t.text)));
+    let headline = |f: &mut Frame, s: String| put(f, area.x, area.y, area.width, Line::styled(truncate(&s, area.width as usize), Style::new().fg(t.primary)));
     if form.logged_in {
-        put(f, area.x, area.y, area.width, Line::styled(format!("Logged in with your {name}: posts on {site} skip the captcha."), Style::new().fg(t.primary)));
+        let skips = if login.skips_captcha() { format!(": posts on {site} skip the captcha") } else { String::new() };
+        headline(f, format!("Logged in with your {name}{skips}."));
         text(f, 2, "Log out? y / n".into());
         return;
     }
-    put(f, area.x, area.y, area.width, Line::styled(format!("Log in with your {name}, and posts on {site} skip the captcha."), Style::new().fg(t.primary)));
+    let skips = if login.skips_captcha() { format!(", and posts on {site} skip the captcha") } else { String::new() };
+    headline(f, format!("Log in with your {name}{skips}."));
     for (i, line) in [
         format!("ck sends it to {site}'s login page through ck-web and keeps no copy."),
         format!("{site}'s cookie in ck-web is the login, until you log out (ctrl-p again)."),
@@ -130,17 +138,22 @@ fn draw_pass(f: &mut Frame, form: &PassForm, name: &str, site: &str, area: Rect)
     {
         put(f, area.x, area.y + 1 + cells(i), area.width, Line::styled(truncate(&line, area.width as usize), dim()));
     }
-    for (i, (label, e)) in form.fields.iter().enumerate() {
+    for (i, (asked, e)) in form.fields.iter().enumerate() {
         let y = area.y + 4 + cells(i);
         let focused = i == form.at;
-        put(f, area.x, y, LABEL, Line::styled(*label, if focused { bold(t.primary) } else { dim() }));
+        put(f, area.x, y, LABEL, Line::styled(asked.label, if focused { bold(t.primary) } else { dim() }));
         let w = area.width.saturating_sub(LABEL);
         fill(f, Rect::new(area.x + LABEL, y, w, 1), t.surface);
         let mut dots = "•".repeat(e.text().chars().count());
         if focused {
             dots.push('▏');
         }
-        put(f, area.x + LABEL, y, w, Line::styled(truncate(&dots, w as usize), Style::new().fg(t.text)));
+        let line = if e.is_empty() && asked.optional {
+            Line::from(vec![Span::raw(dots), Span::styled("if it's on", dim())])
+        } else {
+            Line::styled(dots, Style::new().fg(t.text))
+        };
+        put(f, area.x + LABEL, y, w, line);
     }
 }
 

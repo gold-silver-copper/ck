@@ -1,0 +1,113 @@
+name: Accounts, end to end
+
+# ck-web logging in to real jschan servers (upstream jschan, and ptchina, ptchan.org's fork)
+# and posting there, on each system: src/post/jschan_e2e.rs, with the servers from
+# e2e/jschan/servers.sh. Its own workflow, so a broken install here never holds up CI.
+on:
+  schedule:
+    - cron: "41 4 * * *"
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "src/post/**"
+      - "src/web*"
+      - "src/web/**"
+      - "ck-web/**"
+      - "e2e/jschan/**"
+      - ".github/workflows/e2e-accounts.yml"
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  # Each server on a host of its own: cookies are kept by host, not port.
+  CK_E2E_JSCHAN: http://127.0.0.1:7100 http://localhost:7101
+
+jobs:
+  unix:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    env:
+      CK_E2E: ${{ github.workspace }}/../ck-e2e
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build xvfb
+      - if: runner.os == 'macOS'
+        run: brew install ninja
+      - name: Servers
+        run: e2e/jschan/servers.sh install --packages && e2e/jschan/servers.sh start
+      - name: ck-web
+        run: |
+          cargo build -p ck-web
+          if [ "$RUNNER_OS" = macOS ]; then
+            sh ck-web/bundle-macos.sh target/debug
+            echo "CK_WEB=$PWD/target/debug/ck-web.app/Contents/MacOS/ck-web" >> "$GITHUB_ENV"
+          else
+            echo "CK_WEB=$PWD/target/debug/ck-web" >> "$GITHUB_ENV"
+          fi
+      - name: Log in, post, log out
+        run: |
+          export CK_WEB_PROFILE="$RUNNER_TEMP/profile"
+          # Chromium on Linux needs a display, which the runner hasn't got.
+          run=$([ "$RUNNER_OS" = Linux ] && echo "xvfb-run -a" || true)
+          $run cargo test -p ck --lib -- --ignored jschan_accounts --nocapture
+      - if: failure()
+        run: tail -n 40 "$CK_E2E"/run/*.log "$RUNNER_TEMP/profile/log.txt" || true
+      - if: always()
+        run: e2e/jschan/servers.sh stop
+
+  # The runners can't start the VM that Linux containers or WSL2 need: WSL1, a Linux userland
+  # without one, runs the same script, and shares Windows' network. All but MongoDB, which
+  # can't run there (WSL1 can't sync a folder to disk): it's Windows' own build, on the port
+  # the script would use.
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Vampire/setup-wsl@v5
+        with:
+          distribution: Ubuntu-22.04
+          wsl-version: 1
+      - name: MongoDB
+        shell: pwsh
+        run: |
+          $ProgressPreference = 'SilentlyContinue'
+          $m = "$env:RUNNER_TEMP\mongodb"
+          Invoke-WebRequest https://fastdl.mongodb.org/windows/mongodb-windows-x86_64-7.0.14.zip -OutFile "$m.zip" -MaximumRetryCount 5 -RetryIntervalSec 5
+          Expand-Archive "$m.zip" $m
+          New-Item -ItemType Directory "$m\db" | Out-Null
+          $mongod = (Get-ChildItem $m -Recurse -Filter mongod.exe).FullName
+          Start-Process $mongod -ArgumentList '--dbpath', "$m\db", '--port', '27117', '--bind_ip', '127.0.0.1' -WindowStyle Hidden
+      - name: Servers' install
+        shell: wsl-bash {0}
+        run: CK_E2E_OWN_MONGODB=1 CK_E2E=$HOME/ck-e2e e2e/jschan/servers.sh install --packages
+      # WSL1 ends an instance (and the servers in it) once no wsl.exe is left: one stays,
+      # asleep, while the servers start in the next step and the test runs.
+      - name: Keep WSL running
+        shell: pwsh
+        run: Start-Process wsl.exe -ArgumentList '-- sleep 7200' -WindowStyle Hidden
+      - name: Servers
+        shell: wsl-bash {0}
+        timeout-minutes: 15
+        run: CK_E2E_OWN_MONGODB=1 CK_E2E=$HOME/ck-e2e e2e/jschan/servers.sh start
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build -p ck-web
+      - name: Log in, post, log out
+        shell: bash
+        run: |
+          for url in $CK_E2E_JSCHAN; do curl -fsS -o /dev/null "$url/robots.txt" || { echo "$url is down"; exit 1; }; done
+          export CK_WEB="$PWD/target/debug/ck-web.exe" CK_WEB_PROFILE="$RUNNER_TEMP/profile"
+          cargo test -p ck --lib -- --ignored jschan_accounts --nocapture
+      - if: failure()
+        shell: wsl-bash {0}
+        run: tail -n 40 $HOME/ck-e2e/run/*.log || true

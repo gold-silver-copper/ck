@@ -8,6 +8,8 @@
 mod form;
 mod fourchan;
 mod jschan;
+#[cfg(test)]
+mod jschan_e2e;
 mod kissu;
 mod lynxchan;
 mod makaba;
@@ -116,20 +118,33 @@ pub trait Poster: Send + Sync {
     fn comment_limit(&self) -> Option<usize> {
         None
     }
-    /// The site's paid pass, that posts without a captcha, if it sells one.
-    fn pass(&self) -> Option<Arc<dyn Pass>> {
+    /// What the site can be logged in to with, if anything: a paid pass, or an account.
+    fn login(&self) -> Option<Arc<dyn Login>> {
         None
     }
 }
 
-/// A site's paid pass (4chan's 4chan Pass, 2ch's passcode): logged in to through ck-web, from
-/// a page of the site's, so the login is the site's cookie in ck-web's profile. ck keeps no
-/// copy of what's typed.
-pub trait Pass: Send + Sync {
-    /// What the site calls it.
-    fn name(&self) -> &'static str;
+/// One thing a login asks for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LoginField {
+    pub label: &'static str,
+    /// It may be left empty (a two-factor code, for an account without one).
+    pub optional: bool,
+}
+
+/// A login to a site (4chan's 4chan Pass, 2ch's passcode, a jschan account), through ck-web
+/// from a page of the site's, so the login is the site's cookie in ck-web's profile. ck keeps
+/// no copy of what's typed.
+pub trait Login: Send + Sync {
+    /// What it's called: "4chan Pass", "ptchan account".
+    fn name(&self) -> String;
+    /// Whether posts skip the captcha once logged in: a pass's point. An account's depends on
+    /// what the site lets it do.
+    fn skips_captcha(&self) -> bool {
+        true
+    }
     /// What logging in asks for, in order.
-    fn asks(&self) -> &'static [&'static str];
+    fn asks(&self) -> &'static [LoginField];
     /// The page logging in, checking and logging out go from.
     fn page(&self) -> String;
     /// Whether ck-web is logged in with it.

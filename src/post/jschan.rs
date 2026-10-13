@@ -1,21 +1,24 @@
 //! jschan: posts go to `/forms/board/{board}/post`, answered in JSON when asked with
 //! `x-using-xhr`. Its captcha (when the board wants one: `captchaMode`) is a grid of icons to
 //! pick from, or text to read; its id rides in a cookie. A "block bypass" is the same captcha,
-//! asked for first when the site wants it.
+//! asked for first when the site wants it. Accounts log in at `/forms/login`.
 
+use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::{Context, Result, bail};
 use image::DynamicImage;
 use serde_json::Value;
 
-use super::{Draft, Posted, Poster, Session, Where, thread_in};
+use super::{Draft, Login, LoginField, Posted, Poster, Session, Web, Where, thread_in};
 use crate::captcha::{Cell, Challenge, Task};
 use crate::http::encode_segment as enc;
 use crate::web::{Fetch, Fetched, Upload};
 
 pub struct Jschan {
     pub root: String,
+    /// The site's name, as the config has it.
+    pub site: String,
 }
 
 impl Jschan {
@@ -40,6 +43,10 @@ impl Poster for Jschan {
         format!("{}/robots.txt", self.root)
     }
 
+    fn login(&self) -> Option<Arc<dyn Login>> {
+        Some(Arc::new(Account { root: self.root.clone(), site: self.site.clone() }))
+    }
+
     fn post(&self, s: &Session, to: &Where, draft: &Draft) -> Result<Posted> {
         let board = enc(&to.board);
         let settings = s.web.fetch(Fetch::get(&format!("{}/{board}/settings.json", self.root)))?.json()?;
@@ -53,7 +60,12 @@ impl Poster for Jschan {
             fields.push(("spoiler_all".into(), "true".into()));
         }
         let wants = mode == 2 || (mode == 1 && to.new_thread());
-        let mut captcha = if wants { self.captcha(s, &to.board)? } else { Vec::new() };
+        // An account may be let off the captcha (jschan's "bypass captcha" permission: ptchan's
+        // gold accounts have it), which only the site knows: logged in, the post is sent
+        // without one first, and the captcha comes if it's still wanted. A refused post isn't
+        // kept, so it can't land twice.
+        let account = wants && logged_in(s.web, &self.root)?;
+        let mut captcha = if wants && !account { self.captcha(s, &to.board)? } else { Vec::new() };
         let referer = match to.thread {
             0 => format!("{}/{board}/index.html", self.root),
             t => format!("{}/{board}/thread/{t}.html", self.root),
@@ -65,6 +77,10 @@ impl Poster for Jschan {
             s.web.fetch(Fetch { file, ..Fetch::post(&url, fields) }.header("x-using-xhr", "true").header("Referer", &referer))
         };
         let mut r = send(&captcha)?;
+        if account && r.status == 403 && !r.body.contains("block bypass") {
+            captcha = self.captcha(s, &to.board)?;
+            r = send(&captcha)?;
+        }
         // A block bypass first: the same captcha, to its own form (it sets a cookie the post
         // then carries), then the post again, with a new captcha if it wants one (each is
         // taken once).
@@ -85,6 +101,81 @@ impl Poster for Jschan {
         let (thread, no) = posted(to, &r.json()?)?;
         Ok(Posted { thread, no })
     }
+}
+
+/// A jschan account, logged in to at `/forms/login`. The login is the site's session cookie,
+/// which the page can't read (it's HttpOnly): whether it's there is asked of `/csrf.json`,
+/// which only a logged-in account gets.
+pub struct Account {
+    pub root: String,
+    pub site: String,
+}
+
+/// What jschan says to any login it won't take: a wrong name or password, or a two-factor
+/// code missing or wrong.
+const REFUSED: &str = "Incorrect login credentials";
+
+impl Login for Account {
+    fn name(&self) -> String {
+        format!("{} account", self.site)
+    }
+
+    fn skips_captcha(&self) -> bool {
+        false
+    }
+
+    fn asks(&self) -> &'static [LoginField] {
+        &[LoginField { label: "Username", optional: false }, LoginField { label: "Password", optional: false }, LoginField { label: "2FA code", optional: true }]
+    }
+
+    fn page(&self) -> String {
+        format!("{}/robots.txt", self.root)
+    }
+
+    fn logged_in(&self, web: &dyn Web) -> Result<bool> {
+        logged_in(web, &self.root)
+    }
+
+    fn log_in(&self, web: &dyn Web, answers: &[String]) -> Result<()> {
+        let [username, password, code] = answers else { bail!("A jschan account needs its name, password and two-factor code") };
+        let mut fields = vec![("username".to_string(), username.trim().to_string()), ("password".into(), password.clone())];
+        if !code.trim().is_empty() {
+            fields.push(("twofactor".into(), code.trim().into()));
+        }
+        // URL-encoded, as its login form sends it: it reads no other kind.
+        let body = fields.iter().map(|(k, v)| format!("{k}={}", enc(v))).collect::<Vec<_>>().join("&");
+        let (url, referer) = (format!("{}/forms/login", self.root), format!("{}/login.html", self.root));
+        let login = Fetch { body: Some(body), ..Fetch::post(&url, Vec::new()) };
+        let r = web.fetch(login.header("Content-Type", "application/x-www-form-urlencoded").header("x-using-xhr", "true").header("Referer", &referer))?;
+        if r.status >= 400 {
+            let e = error(&r);
+            // The same words for all of them: the code may be what's missing.
+            if e.to_string() == REFUSED && code.trim().is_empty() {
+                bail!("{e}: check the password, and give the 2FA code if it's on");
+            }
+            return Err(e);
+        }
+        if !logged_in(web, &self.root)? {
+            bail!("{} didn't log you in (it answered {})", self.site, r.status);
+        }
+        Ok(())
+    }
+
+    fn log_out(&self, web: &dyn Web) -> Result<()> {
+        // It sends you to the front page, whatever it answers there.
+        web.fetch(Fetch::post(&format!("{}/forms/logout", self.root), Vec::new()).header("x-using-xhr", "true"))?;
+        if logged_in(web, &self.root)? {
+            bail!("{} didn't log you out", self.site);
+        }
+        Ok(())
+    }
+}
+
+/// Whether ck-web is logged in to the jschan site at `root`: `/csrf.json` answers its token to
+/// an account, and sends anyone else to the login page.
+fn logged_in(web: &dyn Web, root: &str) -> Result<bool> {
+    let r = web.fetch(Fetch::get(&format!("{root}/csrf.json")))?;
+    Ok(r.json().ok().is_some_and(|v| v.get("token").is_some()))
 }
 
 /// The captcha's fields: the text, or each picked cell's index.
@@ -182,6 +273,8 @@ mod tests {
         let picture = png_b64();
         let site = Site::default()
             .answers("/meta/settings.json", 200, r#"{"captchaMode":2,"maxFiles":5}"#)
+            // Not logged in: sent to the login page.
+            .answers("/csrf.json", 200, "<!DOCTYPE html><title>Login</title>")
             .answers("/settings.json", 200, "fixture:jschan_zzzchan_settings.json")
             .answers("/captcha", 200, &picture)
             .answers("/forms/board/meta/post", 403, r#"{"title":"Forbidden","message":"Please complete a block bypass to continue","frame":"/bypass_minimal.html"}"#)
@@ -194,12 +287,65 @@ mod tests {
         let person = Person::says(&[Some("0100000000000000"), Some("1000000000000000"), Some("0010000000000001")]);
         let to = Where { site: "zzzchan".into(), board: "meta".into(), thread: 4378 };
         let draft = Draft { comment: "hi".into(), password: "pw".into(), ..Default::default() };
-        let jschan = Jschan { root: "https://zzzchan.xyz".into() };
+        let jschan = Jschan { root: "https://zzzchan.xyz".into(), site: "zzzchan".into() };
         assert_eq!(jschan.post(&session(&site, &person), &to, &draft).unwrap(), Posted { thread: 4378, no: 6307 });
         let picks: Vec<_> = site.sent("/forms/board/meta/post").fields.into_iter().filter(|(k, _)| k == "captcha").map(|(_, v)| v).collect();
         assert_eq!(picks, ["2", "15"]);
         assert_eq!(site.sent("/forms/blockbypass").field("captcha"), Some("0"));
         assert!(matches!(person.shown.borrow().first(), Some(Task::Grid { image: Some(_), .. })));
+    }
+
+    // Answers recorded from jschan c0d50eb (e2e/jschan/servers.sh), redirects followed as
+    // ck-web's fetch follows them; pages cut to what's read of them.
+    const LOGIN_PAGE: &str = "<!DOCTYPE html><html><head><title>Login</title></head></html>";
+    const REFUSED_JSON: &str = r#"{"title":"Forbidden","message":"Incorrect login credentials","redirect":"/login.html?goto=%2Faccount.html"}"#;
+
+    #[test]
+    fn an_account_logs_in_is_checked_and_logs_out() {
+        use super::super::fake::Site;
+        let account = Account { root: "http://127.0.0.1:7100".into(), site: "ptchan".into() };
+        let answers = |code: &str| ["ck user".to_string(), "p&ss=w0rd".into(), code.into()];
+        // Refused, without a code: the code may be what's missing.
+        let site = Site::default().answers("/forms/login", 403, REFUSED_JSON).answers("/forms/login", 403, REFUSED_JSON);
+        let why = account.log_in(&site, &answers("")).unwrap_err().to_string();
+        assert!(why.starts_with("Incorrect login credentials: ") && why.contains("2FA code"), "{why}");
+        assert_eq!(site.sent("/forms/login").body.as_deref(), Some("username=ck%20user&password=p%26ss%3Dw0rd"));
+        assert_eq!(account.log_in(&site, &answers(" 123456 ")).unwrap_err().to_string(), "Incorrect login credentials");
+        assert_eq!(site.sent("/forms/login").body.as_deref(), Some("username=ck%20user&password=p%26ss%3Dw0rd&twofactor=123456"));
+        // In: its account page, and /csrf.json answers its token.
+        let site = Site::default()
+            .answers("/forms/login", 200, "<!DOCTYPE html><html><head><title>Account</title></head></html>")
+            .answers("/csrf.json", 200, r#"{"token":"QLfCu5WV-FM4YjvJTtMDen_UnSBrOfGFEVlY"}"#)
+            .answers("/csrf.json", 200, r#"{"token":"QLfCu5WV-FM4YjvJTtMDen_UnSBrOfGFEVlY"}"#)
+            // Out: sent to the front page (none without nginx), then to the login page.
+            .answers("/forms/logout", 404, "<!DOCTYPE html><html><head><title>Error</title></head></html>")
+            .answers("/csrf.json", 200, LOGIN_PAGE)
+            .answers("/csrf.json", 200, LOGIN_PAGE);
+        account.log_in(&site, &answers("")).unwrap();
+        assert!(account.logged_in(&site).unwrap());
+        account.log_out(&site).unwrap();
+        assert!(!account.logged_in(&site).unwrap());
+        assert_eq!((account.name(), account.asks().iter().filter(|f| f.optional).count()), ("ptchan account".to_string(), 1));
+    }
+
+    #[test]
+    fn logged_in_a_post_goes_without_the_captcha_first() {
+        use super::super::fake::{Person, Site, session};
+        let site = Site::default()
+            .answers("/capt/settings.json", 200, r#"{"captchaMode":2,"maxFiles":5}"#)
+            .answers("/csrf.json", 200, r#"{"token":"F8Lo7LFF-isTp5Y_nsdEaePkm7SfANouBM84"}"#)
+            // A plain account: the site still wants it.
+            .answers("/forms/board/capt/post", 403, r#"{"title":"Forbidden","message":"Incorrect captcha answer"}"#)
+            .answers("/settings.json", 200, r#"{"captchaOptions":{"language":"en-GB","type":"text"}}"#)
+            .answers("/captcha", 200, &png_b64())
+            .answers("/forms/board/capt/post", 200, r#"{"postId":1,"redirect":"/capt/thread/1.html#1"}"#);
+        let person = Person::says(&[Some("abc123")]);
+        let to = Where { site: "ptchan".into(), board: "capt".into(), thread: 0 };
+        let draft = Draft { comment: "hi".into(), password: "pw".into(), ..Default::default() };
+        let jschan = Jschan { root: "http://localhost:7101".into(), site: "ptchan".into() };
+        assert_eq!(jschan.post(&session(&site, &person), &to, &draft).unwrap(), Posted { thread: 1, no: 1 });
+        assert_eq!(site.sent("/forms/board/capt/post").field("captcha"), Some("abc123"));
+        assert_eq!(person.shown.borrow().len(), 1);
     }
 
     #[test]

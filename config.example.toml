@@ -66,8 +66,9 @@ notify = "auto"
 # default: the one ck downloads, then next to ck, then on the PATH). On Windows it's ck-web.exe.
 # web_helper = "~/ck/target/release/ck-web"
 #
-# A 4chan Pass or a 2ch passcode has no setting here: log in with ctrl-p in the reply box. The
-# login is the site's cookie in ck-web's profile, so the pass is never written to this file.
+# A 4chan Pass, a 2ch passcode or a jschan account has no setting here: log in with ctrl-p in
+# the reply box. The login is the site's cookie in ck-web's profile, so nothing of it is ever
+# written to this file.
 
 # The password posts are sent with, for deleting them on sites that let you (by default a
 # new one each run).

@@ -7,7 +7,7 @@ use std::time::Instant;
 use anyhow::{Result, bail};
 use serde_json::Value;
 
-use super::{Draft, Pass, Posted, Poster, Session, Web, Where, said, text_of_class};
+use super::{LoginField, Draft, Login, Posted, Poster, Session, Web, Where, said, text_of_class};
 use crate::captcha::{Cell, Challenge, Step, Task, decode, inline_image};
 use crate::markup::strip_tags;
 use crate::web::{Fetch, Upload};
@@ -26,7 +26,7 @@ impl Poster for Fourchan {
         Some(2000)
     }
 
-    fn pass(&self) -> Option<Arc<dyn Pass>> {
+    fn login(&self) -> Option<Arc<dyn Login>> {
         Some(Arc::new(FourchanPass))
     }
 
@@ -81,13 +81,13 @@ fn send(s: &Session, to: &Where, draft: &Draft, captcha: Vec<(String, String)>) 
 /// own scripts read) with the pass's own cookie.
 pub struct FourchanPass;
 
-impl Pass for FourchanPass {
-    fn name(&self) -> &'static str {
-        "4chan Pass"
+impl Login for FourchanPass {
+    fn name(&self) -> String {
+        "4chan Pass".into()
     }
 
-    fn asks(&self) -> &'static [&'static str] {
-        &["Token", "PIN"]
+    fn asks(&self) -> &'static [LoginField] {
+        &[LoginField { label: "Token", optional: false }, LoginField { label: "PIN", optional: false }]
     }
 
     fn page(&self) -> String {
