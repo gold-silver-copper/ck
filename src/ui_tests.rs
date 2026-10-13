@@ -1955,7 +1955,7 @@ fn ui_pads_columns_by_cells() {
     }
     assert!(width_spec(r#"format!("{:<16}", x)"#) && width_spec(r#"format!("{s:16}")"#) && width_spec(r#"format!("{s:>w$}")"#));
     assert!(!width_spec(r#"format!("{:02x}{:.1}{x:?}{}", a, b)"#) && !width_spec("Rect { x: 0, y: 1 }") && !width_spec("Vec::<u8>::new()"));
-    // All of src but the test files, which pad expected output on purpose, and the input log,
+    // All of src but the test files, which pad expected output (and timings) on purpose, and the input log,
     // which pads a number in a file.
     let mut dirs = vec![std::path::PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/src"))];
     let mut checked = 0;
@@ -1967,7 +1967,7 @@ fn ui_pads_columns_by_cells() {
                 continue;
             }
             let name = path.file_name().unwrap().to_string_lossy();
-            if !name.ends_with(".rs") || ["tests.rs", "ui_tests.rs", "fuzz.rs", "e2e.rs", "bench.rs", "input_log.rs"].contains(&&*name) {
+            if !name.ends_with(".rs") || ["tests.rs", "ui_tests.rs", "fuzz.rs", "e2e.rs", "bench.rs", "bench_app.rs", "input_log.rs"].contains(&&*name) {
                 continue;
             }
             let src = std::fs::read_to_string(&path).unwrap();

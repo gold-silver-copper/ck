@@ -102,7 +102,6 @@ pub(super) fn draw_viewer(f: &mut Frame, app: &mut App) {
     };
     // Terminal graphics would cover a panel on top.
     let Some((url, kind)) = source.filter(|_| !matches!(app.popup, Some(Popup::ImageSearch(_)))) else { return };
-    let spinner = spinner(app.tick);
     // How much of the image this zoom shows here, for moving around (and so what's shown stays
     // inside the image).
     let mut crop = crop;
@@ -122,8 +121,14 @@ pub(super) fn draw_viewer(f: &mut Frame, app: &mut App) {
             );
             f.render_widget(Image::new(p), r.intersection(inner));
         }
-        State::Loading => msg(f, format!("{spinner} Loading…"), Style::new().fg(t.primary)),
-        State::Rendering => msg(f, format!("{spinner} Rendering…"), Style::new().fg(t.primary)),
+        State::Loading => {
+            app.drawn.spinning = true;
+            msg(f, format!("{} Loading…", spinner(app.tick)), Style::new().fg(t.primary));
+        }
+        State::Rendering => {
+            app.drawn.spinning = true;
+            msg(f, format!("{} Rendering…", spinner(app.tick)), Style::new().fg(t.primary));
+        }
         State::Failed => msg(f, "Couldn't load this image".into(), Style::new().fg(t.error)),
         State::Unavailable => msg(f, format!("Not saved: the image wasn't downloaded or cached ({} downloads it)", app.keys.key(Action::Download)), dim()),
     }

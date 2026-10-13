@@ -14,7 +14,7 @@ use std::borrow::Cow;
 const LABEL: u16 = 9;
 
 pub(super) fn draw_reply(f: &mut Frame, app: &mut App) {
-    let App { popup, images, tick, .. } = app;
+    let App { popup, images, tick, drawn, .. } = app;
     let Some(Popup::Reply(c)) = popup else { return };
     let where_to = match c.to.thread {
         0 => format!("New thread on /{}/", c.to.board),
@@ -75,6 +75,7 @@ pub(super) fn draw_reply(f: &mut Frame, app: &mut App) {
         Stage::Installing { got, size } => {
             let mb = |b: u64| b / (1 << 20);
             let of = size.map_or(String::new(), |s| format!(" of {} MB", mb(s)));
+            drawn.spinning = true;
             say(f, format!("{spin} Downloading ck-web: {} MB{of}…", mb(*got)));
             if let Some(s) = size.filter(|&s| s > 0) {
                 let w = u64::from(body.width.saturating_sub(2));
@@ -83,7 +84,10 @@ pub(super) fn draw_reply(f: &mut Frame, app: &mut App) {
                 fill(f, Rect::new(body.x, body.y + 2, done.min(body.width.saturating_sub(2)), 1), t.primary);
             }
         }
-        Stage::Working => say(f, format!("{spin} {}…", c.doing)),
+        Stage::Working => {
+            drawn.spinning = true;
+            say(f, format!("{spin} {}…", c.doing));
+        }
         Stage::Login(form) => {
             if let Some(login) = &c.login {
                 draw_login(f, form, login.as_ref(), &c.to.site, body);
@@ -108,7 +112,10 @@ pub(super) fn draw_reply(f: &mut Frame, app: &mut App) {
                         c.view_at = Some(ViewAt { area, left: *left, top: *top, width: img.width(), height: img.height() });
                     }
                 }
-                None => put(f, view.x, view.y, view.width, Line::styled(format!("{spin} Loading…"), dim())),
+                None => {
+                    drawn.spinning = true;
+                    put(f, view.x, view.y, view.width, Line::styled(format!("{spin} Loading…"), dim()));
+                }
             }
         }
         Stage::Solving(_) => draw_captcha(f, images, c, body),
