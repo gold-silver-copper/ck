@@ -3,7 +3,9 @@
 # ptchina (ptchan.org's fork), each with its own Redis and database, seeded with the accounts
 # and boards the test uses (seed.js). Everything lives under $CK_E2E (default
 # ~/.cache/ck-e2e): nothing is installed system-wide, but for the image tools with --packages.
-# The same script runs on Linux, macOS and Windows (inside WSL1's Ubuntu).
+# The same script runs on Linux, macOS and Windows (inside WSL1's Ubuntu). There MongoDB can't
+# run (WSL1 can't sync a folder to disk, which it does), so it's Windows' own MongoDB, started
+# beforehand on the same port: CK_E2E_OWN_MONGODB=1 says so, and this leaves it be.
 #
 #   e2e/jschan/servers.sh install [--packages]   Node, MongoDB, Redis and both servers
 #   e2e/jschan/servers.sh start                   start, reset and seed them
@@ -58,7 +60,7 @@ install() {
     *) echo "no builds for $os-$arch" >&2; exit 1 ;;
   esac
   [ -x "$CK_E2E/node/bin/node" ] || fetch "https://nodejs.org/dist/v$NODE_VERSION/node-v$NODE_VERSION-$n_os-$n_arch.tar.gz" "$CK_E2E/node"
-  [ -x "$CK_E2E/mongodb/bin/mongod" ] || fetch "https://fastdl.mongodb.org/${n_os/darwin/osx}/$m_name-$MONGO_VERSION.tgz" "$CK_E2E/mongodb"
+  [ -n "${CK_E2E_OWN_MONGODB:-}" ] || [ -x "$CK_E2E/mongodb/bin/mongod" ] || fetch "https://fastdl.mongodb.org/${n_os/darwin/osx}/$m_name-$MONGO_VERSION.tgz" "$CK_E2E/mongodb"
   if [ ! -x "$CK_E2E/redis/src/redis-server" ]; then
     fetch "https://download.redis.io/releases/redis-$REDIS_VERSION.tar.gz" "$CK_E2E/redis"
     make -s -C "$CK_E2E/redis" -j3 BUILD_TLS=no MALLOC=libc >/dev/null
@@ -95,7 +97,9 @@ wait_port() {
 start() {
   local run="$CK_E2E/run"
   mkdir -p "$run/db"
-  mongod --dbpath "$run/db" --port "$MONGO_PORT" --bind_ip 127.0.0.1 --logpath "$run/mongod.log" --pidfilepath "$run/mongod.pid" --fork >/dev/null
+  if [ -z "${CK_E2E_OWN_MONGODB:-}" ]; then
+    mongod --dbpath "$run/db" --port "$MONGO_PORT" --bind_ip 127.0.0.1 --logpath "$run/mongod.log" --pidfilepath "$run/mongod.pid" --fork >/dev/null
+  fi
   wait_port MongoDB "$MONGO_PORT"
   for s in "${SERVERS[@]}"; do
     read -r name url commit port redis <<<"$s"

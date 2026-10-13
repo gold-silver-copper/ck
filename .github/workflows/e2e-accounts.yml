@@ -65,7 +65,9 @@ jobs:
         run: e2e/jschan/servers.sh stop
 
   # The runners can't start the VM that Linux containers or WSL2 need: WSL1, a Linux userland
-  # without one, runs the same script, and shares Windows' network.
+  # without one, runs the same script, and shares Windows' network. All but MongoDB, which
+  # can't run there (WSL1 can't sync a folder to disk): it's Windows' own build, on the port
+  # the script would use.
   windows:
     runs-on: windows-latest
     timeout-minutes: 60
@@ -75,9 +77,19 @@ jobs:
         with:
           distribution: Ubuntu-22.04
           wsl-version: 1
+      - name: MongoDB
+        shell: pwsh
+        run: |
+          $ProgressPreference = 'SilentlyContinue'
+          $m = "$env:RUNNER_TEMP\mongodb"
+          Invoke-WebRequest https://fastdl.mongodb.org/windows/mongodb-windows-x86_64-7.0.14.zip -OutFile "$m.zip" -MaximumRetryCount 5 -RetryIntervalSec 5
+          Expand-Archive "$m.zip" $m
+          New-Item -ItemType Directory "$m\db" | Out-Null
+          $mongod = (Get-ChildItem $m -Recurse -Filter mongod.exe).FullName
+          Start-Process $mongod -ArgumentList '--dbpath', "$m\db", '--port', '27117', '--bind_ip', '127.0.0.1' -WindowStyle Hidden
       - name: Servers' install
         shell: wsl-bash {0}
-        run: CK_E2E=$HOME/ck-e2e e2e/jschan/servers.sh install --packages
+        run: CK_E2E_OWN_MONGODB=1 CK_E2E=$HOME/ck-e2e e2e/jschan/servers.sh install --packages
       # WSL1 ends an instance (and the servers in it) once no wsl.exe is left: one stays,
       # asleep, while the servers start in the next step and the test runs.
       - name: Keep WSL running
@@ -86,7 +98,7 @@ jobs:
       - name: Servers
         shell: wsl-bash {0}
         timeout-minutes: 15
-        run: CK_E2E=$HOME/ck-e2e e2e/jschan/servers.sh start
+        run: CK_E2E_OWN_MONGODB=1 CK_E2E=$HOME/ck-e2e e2e/jschan/servers.sh start
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo build -p ck-web
