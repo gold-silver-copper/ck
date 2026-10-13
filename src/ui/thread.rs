@@ -47,7 +47,7 @@ pub(super) fn draw_thread(f: &mut Frame, app: &mut App, area: Rect) {
     // change), in place.
     if let Some(l) = t.layout.as_mut().filter(|l| l.at != clock.now()) {
         l.at = clock.now();
-        l.exact.iter_mut().for_each(|x| *x = false);
+        l.stale();
     }
     settle(t, clock);
     // The selection moved (or everything was laid out again): into view, placed exactly.
@@ -107,13 +107,16 @@ pub(super) fn draw_thread(f: &mut Frame, app: &mut App, area: Rect) {
             let code_x = x + PAD + if l.thumbs.iter().any(|&(_, k)| k == e) { THUMB.width + 2 } else { 0 };
             fill(f, Rect::new(code_x, y, area.right().saturating_sub(code_x + 1), 1), th.code_bg);
         }
-        put(f, x + PAD, y, width.saturating_sub(PAD + 2), Line::from(line.spans.clone()));
-        let end = x.saturating_add(PAD).saturating_add(cells(markup::spans_columns(&line.spans)));
-        if row == 0 {
-            ends.0 = end;
-        }
-        if row + 1 == area.height {
-            ends.1 = end;
+        let spans: Vec<Span> = line.spans.iter().map(|s| Span::styled(s.content.as_ref(), s.style)).collect();
+        put(f, x + PAD, y, width.saturating_sub(PAD + 2), Line::from(spans));
+        if row == 0 || row + 1 == area.height {
+            let end = x.saturating_add(PAD).saturating_add(cells(markup::spans_columns(&line.spans)));
+            if row == 0 {
+                ends.0 = end;
+            }
+            if row + 1 == area.height {
+                ends.1 = end;
+            }
         }
     }
 
