@@ -42,6 +42,14 @@ const accounts = async () => {
 	// Posting as fast as a test does, and no captcha switched on by the posts' pace.
 	const config = await Mongo.getConfig();
 	config.floodTimers = { sameContentSameIp: 0, sameContentAnyIp: 0, anyContentSameIp: 0 };
+	// Its text captcha in a font that's there (ImageMagick's own default may be none): DejaVu
+	// Sans, as its grid captchas, else any.
+	const { DejaVuSans, fontList } = app('lib/misc/fonts.js');
+	const font = DejaVuSans || fontList[0];
+	if (!font) {
+		throw new Error('no fonts (fc-list): the captchas need one');
+	}
+	config.captchaOptions.font = font.path;
 	await Mongo.setConfig(config);
 	// ck-web opens a site from its robots.txt, which nginx serves in production.
 	fs.writeFileSync(path.join(dir, 'static', 'robots.txt'), 'User-agent: *\nDisallow:\n');

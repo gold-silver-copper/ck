@@ -151,7 +151,7 @@ impl Login for Account {
             let e = error(&r);
             // The same words for all of them: the code may be what's missing.
             if e.to_string() == REFUSED && code.trim().is_empty() {
-                bail!("{e}: check the name and password, and give the 2FA code if the account has two-factor on");
+                bail!("{e}: check the password, and give the 2FA code if it's on");
             }
             return Err(e);
         }

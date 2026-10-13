@@ -82,12 +82,12 @@ jobs:
       - name: Servers
         shell: pwsh
         run: |
-          Start-Process wsl.exe -ArgumentList '-d', 'Ubuntu-22.04', '--', 'bash', '-c', 'CK_E2E=$HOME/ck-e2e e2e/jschan/servers.sh start > $HOME/start.log 2>&1; sleep 7200' -WindowStyle Hidden
+          Start-Process wsl.exe -ArgumentList '--', 'bash', '-c', 'CK_E2E=$HOME/ck-e2e e2e/jschan/servers.sh start > $HOME/start.log 2>&1; sleep 7200' -WindowStyle Hidden
           for ($i = 0; $i -lt 180; $i++) {
             if ((Test-NetConnection 127.0.0.1 -Port 7101 -WarningAction SilentlyContinue).TcpTestSucceeded) { break }
             Start-Sleep 2
           }
-          wsl -d Ubuntu-22.04 -- bash -c 'cat $HOME/start.log'
+          wsl -- bash -c 'cat $HOME/start.log'
           if (-not (Test-NetConnection 127.0.0.1 -Port 7101 -WarningAction SilentlyContinue).TcpTestSucceeded) { exit 1 }
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2

@@ -758,22 +758,28 @@ config, else a new one each run), for deleting them on the site where it lets yo
 `esc` closes the box and keeps what's written, per thread, for the next `r` there (pressing
 `r` on other posts adds their quotes). Drafts last until ck quits.
 
-### A 4chan Pass or a 2ch passcode
+### Logging in: a 4chan Pass, a 2ch passcode, a jschan account
 
-With a [4chan Pass](https://www.4chan.org/pass) or a 2ch passcode, posts skip the captcha.
-In the reply box on 4chan or 2ch, ctrl-p checks whether ck is logged in with it. If it isn't,
-the box asks for the 4chan Pass's token and PIN, or the 2ch passcode (shown as dots), and
-`enter` logs in. ck sends them to the site's own login page through ck-web (below), as the
-page's form would, and doesn't store them: not in the config, nor anywhere else on disk.
-The login is the site's cookie in ck-web's profile, which lasts (4chan's for a year) until
-you log out: ctrl-p again, then `y`. If the site refuses, the box says why and asks again.
-ck never tries a login again by itself.
+ctrl-p in the reply box logs in to the site: with a [4chan Pass](https://www.4chan.org/pass)
+on 4chan, a passcode on 2ch, or an account on a jschan site (ptchan, zzzchan, trashchan…).
+It first checks whether ck is logged in. If it isn't, the box asks for what the site wants
+(the 4chan Pass's token and PIN, the 2ch passcode, or a jschan account's name, password and,
+if the account has two-factor on, its 2FA code), shown as dots, and `enter` logs in. ck
+sends them to the site's own login page through ck-web (below), as the page's form would,
+and doesn't store them: not in the config, nor anywhere else on disk. The login is the
+site's cookie in ck-web's profile, which lasts until you log out (ctrl-p again, then `y`):
+4chan's for a year, a jschan site's for three days after it was last used. If the site
+refuses, the box says why and asks again. jschan says the same to a wrong password and a
+missing or wrong 2FA code, so the box says to check both. ck never tries a login again by
+itself, and each site's login is its own.
 
-Logged in, a post goes without a captcha, as the site's own form sends it. When 4chan won't
-take the Pass right now (in use from another IP, which it allows to change once every 30
-minutes), the box says so, and the post goes on with a captcha. A second ck running at the
-same time uses another ck-web profile (`web-1`), without the login: log in there too, or
-post from the first one.
+Logged in with a pass, a post goes without a captcha, as the site's own form sends it. When
+4chan won't take the Pass right now (in use from another IP, which it allows to change once
+every 30 minutes), the box says so, and the post goes on with a captcha. A jschan account
+skips the captcha only if the site lets it (ptchan's gold accounts do): logged in,
+ck sends the post without one first, and shows the captcha if the site still wants it. A
+second ck running at the same time uses another ck-web profile (`web-1`), without the login:
+log in there too, or post from the first one.
 
 ### ck-web, and Cloudflare
 

@@ -38,9 +38,10 @@ fetch() {
 install() {
   mkdir -p "$CK_E2E"
   if [ "${1:-}" = --packages ]; then
-    # ImageMagick draws the captchas; fonts for its text.
+    # ImageMagick draws the captchas, in DejaVu Sans (found by fontconfig).
     if [ "$os" = Darwin ]; then
-      brew install imagemagick
+      brew install imagemagick fontconfig
+      brew install --cask font-dejavu
     else
       sudo=$([ "$(id -u)" = 0 ] && echo "" || echo sudo)
       $sudo apt-get update -q
