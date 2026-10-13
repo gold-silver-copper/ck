@@ -6,6 +6,7 @@ use super::*;
 use anyhow::Context;
 use crate::captcha::{Challenge, Solving, Task};
 use crate::editor::Editor;
+use crate::pty_editor::PtyEditor;
 pub use crate::post::Where;
 use crate::post::{Ask, LoginField, Draft, Login, Posted, Poster, Session, Web};
 use std::sync::mpsc::{Sender, channel};
@@ -180,6 +181,8 @@ pub struct Compose {
     /// The names in the file's folder that tab could complete it to, listed after a tab
     /// that couldn't decide between them; the next tab moves on.
     pub file_choices: Vec<String>,
+    /// The user's editor, writing the comment (ctrl-g), till it quits.
+    pub pty: Option<PtyEditor>,
 }
 
 impl Compose {
@@ -213,6 +216,7 @@ impl Compose {
             answer: None,
             limit: poster.comment_limit(),
             file_choices: Vec::new(),
+            pty: None,
         }
     }
 
@@ -394,6 +398,8 @@ enum Then {
     Send,
     /// Ctrl-p: the site's login.
     OpenLogin,
+    /// Ctrl-g: write the comment in $EDITOR.
+    Edit,
     LogIn,
     LogOut,
     /// Stop the post on its way.
@@ -500,15 +506,57 @@ impl App {
         }
     }
 
+    /// Ctrl-g: the comment written in the user's editor, in the box. Each time it draws, the
+    /// loop wakes to show it; when it quits, `editor_quit` takes what it saved.
+    fn open_editor(&mut self) {
+        let (drew, quit) = (self.later(), self.later());
+        let Some(c) = self.reply_box() else { return };
+        let to = c.to.clone();
+        let started = PtyEditor::start(
+            c.comment.text(),
+            move || {
+                drew.run(|_| {});
+            },
+            move |ok| {
+                quit.run(move |app| app.editor_quit(&to, ok));
+            },
+        );
+        match started {
+            Ok(pty) => {
+                c.pty = Some(pty);
+                c.field = Field::Comment;
+                c.problem = None;
+            }
+            Err(e) => c.problem = Some(format!("Couldn't start the editor: {e:#}")),
+        }
+    }
+
+    /// The editor quit: what it saved is the comment.
+    fn editor_quit(&mut self, to: &Where, ok: bool) {
+        let Some(c) = self.compose_for(to) else { return };
+        let Some(pty) = c.pty.take() else { return };
+        match pty.saved(ok) {
+            Ok(Some(text)) => c.comment.set(&text),
+            Ok(None) => c.note = Some("The editor quit with an error: the comment is as it was".into()),
+            Err(e) => c.problem = Some(format!("Couldn't read what the editor saved: {e:#}")),
+        }
+    }
+
     pub(super) fn on_reply_key(&mut self, key: KeyEvent) {
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         let Some(c) = self.reply_box() else { return };
+        // Every key is the editor's while it's open: it's left as it's left in a terminal.
+        if let Some(pty) = &mut c.pty {
+            pty.key(key);
+            return;
+        }
         let busy = c.busy();
         let then = match &mut c.stage {
             Stage::Writing => match key.code {
                 KeyCode::Esc => Then::Close,
                 KeyCode::Char('s') if ctrl => Then::Send,
                 KeyCode::Char('p') if ctrl => Then::OpenLogin,
+                KeyCode::Char('g') if ctrl => Then::Edit,
                 _ => {
                     c.on_writing_key(key);
                     Then::Nothing
@@ -556,6 +604,7 @@ impl App {
             Then::Close => self.close_reply(),
             Then::Send => self.send_reply(),
             Then::OpenLogin => self.open_login(),
+            Then::Edit => self.open_editor(),
             Then::LogIn => {
                 // What was typed goes to the site, and isn't kept.
                 let Some(c) = self.reply_box() else { return };
@@ -589,6 +638,10 @@ impl App {
     /// Text pasted into the box: into the field, or the captcha's answer.
     pub(super) fn paste_reply(&mut self, text: &str) -> bool {
         let Some(c) = self.reply_box() else { return false };
+        if let Some(pty) = &mut c.pty {
+            pty.paste(text);
+            return true;
+        }
         match &mut c.stage {
             Stage::Writing => {
                 let field = c.field;
