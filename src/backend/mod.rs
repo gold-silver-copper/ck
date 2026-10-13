@@ -129,7 +129,7 @@ pub const ENGINES: [Engine; 7] = [
             let _ = jschan::parse_boards(v);
             [jschan::parse_overboard(FUZZ_BASE, v), jschan::parse_thread(FUZZ_BASE, v)].concat()
         },
-        post: Some(|c| Arc::new(crate::post::Jschan { root: site_url(c) })),
+        post: Some(|c| Arc::new(crate::post::Jschan { root: site_url(c), site: c.name.clone() })),
     },
     Engine {
         kind: SiteKind::Lynxchan,

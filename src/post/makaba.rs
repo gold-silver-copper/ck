@@ -12,7 +12,7 @@ use image::{DynamicImage, Rgba, RgbaImage, imageops};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha512};
 
-use super::{Draft, Pass, Posted, Poster, Session, Web, Where, said, text_of_class};
+use super::{LoginField, Draft, Login, Posted, Poster, Session, Web, Where, said, text_of_class};
 use crate::captcha::{Cell, Challenge, Task, decode};
 use crate::http::encode_segment as enc;
 use crate::web::{Fetch, Upload};
@@ -62,7 +62,7 @@ impl Poster for Makaba {
         format!("{}/robots.txt", self.root)
     }
 
-    fn pass(&self) -> Option<Arc<dyn Pass>> {
+    fn login(&self) -> Option<Arc<dyn Login>> {
         Some(Arc::new(Passcode { root: self.root.clone() }))
     }
 
@@ -96,13 +96,13 @@ pub struct Passcode {
     pub root: String,
 }
 
-impl Pass for Passcode {
-    fn name(&self) -> &'static str {
-        "2ch passcode"
+impl Login for Passcode {
+    fn name(&self) -> String {
+        "2ch passcode".into()
     }
 
-    fn asks(&self) -> &'static [&'static str] {
-        &["Passcode"]
+    fn asks(&self) -> &'static [LoginField] {
+        &[LoginField { label: "Passcode", optional: false }]
     }
 
     fn page(&self) -> String {

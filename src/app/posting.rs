@@ -7,7 +7,7 @@ use anyhow::Context;
 use crate::captcha::{Challenge, Solving, Task};
 use crate::editor::Editor;
 pub use crate::post::Where;
-use crate::post::{Ask, Draft, Pass, Posted, Poster, Session, Web};
+use crate::post::{Ask, LoginField, Draft, Login, Posted, Poster, Session, Web};
 use std::sync::mpsc::{Sender, channel};
 use crate::web::{self, Reply, Request};
 use image::DynamicImage;
@@ -72,28 +72,28 @@ pub enum Stage {
     /// No captcha for a while (posting too often): until when, and the site's message.
     Waiting { until: Instant, message: String },
     Solving(Box<Solving>),
-    /// The site's pass (ctrl-p): asking what to log in with, or whether to log out.
-    Pass(Box<PassForm>),
+    /// The site's login (ctrl-p): asking what to log in with, or whether to log out.
+    Login(Box<LoginForm>),
 }
 
-/// Logging in with a site's pass, or out: what it asks for, typed (shown as dots), or, when
-/// ck-web's logged in already, whether to log out.
-pub struct PassForm {
+/// Logging in to a site, or out: what it asks for, typed (shown as dots), or, when ck-web's
+/// logged in already, whether to log out.
+pub struct LoginForm {
     pub logged_in: bool,
-    pub fields: Vec<(&'static str, Editor)>,
+    pub fields: Vec<(LoginField, Editor)>,
     pub at: usize,
 }
 
-impl PassForm {
-    fn new(pass: &dyn Pass, logged_in: bool) -> Self {
-        PassForm { logged_in, fields: pass.asks().iter().map(|&label| (label, Editor::default())).collect(), at: 0 }
+impl LoginForm {
+    fn new(login: &dyn Login, logged_in: bool) -> Self {
+        LoginForm { logged_in, fields: login.asks().iter().map(|&asked| (asked, Editor::default())).collect(), at: 0 }
     }
 
-    /// A key while typing: whether it's done (enter with every field filled in).
+    /// A key while typing: whether it's done (enter with everything needed filled in).
     fn on_key(&mut self, key: KeyEvent) -> bool {
         let n = self.fields.len().max(1);
         match key.code {
-            KeyCode::Enter if self.fields.iter().all(|(_, e)| !e.text().trim().is_empty()) => return true,
+            KeyCode::Enter if self.fields.iter().all(|(a, e)| a.optional || !e.text().trim().is_empty()) => return true,
             KeyCode::Enter | KeyCode::Tab | KeyCode::Down => self.at = (self.at + 1) % n,
             KeyCode::BackTab | KeyCode::Up => self.at = (self.at + n - 1) % n,
             _ => {
@@ -106,15 +106,15 @@ impl PassForm {
     }
 }
 
-/// What's asked of a site's pass.
-enum PassJob {
+/// What's asked of a site's login.
+enum LoginJob {
     Check,
     LogIn(Vec<String>),
     LogOut,
 }
 
 /// How it went.
-pub enum PassDone {
+pub enum LoginDone {
     Checked(bool),
     LoggedIn,
     LoggedOut,
@@ -157,10 +157,10 @@ pub struct Compose {
     pub note: Option<String>,
     /// What ck-web is doing for it, while it's working.
     pub doing: String,
-    /// What the site's pass is called, if it sells one.
-    pub pass: Option<&'static str>,
-    /// ck-web's being offered (or downloaded) for the pass, not the post.
-    for_pass: bool,
+    /// What the site can be logged in to with, if anything.
+    pub login: Option<Arc<dyn Login>>,
+    /// ck-web's being offered (or downloaded) for the login, not the post.
+    for_login: bool,
     /// The picture drawn last, and where the browser view was drawn, for clicks.
     pub art: Option<Art>,
     /// The picture beside it (a slider's shape to find).
@@ -202,8 +202,8 @@ impl Compose {
             problem: None,
             note: None,
             doing: String::new(),
-            pass: poster.pass().map(|p| p.name()),
-            for_pass: false,
+            login: poster.login(),
+            for_login: false,
             art: None,
             side_art: None,
             view_at: None,
@@ -392,8 +392,8 @@ enum Then {
     Nothing,
     Close,
     Send,
-    /// Ctrl-p: the site's pass.
-    Pass,
+    /// Ctrl-p: the site's login.
+    OpenLogin,
     LogIn,
     LogOut,
     /// Stop the post on its way.
@@ -467,8 +467,8 @@ impl App {
             c.answer = None;
             c.stage = Stage::Writing;
         }
-        // What was typed for a pass goes.
-        if matches!(c.stage, Stage::Offer | Stage::Pass(_)) {
+        // What was typed for a login goes.
+        if matches!(c.stage, Stage::Offer | Stage::Login(_)) {
             c.stage = Stage::Writing;
         }
         c.art = None;
@@ -508,7 +508,7 @@ impl App {
             Stage::Writing => match key.code {
                 KeyCode::Esc => Then::Close,
                 KeyCode::Char('s') if ctrl => Then::Send,
-                KeyCode::Char('p') if ctrl => Then::Pass,
+                KeyCode::Char('p') if ctrl => Then::OpenLogin,
                 _ => {
                     c.on_writing_key(key);
                     Then::Nothing
@@ -519,12 +519,12 @@ impl App {
                 c.stage = Stage::Writing;
                 Then::Nothing
             }
-            Stage::Pass(_) if key.code == KeyCode::Esc => {
+            Stage::Login(_) if key.code == KeyCode::Esc => {
                 c.stage = Stage::Writing;
                 c.problem = None;
                 Then::Nothing
             }
-            Stage::Pass(form) if form.logged_in => match key.code {
+            Stage::Login(form) if form.logged_in => match key.code {
                 KeyCode::Char('y') | KeyCode::Enter => Then::LogOut,
                 KeyCode::Char('n') => {
                     c.stage = Stage::Writing;
@@ -532,7 +532,7 @@ impl App {
                 }
                 _ => Then::Nothing,
             },
-            Stage::Pass(form) => {
+            Stage::Login(form) => {
                 if form.on_key(key) { Then::LogIn } else { Then::Nothing }
             }
             Stage::Installing { .. } if key.code == KeyCode::Esc => Then::Close,
@@ -555,15 +555,15 @@ impl App {
             Then::Nothing => {}
             Then::Close => self.close_reply(),
             Then::Send => self.send_reply(),
-            Then::Pass => self.open_pass(),
+            Then::OpenLogin => self.open_login(),
             Then::LogIn => {
                 // What was typed goes to the site, and isn't kept.
                 let Some(c) = self.reply_box() else { return };
-                let Stage::Pass(form) = std::mem::replace(&mut c.stage, Stage::Writing) else { return };
+                let Stage::Login(form) = std::mem::replace(&mut c.stage, Stage::Writing) else { return };
                 let answers = form.fields.into_iter().map(|(_, e)| e.text().to_string()).collect();
-                self.run_pass(PassJob::LogIn(answers));
+                self.run_login(LoginJob::LogIn(answers));
             }
-            Then::LogOut => self.run_pass(PassJob::LogOut),
+            Then::LogOut => self.run_login(LoginJob::LogOut),
             Then::Install => self.install_helper(),
             Then::Click => {
                 if let Some((x, y)) = self.reply_box().and_then(|c| c.pointer) {
@@ -597,7 +597,7 @@ impl App {
                 }
             }
             Stage::Solving(s) if matches!(s.challenge.task, Task::Text { .. }) => s.typed.push_str(text.trim()),
-            Stage::Pass(form) => {
+            Stage::Login(form) => {
                 if let Some((_, e)) = form.fields.get_mut(form.at) {
                     e.insert(text.trim());
                 }
@@ -626,36 +626,35 @@ impl App {
         }
     }
 
-    /// When ck-web isn't here but can be downloaded: offer it, for the post or the pass.
-    fn offer_helper(&mut self, pass: bool) -> bool {
+    /// When ck-web isn't here but can be downloaded: offer it, for the post or the login.
+    fn offer_helper(&mut self, login: bool) -> bool {
         if self.web.is_some() || web::find(self.web_helper.as_deref()).is_some() || web::install::bundle().is_none() {
             return false;
         }
         if let Some(c) = self.reply_box() {
             c.stage = Stage::Offer;
-            c.for_pass = pass;
+            c.for_login = login;
             c.problem = None;
         }
         true
     }
 
-    /// Ctrl-p: whether ck-web is logged in with the site's pass, to log in or out.
-    fn open_pass(&mut self) {
+    /// Ctrl-p: whether ck-web is logged in to the site, to log in or out.
+    fn open_login(&mut self) {
         let Some(c) = self.reply_box() else { return };
-        if c.pass.is_none() {
-            c.problem = Some(format!("{} sells no pass that ck can log in with", c.to.site));
+        if c.login.is_none() {
+            c.problem = Some(format!("{} has nothing ck can log in to", c.to.site));
             return;
         }
         if !self.offer_helper(true) {
-            self.run_pass(PassJob::Check);
+            self.run_login(LoginJob::Check);
         }
     }
 
-    /// Check, log in or log out with the box's site's pass, through ck-web on a thread of its
-    /// own (a site's check before it is shown in the box, as for a post).
-    fn run_pass(&mut self, job: PassJob) {
-        let Some(to) = self.reply_box().map(|c| c.to.clone()) else { return };
-        let Some(pass) = self.poster_for(&to).and_then(|p| p.pass()) else { return };
+    /// Check, log in or log out of the box's site, through ck-web on a thread of its own (a
+    /// site's check before it is shown in the box, as for a post).
+    fn run_login(&mut self, job: LoginJob) {
+        let Some((to, login)) = self.reply_box().and_then(|c| Some((c.to.clone(), c.login.clone()?))) else { return };
         let helper = match self.helper().cloned() {
             Ok(h) => h,
             Err(e) => {
@@ -665,48 +664,49 @@ impl App {
                 return;
             }
         };
-        let name = pass.name();
+        let name = login.name();
         let doing = match job {
-            PassJob::Check => format!("Checking your {name}"),
-            PassJob::LogIn(_) => format!("Logging in with your {name}"),
-            PassJob::LogOut => format!("Logging out of your {name}"),
+            LoginJob::Check => format!("Checking your {name}"),
+            LoginJob::LogIn(_) => format!("Logging in with your {name}"),
+            LoginJob::LogOut => format!("Logging out of your {name}"),
         };
         let Some(attempt) = self.start_attempt(&to, Stage::Working) else { return };
         if let Some(c) = self.reply_box() {
             c.doing = doing;
         }
-        let (later, login) = (self.later(), matches!(job, PassJob::LogIn(_)));
+        let (later, logging_in) = (self.later(), matches!(job, LoginJob::LogIn(_)));
         std::thread::spawn(move || {
             let done = crate::guard::result(|| {
-                helper.open(&pass.page())?;
+                helper.open(&login.page())?;
                 Ok(match job {
-                    PassJob::Check => PassDone::Checked(pass.logged_in(&helper)?),
-                    PassJob::LogIn(answers) => pass.log_in(&helper, &answers).map(|()| PassDone::LoggedIn)?,
-                    PassJob::LogOut => pass.log_out(&helper).map(|()| PassDone::LoggedOut)?,
+                    LoginJob::Check => LoginDone::Checked(login.logged_in(&helper)?),
+                    LoginJob::LogIn(answers) => login.log_in(&helper, &answers).map(|()| LoginDone::LoggedIn)?,
+                    LoginJob::LogOut => login.log_out(&helper).map(|()| LoginDone::LoggedOut)?,
                 })
             });
-            later.run(move |app| app.pass_done(&to, attempt, login, done));
+            later.run(move |app| app.login_done(&to, attempt, logging_in, done));
         });
     }
 
-    /// How the pass's check, login or logout went: the form, or back to writing saying so. A
+    /// How the login's check, login or logout went: the form, or back to writing saying so. A
     /// login the site refused asks again.
-    pub(super) fn pass_done(&mut self, to: &Where, attempt: u64, login: bool, done: anyhow::Result<PassDone>) {
-        let Some(pass) = self.poster_for(to).and_then(|p| p.pass()) else { return };
+    pub(super) fn login_done(&mut self, to: &Where, attempt: u64, logging_in: bool, done: anyhow::Result<LoginDone>) {
         let Some(c) = self.compose_for(to).filter(|c| c.attempt == attempt && c.busy()) else { return };
-        let name = pass.name();
+        let Some(login) = c.login.clone() else { return };
+        let name = login.name();
         match done {
-            Ok(PassDone::Checked(logged_in)) => c.stage = Stage::Pass(Box::new(PassForm::new(pass.as_ref(), logged_in))),
-            Ok(PassDone::LoggedIn) => {
+            Ok(LoginDone::Checked(logged_in)) => c.stage = Stage::Login(Box::new(LoginForm::new(login.as_ref(), logged_in))),
+            Ok(LoginDone::LoggedIn) => {
                 c.stage = Stage::Writing;
-                c.note = Some(format!("Logged in with your {name}: posts on {} skip the captcha", c.to.site));
+                let skips = if login.skips_captcha() { format!(": posts on {} skip the captcha", c.to.site) } else { String::new() };
+                c.note = Some(format!("Logged in with your {name}{skips}"));
             }
-            Ok(PassDone::LoggedOut) => {
+            Ok(LoginDone::LoggedOut) => {
                 c.stage = Stage::Writing;
                 c.note = Some(format!("Logged out of your {name}"));
             }
-            Err(e) if login => {
-                c.stage = Stage::Pass(Box::new(PassForm::new(pass.as_ref(), false)));
+            Err(e) if logging_in => {
+                c.stage = Stage::Login(Box::new(LoginForm::new(login.as_ref(), false)));
                 c.problem = Some(format!("{e:#}"));
             }
             Err(e) => c.problem(format!("{e:#}")),
@@ -746,10 +746,10 @@ impl App {
     fn helper_installed(&mut self, to: &Where, done: anyhow::Result<std::path::PathBuf>) {
         let open = matches!(&self.popup, Some(Popup::Reply(c)) if &c.to == to);
         let Some(c) = self.compose_for(to) else { return };
-        let pass = c.for_pass;
+        let for_login = c.for_login;
         match done {
             Err(e) => c.problem(format!("Couldn't get ck-web: {e:#}")),
-            Ok(_) if open && pass => self.run_pass(PassJob::Check),
+            Ok(_) if open && for_login => self.run_login(LoginJob::Check),
             Ok(_) if open => self.start_post(),
             Ok(_) => c.stage = Stage::Writing,
         }
