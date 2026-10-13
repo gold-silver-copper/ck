@@ -239,6 +239,8 @@ pub struct Drawn {
     /// Whether nothing since may have moved its rows (see `forget_frame`): a click lands only
     /// then, while a grid's columns hold until the screen changes.
     fresh: bool,
+    /// It showed a spinner (an image loading, a post being sent): the next frame turns it.
+    pub spinning: bool,
 }
 
 /// New posts in a watched thread, for a notification.
@@ -1000,7 +1002,7 @@ impl App {
     /// due refresh, and at most a second (relative times like "5s ago" stay current).
     pub fn next_wake(&self, now: Instant) -> Duration {
         let mut wake = Duration::from_secs(1);
-        let animating = self.tab.loading().is_some() || !self.refreshing.is_empty() || self.downloads.running > 0 || self.tab.viewer().is_some();
+        let animating = self.tab.loading().is_some() || !self.refreshing.is_empty() || self.downloads.running > 0 || self.drawn.spinning;
         if animating {
             wake = wake.min(Duration::from_millis(100));
         }

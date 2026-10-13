@@ -51,6 +51,9 @@ pub(crate) mod captcha;
 pub(crate) mod clipboard;
 #[cfg(test)]
 mod bench;
+#[cfg(test)]
+#[cfg(unix)] // it drives ck in tmux
+mod bench_app;
 pub(crate) mod config;
 pub(crate) mod disk_cache;
 pub(crate) mod download;

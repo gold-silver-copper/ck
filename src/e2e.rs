@@ -126,13 +126,13 @@ fn local_urls(body: &str, port: u16) -> String {
 }
 
 /// One tmux server of our own, with ck in a window that outlives it.
-struct Tmux {
-    socket: String,
+pub(crate) struct Tmux {
+    pub(crate) socket: String,
 }
 
 impl Tmux {
-    fn run(&self, args: &[&str]) -> String {
-        let out = Command::new("tmux").arg("-L").arg(&self.socket).args(args).output().unwrap();
+    pub(crate) fn run(&self, args: &[&str]) -> String {
+        let out = Command::new("tmux").args(["-f", "/dev/null", "-L"]).arg(&self.socket).args(args).output().unwrap();
         if !out.status.success() && args.first() != Some(&"kill-server") {
             eprintln!("tmux {args:?}: {}", String::from_utf8_lossy(&out.stderr).trim());
         }
@@ -146,7 +146,7 @@ impl Tmux {
 
     /// `cmd` in a new window of a new server. (A new server sometimes exits as it starts:
     /// "server exited unexpectedly". Then again.)
-    fn launch(&self, cmd: &str, (w, h): (u16, u16)) {
+    pub(crate) fn launch(&self, cmd: &str, (w, h): (u16, u16)) {
         for _ in 0..5 {
             let _ = self.run(&["kill-server"]);
             self.run(&["new-session", "-d", "-s", "ck", "-x", &w.to_string(), "-y", &h.to_string(), cmd]);
@@ -157,17 +157,17 @@ impl Tmux {
         }
     }
 
-    fn screen(&self) -> String {
+    pub(crate) fn screen(&self) -> String {
         self.run(&["capture-pane", "-p", "-t", "ck"])
     }
 
-    fn keys(&self, keys: &[&str]) {
+    pub(crate) fn keys(&self, keys: &[&str]) {
         let mut args = vec!["send-keys", "-t", "ck"];
         args.extend_from_slice(keys);
         self.run(&args);
     }
 
-    fn text(&self, text: &str) {
+    pub(crate) fn text(&self, text: &str) {
         self.run(&["send-keys", "-t", "ck", "-l", text]);
     }
 
@@ -180,7 +180,7 @@ impl Tmux {
 }
 
 /// The shell command that runs ck with `env` and `args`.
-fn command(ck: &Path, env: &[(String, String)], args: &[&str]) -> String {
+pub(crate) fn command(ck: &Path, env: &[(String, String)], args: &[&str]) -> String {
     let vars: String = env.iter().map(|(k, v)| format!("{k}='{v}' ")).collect();
     let args: String = args.iter().map(|a| format!(" '{a}'")).collect();
     format!("env {vars} '{}'{args}", ck.display())
@@ -258,7 +258,7 @@ fn ready(t: &Tmux) {
 }
 
 /// The release binary (`CK_BIN`, or target/release/ck).
-fn release_ck() -> PathBuf {
+pub(crate) fn release_ck() -> PathBuf {
     let ck = PathBuf::from(std::env::var("CK_BIN").unwrap_or_else(|_| format!("{}/target/release/ck", env!("CARGO_MANIFEST_DIR"))));
     assert!(ck.exists(), "no {} (cargo build --release first)", ck.display());
     ck
@@ -276,7 +276,7 @@ fn ck_and_tmux(test: &str) -> Option<PathBuf> {
 
 /// `config` written to a scratch config directory in `dir`, and the environment that has
 /// ck use it and keep its data, cache and last frame (frame.txt) in `dir` too.
-fn scratch(dir: &Path, config: &str) -> Vec<(String, String)> {
+pub(crate) fn scratch(dir: &Path, config: &str) -> Vec<(String, String)> {
     std::fs::create_dir_all(dir.join("config/ck")).unwrap();
     std::fs::write(dir.join("config/ck/config.toml"), config).unwrap();
     [("XDG_CONFIG_HOME", "config"), ("XDG_DATA_HOME", "data"), ("XDG_CACHE_HOME", "cache")]
