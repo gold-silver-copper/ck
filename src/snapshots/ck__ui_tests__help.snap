@@ -11,9 +11,9 @@ expression: snapshot(&mut a)
        lainc    n                  next search match (archive search: more results)
        wizch    *                  favorite board: on / off
        uboac    x                  remove the entry (home: a favorite)
-       endch    . B                images on this board: on / off
-       kohlc    . a                add a site from a link to any page of it
-       desua    . U                read a vichan site's board list again from its
+       endch    B                  images on this board: on / off
+       kohlc    a                  add a site from a link to any page of it
+       desua    U                  read a vichan site's board list again from its
        zzzch                       pages
        2ch
        smugl  Everywhere

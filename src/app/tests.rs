@@ -1165,7 +1165,8 @@ fn expanded_replies_survive_a_refresh() {
     let post = |no, quotes: Vec<u64>| Post { no, quotes, ..Default::default() };
     app.set_thread(vec![post(1, vec![]), post(2, vec![1])]);
     app.tab.navigate(View::Thread);
-    app.act(Action::Expand);
+    // `e`, without the menu.
+    app.on_key(KeyEvent::from(KeyCode::Char('e')));
     app.on_key(KeyEvent::from(KeyCode::Down));
     assert_eq!((app.tab.thread.as_ref().unwrap().entry(), app.tab.thread.as_ref().unwrap().selected), (1, 1));
     app.set_thread(vec![post(1, vec![]), post(2, vec![1]), post(3, vec![1])]);

@@ -15,8 +15,8 @@ expression: snapshot(&mut a)
     Replies  >>100  e      show its replies under it
                     r      reply to it
                     Q      reply quoting its text
-  ▌                 m      mark it as yours
-  ▌ Anonymous  202  H      hide it
+  ▌                 P      mark it as yours
+  ▌ Anonymous  202  x      hide it
   ▌                 X      hide or highlight posts like it…
   ▌ >>1000 (OP)     c      show: a conversation, a poster's posts, files only…
   ▌ >implying       w      stop watching the thread

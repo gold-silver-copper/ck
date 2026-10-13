@@ -537,7 +537,7 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
     if let Some((at, of)) = app.position() {
         right.extend([Span::styled(format!("{at}/{of}  {}%", at.saturating_mul(100) / of.max(1)), Style::new().fg(t.on_bar)), Span::raw("  ")]);
     }
-    // Files being saved (`d`, `. D`): how many of how many.
+    // Files being saved (`d`, `D`): how many of how many.
     if d.running > 0 {
         let failed = if d.failed > 0 { format!(", {} failed", d.failed) } else { String::new() };
         right.extend([chip(format!("⇣ saving {} of {} files{failed}", d.done + d.skipped + d.failed, d.total), t.text, t.surface_high), Span::raw(" ")]);

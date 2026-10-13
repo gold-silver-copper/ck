@@ -442,7 +442,7 @@ url = "https://arch.b4k.dev"
 # without applying it; `recursive = true` hides the replies to what it hides in a thread
 # too (and theirs); `notify = true` sends a notification when a watched thread's refresh
 # (or a followed general's board) brings a post (or thread) it catches; `top = true` puts
-# what it highlights first in catalogs. `. X` on a post (or thread) adds one like it, and
+# what it highlights first in catalogs. `X` on a post (or thread) adds one like it, and
 # Settings › Filters lists, edits and removes them (comments here are kept).
 #
 # [[filter]]
