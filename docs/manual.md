@@ -880,8 +880,8 @@ ck downloads the video through its rate limiter as it does images, into
 on Windows; at most 256 MB a video, and 512 MB in all, least recently played first out).
 A saved thread's downloaded videos play from the download folder, offline too. ffmpeg
 reads only that file (webm, mp4 and their kin; nothing that would fetch other files or
-URLs) and turns it into pictures for the viewer's size, drawn like images: up to 20 a
-second, and fewer, or smaller, in kitty, sixel and iTerm2 when they're big (each is sent
+URLs) and turns it into pictures that fill the viewer (a small video is scaled up, as
+players do), drawn like images: up to 20 a second, and fewer, or smaller, in kitty, sixel and iTerm2 when they're big (each is sent
 whole, and big ones at 20 a second would swamp the terminal). Frames ck falls behind on
 are skipped, so the video keeps its speed. The sound plays in `ffplay` (it comes with
 ffmpeg), else in mpv with no window; with neither, the video plays without it and the
@@ -889,7 +889,9 @@ top bar says so.
 
 The top bar shows where the video is and how long it is. Space pauses, `[` and `]` go 5
 seconds back and on, `{` and `}` 30, and `m` turns the sound off and on for every video
-until ck quits. Videos loop. Moving to another file, closing the viewer or switching tabs
+until ck quits. `+`, `-` and `0` zoom as for images, and zoomed in, `h`/`j`/`k`/`l` and the
+arrows move around: ffmpeg cuts out that part of the video, so it's as sharp as the video
+is, not a frame blown up. Videos loop. Moving to another file, closing the viewer or switching tabs
 stops the video, its sound and ffmpeg; coming back to the same video goes on from where
 it was. A video that can't be played (ffmpeg can't read it, the download failed) shows its
 thumbnail and why. `inline_videos = false` (or Settings › Videos) shows the thumbnail

@@ -963,7 +963,7 @@ impl App {
         let zoomed = !v.crop.is_fit();
         match nav {
             // A video playing here: space pauses it, and it can be wound back and on.
-            Nav::Play | Nav::SeekBack | Nav::SeekOn | Nav::SeekBackFar | Nav::SeekOnFar | Nav::ZoomIn if video => {
+            Nav::Play | Nav::SeekBack | Nav::SeekOn | Nav::SeekBackFar | Nav::SeekOnFar if video => {
                 let Some(p) = self.images.playing() else { return };
                 match nav {
                     Nav::Play if p.toggle_pause() => {

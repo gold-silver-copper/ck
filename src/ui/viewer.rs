@@ -38,7 +38,9 @@ pub(super) fn draw_gallery(f: &mut Frame, app: &mut App, area: Rect) {
 pub(super) fn draw_viewer(f: &mut Frame, app: &mut App) {
     let t = theme();
     let Some(v) = app.tab.viewer() else { return };
-    let Some(file) = v.files.get(v.index) else { return };
+    // (Owned: the viewer is changed below while it's used, as a video is zoomed.)
+    let Some(file) = v.files.get(v.index).cloned() else { return };
+    let file = &file;
     let [top, _, middle, _, bottom] = Layout::vertical([
         Constraint::Length(1),
         Constraint::Length(1),
@@ -86,8 +88,11 @@ pub(super) fn draw_viewer(f: &mut Frame, app: &mut App) {
         hints.extend(status_spans(s, t));
     } else {
         let save = app.keys.key(Action::Download);
-        let mut keys: Vec<(&str, &str)> = if video.is_some() && !failed {
-            vec![("space", "pause"), ("[ ]", "5s back / on"), ("{ }", "30s"), ("m", "sound"), ("h/l", "previous / next"), ("enter", "open externally"), ("esc", "close")]
+        let playing = video.is_some() && !failed;
+        let mut keys: Vec<(&str, &str)> = if playing && crop.is_fit() {
+            vec![("space", "pause"), ("[ ]", "5s back / on"), ("{ }", "30s"), ("m", "sound"), ("+/-", "zoom"), ("h/l", "previous / next"), ("enter", "open externally"), ("esc", "close")]
+        } else if playing {
+            vec![("h/j/k/l", "move"), ("+/-", "zoom"), ("space", "pause"), ("[ ]", "5s back / on"), ("pgup/pgdn", "previous / next"), ("0, esc", "fit")]
         } else if crop.is_fit() {
             vec![("h/l", "previous / next"), ("+/-", "zoom"), ("enter", "open externally"), (&save, "save"), ("esc", "close")]
         } else {
@@ -109,7 +114,15 @@ pub(super) fn draw_viewer(f: &mut Frame, app: &mut App) {
             return;
         }
         let center = |f: &mut Frame, s: String, style: Style| put(f, area.x, area.y + area.height / 2, area.width, Line::styled(s, style).centered());
-        match app.images.video(url, Size::new(area.width, area.height)) {
+        // Zoomed in: how much of it shows here, for moving around (as for an image).
+        let mut crop = crop;
+        let dims = app.images.playing().filter(|p| &p.url == url).and_then(|p| p.dims());
+        if let (Some((w, h)), Some((cw, ch)), Some(v)) = (dims, app.images.cell_size(), app.tab.viewer_mut()) {
+            let shown = crop.shown(w, h, (u32::from(area.width) * cw, u32::from(area.height) * ch));
+            crop = crop.within(shown);
+            (v.shown, v.crop) = (Some(shown), crop);
+        }
+        match app.images.video(url, Size::new(area.width, area.height), crop) {
             VideoShown::Ready(p) => {
                 let s = p.size();
                 let r = Rect::new(area.x + area.width.saturating_sub(s.width) / 2, area.y + area.height.saturating_sub(s.height) / 2, s.width, s.height);

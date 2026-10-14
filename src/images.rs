@@ -512,10 +512,10 @@ impl Images {
         matches!(self.slots.get(url), Some(Slot::Ready { animation: Some(a), .. }) if a.paused.is_some())
     }
 
-    /// The video at `url` in `size` cells: the frame due now, started if it isn't the one
-    /// playing (where it was left, if it was the last one). Only one plays: one that isn't
-    /// drawn in a frame stops (see `end_frame`).
-    pub fn video(&mut self, url: &str, size: Size) -> crate::video::Shown<'_> {
+    /// The video at `url` in `size` cells (the part `crop` zooms into): the frame due now,
+    /// started if it isn't the one playing (where it was left, if it was the last one). Only
+    /// one plays: one that isn't drawn in a frame stops (see `end_frame`).
+    pub fn video(&mut self, url: &str, size: Size, crop: Crop) -> crate::video::Shown<'_> {
         use crate::video::{Player, Shown};
         let Some(picker) = &self.picker else { return Shown::Failed("images are off") };
         if self.video.as_ref().is_none_or(|v| v.url != url) {
@@ -529,7 +529,7 @@ impl Images {
         let font = picker.font_size();
         let halfblocks = picker.protocol_type() == ProtocolType::Halfblocks;
         let Some(v) = &mut self.video else { return Shown::Loading(None) };
-        let (shown, next) = v.frame(size, (u32::from(font.width), u32::from(font.height)), halfblocks, Instant::now());
+        let (shown, next) = v.frame((size, crop), (u32::from(font.width), u32::from(font.height)), halfblocks, Instant::now());
         if let Some(next) = next {
             self.drawing_next = Some(self.drawing_next.map_or(next, |t| t.min(next)));
         }

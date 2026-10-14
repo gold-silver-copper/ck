@@ -125,10 +125,12 @@ fn secs(d: Duration) -> String {
     format!("{:.3}", d.as_secs_f64())
 }
 
-/// Where a video is drawn: scaled to `scaled` pixels, padded (transparent) to `padded`, which
-/// fill `cells` (for half-blocks, a pixel is half a cell); `fps` frames a second.
+/// Where a video is drawn: `part` of it (zoomed in: left, top, width and height, in
+/// thousandths of its own), scaled to `scaled` pixels, padded (transparent) to `padded`,
+/// which fill `cells` (for half-blocks, a pixel is half a cell); `fps` frames a second.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Geometry {
+    pub part: Option<[u32; 4]>,
     pub scaled: (u32, u32),
     pub padded: (u32, u32),
     pub cells: Size,
@@ -143,17 +145,25 @@ impl Geometry {
 }
 
 /// How a `w` x `h` video is drawn in `area` cells, at the terminal's cell size `font`
-/// (pixels): as images are, fitted, and no bigger than it is; in kitty, sixel or iTerm2,
-/// within `PIXEL_BYTES_PER_SECOND` (fewer frames, then smaller).
-pub fn geometry((w, h): (u32, u32), area: Size, font: (u32, u32), halfblocks: bool) -> Geometry {
-    if halfblocks {
-        let (cells, cw, ch) = crate::images::halfblock_grid((w, h), area, font, false);
-        return Geometry { scaled: (cw, ch), padded: (u32::from(cells.width), u32::from(cells.height).saturating_mul(2)), cells, fps: FPS };
-    }
+/// (pixels): fitted to the area, scaled up too (as players do: a small video isn't left
+/// small), or the part `crop` zooms into; in kitty, sixel or iTerm2, within
+/// `PIXEL_BYTES_PER_SECOND` (fewer frames, then smaller).
+pub fn geometry((w, h): (u32, u32), area: Size, font: (u32, u32), halfblocks: bool, crop: crate::images::Crop) -> Geometry {
     let (fw, fh) = (font.0.max(1), font.1.max(1));
     let (aw, ah) = (u32::from(area.width).saturating_mul(fw).max(1), u32::from(area.height).saturating_mul(fh).max(1));
-    let (w, h) = (w.max(1), h.max(1));
-    let fitted = f64::min(1.0, f64::min(f64::from(aw) / f64::from(w), f64::from(ah) / f64::from(h)));
+    // Zoomed in: what's drawn is that part, at its size in the video.
+    let (part, (w, h)) = if crop.is_fit() {
+        (None, (w.max(1), h.max(1)))
+    } else {
+        let (x, y, rw, rh) = crop.region(w, h, (aw, ah));
+        let of = |v: u32, side: u32| u32::try_from(u64::from(v).saturating_mul(1000).checked_div(u64::from(side.max(1))).unwrap_or(0)).unwrap_or(1000).min(1000);
+        (Some([of(x, w), of(y, h), of(rw, w).max(1), of(rh, h).max(1)]), (rw.max(1), rh.max(1)))
+    };
+    if halfblocks {
+        let (cells, cw, ch) = crate::images::halfblock_grid((w, h), area, font, true);
+        return Geometry { part, scaled: (cw, ch), padded: (u32::from(cells.width), u32::from(cells.height).saturating_mul(2)), cells, fps: FPS };
+    }
+    let fitted = f64::min(f64::from(aw) / f64::from(w), f64::from(ah) / f64::from(h));
     // Smaller still if even `MIN_FPS` frames a second would be too much.
     let most = PIXEL_BYTES_PER_SECOND as f64 / f64::from(MIN_FPS) / 4.0;
     let ratio = fitted * f64::min(1.0, (most / (f64::from(w) * f64::from(h) * fitted * fitted)).sqrt());
@@ -164,14 +174,20 @@ pub fn geometry((w, h): (u32, u32), area: Size, font: (u32, u32), halfblocks: bo
     let padded = (u32::from(cells.width).saturating_mul(fw), u32::from(cells.height).saturating_mul(fh));
     let bytes = u64::from(padded.0).saturating_mul(u64::from(padded.1)).saturating_mul(4).max(1);
     let fps = u32::try_from(PIXEL_BYTES_PER_SECOND.checked_div(bytes).unwrap_or(0)).unwrap_or(FPS).clamp(MIN_FPS, FPS);
-    Geometry { scaled: (sw, sh), padded, cells, fps }
+    Geometry { part, scaled: (sw, sh), padded, cells, fps }
 }
 
 /// ffmpeg's arguments to decode `path` from `from` on, as `g` says, to raw RGBA frames on
 /// its stdout, `g.fps` a second.
 fn decoder_args(path: &Path, from: Duration, g: Geometry) -> Vec<std::ffi::OsString> {
     let ((sw, sh), (pw, ph)) = (g.scaled, g.padded);
-    let filters = format!("fps={},scale={sw}:{sh}:flags=bilinear,pad={pw}:{ph}:0:0:color=black@0,format=rgba", g.fps);
+    // A part, zoomed in: cut from the picture as it's shown (turned upright, though its
+    // pixels may not be square: so in proportions of its width and height).
+    let part = g.part.map_or_else(String::new, |[x, y, w, h]| {
+        let k = |v: u32| f64::from(v) / 1000.0;
+        format!("crop=iw*{}:ih*{}:iw*{}:ih*{},", k(w), k(h), k(x), k(y))
+    });
+    let filters = format!("fps={},{part}scale={sw}:{sh}:flags=bilinear,pad={pw}:{ph}:0:0:color=black@0,format=rgba", g.fps);
     let mut args: Vec<std::ffi::OsString> =
         ["-nostdin", "-hide_banner", "-loglevel", "error", "-protocol_whitelist", "file", "-format_whitelist", FORMATS, "-ss", &secs(from), "-i"].into_iter().map(Into::into).collect();
     args.push(path.into());
@@ -231,6 +247,8 @@ struct Decoder {
     /// Set by the viewer when it has no frame waiting: the next one wakes it.
     starving: Arc<AtomicBool>,
     geometry: Geometry,
+    /// The area it decodes for, in cells.
+    area: Size,
     /// Ended when dropped: the thread then gets an error sending (`rx` is gone) or the end
     /// of the pipe reading.
     ffmpeg: Process,
@@ -486,9 +504,9 @@ impl Player {
         Player { url: url.to_string(), stage: Stage::Failed(why.to_string()) }
     }
 
-    /// The frame due now, for `area` cells; and when the viewer should draw again (the next
-    /// frame, or the clock's next second), if it's playing.
-    pub fn frame(&mut self, area: Size, font: (u32, u32), halfblocks: bool, now: Instant) -> (Shown<'_>, Option<Instant>) {
+    /// The frame due now, for `area` cells (the part `crop` zooms into); and when the viewer
+    /// should draw again (the next frame, or the clock's next second), if it's playing.
+    pub fn frame(&mut self, (area, crop): (Size, crate::images::Crop), font: (u32, u32), halfblocks: bool, now: Instant) -> (Shown<'_>, Option<Instant>) {
         if let Stage::Fetching { rx, progress, from, muted, encode, wake } = &self.stage {
             match rx.try_recv() {
                 Ok(Ok((path, probe))) => {
@@ -508,7 +526,7 @@ impl Player {
         match &mut self.stage {
             Stage::Fetching { .. } => (Shown::Loading(None), None),
             Stage::Failed(why) => (Shown::Failed(why), None),
-            Stage::Playing(p) => p.frame(area, font, halfblocks, now),
+            Stage::Playing(p) => p.frame((area, crop), font, halfblocks, now),
         }
     }
 
@@ -547,6 +565,12 @@ impl Player {
         matches!(&self.stage, Stage::Playing(p) if p.paused)
     }
 
+    /// Its size as shown, once it's known.
+    pub fn dims(&self) -> Option<(u32, u32)> {
+        let Stage::Playing(p) = &self.stage else { return None };
+        Some((p.probe.width, p.probe.height))
+    }
+
     /// Where it is, and how long it is.
     pub fn position(&self) -> Option<(Duration, Option<Duration>)> {
         let Stage::Playing(p) = &self.stage else { return None };
@@ -574,7 +598,7 @@ impl Player {
         let at = lock(&p.clock).now(now);
         let to = if by < 0 { at.saturating_sub(Duration::from_secs(by.unsigned_abs())) } else { at.saturating_add(Duration::from_secs(by.unsigned_abs())) };
         let to = p.probe.duration.map_or(to, |d| to.min(d.saturating_sub(END_MARGIN)));
-        p.restart(to, p.decoder.as_ref().map(|d| d.geometry));
+        p.restart(to, p.decoder.as_ref().map(|d| (d.geometry, d.area)));
     }
 
     /// Sound off, or on again.
@@ -595,16 +619,18 @@ impl Player {
 }
 
 impl Playing {
-    fn frame(&mut self, area: Size, font: (u32, u32), halfblocks: bool, now: Instant) -> (Shown<'_>, Option<Instant>) {
-        let g = geometry((self.probe.width, self.probe.height), area, font, halfblocks);
+    fn frame(&mut self, (area, crop): (Size, crate::images::Crop), font: (u32, u32), halfblocks: bool, now: Instant) -> (Shown<'_>, Option<Instant>) {
+        let g = geometry((self.probe.width, self.probe.height), area, font, halfblocks, crop);
         let pos = lock(&self.clock).now(now);
         match &self.decoder {
-            None if !self.ended => self.restart(pos, Some(g)),
+            None if !self.ended => self.restart(pos, Some((g, area))),
+            // A zoom or a move (a key, once): decoded for it at once.
+            Some(d) if d.geometry != g && d.area == area => self.restart(pos, Some((g, area))),
             // A resize: decoded for the new size once it's held.
             Some(d) if d.geometry != g => match self.asked {
                 Some((s, since)) if s == area && now.saturating_duration_since(since) >= RESIZE_DEBOUNCE => {
                     self.asked = None;
-                    self.restart(pos, Some(g));
+                    self.restart(pos, Some((g, area)));
                 }
                 Some((s, _)) if s == area => {}
                 _ => self.asked = Some((area, now)),
@@ -624,7 +650,7 @@ impl Playing {
         let pos = lock(&self.clock).now(now);
         let end = self.probe.duration.unwrap_or_else(|| self.shown.as_ref().map_or(Duration::ZERO, |(t, _)| t.saturating_add(g.frame())));
         if self.ended && self.next.is_none() && !self.paused && !self.waiting && pos >= end {
-            self.restart(Duration::ZERO, Some(g));
+            self.restart(Duration::ZERO, Some((g, area)));
         }
         if self.ended && self.shown.is_none() && self.next.is_none() {
             return (Shown::Failed("ffmpeg couldn't decode it"), None);
@@ -694,25 +720,27 @@ impl Playing {
     }
 
     /// Decode from `at` on (for `g`, if it's known; else for the size last decoded for).
-    fn restart(&mut self, at: Duration, g: Option<Geometry>) {
+    fn restart(&mut self, at: Duration, g: Option<(Geometry, Size)>) {
         self.sound = None;
         self.decoder = None;
         self.next = None;
         self.ended = false;
         self.waiting = true;
         *lock(&self.clock) = Clock { at, since: None };
-        let Some(g) = g else { return };
+        let Some((g, area)) = g else { return };
+        // The same cells as the frame on screen (a seek, the loop, a move while zoomed): the
+        // new frames cover it as they are, and number on.
         let first = match self.last {
-            Some((was, n)) if was == g => n.wrapping_add(1),
+            Some((was, n)) if (was.cells, was.padded) == (g.cells, g.padded) => n.wrapping_add(1),
             _ => 0,
         };
-        match self.spawn((at, first), g) {
+        match self.spawn((at, first), g, area) {
             Ok(d) => self.decoder = Some(d),
             Err(_) => self.ended = true,
         }
     }
 
-    fn spawn(&self, (from, first): (Duration, u64), g: Geometry) -> std::io::Result<Decoder> {
+    fn spawn(&self, (from, first): (Duration, u64), g: Geometry, area: Size) -> std::io::Result<Decoder> {
         let mut child = crate::quiet_command("ffmpeg", decoder_args(&self.path, from, g)).stdout(Stdio::piped()).spawn()?;
         let out = child.stdout.take();
         let ffmpeg = Process(child);
@@ -723,7 +751,7 @@ impl Playing {
         std::thread::spawn(move || {
             let _ = crate::guard::catching(|| pump(out, g, (from, first), &clock, &encode, &Sink { tx: &tx, starving: &s, wake: &*wake }));
         });
-        Ok(Decoder { rx, starving, geometry: g, ffmpeg })
+        Ok(Decoder { rx, starving, geometry: g, area, ffmpeg })
     }
 
     fn start_sound(&mut self, at: Duration) {
@@ -760,14 +788,14 @@ mod tests {
     #[test]
     fn the_programs_get_the_file_as_one_argument_and_read_nothing_else() {
         let path = Path::new("/c/my clip; rm -rf ~.webm");
-        let g = geometry((640, 360), Size::new(80, 24), (10, 20), false);
+        let g = geometry((640, 360), Size::new(80, 24), (10, 20), false, crate::images::Crop::FIT);
         let args: Vec<String> = decoder_args(path, Duration::from_millis(2500), g).iter().map(|a| a.to_string_lossy().into_owned()).collect();
         let at = |k: &str| args.iter().position(|a| a == k).map(|i| args[i + 1].as_str());
         assert_eq!(at("-i"), Some("/c/my clip; rm -rf ~.webm"));
         assert_eq!(at("-ss"), Some("2.500"));
         assert_eq!(at("-protocol_whitelist"), Some("file"));
         assert_eq!(at("-format_whitelist"), Some(FORMATS));
-        assert_eq!(at("-vf"), Some("fps=20,scale=640:360:flags=bilinear,pad=640:360:0:0:color=black@0,format=rgba"));
+        assert_eq!(at("-vf"), Some("fps=17,scale=800:450:flags=bilinear,pad=800:460:0:0:color=black@0,format=rgba"));
         assert_eq!(args.last().map(String::as_str), Some("pipe:1"));
         for program in ["ffplay", "mpv"] {
             let args = sound_args(program, path, Duration::from_secs(3));
@@ -781,22 +809,38 @@ mod tests {
     #[test]
     fn a_video_fits_the_viewer_in_whole_cells() {
         // Fitted to the area's height, padded to whole cells; 20 frames a second.
-        let g = geometry((1080, 1920), Size::new(100, 30), (10, 20), false);
+        let g = geometry((1080, 1920), Size::new(100, 30), (10, 20), false, crate::images::Crop::FIT);
         assert_eq!((g.scaled, g.cells, g.padded, g.fps), ((338, 600), Size::new(34, 30), (340, 600), 20));
-        // Smaller than the area: as it is (like an image).
-        let g = geometry((320, 240), Size::new(100, 30), (10, 20), false);
-        assert_eq!((g.scaled, g.cells, g.padded, g.fps), ((320, 240), Size::new(32, 12), (320, 240), 20));
+        // Smaller than the area: scaled up to fill it, as players do (fewer frames, as they're
+        // bigger).
+        let g = geometry((320, 240), Size::new(100, 30), (10, 20), false, crate::images::Crop::FIT);
+        assert_eq!((g.scaled, g.cells, g.padded, g.fps), ((800, 600), Size::new(80, 30), (800, 600), 13));
+        let g = geometry((320, 240), Size::new(100, 30), (10, 20), true, crate::images::Crop::FIT);
+        assert_eq!(g.cells, Size::new(80, 30));
         // Fitted to the area's width (1000 x 600 pixels): fewer frames, as each is bigger.
-        let g = geometry((1920, 1080), Size::new(100, 30), (10, 20), false);
+        let g = geometry((1920, 1080), Size::new(100, 30), (10, 20), false, crate::images::Crop::FIT);
         assert_eq!((g.scaled, g.cells, g.padded, g.fps), ((1000, 563), Size::new(100, 29), (1000, 580), 10));
         // A big area: smaller too, to stay within what a second's frames may take.
-        let g = geometry((1920, 1080), Size::new(300, 80), (10, 20), false);
+        let g = geometry((1920, 1080), Size::new(300, 80), (10, 20), false, crate::images::Crop::FIT);
         let bytes = u64::from(g.padded.0 * g.padded.1 * 4 * g.fps);
         assert!(g.fps == 10 && g.scaled.0 < 1920 && bytes <= PIXEL_BYTES_PER_SECOND * 21 / 20, "{g:?}");
         // Half-blocks: a cell's width, half its height, padded to whole cells.
-        let g = geometry((1920, 1080), Size::new(100, 30), (10, 20), true);
+        let g = geometry((1920, 1080), Size::new(100, 30), (10, 20), true, crate::images::Crop::FIT);
         assert_eq!(g.padded, (u32::from(g.cells.width), u32::from(g.cells.height) * 2));
         assert!(g.scaled.0 <= g.padded.0 && g.scaled.1 <= g.padded.1 && g.cells.width == 100, "{g:?}");
+    }
+
+    #[test]
+    fn zoomed_in_the_part_is_cut_out_and_fills_the_area() {
+        // 200%, in the middle: the middle half each way, filling the area as the whole did.
+        let zoom = crate::images::Crop::FIT.zoomed(true).zoomed(true);
+        let g = geometry((640, 360), Size::new(64, 18), (10, 20), true, zoom);
+        assert_eq!((g.part, g.cells), (Some([250, 250, 500, 500]), Size::new(64, 18)));
+        let args: Vec<String> = decoder_args(Path::new("/v"), Duration::ZERO, g).iter().map(|a| a.to_string_lossy().into_owned()).collect();
+        assert!(args.iter().any(|a| a.starts_with("fps=20,crop=iw*0.5:ih*0.5:iw*0.25:ih*0.25,scale=")), "{args:?}");
+        // Moved to the left edge: the part from there.
+        let g = geometry((640, 360), Size::new(64, 18), (10, 20), true, zoom.moved(-4, 0, (500, 500)));
+        assert_eq!(g.part.map(|p| p[0]), Some(0));
     }
 
     /// Frames in a stream as ffmpeg writes them: `n` frames of `w` x `h`, each one a color
@@ -815,7 +859,7 @@ mod tests {
 
     #[test]
     fn frames_come_with_their_times_and_repeats_and_late_ones_are_dropped() {
-        let g = Geometry { scaled: (4, 4), padded: (4, 4), cells: Size::new(4, 2), fps: 20 };
+        let g = Geometry { part: None, scaled: (4, 4), padded: (4, 4), cells: Size::new(4, 2), fps: 20 };
         let stopped = Clock { at: Duration::ZERO, since: None };
         // Frames 0 and 1 the same, then 2, then 3: three pictures and the end.
         let frames = pump_all(&stream(4, 4, 4, |i| if i < 2 { 0 } else { i }), g, stopped);
@@ -874,7 +918,7 @@ mod tests {
     #[test]
     fn a_failure_is_shown_and_never_needs_a_redraw() {
         let mut p = Player::failed("https://x/a.webm", "ffprobe: Invalid data found when processing input");
-        let (shown, wake) = p.frame(Size::new(80, 24), (10, 20), true, Instant::now());
+        let (shown, wake) = p.frame((Size::new(80, 24), crate::images::Crop::FIT), (10, 20), true, Instant::now());
         assert!(matches!(shown, Shown::Failed(w) if w.contains("Invalid data")));
         assert!(wake.is_none());
         assert!(!p.toggle_pause() && p.position().is_none());
