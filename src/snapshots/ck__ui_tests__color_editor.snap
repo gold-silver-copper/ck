@@ -31,4 +31,4 @@ expression: snapshot(&mut a)
 
     Changing a color of a built-in theme saves it as a copy: NAME-custom.
 
- enter change   / filter   esc back   ? help                                              2/25  8%
+ enter change   / filter   esc back   ? help                                              2/26  7%

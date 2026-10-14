@@ -28,6 +28,8 @@ use crate::fuzz::Rng;
 /// The long thread's number; the board's other threads come after it.
 const BIG: u64 = 1000;
 const THREADS: u64 = 150;
+/// A thread whose OP is a video (10 seconds, 640x360, made with ffmpeg if it's installed).
+const VIDEO: u64 = 999;
 
 /// Bodies for posts: the markup samples (code, spoilers, links, ...) and plain talk.
 fn bodies() -> Vec<String> {
@@ -111,11 +113,22 @@ fn jpeg(w: u32, h: u32) -> Vec<u8> {
     out.into_inner()
 }
 
+/// A 10 second 640x360 webm with sound, all motion (ffmpeg's test pattern), if ffmpeg is
+/// installed.
+fn webm() -> Option<Vec<u8>> {
+    let dir = tempfile::tempdir().ok()?;
+    let out = dir.path().join("clip.webm");
+    let args = ["-v", "error", "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=30", "-f", "lavfi", "-i", "sine", "-t", "10", "-c:v", "libvpx", "-b:v", "1M", "-c:a", "libopus"];
+    let made = std::process::Command::new("ffmpeg").args(args).arg(&out).output().is_ok_and(|o| o.status.success());
+    made.then(|| std::fs::read(&out).ok()).flatten()
+}
+
 struct Site {
     threads: HashMap<u64, Value>,
     catalog: Vec<u8>,
     thumb: Vec<u8>,
     full: Vec<u8>,
+    video: Option<Vec<u8>>,
     /// Paths asked for that it doesn't have.
     missing: Mutex<Vec<String>>,
 }
@@ -127,7 +140,11 @@ fn serve(posts: u64) -> (u16, Arc<Site>) {
     let bodies = bodies();
     let threads: HashMap<u64, Value> = (0..THREADS).map(|i| (BIG + i, thread(BIG + i, if i == 0 { posts } else { 20 + (i * 7) % 120 }, &bodies))).collect();
     let catalog = serde_json::to_vec(&catalog(&threads)).unwrap();
-    let site = Arc::new(Site { threads, catalog, thumb: jpeg(250, 188), full: jpeg(1600, 1200), missing: Mutex::new(Vec::new()) });
+    let mut threads = threads;
+    let op = json!({ "no": VIDEO, "resto": 0, "time": 1_790_000_000, "name": "Anonymous", "sub": "A video", "com": "a webm",
+        "tim": "1790000000999", "ext": ".webm", "filename": "clip", "w": 640, "h": 360, "tn_w": 250, "tn_h": 141, "fsize": 900_000 });
+    threads.insert(VIDEO, json!({ "posts": [op] }));
+    let site = Arc::new(Site { threads, catalog, thumb: jpeg(250, 188), full: jpeg(1600, 1200), video: webm(), missing: Mutex::new(Vec::new()) });
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
     let s = site.clone();
@@ -155,6 +172,8 @@ fn respond(mut stream: TcpStream, site: &Site) {
     let json = |v: &Value| serde_json::to_vec(v).unwrap();
     let (status, kind, body) = if path.contains("/thumb/") {
         (200, "image/jpeg", site.thumb.clone())
+    } else if path.ends_with(".webm") && let Some(v) = &site.video {
+        (200, "video/webm", v.clone())
     } else if path.contains("/src/") {
         (200, "image/jpeg", site.full.clone())
     } else if since {
@@ -379,6 +398,60 @@ fn run(ck: &Path, port: u16, posts: u64, profile: Option<&str>) -> (Vec<(&'stati
     (s.costs, mem)
 }
 
+/// A video playing in the viewer for 10 seconds, its images drawn as `images` says (a
+/// protocol the terminal, tmux, needn't show: what matters is what ck writes): the first
+/// frame (downloading it, then ffmpeg's start), the playing, and the pause.
+fn video_run(ck: &Path, port: u16, images: &str, labels: [&'static str; 3]) -> Vec<(&'static str, Cost)> {
+    let dir = tempfile::tempdir().unwrap();
+    let config = format!("notify = \"off\"\nrestore_session = false\nimages = \"{images}\"\n\n[[site]]\nname = \"vichan\"\nkind = \"vichan\"\nurl = \"http://127.0.0.1:{port}\"\nboards = [\"g\"]\n");
+    // Not kept from what ck may do outside itself: videos play only then. Their sound goes
+    // nowhere.
+    let mut env: Vec<(String, String)> = scratch(dir.path(), &config).into_iter().filter(|(k, _)| k != "CK_NO_EXTERNAL").collect();
+    env.push(("CK_INPUT_LOG".into(), dir.path().join("input.log").display().to_string()));
+    env.push(("SDL_AUDIODRIVER".into(), "dummy".into()));
+    let tmux = Tmux { socket: format!("ck-bench-video-{}", std::process::id()) };
+    let start = Instant::now();
+    tmux.launch(&format!("{}; echo CK_EXIT=$?; sleep 600", command(ck, &env, &[])), (120, 40));
+    tmux.run(&["pipe-pane", "-o", "-t", "ck", &format!("cat >> '{}'", dir.path().join("tty.out").display())]);
+    let mut pid = None;
+    while pid.is_none() && start.elapsed() < Duration::from_secs(10) {
+        pid = ck_pid(&tmux);
+    }
+    let mut s = Session { tmux, dir: dir.path().to_path_buf(), pid: pid.expect("ck didn't start"), costs: Vec::new() };
+    while !s.frame().contains("vichan") {
+        assert!(start.elapsed() < Duration::from_secs(10), "ck didn't draw:\n{}", s.tmux.screen());
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    s.tmux.keys(&[":"]);
+    s.tmux.text(&format!("vichan/g/{VIDEO}"));
+    s.tmux.keys(&["Enter"]);
+    while !s.frame().contains("A video") {
+        assert!(start.elapsed() < Duration::from_secs(20), "the thread didn't open:\n{}", s.frame());
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    // Its first frame: the clock in the top bar.
+    let shown = Instant::now();
+    let (cpu0, frames0, bytes0) = (cpu(s.pid), s.frames(), s.bytes());
+    s.tmux.keys(&["Enter"]);
+    while !s.frame().lines().next().is_some_and(|l| l.contains("/ 0:10")) {
+        assert!(shown.elapsed() < Duration::from_secs(20), "the video didn't play:\n{}", s.frame());
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    s.costs.push((labels[0], Cost { wall: shown.elapsed(), cpu: cpu(s.pid) - cpu0, frames: s.frames() - frames0, bytes: s.bytes() - bytes0 }));
+    s.idle(labels[1], 5);
+    s.tmux.keys(&["Space"]);
+    std::thread::sleep(Duration::from_millis(300));
+    s.idle(labels[2], 3);
+    s.tmux.keys(&["q"]);
+    let quit = Instant::now();
+    s.tmux.keys(&["C-c"]);
+    while !s.tmux.screen().contains("CK_EXIT=") {
+        assert!(quit.elapsed() < Duration::from_secs(20), "ck didn't quit");
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    s.costs
+}
+
 fn median(mut v: Vec<Duration>) -> Duration {
     v.sort();
     v[v.len() / 2]
@@ -397,7 +470,15 @@ fn bench_app() {
     let profile = std::env::var("BENCH_PROFILE").ok();
     let runs = if profile.is_some() { 1 } else { env("BENCH_RUNS", 3) };
     let (port, site) = serve(posts);
-    let results: Vec<_> = (0..runs).map(|_| run(&ck, port, posts, profile.as_deref())).collect();
+    let mut results: Vec<_> = (0..runs).map(|_| run(&ck, port, posts, profile.as_deref())).collect();
+    // Videos, if ffmpeg is installed: each run's steps go on with them.
+    if site.video.is_some() && profile.is_none() {
+        for r in &mut results {
+            r.0.extend(video_run(&ck, port, "halfblocks", ["video: to the first frame", "video: playing, 5s", "video: paused, 3s"]));
+            r.0.extend(video_run(&ck, port, "kitty", ["video in kitty: to the first frame", "video in kitty: playing, 5s", "video in kitty: paused, 3s"]));
+            r.0.extend(video_run(&ck, port, "sixel", ["video in sixel: to the first frame", "video in sixel: playing, 5s", "video in sixel: paused, 3s"]));
+        }
+    }
     let missing = crate::http::lock(&site.missing).clone();
     if !missing.is_empty() {
         eprintln!("(the site had no {missing:?})");

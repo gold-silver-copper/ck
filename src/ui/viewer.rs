@@ -56,6 +56,23 @@ pub(super) fn draw_viewer(f: &mut Frame, app: &mut App) {
         meta.push(format!("{}%", v.crop.zoom));
     }
     let crop = v.crop;
+    // A video playing here: where it is, and whether it's paused or without sound.
+    let video = app.video_source(file);
+    let failed = app.images.playing().is_some_and(|p| video.as_ref() == Some(&p.url) && p.has_failed());
+    let muted = app.images.muted;
+    if let Some(p) = app.images.playing().filter(|p| video.as_ref() == Some(&p.url)) {
+        if let Some((at, length)) = p.position() {
+            meta.push(length.map_or_else(|| clock_time(at), |l| format!("{} / {}", clock_time(at.min(l)), clock_time(l))));
+        }
+        if p.is_paused() {
+            meta.push("paused".into());
+        }
+        if p.soundless() {
+            meta.push("no sound (install ffplay or mpv)".into());
+        } else if muted {
+            meta.push("sound off".into());
+        }
+    }
     fill(f, top, t.bar);
     let line = Line::from(vec![
         Span::styled(" ck ", bold(t.on_primary).bg(t.primary)),
@@ -69,7 +86,9 @@ pub(super) fn draw_viewer(f: &mut Frame, app: &mut App) {
         hints.extend(status_spans(s, t));
     } else {
         let save = app.keys.key(Action::Download);
-        let mut keys: Vec<(&str, &str)> = if crop.is_fit() {
+        let mut keys: Vec<(&str, &str)> = if video.is_some() && !failed {
+            vec![("space", "pause"), ("[ ]", "5s back / on"), ("{ }", "30s"), ("m", "sound"), ("h/l", "previous / next"), ("enter", "open externally"), ("esc", "close")]
+        } else if crop.is_fit() {
             vec![("h/l", "previous / next"), ("+/-", "zoom"), ("enter", "open externally"), (&save, "save"), ("esc", "close")]
         } else {
             vec![("h/j/k/l", "move"), ("+/-", "zoom"), ("pgup/pgdn", "previous / next"), ("0, esc", "fit")]
@@ -81,6 +100,32 @@ pub(super) fn draw_viewer(f: &mut Frame, app: &mut App) {
     }
     put(f, bottom.x, bottom.y, bottom.width, Line::from(hints));
     let area = middle.inner(Margin::new(MARGIN, 0));
+    // A video plays; if it can't, its thumbnail shows, saying why.
+    let mut cant_play = None;
+    if let Some(url) = &video {
+        // Not under a popup (help, the menu): frames drawn many times a second would cover it.
+        // It stops, and goes on from there once the popup is gone.
+        if app.popup.is_some() {
+            return;
+        }
+        let center = |f: &mut Frame, s: String, style: Style| put(f, area.x, area.y + area.height / 2, area.width, Line::styled(s, style).centered());
+        match app.images.video(url, Size::new(area.width, area.height)) {
+            VideoShown::Ready(p) => {
+                let s = p.size();
+                let r = Rect::new(area.x + area.width.saturating_sub(s.width) / 2, area.y + area.height.saturating_sub(s.height) / 2, s.width, s.height);
+                f.render_widget(Image::new(p), r.intersection(area));
+                return;
+            }
+            VideoShown::Loading(pct) => {
+                app.drawn.spinning = true;
+                let pct = pct.map(|p| format!(" {p}%")).unwrap_or_default();
+                center(f, format!("{} Loading…{pct}", spinner(app.tick)), Style::new().fg(t.primary));
+                return;
+            }
+            VideoShown::Failed(why) => cant_play = Some(format!("Couldn't play it: {why}. Enter opens it externally.")),
+            VideoShown::Unavailable => cant_play = Some("Not saved: the video wasn't downloaded or played before. Showing the thumbnail.".to_string()),
+        }
+    }
     // Non-images (videos, pdfs, ...) show their thumbnail, if any, with a hint; so do images
     // of a saved copy that weren't downloaded.
     let source = app.viewer_source(file);
@@ -88,10 +133,12 @@ pub(super) fn draw_viewer(f: &mut Frame, app: &mut App) {
     let thumb_only = source.as_ref().is_some_and(|(_, k)| *k == Kind::Thumb);
     if file.image().is_none() || thumb_only {
         let hint = match file.ext().to_uppercase() {
+            _ if cant_play.is_some() => cant_play.unwrap_or_default(),
             _ if file.url.is_none() && file.thumb.is_none() => "Neither the file nor its thumbnail is available here.".to_string(),
             _ if file.url.is_none() => "Only the thumbnail is available here. Press enter to open it externally.".to_string(),
             _ if file.is_image() => format!("Not downloaded: showing the saved thumbnail ({} downloads it).", app.keys.key(Action::Download)),
             e if e.is_empty() => "Showing the thumbnail. Press enter to open the file externally.".to_string(),
+            _ if file.is_video() && app.inline_videos && !crate::video::available() => "Showing the thumbnail: with ffmpeg installed, videos play here. Press enter to open it externally.".to_string(),
             e => format!("{e} files can't be shown here; showing the thumbnail. Press enter to open it externally."),
         };
         put(f, inner.x, inner.bottom().saturating_sub(1), inner.width, Line::styled(hint, dim()).centered());
@@ -131,6 +178,15 @@ pub(super) fn draw_viewer(f: &mut Frame, app: &mut App) {
         }
         State::Failed => msg(f, "Couldn't load this image".into(), Style::new().fg(t.error)),
         State::Unavailable => msg(f, format!("Not saved: the image wasn't downloaded or cached ({} downloads it)", app.keys.key(Action::Download)), dim()),
+    }
+}
+
+/// A point in a video, as players show it: 1:05, or 1:02:05.
+fn clock_time(d: std::time::Duration) -> String {
+    let s = d.as_secs();
+    match s / 3600 {
+        0 => format!("{}:{:02}", s / 60, s % 60),
+        h => format!("{h}:{:02}:{:02}", s / 60 % 60, s % 60),
     }
 }
 

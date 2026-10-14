@@ -62,6 +62,12 @@ notify = "auto"
 # video_player = ["vlc", "{url}"]
 # video_player = ["/Applications/IINA.app/Contents/MacOS/iina-cli", "--no-stdin", "{url}"]
 
+# Videos (webm, mp4) play in the image viewer, with their sound, if ffmpeg is installed
+# (ffmpeg and ffprobe on the PATH; the sound plays in ffplay, which comes with it, or mpv).
+# false shows their thumbnail there instead. Enter still opens them in video_player.
+# Also in Settings.
+inline_videos = true
+
 # Where ck-web, the browser helper ck posts through, is, if you built your own (by
 # default: the one ck downloads, then next to ck, then on the PATH). On Windows it's ck-web.exe.
 # web_helper = "~/ck/target/release/ck-web"

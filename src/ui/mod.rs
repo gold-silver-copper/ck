@@ -20,6 +20,7 @@ use std::collections::HashMap;
 
 use crate::http;
 use crate::images::{Images, Kind, State};
+use crate::video::Shown as VideoShown;
 use crate::keys::{self, Action, Scope};
 use crate::config::CatalogLayout;
 use crate::markup;

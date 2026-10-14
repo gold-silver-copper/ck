@@ -483,6 +483,8 @@ pub struct App {
     pub notify_command: Option<Vec<String>>,
     /// `video_player`: the program videos play in.
     pub video_player: Option<Vec<String>>,
+    /// `inline_videos`: videos play in the viewer (if ffmpeg is installed).
+    pub inline_videos: bool,
     /// Notifications sent (the last few), for the record.
     pub notified: Vec<String>,
     /// Sites whose saved board list is being refreshed in the background, and when each was
@@ -661,6 +663,7 @@ impl App {
             notify_mode: cfg.notify,
             notify_command: cfg.notify_command.clone(),
             video_player: cfg.video_player.clone(),
+            inline_videos: cfg.inline_videos,
             notified: Vec::new(),
             boards_refreshing: HashSet::new(),
             boards_tried: HashMap::new(),
@@ -1725,6 +1728,10 @@ impl App {
         };
         let player = if f.kind == FileKind::Video { video_command(self.video_player.as_deref(), || on_path("mpv"), url) } else { None };
         let Some((program, args)) = player.filter(|_| !crate::sandboxed()) else { return self.open_url(url) };
+        // Not heard twice: the video playing in the viewer pauses.
+        if let Some(p) = self.images.playing().filter(|p| !p.is_paused()) {
+            p.toggle_pause();
+        }
         match crate::spawn_detached(&program, args) {
             Ok(()) => self.info(format!("Playing {} in {program}", f.filename)),
             Err(e) => self.error(anyhow::Error::from(e).context(format!("Couldn't start {program}"))),

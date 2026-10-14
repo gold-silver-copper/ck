@@ -69,7 +69,7 @@ impl DiskCache {
 }
 
 /// 128-bit FNV-1a: stable across Rust versions, unlike `DefaultHasher`.
-fn fnv1a128(data: &[u8]) -> u128 {
+pub(crate) fn fnv1a128(data: &[u8]) -> u128 {
     let mut h: u128 = 0x6c62272e07bb014262b821756295c58d;
     for &b in data {
         h ^= b as u128;

@@ -97,6 +97,9 @@ pub struct Config {
     /// else the system's opener).
     #[serde(default, deserialize_with = "command")]
     pub video_player: Option<Vec<String>>,
+    /// Videos play in the viewer (with ffmpeg); off, it shows their thumbnail.
+    #[serde(default = "default_true")]
+    pub inline_videos: bool,
     /// `[[image_search]]`: reverse image search engines for `R` (default: a few well-known ones).
     #[serde(default, rename = "image_search")]
     pub image_search: Vec<ImageSearch>,

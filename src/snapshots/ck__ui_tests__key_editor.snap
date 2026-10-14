@@ -31,4 +31,4 @@ expression: snapshot(&mut a)
     Changed keys are saved in [keys]; navigation keys are fixed. Without a key: on a letter in
     its menu (. h).
 
- enter change   / filter   esc back   ? help                                           25/25  100%
+ enter change   / filter   esc back   ? help                                           26/26  100%

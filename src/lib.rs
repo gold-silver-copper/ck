@@ -34,14 +34,20 @@ pub fn sandboxed() -> bool {
 /// process group of its own, so ctrl-c in ck doesn't reach it), and wait on it in the
 /// background so it doesn't linger once it exits.
 pub fn spawn_detached(program: &str, args: impl IntoIterator<Item = String>) -> std::io::Result<()> {
+    let mut child = quiet_command(program, args).spawn()?;
+    std::thread::spawn(move || child.wait());
+    Ok(())
+}
+
+/// A program to run away from the terminal: no stdin, stdout or stderr (set them after, to
+/// read one), and on Unix a process group of its own, so ctrl-c in ck doesn't reach it.
+pub(crate) fn quiet_command(program: &str, args: impl IntoIterator<Item = impl AsRef<std::ffi::OsStr>>) -> std::process::Command {
     use std::process::Stdio;
     let mut cmd = std::process::Command::new(program);
     cmd.args(args).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
     #[cfg(unix)]
     std::os::unix::process::CommandExt::process_group(&mut cmd, 0);
-    let mut child = cmd.spawn()?;
-    std::thread::spawn(move || child.wait());
-    Ok(())
+    cmd
 }
 
 pub(crate) mod app;
@@ -86,6 +92,7 @@ mod test_fixtures;
 pub(crate) mod theme;
 pub(crate) mod title;
 pub(crate) mod ui;
+pub(crate) mod video;
 pub(crate) mod web;
 pub(crate) mod writer;
 #[cfg(test)]

@@ -803,7 +803,7 @@ fn config_once(seed: u64) {
     const KEYS: &[&str] = &[
         "theme", "color", "images", "notify", "notify_command", "catalog_layout", "compact_catalog", "refresh_thread_secs",
         "refresh_watched_secs", "restore_session", "download_dir", "favorites", "hidden_sites", "hidden_words", "nsfw_images",
-        "follow_new_posts", "watched_first", "remember_thread_position", "video_player",
+        "follow_new_posts", "watched_first", "remember_thread_position", "video_player", "inline_videos",
     ];
     for _ in 0..1 + rng.below(5) {
         match rng.below(8) {
