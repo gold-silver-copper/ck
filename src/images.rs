@@ -527,9 +527,9 @@ impl Images {
         }
         self.video_drawn = true;
         let font = picker.font_size();
-        let halfblocks = picker.protocol_type() == ProtocolType::Halfblocks;
+        let protocol = picker.protocol_type();
         let Some(v) = &mut self.video else { return Shown::Loading(None) };
-        let (shown, next) = v.frame((size, crop), (u32::from(font.width), u32::from(font.height)), halfblocks, Instant::now());
+        let (shown, next) = v.frame((size, crop), (u32::from(font.width), u32::from(font.height)), protocol, Instant::now());
         if let Some(next) = next {
             self.drawing_next = Some(self.drawing_next.map_or(next, |t| t.min(next)));
         }
