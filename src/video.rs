@@ -19,6 +19,7 @@ use std::time::{Duration, Instant};
 use image::{DynamicImage, RgbaImage};
 use ratatui::layout::Size;
 use ratatui_image::Resize;
+use ratatui_image::picker::cap_parser::Parser;
 use ratatui_image::picker::{Capability, Picker, ProtocolType};
 use ratatui_image::protocol::Protocol;
 
@@ -34,6 +35,8 @@ const MIN_FPS: u32 = 10;
 const PIXEL_BYTES_PER_SECOND: u64 = 24 * 1024 * 1024;
 /// Frames decoded and encoded ahead of the one on screen.
 const AHEAD: usize = 2;
+/// Threads turning frames into terminal output (sixel especially takes its time).
+const ENCODERS: usize = 2;
 /// The biggest video downloaded to play.
 const MAX_VIDEO: u64 = 256 * 1024 * 1024;
 /// Videos played are kept in the cache folder up to this; the least recently played go.
@@ -216,8 +219,8 @@ impl Clock {
 
 /// What the decoding thread hands the viewer.
 enum Frame {
-    /// The picture for this point in the video.
-    Picture(Duration, Protocol),
+    /// The picture for this point in the video, the decoder's `n`th (see `Encode`).
+    Picture(Duration, u64, Protocol),
     /// No more: the end, or ffmpeg stopped.
     End,
 }
@@ -233,26 +236,25 @@ struct Decoder {
     ffmpeg: Process,
 }
 
-/// Turns a frame (`padded` pixels) into what the terminal shows.
-pub type Encode = Arc<dyn Fn(DynamicImage, Size) -> Result<Protocol, String> + Send + Sync>;
+/// Turns a frame (`padded` pixels) into what the terminal shows in `cells`: the decoder's
+/// `n`th shown (0: the first, after a start or a new size).
+pub type Encode = Arc<dyn Fn(DynamicImage, Size, u64) -> Result<Protocol, String> + Send + Sync>;
 
 /// Where frames go: to the viewer, waking it (`wake`) when it's `starving` for one.
 struct Sink<'a> {
     tx: &'a SyncSender<Frame>,
     starving: &'a AtomicBool,
-    wake: &'a dyn Fn(),
+    wake: &'a (dyn Fn() + Sync),
 }
 
-/// Read raw frames of `g.padded` pixels from `out` (the first at `from`), and send the ones
+/// Read raw frames of `g.padded` pixels from `out` (the first at `from`, numbered from
+/// `first` on as they're encoded), and send the ones
 /// still due to the viewer as pictures, then `End`. A frame the clock has already passed is
 /// dropped unencoded, and so is one just like the last (a still scene, a video slower than
-/// `g.fps`).
-fn pump(mut out: impl Read, g: Geometry, from: Duration, clock: &Mutex<Clock>, encode: &Encode, sink: &Sink) {
+/// `g.fps`). `ENCODERS` threads encode them, taking turns, and they're sent in order.
+fn pump(mut out: impl Read, g: Geometry, (from, first): (Duration, u64), clock: &Mutex<Clock>, encode: &Encode, sink: &Sink) {
     let (pw, ph) = g.padded;
     let len = usize::try_from(u64::from(pw).saturating_mul(u64::from(ph)).saturating_mul(4)).unwrap_or(usize::MAX);
-    let mut buf = vec![0u8; len];
-    let mut last: Vec<u8> = Vec::new();
-    let mut at = from;
     let send = |f: Frame| {
         let sent = sink.tx.send(f).is_ok();
         if sink.starving.swap(false, Ordering::SeqCst) {
@@ -260,35 +262,120 @@ fn pump(mut out: impl Read, g: Geometry, from: Duration, clock: &Mutex<Clock>, e
         }
         sent
     };
-    while out.read_exact(&mut buf).is_ok() {
-        let pts = at;
-        at = at.saturating_add(g.frame());
-        let late = pts.saturating_add(g.frame()) < lock(clock).now(Instant::now());
-        if late || buf == last {
-            continue;
+    std::thread::scope(|scope| {
+        let (mut work, mut done) = (Vec::new(), Vec::new());
+        for _ in 0..ENCODERS {
+            let (in_tx, in_rx) = sync_channel::<(u64, Duration, Vec<u8>)>(1);
+            let (out_tx, out_rx) = sync_channel(1);
+            scope.spawn(move || {
+                for (n, pts, bytes) in in_rx {
+                    let img = RgbaImage::from_raw(pw, ph, bytes).ok_or_else(|| "a frame of the wrong size".to_string());
+                    let res = crate::guard::catching(|| img.and_then(|img| encode(DynamicImage::ImageRgba8(img), g.cells, n))).unwrap_or_else(Err);
+                    if out_tx.send((pts, n, res)).is_err() {
+                        return;
+                    }
+                }
+            });
+            work.push(in_tx);
+            done.push(out_rx);
         }
-        last.clone_from(&buf);
-        let Some(img) = RgbaImage::from_raw(pw, ph, buf.clone()) else { break };
-        let Ok(p) = encode(DynamicImage::ImageRgba8(img), g.cells) else { continue };
-        if !send(Frame::Picture(pts, p)) {
-            return;
+        // Back in order (each encoder's next is the next frame), to the viewer.
+        scope.spawn(move || {
+            for i in 0usize.. {
+                let Some(rx) = done.get(i.checked_rem(ENCODERS).unwrap_or(0)) else { break };
+                match rx.recv() {
+                    Ok((pts, n, Ok(p))) => {
+                        if !send(Frame::Picture(pts, n, p)) {
+                            return;
+                        }
+                    }
+                    // A frame that couldn't be encoded is left out.
+                    Ok((_, _, Err(_))) => {}
+                    Err(_) => break,
+                }
+            }
+            send(Frame::End);
+        });
+        let mut buf = vec![0u8; len];
+        let mut last: Vec<u8> = Vec::new();
+        let (mut at, mut n) = (from, first);
+        while out.read_exact(&mut buf).is_ok() {
+            let pts = at;
+            at = at.saturating_add(g.frame());
+            let late = pts.saturating_add(g.frame()) < lock(clock).now(Instant::now());
+            if late || buf == last {
+                continue;
+            }
+            last.clone_from(&buf);
+            let to = work.get(usize::try_from(n.wrapping_sub(first)).unwrap_or(0).checked_rem(ENCODERS).unwrap_or(0));
+            if to.is_none_or(|w| w.send((n, pts, buf.clone())).is_err()) {
+                break;
+            }
+            n = n.saturating_add(1);
         }
-    }
-    send(Frame::End);
+        // Done: the encoders finish what they have, then the frames end.
+        drop(work);
+    });
 }
 
-/// The encoder for one video's frames: as images are, but kitty's all under one image
-/// number, so each frame replaces the last in the terminal rather than piling up there.
+/// The encoder for one video's frames, as images are, but so that a frame never leaves the
+/// screen before the next is all there (images are cleared first, which played 20 times a
+/// second is a flicker):
+/// - kitty: frames take turns between two image numbers, so a new one goes up beside the
+///   one showing, and replaces it once it's there; the one before is replaced in turn;
+/// - sixel, iTerm2: the area is cleared only for the first frame (after a start or a new
+///   size); the ones after cover it exactly. Sixel without dithering, which redone on each
+///   frame made still parts shimmer (and is slower).
 pub fn encoder(picker: &Picker) -> Encode {
     let picker = picker.clone();
-    // A number of its own (kitty's image ids are the program's to pick).
+    // Numbers of its own (kitty's image ids are the program's to pick).
     let id = u32::try_from(std::hash::BuildHasher::hash_one(&std::collections::hash_map::RandomState::new(), Instant::now()) >> 40).unwrap_or(1) | 1;
     let compress = picker.capabilities().contains(&Capability::KittyCompression);
-    Arc::new(move |img, cells| match picker.protocol_type() {
+    let tmux = picker.tmux_detected();
+    Arc::new(move |img, cells, n| match picker.protocol_type() {
         ProtocolType::Halfblocks => crate::images::halfblocks_of(img, cells),
-        ProtocolType::Kitty => ratatui_image::protocol::kitty::Kitty::new(img, cells, id, picker.tmux_detected(), compress).map(Protocol::Kitty).map_err(|e| e.to_string()),
-        _ => picker.new_protocol(img, cells, Resize::Fit(None)).map_err(|e| e.to_string()),
+        ProtocolType::Kitty => {
+            let id = if n & 1 == 0 { id } else { id ^ 2 };
+            ratatui_image::protocol::kitty::Kitty::new(img, cells, id, tmux, compress).map(Protocol::Kitty).map_err(|e| e.to_string())
+        }
+        ProtocolType::Sixel => sixel(&img, cells, tmux, n == 0).map(Protocol::Sixel),
+        ProtocolType::Iterm2 => match picker.new_protocol(img, cells, Resize::Fit(None)).map_err(|e| e.to_string())? {
+            Protocol::ITerm2(mut p) if n > 0 => {
+                p.data = p.data.replacen(&clear(cells, tmux), "", 1);
+                Ok(Protocol::ITerm2(p))
+            }
+            p => Ok(p),
+        },
     })
+}
+
+/// What clears `cells` before an image is drawn there (as ratatui-image does it): each row
+/// erased, then back up.
+fn clear(cells: Size, tmux: bool) -> String {
+    let (_, esc, _) = Parser::tmux_start_escape_end(tmux);
+    if cells.height == 1 {
+        return format!("{esc}[{}X", cells.width);
+    }
+    let row = format!("{esc}[{}X{esc}[1B", cells.width);
+    format!("{}{esc}[{}A", row.repeat(usize::from(cells.height)), cells.height)
+}
+
+/// A frame in sixel, clearing `cells` first if `fresh`.
+fn sixel(img: &DynamicImage, cells: Size, tmux: bool, fresh: bool) -> Result<ratatui_image::protocol::sixel::Sixel, String> {
+    let rgba = img.as_rgba8().ok_or("not RGBA")?;
+    let (w, h) = (usize::try_from(rgba.width()).unwrap_or(0), usize::try_from(rgba.height()).unwrap_or(0));
+    let options = icy_sixel::EncodeOptions { diffusion: 0.0, ..icy_sixel::EncodeOptions::default() };
+    let six = icy_sixel::sixel_encode(rgba.as_raw(), w, h, &options).map_err(|e| format!("sixel: {e}"))?;
+    let (start, esc, end) = Parser::tmux_start_escape_end(tmux);
+    let mut data = String::from(start);
+    if fresh {
+        data.push_str(&clear(cells, tmux));
+    }
+    // Inside tmux's passthrough its escape is doubled.
+    data.push_str(esc);
+    data.push_str(six.strip_prefix('\x1b').ok_or("sixel without its escape")?);
+    data.push_str(end);
+    Ok(ratatui_image::protocol::sixel::Sixel { data, size: cells, is_tmux: tmux })
 }
 
 /// Where a video at `url` is kept once downloaded.
@@ -367,7 +454,10 @@ struct Playing {
     /// A new size for the viewer, and since when (it's decoded for once it's held).
     asked: Option<(Size, Instant)>,
     shown: Option<(Duration, Protocol)>,
-    next: Option<(Duration, Protocol)>,
+    next: Option<(Duration, u64, Protocol)>,
+    /// The size the frame on screen was decoded for, and its number: a restart for the same
+    /// size goes on numbering (no clearing; kitty's turns go on), one for another starts over.
+    last: Option<(Geometry, u64)>,
     ended: bool,
     sound: Option<Process>,
     muted: bool,
@@ -404,7 +494,7 @@ impl Player {
                 Ok(Ok((path, probe))) => {
                     let (encode, wake, muted) = (encode.clone(), wake.clone(), *muted);
                     let clock = Arc::new(Mutex::new(Clock { at: *from, since: None }));
-                    let p = Playing { path, probe, clock, waiting: true, paused: false, decoder: None, asked: None, shown: None, next: None, ended: false, sound: None, muted, encode, wake };
+                    let p = Playing { path, probe, clock, waiting: true, paused: false, decoder: None, asked: None, shown: None, next: None, last: None, ended: false, sound: None, muted, encode, wake };
                     self.stage = Stage::Playing(Box::new(p));
                 }
                 Ok(Err(e)) => self.stage = Stage::Failed(e),
@@ -543,7 +633,7 @@ impl Playing {
         if !self.paused && !self.waiting {
             // The next frame, the end, or the clock's next second, whichever comes first.
             let next_second = Duration::from_secs(pos.as_secs().saturating_add(1));
-            let due = self.next.as_ref().map_or(next_second, |(t, _)| (*t).min(next_second));
+            let due = self.next.as_ref().map_or(next_second, |(t, ..)| (*t).min(next_second));
             let due = if self.ended { due.min(end) } else { due };
             wake = now.checked_add(due.saturating_sub(pos));
         }
@@ -554,17 +644,21 @@ impl Playing {
         (shown, wake)
     }
 
-    /// Take the frames that have come: show the latest one due, keep the next one.
+    /// Take the frames that have come: show the next one if it's due, and keep the one
+    /// after. One at a time, never skipping one (the decoder already drops those it's late
+    /// for): kitty's frames take turns between two images, and the one showing mustn't be
+    /// replaced.
     fn take_frames(&mut self, now: Instant) {
+        let mut took = false;
         loop {
             if self.next.is_none() {
                 let Some(d) = &self.decoder else { return };
                 // Waiting for a frame, said before looking: one sent meanwhile wakes the viewer.
                 d.starving.store(true, Ordering::SeqCst);
                 match d.rx.try_recv() {
-                    Ok(Frame::Picture(t, p)) => {
+                    Ok(Frame::Picture(t, n, p)) => {
                         d.starving.store(false, Ordering::SeqCst);
-                        self.next = Some((t, p));
+                        self.next = Some((t, n, p));
                     }
                     Ok(Frame::End) | Err(TryRecvError::Disconnected) => {
                         self.ended = true;
@@ -574,8 +668,11 @@ impl Playing {
                     Err(TryRecvError::Empty) => return,
                 }
             }
-            let Some((t, _)) = &self.next else { return };
+            let Some((t, ..)) = &self.next else { return };
             let t = *t;
+            if took {
+                return;
+            }
             if self.waiting {
                 // The first frame after a start: the clock (and the sound) start with it.
                 self.waiting = false;
@@ -588,7 +685,11 @@ impl Playing {
             } else if t > lock(&self.clock).now(now) {
                 return;
             }
-            self.shown = self.next.take();
+            if let Some((t, n, p)) = self.next.take() {
+                self.last = self.decoder.as_ref().map(|d| (d.geometry, n));
+                self.shown = Some((t, p));
+            }
+            took = true;
         }
     }
 
@@ -601,13 +702,17 @@ impl Playing {
         self.waiting = true;
         *lock(&self.clock) = Clock { at, since: None };
         let Some(g) = g else { return };
-        match self.spawn(at, g) {
+        let first = match self.last {
+            Some((was, n)) if was == g => n.wrapping_add(1),
+            _ => 0,
+        };
+        match self.spawn((at, first), g) {
             Ok(d) => self.decoder = Some(d),
             Err(_) => self.ended = true,
         }
     }
 
-    fn spawn(&self, from: Duration, g: Geometry) -> std::io::Result<Decoder> {
+    fn spawn(&self, (from, first): (Duration, u64), g: Geometry) -> std::io::Result<Decoder> {
         let mut child = crate::quiet_command("ffmpeg", decoder_args(&self.path, from, g)).stdout(Stdio::piped()).spawn()?;
         let out = child.stdout.take();
         let ffmpeg = Process(child);
@@ -616,7 +721,7 @@ impl Playing {
         let starving = Arc::new(AtomicBool::new(true));
         let (clock, encode, wake, s) = (self.clock.clone(), self.encode.clone(), self.wake.clone(), starving.clone());
         std::thread::spawn(move || {
-            let _ = crate::guard::catching(|| pump(out, g, from, &clock, &encode, &Sink { tx: &tx, starving: &s, wake: &*wake }));
+            let _ = crate::guard::catching(|| pump(out, g, (from, first), &clock, &encode, &Sink { tx: &tx, starving: &s, wake: &*wake }));
         });
         Ok(Decoder { rx, starving, geometry: g, ffmpeg })
     }
@@ -702,8 +807,8 @@ mod tests {
 
     fn pump_all(bytes: &[u8], g: Geometry, clock: Clock) -> Vec<Frame> {
         let (tx, rx) = sync_channel(64);
-        let encode: Encode = Arc::new(crate::images::halfblocks_of);
-        pump(bytes, g, Duration::from_secs(1), &Mutex::new(clock), &encode, &Sink { tx: &tx, starving: &AtomicBool::new(false), wake: &|| {} });
+        let encode: Encode = Arc::new(|img, cells, _| crate::images::halfblocks_of(img, cells));
+        pump(bytes, g, (Duration::from_secs(1), 0), &Mutex::new(clock), &encode, &Sink { tx: &tx, starving: &AtomicBool::new(false), wake: &|| {} });
         drop(tx);
         rx.into_iter().collect()
     }
@@ -714,7 +819,7 @@ mod tests {
         let stopped = Clock { at: Duration::ZERO, since: None };
         // Frames 0 and 1 the same, then 2, then 3: three pictures and the end.
         let frames = pump_all(&stream(4, 4, 4, |i| if i < 2 { 0 } else { i }), g, stopped);
-        let times: Vec<Option<u64>> = frames.iter().map(|f| if let Frame::Picture(t, _) = f { Some(t.as_millis() as u64) } else { None }).collect();
+        let times: Vec<Option<u64>> = frames.iter().map(|f| if let Frame::Picture(t, ..) = f { Some(t.as_millis() as u64) } else { None }).collect();
         assert_eq!(times, [Some(1000), Some(1100), Some(1150), None]);
         // A truncated stream: the whole frames, then the end.
         let mut bytes = stream(4, 4, 2, |i| i);
@@ -724,10 +829,37 @@ mod tests {
         // Played up to 1.12s already: the frames before it are dropped unencoded.
         let behind = Clock { at: Duration::from_millis(1120), since: Some(Instant::now()) };
         let frames = pump_all(&stream(4, 4, 6, |i| i), g, behind);
-        let first = frames.iter().find_map(|f| if let Frame::Picture(t, _) = f { Some(*t) } else { None });
+        let first = frames.iter().find_map(|f| if let Frame::Picture(t, ..) = f { Some(*t) } else { None });
         assert!(first.is_some_and(|t| t >= Duration::from_millis(1100)), "{first:?}");
         // Nothing at all: just the end.
         assert!(matches!(pump_all(&[], g, stopped).as_slice(), [Frame::End]));
+    }
+
+    #[test]
+    fn a_frame_never_leaves_the_screen_before_the_next_is_there() {
+        let img = DynamicImage::ImageRgba8(RgbaImage::from_pixel(40, 40, image::Rgba([200, 30, 30, 255])));
+        let cells = Size::new(4, 2);
+        // Sixel: only the first frame clears the area first; the next ones cover it.
+        #[allow(deprecated)]
+        let mut picker = Picker::from_fontsize((10, 20).into());
+        picker.set_protocol_type(ProtocolType::Sixel);
+        let encode = encoder(&picker);
+        let data = |n| match encode(img.clone(), cells, n).unwrap() {
+            Protocol::Sixel(s) => s.data,
+            _ => panic!("not sixel"),
+        };
+        assert!(data(0).starts_with(&clear(cells, false)) && data(0).contains("\x1bP"));
+        assert!(data(1).starts_with("\x1bP") && data(2).starts_with("\x1bP"));
+        // Kitty: frames take turns between two images (the number is the cells' color).
+        picker.set_protocol_type(ProtocolType::Kitty);
+        let encode = encoder(&picker);
+        let image_of = |n| {
+            let p = encode(img.clone(), cells, n).unwrap();
+            let mut buf = ratatui::buffer::Buffer::empty(ratatui::layout::Rect::new(0, 0, 4, 2));
+            ratatui::widgets::Widget::render(ratatui_image::Image::new(&p), buf.area, &mut buf);
+            buf[(1, 1)].fg
+        };
+        assert!(image_of(0) != image_of(1) && image_of(0) == image_of(2) && image_of(1) == image_of(3));
     }
 
     #[test]
