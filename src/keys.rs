@@ -373,8 +373,14 @@ pub enum Nav {
     ZoomIn,
     ZoomOut,
     Fit,
-    /// Pause an animated GIF, or the next file.
+    /// Pause a video or an animated GIF, or the next file.
     Play,
+    /// A video: back or on, a little or more; its sound off or on.
+    SeekBack,
+    SeekOn,
+    SeekBackFar,
+    SeekOnFar,
+    Mute,
 }
 
 const EVERYWHERE: &[Scope] = &[Scope::Global, Scope::Gallery, Scope::Viewer];
@@ -425,7 +431,12 @@ const FIXED: &[(&[Scope], Nav, &[Key], &str)] = &[
     (&[Scope::Viewer], Nav::ZoomIn, &[Key::char('+'), Key::char('=')], "zoom in (then h/j/k/l move)"),
     (&[Scope::Viewer], Nav::ZoomOut, &[Key::char('-')], "zoom out"),
     (&[Scope::Viewer], Nav::Fit, &[Key::char('0')], "fit the screen"),
-    (&[Scope::Viewer], Nav::Play, &[Key::char(' ')], "pause an animated GIF, or the next file"),
+    (&[Scope::Viewer], Nav::Play, &[Key::char(' ')], "pause a video or an animated GIF, or the next file"),
+    (&[Scope::Viewer], Nav::SeekBack, &[Key::char('[')], "a video: 5 seconds back"),
+    (&[Scope::Viewer], Nav::SeekOn, &[Key::char(']')], "a video: 5 seconds on"),
+    (&[Scope::Viewer], Nav::SeekBackFar, &[Key::char('{')], "a video: 30 seconds back"),
+    (&[Scope::Viewer], Nav::SeekOnFar, &[Key::char('}')], "a video: 30 seconds on"),
+    (&[Scope::Viewer], Nav::Mute, &[Key::char('m')], "videos' sound off / on"),
 ];
 
 /// The views an action works in.

@@ -512,16 +512,17 @@ pub fn get_bytes(url: &str, limit: u64) -> Result<Vec<u8>> {
 
 /// Download `url` into `path` at low priority, through a temp file renamed into place.
 pub fn download_to(url: &str, path: &std::path::Path) -> Result<()> {
-    download_with_progress(url, path, |_, _| {})
+    download_with_progress(url, path, 1 << 30, |_, _| {})
 }
 
-/// `download_to`, telling `progress` the bytes so far and the whole size (if the server says).
-pub fn download_with_progress(url: &str, path: &std::path::Path, progress: impl FnMut(u64, Option<u64>)) -> Result<()> {
+/// `download_to`, up to `limit` bytes (more is an error), telling `progress` the bytes so far
+/// and the whole size (if the server says).
+pub fn download_with_progress(url: &str, path: &std::path::Path, limit: u64, progress: impl FnMut(u64, Option<u64>)) -> Result<()> {
     throttle(url, Priority::Low)?;
     let mut resp = AGENT.get(url).call().with_context(|| format!("GET {url}"))?;
     check_status(resp.status().as_u16(), url)?;
     let size = resp.headers().get("content-length").and_then(|v| v.to_str().ok()).and_then(|v| v.parse().ok());
-    let body = Counted { inner: resp.body_mut().with_config().limit(1 << 30).reader(), got: 0, size, progress };
+    let body = Counted { inner: resp.body_mut().with_config().limit(limit).reader(), got: 0, size, progress };
     crate::atomic::write_from(path, body).with_context(|| format!("downloading {url}"))
 }
 

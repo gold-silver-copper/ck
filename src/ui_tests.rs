@@ -898,6 +898,19 @@ fn image_viewer_placeholder() {
 }
 
 #[test]
+fn a_video_without_ffmpeg_shows_its_thumbnail_and_says_how_to_play_it() {
+    // Tests never start ffmpeg: as on a machine without it.
+    let mut a = thread_app(true);
+    a.tab.popup = Some(crate::app::TabPopup::Viewer(Viewer::new(vec![file("clip.webm"), file("op.png")], 0, None)));
+    let text = snapshot(&mut a);
+    assert!(text.contains("with ffmpeg installed, videos play here") && text.contains("+/- zoom"), "{text}");
+    // Turned off: just the thumbnail, as for any other file.
+    a.inline_videos = false;
+    let text = snapshot(&mut a);
+    assert!(text.contains("WEBM files can't be shown here"), "{text}");
+}
+
+#[test]
 fn settings() {
     let mut a = app(false);
     a.tab.navigate(View::Settings);

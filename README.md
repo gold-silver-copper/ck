@@ -19,6 +19,10 @@ its SHA-256 beside it. On Windows, run it in Windows Terminal (see the
 
 Run `ck`, or `ck 4chan/g` (or any thread or board URL) to start there.
 
+Videos play in the terminal if [ffmpeg](https://ffmpeg.org/download.html) is installed
+(`ffmpeg` and `ffprobe` on the PATH; `brew install ffmpeg`, `winget install ffmpeg`, or your
+distribution's package). It's optional: without it, they open in mpv or your player.
+
 A terminal browser for imageboards, built with [ratatui](https://ratatui.rs): 4chan,
 vichan and LynxChan sites, jschan, 2ch and FoolFuuka archives, with images drawn in the
 terminal. (Click the tour for [the video](ck-demo.webm), with controls.)
@@ -28,7 +32,8 @@ terminal. (Click the tour for [the video](ck-demo.webm), with controls.)
 - **Catalogs** as cards, a list or a thumbnail grid, marking what's new since your last visit.
 - **Threads** with quote previews, replies shown inline, one post's conversation alone, and search.
 - **Images** in the terminal (kitty, sixel, iTerm2, or half-blocks anywhere), a full-screen
-  viewer that plays GIFs, a gallery of a thread's files, downloads and reverse image search.
+  viewer that plays GIFs, and webms and mp4s with their sound when ffmpeg is installed, a
+  gallery of a thread's files, downloads and reverse image search.
 - **Posting** on 4chan, vichan, LynxChan, jschan and 2ch sites: a reply box with quoting and
   drafts, the site's captcha answered in the terminal, and Cloudflare's check clicked there
   too; your posts are marked as yours. Log in (ctrl-p) with a 4chan Pass or a 2ch

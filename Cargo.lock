@@ -390,6 +390,7 @@ dependencies = [
  "dirs",
  "flate2",
  "html-escape",
+ "icy_sixel",
  "image",
  "insta",
  "open",

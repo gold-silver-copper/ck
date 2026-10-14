@@ -53,7 +53,7 @@ pub fn install(progress: impl FnMut(u64, Option<u64>)) -> Result<PathBuf> {
     let base = dir().context("no data folder to put ck-web in")?;
     // Named as this ck's temp, so another ck's cleanup leaves it be.
     let archive = base.join(format!("{name}.ck-{}-0.tmp", std::process::id()));
-    crate::http::download_with_progress(&format!("{RELEASES}/ck-web-v{VERSION}/{name}"), &archive, progress)?;
+    crate::http::download_with_progress(&format!("{RELEASES}/ck-web-v{VERSION}/{name}"), &archive, 1 << 30, progress)?;
     let unpacked = (|| -> Result<()> {
         ensure!(sha256(&archive)? == sum, "The download isn't ck-web {VERSION} as this ck knows it (its checksum differs); not using it");
         let file = std::fs::File::open(&archive)?;

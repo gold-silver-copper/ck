@@ -152,7 +152,9 @@ ones for where you are.
 | key  | action |
 |------|--------|
 | `h`/`l`, arrows | previous / next file (animated GIFs play); from a thread, every file in it (or in the conversation shown) |
-| space | pause an animated GIF |
+| space | pause a video or an animated GIF |
+| `[` / `]`, `{` / `}` | a video: 5 seconds back / on, 30 seconds back / on |
+| `m` | videos' sound off / on |
 | `+` / `-` / `0` | zoom in / out (up to 800%) / fit again; zoomed in, `h`/`j`/`k`/`l` and the arrows move around, page up / down change file, `esc` fits |
 | `enter` | open the file externally, videos in `video_player` or else mpv if it's installed (its thumbnail, when that's all there is) |
 | `y`  | copy the file's URL (or its thumbnail's) [`copy`] |
@@ -840,8 +842,9 @@ site has lost (old posts on some sites, like kissu's) is made from the file itse
 that's a picture of at most 4 MB; otherwise the tile shows ✗.
 
 Animated GIFs play in the viewer, at up to 20 frames a second (frames are prepared in the
-background, and scaled down if a long GIF would take too much memory). Videos open
-externally with `enter` in the viewer (`i` in a thread). When the site or archive has only a file's thumbnail, the viewer
+background, and scaled down if a long GIF would take too much memory). Videos play there
+too (see [Videos](#videos)), and open externally with `enter` in the viewer (`i` in a
+thread). When the site or archive has only a file's thumbnail, the viewer
 shows it and says so; `enter` and `y` in the viewer, and `o` and `y` on the focused file in a
 thread, act on the thumbnail's address and say so, and `d` says there's no file to save.
 A spoilered file the archive didn't keep has no thumbnail either: the viewer, and opening,
@@ -863,6 +866,37 @@ the detected protocol is wrong for your setup, name one: `images = "halfblocks"`
 `"sixel"`, `"kitty"` or `"iterm2"` (Settings cycles through them too; it takes effect at the
 next start). To turn images off entirely (no image requests at all), put `images = "off"`
 at the top of your config.
+
+### Videos
+
+Webms and mp4s play in the viewer, with their sound, when [ffmpeg](https://ffmpeg.org) is
+installed: `ffmpeg` and `ffprobe` on the PATH (they come together; `brew install ffmpeg` on
+macOS, `winget install ffmpeg` on Windows). Nothing of ffmpeg is built into ck. Without it
+the viewer shows the video's thumbnail and says so, and `enter` opens the video in
+`video_player` (or mpv) as before.
+
+ck downloads the video through its rate limiter as it does images, into
+`$XDG_CACHE_HOME/ck/videos` (default `~/.cache/ck/videos`, `%LOCALAPPDATA%\ck\cache\videos`
+on Windows; at most 256 MB a video, and 512 MB in all, least recently played first out).
+A saved thread's downloaded videos play from the download folder, offline too. ffmpeg
+reads only that file (webm, mp4 and their kin; nothing that would fetch other files or
+URLs) and turns it into pictures that fill the viewer (a small video is scaled up, as
+players do), drawn like images: up to 20 a second; in kitty and iTerm2, fewer when they're big (each is
+sent whole, and big ones at 20 a second would swamp the terminal). Sixel encodes each
+frame on a few threads, and the bigger the viewer the more CPU that takes. Frames ck falls behind on
+are skipped, so the video keeps its speed. The sound plays in `ffplay` (it comes with
+ffmpeg), else in mpv with no window; with neither, the video plays without it and the
+top bar says so.
+
+The top bar shows where the video is and how long it is. Space pauses, `[` and `]` go 5
+seconds back and on, `{` and `}` 30, and `m` turns the sound off and on for every video
+until ck quits. `+`, `-` and `0` zoom as for images, and zoomed in, `h`/`j`/`k`/`l` and the
+arrows move around: ffmpeg cuts out that part of the video, so it's as sharp as the video
+is, not a frame blown up. Videos loop. Moving to another file, closing the viewer or switching tabs
+stops the video, its sound and ffmpeg; coming back to the same video goes on from where
+it was. A video that can't be played (ffmpeg can't read it, the download failed) shows its
+thumbnail and why. `inline_videos = false` (or Settings › Videos) shows the thumbnail
+instead of playing.
 
 ### Images on or off per board
 
@@ -1016,6 +1050,8 @@ All settings are optional; see `config.example.toml` for every option with comme
   the system's opener. If the player won't start, ck says so and doesn't try another.
   For IINA on macOS:
   `video_player = ["/Applications/IINA.app/Contents/MacOS/iina-cli", "--no-stdin", "{url}"]`.
+- `inline_videos = false` to show videos' thumbnails in the viewer instead of playing them
+  there (see [Videos](#videos)).
 - `set_title = false` to leave the terminal's title alone (see
   [Notifications](#notifications)).
 - `[[filter]]`: hide or highlight threads and posts, see [Filters](#filters-and-hiding).

@@ -118,6 +118,20 @@ pub const SECTIONS: &[(&str, &[Setting])] = &[
             },
         ),
         row(
+            "Videos",
+            "Webms and mp4s play in the image viewer (needs ffmpeg)",
+            |a| match (a.inline_videos, crate::video::available()) {
+                (false, _) => "thumbnail only".into(),
+                (true, true) => "played in ck".into(),
+                (true, false) => "on (install ffmpeg)".into(),
+            },
+            |a| {
+                a.inline_videos = !a.inline_videos;
+                let on = a.inline_videos;
+                a.save_config(if on { "videos playing in the viewer" } else { "videos as thumbnails in the viewer" }, |d| d["inline_videos"] = toml_edit::value(on));
+            },
+        ),
+        row(
             "NSFW boards",
             "Images on boards the site marks NSFW",
             |a| if a.nsfw_images == crate::config::NsfwImages::Show { "images shown" } else { "images off" }.into(),

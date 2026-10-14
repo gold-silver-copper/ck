@@ -16,12 +16,12 @@ expression: "shots.join(\"\\n=====\\n\")"
     P  Kept in the config as [[site]] tables; the built-in sites are always there too.                   o…
     W
     Images            on                           Thumbnails and the image viewer (after a restart)
+    Videos            on (install ffmpeg)          Webms and mp4s play in the image viewer (needs ffmpeg)
     NSFW boards       images shown                 Images on boards the site marks NSFW
     Board images      none                         Boards with their own image setting (. menu on a board)
-    Filters           0 filters, 0 hidden by hand  Hide or highlight by pattern; X adds one from a post
 
     Theme: material  ·  Live preview while choosing
- enter change   / filter   esc back   ? help                                                        1/25  4%
+ enter change   / filter   esc back   ? help                                                        1/26  3%
 
 =====
  ck  Settings
@@ -38,12 +38,12 @@ expression: "shots.join(\"\\n=====\\n\")"
     P                                                                                                    o…
     W  Kept in the config as [[site]] tables; the built-in sites are always there too.
     I
+    Videos            on (install ffmpeg)          Webms and mp4s play in the image viewer (needs ffmpeg)
     NSFW boards       images shown                 Images on boards the site marks NSFW
     Board images      none                         Boards with their own image setting (. menu on a board)
-    Filters           0 filters, 0 hidden by hand  Hide or highlight by pattern; X adds one from a post
 
     Theme: material  ·  Live preview while choosing
- enter change   / filter   esc back   ? help                                                        1/25  4%
+ enter change   / filter   esc back   ? help                                                        1/26  3%
 
 =====
  ck  Settings
@@ -61,7 +61,7 @@ expression: "shots.join(\"\\n=====\\n\")"
     Watched first     in the sort's order      Threads you watch at the top of catalogs
 
     Theme: material  ·  Live preview while choosing
- enter change   / filter   esc back   ? help                                    1/25  4%
+ enter change   / filter   esc back   ? help                                    1/26  3%
 
 =====
  ck  Settings
@@ -79,7 +79,7 @@ expression: "shots.join(\"\\n=====\\n\")"
     Watched first     in the sort's order      Threads you watch at the top of catalogs
 
     Theme: material  ·  Live preview while choosing
- enter change   / filter   esc back   ? help                                    1/25  4%
+ enter change   / filter   esc back   ? help                                    1/26  3%
 
 =====
  ck  Settings
@@ -97,7 +97,7 @@ expression: "shots.join(\"\\n=====\\n\")"
     Watched first     in the sort's order      Threads you watch at the top of catalogs
 
     Theme: material  ·  Live preview while choosing
- enter change   / filter   esc back   ? help                                    1/25  4%
+ enter change   / filter   esc back   ? help                                    1/26  3%
 
 =====
  ck  Settings
@@ -115,7 +115,7 @@ expression: "shots.join(\"\\n=====\\n\")"
     Watched first     in the sort's order      Threads you watch at the top of catalogs
 
     Theme: material  ·  Live preview while choosing
- enter change   / filter   esc back   ? help                                    1/25  4%
+ enter change   / filter   esc back   ? help                                    1/26  3%
 
 =====
  ck  Settings
@@ -133,7 +133,7 @@ expression: "shots.join(\"\\n=====\\n\")"
     Watched first     in the sort's order      Threads you watch at the top of catalogs
 
     Theme: material  ·  Live preview while choosing
- enter change   / filter   esc back   ? help                                    1/25  4%
+ enter change   / filter   esc back   ? help                                    1/26  3%
 
 =====
  ck  Settings
@@ -151,7 +151,7 @@ expression: "shots.join(\"\\n=====\\n\")"
     Watche                                                                      atalogs
             Whole words, any case. Kept in the config as hidden_words.
     Theme:
- enter change   / filter   esc back   ? help                                    1/25  4%
+ enter change   / filter   esc back   ? help                                    1/26  3%
 
 =====
  ck  Settings
@@ -169,4 +169,4 @@ expression: "shots.join(\"\\n=====\\n\")"
     Watche  New  x▏                                                             atalogs
             Whole words, any case. Kept in the config as hidden_words.
     Theme:
- enter change   / filter   esc back   ? help                                    1/25  4%
+ enter change   / filter   esc back   ? help                                    1/26  3%

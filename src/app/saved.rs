@@ -65,6 +65,16 @@ impl App {
         Some(ThreadKey { site: self.sites.get(archive)?.cfg.name.clone(), ..key.clone() })
     }
 
+    /// Where a video the viewer plays comes from: a saved copy's download, else its URL.
+    /// `None` when it doesn't play there: not a video, `inline_videos` off, or no ffmpeg.
+    pub fn video_source(&self, file: &Attachment) -> Option<String> {
+        if !file.is_video() || !self.inline_videos || !crate::video::available() {
+            return None;
+        }
+        let saved = self.tab.saved().is_some() && self.tab.view() == View::Thread;
+        saved.then(|| self.downloaded(file)).flatten().map(|path| format!("file://{}", path.display())).or_else(|| file.url.clone())
+    }
+
     /// What the viewer shows for a file: the image itself, or the thumbnail for other files.
     /// A saved copy's images come from the download folder, else their cached thumbnail.
     pub fn viewer_source(&self, file: &Attachment) -> Option<(String, Kind)> {

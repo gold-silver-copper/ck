@@ -952,6 +952,9 @@ impl App {
 
     fn on_viewer_nav(&mut self, nav: Nav) {
         use crate::images::Crop;
+        // A video playing here (or about to), not one that couldn't be played.
+        let video = matches!(&self.tab.popup, Some(TabPopup::Viewer(v)) if v.files.get(v.index).and_then(|f| self.video_source(f)).is_some())
+            && !self.images.playing().is_some_and(|p| p.has_failed());
         let Some(TabPopup::Viewer(v)) = &mut self.tab.popup else { return };
         let n = v.files.len();
         let pan = |v: &Viewer, x, y| v.crop.moved(x, y, v.shown.unwrap_or_else(|| v.crop.guess_shown()));
@@ -959,6 +962,21 @@ impl App {
         // and esc fits it again.
         let zoomed = !v.crop.is_fit();
         match nav {
+            // A video playing here: space pauses it, and it can be wound back and on.
+            Nav::Play | Nav::SeekBack | Nav::SeekOn | Nav::SeekBackFar | Nav::SeekOnFar if video => {
+                let Some(p) = self.images.playing() else { return };
+                match nav {
+                    Nav::Play if p.toggle_pause() => {
+                        let paused = p.is_paused();
+                        self.info(if paused { "Paused (space plays)" } else { "Playing" });
+                    }
+                    Nav::SeekBack => p.seek(-5),
+                    Nav::SeekOn => p.seek(5),
+                    Nav::SeekBackFar => p.seek(-30),
+                    Nav::SeekOnFar => p.seek(30),
+                    _ => {}
+                }
+            }
             Nav::ZoomIn => v.crop = v.crop.zoomed(true),
             Nav::ZoomOut => v.crop = v.crop.zoomed(false),
             Nav::Fit => v.crop = Crop::FIT,
@@ -982,6 +1000,10 @@ impl App {
             Nav::Left | Nav::Up | Nav::PageUp => {
                 v.index = (v.index + n - 1) % n;
                 v.crop = Crop::FIT;
+            }
+            Nav::Mute => {
+                self.images.toggle_mute();
+                self.info(if self.images.muted { "Videos' sound off (m turns it on)" } else { "Videos' sound on" });
             }
             // Space pauses an animated GIF; otherwise it's the next file.
             Nav::Play if v.files.get(v.index).is_some_and(|f| f.image().is_some_and(|u| self.images.toggle_pause(u))) => {

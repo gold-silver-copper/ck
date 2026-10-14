@@ -287,6 +287,14 @@ pub struct Images {
     /// load; nothing is fetched.
     pub offline: bool,
     disk: Option<Arc<DiskCache>>,
+    wake: Waker,
+    /// The video in the viewer, whether it was drawn this frame (one that isn't stops), and
+    /// where the last one stopped (going back to it goes on from there).
+    video: Option<crate::video::Player>,
+    video_drawn: bool,
+    video_left: Option<(String, Duration)>,
+    /// Videos play without sound.
+    pub muted: bool,
 }
 
 impl Images {
@@ -306,13 +314,14 @@ impl Images {
                 let (q, tx, wake, disk) = (queue.clone(), tx.clone(), wake.clone(), disk.clone());
                 std::thread::spawn(move || worker(&q, &tx, &*wake, disk.as_deref()));
             }
-            // Last, as it takes `tx` and `wake` themselves.
-            let p = p.clone();
+            // Last, as it takes `tx` itself.
+            let (p, wake) = (p.clone(), wake.clone());
             std::thread::spawn(move || encoder(&p, &enc_rx, &tx, &*wake));
             encode = Some(enc_tx);
         }
         let (offline, frame) = (false, Vec::new());
-        Self { picker, slots: HashMap::new(), queue, rx, encode, frame, tick: 0, bytes: 0, next_frame: None, drawing_next: None, offline, disk }
+        let (video, video_drawn, video_left, muted) = (None, false, None, false);
+        Self { picker, slots: HashMap::new(), queue, rx, encode, frame, tick: 0, bytes: 0, next_frame: None, drawing_next: None, offline, disk, wake, video, video_drawn, video_left, muted }
     }
 
     /// Images "on", but nothing is ever fetched or encoded: everything stays a placeholder.
@@ -321,8 +330,9 @@ impl Images {
         let (_tx, rx) = channel();
         let picker = Some(Picker::halfblocks());
         let queue = Arc::new(Queue::default());
-        let (offline, disk) = (false, None);
-        Self { picker, slots: HashMap::new(), queue, rx, encode: None, frame: Vec::new(), tick: 0, bytes: 0, next_frame: None, drawing_next: None, offline, disk }
+        let (offline, disk, wake) = (false, None, Arc::new(|| {}));
+        let (video, video_drawn, video_left, muted) = (None, false, None, false);
+        Self { picker, slots: HashMap::new(), queue, rx, encode: None, frame: Vec::new(), tick: 0, bytes: 0, next_frame: None, drawing_next: None, offline, disk, wake, video, video_drawn, video_left, muted }
     }
 
     /// An encoder thread but no fetch workers (tests and benchmarks).
@@ -502,6 +512,43 @@ impl Images {
         matches!(self.slots.get(url), Some(Slot::Ready { animation: Some(a), .. }) if a.paused.is_some())
     }
 
+    /// The video at `url` in `size` cells (the part `crop` zooms into): the frame due now,
+    /// started if it isn't the one playing (where it was left, if it was the last one). Only
+    /// one plays: one that isn't drawn in a frame stops (see `end_frame`).
+    pub fn video(&mut self, url: &str, size: Size, crop: Crop) -> crate::video::Shown<'_> {
+        use crate::video::{Player, Shown};
+        let Some(picker) = &self.picker else { return Shown::Failed("images are off") };
+        if self.video.as_ref().is_none_or(|v| v.url != url) {
+            if self.offline && !crate::video::on_disk(url) {
+                return Shown::Unavailable;
+            }
+            let from = self.video_left.take().filter(|(u, _)| u == url).map_or(Duration::ZERO, |(_, at)| at);
+            self.video = Some(Player::new(url, from, self.muted, crate::video::encoder(picker), self.wake.clone()));
+        }
+        self.video_drawn = true;
+        let font = picker.font_size();
+        let protocol = picker.protocol_type();
+        let Some(v) = &mut self.video else { return Shown::Loading(None) };
+        let (shown, next) = v.frame((size, crop), (u32::from(font.width), u32::from(font.height)), protocol, Instant::now());
+        if let Some(next) = next {
+            self.drawing_next = Some(self.drawing_next.map_or(next, |t| t.min(next)));
+        }
+        shown
+    }
+
+    /// The video playing, to pause, seek or mute.
+    pub fn playing(&mut self) -> Option<&mut crate::video::Player> {
+        self.video.as_mut()
+    }
+
+    /// Videos' sound off, or on again.
+    pub fn toggle_mute(&mut self) {
+        self.muted = !self.muted;
+        if let Some(v) = &mut self.video {
+            v.set_muted(self.muted);
+        }
+    }
+
     /// Ask for an image without drawing it (prefetch for rows about to scroll into view).
     pub fn want(&mut self, url: &str, kind: Kind) {
         if self.picker.is_some() && self.may_load(url) {
@@ -523,6 +570,13 @@ impl Images {
         let frame = std::mem::take(&mut self.frame);
         // Only an image drawn this frame keeps the loop waking.
         self.next_frame = self.drawing_next.take();
+        // A video not drawn this frame (the viewer moved on, closed, or is behind another
+        // screen) stops, and its sound and ffmpeg with it.
+        if !std::mem::take(&mut self.video_drawn)
+            && let Some(v) = self.video.take()
+        {
+            self.video_left = Some((v.url.clone(), v.at()));
+        }
         let mut st = lock(&self.queue.state);
         st.wanted = frame.iter().map(|(u, ..)| u.clone()).collect();
         for (url, kind, size) in frame {
@@ -730,10 +784,33 @@ fn shrink(img: &DynamicImage, w: u32, h: u32, grow: bool) -> DynamicImage {
 /// two pixels per cell, rather than to the screen's full pixel size first (which, at a large
 /// cell size, made the viewer cost a tenth of a second per image).
 fn halfblocks(img: &DynamicImage, size: Size, font: ratatui_image::FontSize, fill: bool) -> Result<Protocol, String> {
-    use ratatui_image::protocol::halfblocks::Halfblocks;
-    let (fw, fh) = (u32::from(font.width).max(1), u32::from(font.height).max(1));
-    let (area_w, area_h) = (u32::from(size.width).saturating_mul(fw), u32::from(size.height).saturating_mul(fh));
     let (iw, ih) = (img.width().max(1), img.height().max(1));
+    let (cells, cw, ch) = halfblock_grid((iw, ih), size, (u32::from(font.width), u32::from(font.height)), fill);
+    let scaled = if iw > cw.saturating_mul(2) || ih > ch.saturating_mul(2) { img.thumbnail_exact(cw, ch) } else { img.resize_exact(cw, ch, FilterType::Triangle) };
+    // Padded to whole cells like the library pads (transparent, shown black).
+    let (gw, gh) = (u32::from(cells.width), u32::from(cells.height) * 2);
+    let image = if (cw, ch) == (gw, gh) {
+        scaled
+    } else {
+        let mut bg = DynamicImage::ImageRgba8(image::RgbaImage::new(gw, gh));
+        image::imageops::overlay(&mut bg, &scaled, 0, 0);
+        bg
+    };
+    halfblocks_of(image, cells)
+}
+
+/// Half-blocks for an image already in half-block pixels: `cells` wide, twice as tall.
+pub(crate) fn halfblocks_of(image: DynamicImage, cells: Size) -> Result<Protocol, String> {
+    ratatui_image::protocol::halfblocks::Halfblocks::new(image, cells).map(Protocol::Halfblocks).map_err(|e| e.to_string())
+}
+
+/// Where a `w` x `h` picture goes in half-blocks in `size` cells, at the terminal's cell
+/// size `font` (pixels): the cells it takes (as many as its pixels cover, fewer if they
+/// don't fit, or with `fill` all it can), and its size in half-block pixels in them.
+pub(crate) fn halfblock_grid((iw, ih): (u32, u32), size: Size, font: (u32, u32), fill: bool) -> (Size, u32, u32) {
+    let (fw, fh) = (font.0.max(1), font.1.max(1));
+    let (area_w, area_h) = (u32::from(size.width).saturating_mul(fw), u32::from(size.height).saturating_mul(fh));
+    let (iw, ih) = (iw.max(1), ih.max(1));
     // Its size on screen, in pixels: as it is if it fits (and isn't to fill), else fitted.
     #[allow(clippy::cast_possible_truncation)] // f64 as u32 saturates
     let (pw, ph) = if !fill && iw <= area_w && ih <= area_h {
@@ -748,17 +825,7 @@ fn halfblocks(img: &DynamicImage, size: Size, font: ratatui_image::FontSize, fil
     // (Rounded: pw / fw wide, ph * 2 / fh tall.)
     let cw = pw.saturating_mul(2).saturating_add(fw).checked_div(fw.saturating_mul(2)).unwrap_or(0).clamp(1, u32::from(cells.width));
     let ch = ph.saturating_mul(4).saturating_add(fh).checked_div(fh.saturating_mul(2)).unwrap_or(0).clamp(1, u32::from(cells.height) * 2);
-    let scaled = if iw > cw.saturating_mul(2) || ih > ch.saturating_mul(2) { img.thumbnail_exact(cw, ch) } else { img.resize_exact(cw, ch, FilterType::Triangle) };
-    // Padded to whole cells like the library pads (transparent, shown black).
-    let (gw, gh) = (u32::from(cells.width), u32::from(cells.height) * 2);
-    let image = if (cw, ch) == (gw, gh) {
-        scaled
-    } else {
-        let mut bg = DynamicImage::ImageRgba8(image::RgbaImage::new(gw, gh));
-        image::imageops::overlay(&mut bg, &scaled, 0, 0);
-        bg
-    };
-    Halfblocks::new(image, cells).map(Protocol::Halfblocks).map_err(|e| e.to_string())
+    (cells, cw, ch)
 }
 
 /// Whether a job can start now: cached thumbnails and media hosts always; hosts that share
