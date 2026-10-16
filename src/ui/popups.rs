@@ -172,13 +172,16 @@ pub(super) fn draw_hints(f: &mut Frame, app: &App) {
 }
 
 pub(super) fn draw_preview(f: &mut Frame, app: &mut App) {
+    let off = !app.thread_images_on();
     let (Some(TabPopup::Preview(p)), Some(t)) = (&mut app.tab.popup, &app.tab.thread) else { return };
     let w = f.area().width.saturating_sub(8).clamp(20, 110);
     let width = w.saturating_sub(4) as usize;
     let mut lines = Vec::new();
+    let mut tiles = Vec::new();
     // Quoted posts a refresh has since dropped are left out.
     for &i in p.posts.iter().filter_map(|no| t.index.get(no)) {
-        lines.extend(post_card(t, i, app.clock, width));
+        let at = lines.len();
+        lines.extend(post_card(t, i, app.clock, width, app.images.enabled(), &mut tiles, at));
         lines.push(Line::raw(""));
     }
     for (link, quoted) in &p.elsewhere {
@@ -205,7 +208,13 @@ pub(super) fn draw_preview(f: &mut Frame, app: &mut App) {
     while lines.last().is_some_and(|l| markup::spans_columns(&l.spans) == 0) {
         lines.pop();
     }
+    // Not shorter than the last tile.
+    let tiled = tiles.iter().map(|&(at, _)| at + THUMB.height as usize).max().unwrap_or(0);
+    lines.resize(lines.len().max(tiled), Line::raw(""));
     let hit = list_panel(f, (w, "Quoted posts", "j/k scroll · enter jump · esc close"), &mut p.scroll, &lines, ("", false), |_| Vec::new(), |_, line, _| line.clone());
+    if let Hit::List { area, offset, .. } = hit {
+        draw_tiles(f, &mut app.images, &tiles, off, area, offset);
+    }
     cover_tabs(&mut app.drawn.tabs, hit);
 }
 

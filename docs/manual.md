@@ -182,7 +182,7 @@ ones for where you are.
 | `c`  | which posts: a conversation, a poster's posts, only those with files, hidden posts, spoilers (below) [`show`] |
 | `r`  | reply, quoting the post (see Posting) [`reply`] |
 | `w`  | watch / unwatch [`watch`] |
-| `p`  | preview the posts a post quotes; one in another thread (its quote ends in `→`) is fetched from there, and `enter` goes to it when it's the only kind [`preview`] |
+| `p`  | preview the posts a post quotes (with their thumbnails, as in the thread); one in another thread (its quote ends in `→`) is fetched from there, and `enter` goes to it when it's the only kind [`preview`] |
 | `n` / `N` | next / previous search match [`next_match`, `prev_match`] |
 | `V`  | gallery of every file in the thread [`gallery`] |
 | `d`  | save the focused file, or all the post's files; in the gallery, the selected one [`download`] |

@@ -202,6 +202,19 @@ fn quote_preview() {
 }
 
 #[test]
+fn a_quoted_posts_file_shows_its_thumbnail() {
+    let mut a = thread_app(true);
+    let t = a.tab.thread.as_mut().unwrap();
+    let i = t.index[&1001];
+    t.posts[i].files = vec![file("quoted.webm")];
+    a.tab.popup = Some(crate::app::TabPopup::Preview(Preview { posts: vec![1001], elsewhere: vec![], scroll: Default::default() }));
+    // The tile beside the post's text, as in the thread (here, loading).
+    let text = render(&mut a).0;
+    let preview: Vec<&str> = text.lines().skip_while(|l| !l.contains("Quoted posts")).take(12).collect();
+    assert!(preview.iter().any(|l| l.contains('…')), "{text}");
+}
+
+#[test]
 fn search_highlight() {
     let mut a = thread_app(false);
     let t = a.tab.thread.as_mut().unwrap();
