@@ -202,8 +202,6 @@ fn key_bytes(key: KeyEvent, app_cursor: bool) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::mpsc::channel;
-    use std::time::Duration;
 
     #[test]
     fn keys_as_xterm_sends_them() {
@@ -222,6 +220,8 @@ mod tests {
     // A shell line stands in for the editor: it's given the file as $1.
     #[cfg(unix)]
     fn edit(editor: &str, text: &str) -> Option<String> {
+        use std::sync::mpsc::channel;
+        use std::time::Duration;
         let (tx, rx) = channel();
         let pty = PtyEditor::start_with(editor, text, || {}, move |ok| tx.send(ok).unwrap()).unwrap();
         let ok = rx.recv_timeout(Duration::from_secs(10)).unwrap();
