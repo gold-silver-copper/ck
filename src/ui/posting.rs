@@ -7,6 +7,7 @@ use crate::post::Login;
 use std::time::Instant;
 use crate::captcha::{Cell, Solving, Task};
 use crate::editor::Editor;
+use crate::pty_editor::PtyEditor;
 use image::DynamicImage;
 use std::borrow::Cow;
 
@@ -21,8 +22,9 @@ pub(super) fn draw_reply(f: &mut Frame, app: &mut App) {
         no => format!("Reply to /{}/ No.{no}", c.to.board),
     };
     let hint = match &c.stage {
-        Stage::Writing if c.login.is_some() => "ctrl-s post · ctrl-p log in · esc keep draft",
-        Stage::Writing => "ctrl-s post · tab next · esc keep for later",
+        Stage::Writing if c.pty.is_some() => "the editor has the keys: save and quit it to come back",
+        Stage::Writing if c.login.is_some() => "ctrl-s post · ctrl-g editor · ctrl-p log in · esc keep draft",
+        Stage::Writing => "ctrl-s post · ctrl-g editor · tab next · esc keep for later",
         Stage::Login(form) if form.logged_in => "y log out · esc back",
         Stage::Login(_) => "enter log in · tab next · esc back",
         Stage::Offer => "y download · esc back",
@@ -186,7 +188,10 @@ fn draw_fields(f: &mut Frame, c: &Compose, area: Rect) {
                 let style = if c.limit.is_some_and(|max| n > max) { Style::new().fg(t.error) } else { dim() };
                 let rows = Rect::new(value_x, y, value_w.saturating_sub(cells(count.len()) + 1), comment_rows);
                 fill(f, Rect::new(value_x, y, value_w, comment_rows), t.surface);
-                draw_editor(f, &c.comment, rows, focused, Some(">>123 quotes, >text is green"));
+                match &c.pty {
+                    Some(pty) => draw_pty(f, pty, Rect::new(value_x, y, value_w, comment_rows)),
+                    None => draw_editor(f, &c.comment, rows, focused, Some(">>123 quotes, >text is green")),
+                }
                 put(f, area.right().saturating_sub(cells(count.len())), y + comment_rows - 1, cells(count.len()), Line::styled(count, style));
                 y += comment_rows;
             }
@@ -268,6 +273,33 @@ fn draw_editor(f: &mut Frame, e: &Editor, area: Rect, focused: bool, placeholder
         if e.is_empty() && let Some(p) = placeholder {
             put(f, x + 1, y, area.width.saturating_sub(1), Line::styled(p.to_string(), dim()));
         }
+    }
+}
+
+/// The user's editor in the comment's place, fitted to it, with the terminal's own cursor
+/// where the editor's is (vt100 doesn't keep the shape it asks for: a bar while inserting).
+fn draw_pty(f: &mut Frame, pty: &PtyEditor, area: Rect) {
+    pty.fit(area.height, area.width);
+    let parser = pty.screen();
+    let screen = parser.screen();
+    let cursor = tui_term::widget::Cursor::default().visibility(false);
+    f.render_widget(tui_term::widget::PseudoTerminal::new(screen).cursor(cursor), area);
+    // ck is the editor's terminal, so the terminal's own colors are the comment's: else
+    // what the editor leaves to the terminal shows what's behind ck (a see-through one).
+    let t = theme();
+    for pos in area.intersection(f.area()).positions() {
+        if let Some(cell) = f.buffer_mut().cell_mut(pos) {
+            if cell.bg == Color::Reset {
+                cell.bg = t.surface;
+            }
+            if cell.fg == Color::Reset {
+                cell.fg = t.text;
+            }
+        }
+    }
+    let (row, col) = screen.cursor_position();
+    if !screen.hide_cursor() && row < area.height && col < area.width {
+        f.set_cursor_position((area.x + col, area.y + row));
     }
 }
 

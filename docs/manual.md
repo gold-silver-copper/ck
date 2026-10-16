@@ -718,6 +718,16 @@ or end, alt or ctrl with the arrows a word at a time. Pasted text keeps its line
 comment. The counter counts its characters, against the site's limit where ck knows it
 (4chan's 2000).
 
+ctrl-g writes the comment in your own editor (`$VISUAL`, else `$EDITOR`, else `vi`;
+Notepad on Windows), in the box: it opens on what's written, in the comment's place, with
+the other fields around it, and every key is its own till it quits. What it saved is the
+comment then (the line break an editor ends a file with left off); quitting with an error
+(`:cq` in vim) leaves the comment as it was, as git does with a commit message. What it
+leaves to the terminal's own colors takes the box's, so a see-through terminal doesn't show
+through it. A graphical editor has to wait till its window is closed (`code --wait`,
+`subl -w`), or it quits at once and the comment stays as it was. ck is its terminal, an
+xterm (`TERM=xterm-256color`), without the mouse, or the cursor's shape it asks for.
+
 `esc` keeps what you wrote for later: the top bar then says "draft kept" (in the thread,
 or the catalog for a new thread), a thread's footer "reply (draft)", and `r` brings it back.
 

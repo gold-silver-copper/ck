@@ -48,6 +48,10 @@ ureq = "3"
 # Proofs of work some sites ask before a post: LynxChan's block bypass, kohlchan's hashcash.
 pbkdf2 = { version = "0.12", default-features = false, features = ["hmac"] }
 argon2 = "0.5"
+# The user's editor in the reply box (ctrl-g): a pseudo-terminal, and its screen drawn.
+portable-pty = "0.9"
+vt100 = "0.16"
+tui-term = { version = "0.3", default-features = false, features = ["vt100"] }
 
 # SIGTERM, SIGHUP and SIGQUIT end ck like a quit, saving first.
 [target.'cfg(unix)'.dependencies]

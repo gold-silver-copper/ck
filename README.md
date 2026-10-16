@@ -35,7 +35,8 @@ terminal. (Click the tour for [the video](ck-demo.webm), with controls.)
   viewer that plays GIFs, and webms and mp4s with their sound when ffmpeg is installed, a
   gallery of a thread's files, downloads and reverse image search.
 - **Posting** on 4chan, vichan, LynxChan, jschan and 2ch sites: a reply box with quoting and
-  drafts, the site's captcha answered in the terminal, and Cloudflare's check clicked there
+  drafts (or the comment in your own editor, inside the box: ctrl-g), the site's captcha
+  answered in the terminal, and Cloudflare's check clicked there
   too; your posts are marked as yours. Log in (ctrl-p) with a 4chan Pass or a 2ch
   passcode to skip the captcha, or to a jschan account. The first post downloads ck-web, the browser ck posts
   through (about 150 MB, once; Linux, macOS and Windows).
