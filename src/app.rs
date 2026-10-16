@@ -572,8 +572,8 @@ pub struct App {
     work: crate::post::Work,
     /// Posts written and not sent, by where they go.
     drafts: HashMap<posting::Where, Compose>,
-    /// The name and options last posted with.
-    poster: (String, String),
+    /// The name and options last posted with, by site.
+    posters: HashMap<String, (String, String)>,
     /// A post just sent, until its thread shows it.
     awaiting: Option<posting::Awaiting>,
     tx: Sender<Msg>,
@@ -721,7 +721,7 @@ impl App {
             post_password: cfg.post_password.clone().unwrap_or_else(crate::post::random_password),
             work: crate::post::Work::new(cfg.proof_of_work_seconds, cfg.proof_of_work_threads),
             drafts: HashMap::new(),
-            poster: (String::new(), String::new()),
+            posters: HashMap::new(),
             awaiting: None,
             tx,
             rx,

@@ -707,7 +707,8 @@ unless it's the opening post; the menu's "reply quoting its text" quotes its tex
 (`>line`). `r` in a catalog starts a new thread on the board.
 
 The box has the post's fields: name, options (`sage`, …), the subject for a new thread,
-the comment, a file (a path; `~/` works) and whether to spoiler it. In the file's field
+the comment, a file (a path; `~/` works) and whether to spoiler it. The name and options
+last sent with on a site fill in its next box (each site has its own, until ck quits). In the file's field
 `tab` completes the path as a shell does (several names that fit are listed beside it; the
 next `tab` moves on), and beside the path is what's there: its size and the type it's sent
 as (`image/jpeg`, `video/mp4`, … by what the file starts with, else its name), or "no such

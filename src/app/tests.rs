@@ -6377,3 +6377,27 @@ fn a_page_can_be_saved_with_its_files_to_read_offline() {
     // Written again once the file is: the page waits for it.
     assert!(app.downloads.running > 0 && app.downloads.page.is_some());
 }
+
+#[test]
+fn the_name_posted_with_is_remembered_by_site() {
+    let mut app = local_app();
+    let reply_on = |app: &mut App, site: usize, no: u64| {
+        while app.popup.is_some() {
+            app.on_key(KeyEvent::from(KeyCode::Esc));
+        }
+        app.switch_site(site);
+        let board = ["x", "y"][site];
+        app.tab.thread = Some(ThreadView::new(here(app, board, no), vec![Post { no, ..Default::default() }]));
+        app.tab.navigate(View::Thread);
+        app.act(Action::Reply);
+    };
+    reply_on(&mut app, 0, 1);
+    reply_box(&mut app).name.set("a's name");
+    type_text(&mut app, "hi");
+    app.on_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL));
+    // Not on the other site; on a new post on the same one, it is.
+    reply_on(&mut app, 1, 1);
+    assert_eq!(reply_box(&mut app).name.text(), "");
+    reply_on(&mut app, 0, 2);
+    assert_eq!(reply_box(&mut app).name.text(), "a's name");
+}

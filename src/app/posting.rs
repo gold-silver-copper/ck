@@ -454,7 +454,10 @@ impl App {
             self.note(format!("ck can't post on this site (an archive takes no posts); {browser} opens this in the browser"));
             return;
         };
-        let mut c = self.drafts.remove(&to).unwrap_or_else(|| Compose::new(to, &self.poster.0, &self.poster.1, poster.as_ref()));
+        let mut c = self.drafts.remove(&to).unwrap_or_else(|| {
+            let (name, options) = self.posters.get(&to.site).cloned().unwrap_or_default();
+            Compose::new(to, &name, &options, poster.as_ref())
+        });
         if let Some(t) = &self.tab.thread
             && let Some(p) = t.current().filter(|p| self.tab.view() == View::Thread && (p.no != t.key().no || quoting == Quoting::Text))
         {
@@ -673,7 +676,8 @@ impl App {
             return;
         }
         let poster = (c.name.text().to_string(), c.options.text().to_string());
-        self.poster = poster;
+        let site = c.to.site.clone();
+        self.posters.insert(site, poster);
         if !self.offer_helper(false) {
             self.start_post();
         }
