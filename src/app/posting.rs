@@ -428,11 +428,11 @@ impl App {
     }
 
     /// Where the reply box would post from here: the thread, or a new thread on the
-    /// catalog's board.
+    /// catalog's board (an overboard has none).
     fn reply_to(&self) -> Option<Where> {
         match self.tab.view() {
             View::Thread => self.tab.thread.as_ref().map(|t| Where { site: t.key().site.clone(), board: t.key().board.clone(), thread: t.key().no }),
-            View::Catalog => self.tab.catalog.board().map(|b| Where { site: self.tab.catalog.site().to_string(), board: b.uri.clone(), thread: 0 }),
+            View::Catalog => self.tab.catalog.board().filter(|_| !self.tab.catalog.mixes_boards()).map(|b| Where { site: self.tab.catalog.site().to_string(), board: b.uri.clone(), thread: 0 }),
             _ => None,
         }
     }
@@ -446,7 +446,11 @@ impl App {
     /// the catalog. A draft left there comes back.
     pub(super) fn open_reply(&mut self, quoting: Quoting) {
         let Some(to) = self.reply_to() else {
-            self.note("Open a thread to reply, or a catalog to start a thread");
+            self.note(if self.tab.view() == View::Catalog && self.tab.catalog.mixes_boards() {
+                "This has threads from many boards: start a thread from its board's catalog"
+            } else {
+                "Open a thread to reply, or a catalog to start a thread"
+            });
             return;
         };
         let Some(poster) = self.poster_for(&to) else {

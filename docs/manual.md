@@ -704,7 +704,8 @@ older ck is not, and can be deleted by hand.
 ck posts on every site but the archives: 4chan, and vichan, LynxChan, jschan and 2ch sites.
 `r` in a thread opens the reply box, quoting the selected post (`>>123`)
 unless it's the opening post; the menu's "reply quoting its text" quotes its text too
-(`>line`). `r` in a catalog starts a new thread on the board.
+(`>line`). `r` in a catalog starts a new thread on the board (not on an overboard: its threads
+are on many boards, so start one from its board's catalog).
 
 The box has the post's fields: name, options (`sage`, …), the subject for a new thread,
 the comment, a file (a path; `~/` works) and whether to spoiler it. The name and options

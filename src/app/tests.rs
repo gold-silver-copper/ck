@@ -6401,3 +6401,28 @@ fn the_name_posted_with_is_remembered_by_site() {
     reply_on(&mut app, 0, 2);
     assert_eq!(reply_box(&mut app).name.text(), "a's name");
 }
+
+#[test]
+fn an_overboard_starts_no_thread() {
+    let mut app = local_app();
+    let op = |no, board: &str| Post { no, board: Some(board.into()), ..Default::default() };
+    let menu_has_new_thread = |app: &mut App| {
+        app.on_key(KeyEvent::from(KeyCode::Char('.')));
+        let has = app.menu_mut().unwrap().items.iter().any(|it| matches!(it, MenuItem::Act(Action::Reply, _)));
+        app.on_key(KeyEvent::from(KeyCode::Esc));
+        has
+    };
+    app.tab.navigate(View::Catalog);
+    // A board's own threads: r starts one there.
+    app.tab.catalog = Catalog::of("a", "x", vec![op(1, "x")]);
+    assert!(menu_has_new_thread(&mut app));
+    app.act(Action::Reply);
+    assert_eq!(reply_box(&mut app).to.board, "x");
+    app.on_key(KeyEvent::from(KeyCode::Esc));
+    // Threads from many boards: there's no board to start it on, so it isn't offered.
+    app.tab.catalog = Catalog::of("a", "overboard", vec![op(1, "x"), op(2, "xy")]);
+    assert!(!menu_has_new_thread(&mut app));
+    app.act(Action::Reply);
+    assert!(app.popup.is_none());
+    assert!(app.footer.get().unwrap().text.contains("many boards"));
+}
