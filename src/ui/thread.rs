@@ -277,14 +277,7 @@ fn lay_out(t: &ThreadView, cache: &mut LineCache, e: usize, width: u16, thumbs: 
     }
     // A padding line above: the spots are a line further down.
     let mut lines = vec![Line::raw("")];
-    let (text, mut at) = if thumb {
-        let (text, at) = post_lines(&ctx, text_width - THUMB.width as usize - 2);
-        let mut text = beside_tile(text, THUMB.width + 2);
-        text.resize(text.len().max(THUMB.height as usize), Line::raw(""));
-        (text, at.into_iter().map(|s| Spot { col: s.col + THUMB.width + 2, ..s }).collect())
-    } else {
-        post_lines(&ctx, text_width)
-    };
+    let (text, mut at) = card_lines(&ctx, text_width, thumb);
     lines.extend(text);
     lines.extend([Line::raw(""), Line::raw("")]);
     for s in &mut at {
@@ -452,11 +445,49 @@ fn hidden_line(no: u64) -> Line<'static> {
     Line::styled(format!("No.{no}  hidden"), Style::new().fg(theme().text_dim))
 }
 
-/// Post `i`'s lines as the thread shows it: one line when it's collapsed.
-pub(super) fn post_card(t: &ThreadView, i: usize, clock: Clock, width: usize) -> Vec<Line<'static>> {
-    match post_ctx(t, i, clock) {
-        Some(ctx) => post_lines(&ctx, width).0,
-        None => t.posts.get(i).map(|p| vec![hidden_line(p.no)]).unwrap_or_default(),
+/// A post's lines `width` wide and where its parts are; with `thumb`, beside its tile on
+/// the left (and at least as tall).
+fn card_lines(ctx: &PostCtx, width: usize, thumb: bool) -> (Vec<Line<'static>>, Vec<Spot>) {
+    if !thumb {
+        return post_lines(ctx, width);
+    }
+    let (text, at) = post_lines(ctx, width - THUMB.width as usize - 2);
+    let mut text = beside_tile(text, THUMB.width + 2);
+    text.resize(text.len().max(THUMB.height as usize), Line::raw(""));
+    (text, at.into_iter().map(|s| Spot { col: s.col + THUMB.width + 2, ..s }).collect())
+}
+
+/// Post `i`'s lines as the thread shows it: one line when it's collapsed. With `thumbs`, a
+/// post with files leaves room for its tile on the left, which `tiles` gets (at its first
+/// line) for `draw_tiles`.
+pub(super) fn post_card<'a>(t: &'a ThreadView, i: usize, clock: Clock, width: usize, thumbs: bool, tiles: &mut Vec<(usize, &'a [Attachment])>, at: usize) -> Vec<Line<'static>> {
+    let Some(ctx) = post_ctx(t, i, clock) else {
+        return t.posts.get(i).map(|p| vec![hidden_line(p.no)]).unwrap_or_default();
+    };
+    let thumb = with_thumb(thumbs, ctx.post, width);
+    if thumb {
+        tiles.push((at, &ctx.post.files));
+    }
+    card_lines(&ctx, width, thumb).0
+}
+
+/// The tiles `post_card` left room for, in `area` showing its lines from `first`: a whole
+/// tile shows its image, one cut off by the area's edge only its background, as the thread
+/// does (`off`: images are off on the board).
+pub(super) fn draw_tiles(f: &mut Frame, images: &mut Images, tiles: &[(usize, &[Attachment])], off: bool, area: Rect, first: usize) {
+    for &(line, files) in tiles {
+        let Some(file) = files.first() else { continue };
+        let y = area.y as i32 + line as i32 - first as i32;
+        if y + THUMB.height as i32 <= area.y as i32 || y >= area.bottom() as i32 {
+            continue;
+        }
+        let top = y.max(area.y as i32) as u16;
+        let tile = Rect::new(area.x, top, THUMB.width, (y + THUMB.height as i32 - top as i32) as u16);
+        if y >= area.y as i32 && y + THUMB.height as i32 <= area.bottom() as i32 {
+            draw_tile(f, images, file, files.len(), off, tile, area);
+        } else {
+            fill(f, tile.intersection(area), theme().surface_high);
+        }
     }
 }
 
@@ -625,13 +656,15 @@ fn post_lines(ctx: &PostCtx, width: usize) -> (Vec<Line<'static>>, Vec<Spot>) {
 /// the bottom of the thread, or the top when the quote is down there.
 pub(super) fn draw_peek(f: &mut Frame, app: &mut App, area: Rect) {
     use crate::model::Target;
+    let off = !app.thread_images_on();
     let Some(Part::Link(Target::Quote(l))) = app.focused() else { return };
     let Some(t) = &app.tab.thread else { return };
     let Some(&i) = l.post.filter(|_| l.board.is_none() && l.thread.is_none_or(|n| n == t.key().no)).and_then(|n| t.index.get(&n)) else { return };
     let th = theme();
     let width = area.width.saturating_sub(6);
+    let mut tiles = Vec::new();
     // A hidden post peeks as it shows in the thread: one line, not what it says.
-    let mut lines = post_card(t, i, app.clock, width as usize);
+    let mut lines = post_card(t, i, app.clock, width as usize, app.images.enabled(), &mut tiles, 0);
     let h = (cells(lines.len()).saturating_add(2)).min(area.height / 2).max(3);
     lines.truncate(h.saturating_sub(2) as usize);
     // Where the quote is on screen decides where the peek goes.
@@ -649,6 +682,8 @@ pub(super) fn draw_peek(f: &mut Frame, app: &mut App, area: Rect) {
     for (row, line) in lines.into_iter().enumerate() {
         put(f, r.x + 2, r.y + 1 + row as u16, r.width.saturating_sub(4), line);
     }
+    let text = Rect::new(r.x + 2, r.y + 1, r.width.saturating_sub(4), h.saturating_sub(2));
+    draw_tiles(f, &mut app.images, &tiles, off, text, 0);
     // The rows it covers can't be clicked, nor labeled.
     if let Some(Hit::Thread { area: a, scroll }) = &mut app.drawn.body {
         if top {

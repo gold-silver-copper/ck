@@ -83,6 +83,12 @@ impl Catalog {
         self.site == site && self.board.as_ref().is_some_and(|b| b.uri == uri)
     }
 
+    /// Whether it has threads from other boards (an overboard's): there's no one board
+    /// here to start a thread on.
+    pub fn mixes_boards(&self) -> bool {
+        self.posts.iter().any(|p| p.board.as_ref().is_some_and(|b| self.board.as_ref().is_none_or(|own| own.uri != *b)))
+    }
+
     pub fn posts(&self) -> &[Post] {
         &self.posts
     }

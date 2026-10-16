@@ -6377,3 +6377,52 @@ fn a_page_can_be_saved_with_its_files_to_read_offline() {
     // Written again once the file is: the page waits for it.
     assert!(app.downloads.running > 0 && app.downloads.page.is_some());
 }
+
+#[test]
+fn the_name_posted_with_is_remembered_by_site() {
+    let mut app = local_app();
+    let reply_on = |app: &mut App, site: usize, no: u64| {
+        while app.popup.is_some() {
+            app.on_key(KeyEvent::from(KeyCode::Esc));
+        }
+        app.switch_site(site);
+        let board = ["x", "y"][site];
+        app.tab.thread = Some(ThreadView::new(here(app, board, no), vec![Post { no, ..Default::default() }]));
+        app.tab.navigate(View::Thread);
+        app.act(Action::Reply);
+    };
+    reply_on(&mut app, 0, 1);
+    reply_box(&mut app).name.set("a's name");
+    type_text(&mut app, "hi");
+    app.on_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL));
+    // Not on the other site; on a new post on the same one, it is.
+    reply_on(&mut app, 1, 1);
+    assert_eq!(reply_box(&mut app).name.text(), "");
+    reply_on(&mut app, 0, 2);
+    assert_eq!(reply_box(&mut app).name.text(), "a's name");
+}
+
+#[test]
+fn an_overboard_starts_no_thread() {
+    let mut app = local_app();
+    let op = |no, board: &str| Post { no, board: Some(board.into()), ..Default::default() };
+    let menu_has_new_thread = |app: &mut App| {
+        app.on_key(KeyEvent::from(KeyCode::Char('.')));
+        let has = app.menu_mut().unwrap().items.iter().any(|it| matches!(it, MenuItem::Act(Action::Reply, _)));
+        app.on_key(KeyEvent::from(KeyCode::Esc));
+        has
+    };
+    app.tab.navigate(View::Catalog);
+    // A board's own threads: r starts one there.
+    app.tab.catalog = Catalog::of("a", "x", vec![op(1, "x")]);
+    assert!(menu_has_new_thread(&mut app));
+    app.act(Action::Reply);
+    assert_eq!(reply_box(&mut app).to.board, "x");
+    app.on_key(KeyEvent::from(KeyCode::Esc));
+    // Threads from many boards: there's no board to start it on, so it isn't offered.
+    app.tab.catalog = Catalog::of("a", "overboard", vec![op(1, "x"), op(2, "xy")]);
+    assert!(!menu_has_new_thread(&mut app));
+    app.act(Action::Reply);
+    assert!(app.popup.is_none());
+    assert!(app.footer.get().unwrap().text.contains("many boards"));
+}

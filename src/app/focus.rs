@@ -430,7 +430,7 @@ impl App {
         }
         let rows = items.len();
         items.push(act(A::Show, "show: sort, layout, hidden threads…"));
-        if self.can_post() {
+        if self.can_post() && !self.tab.catalog.mixes_boards() {
             items.push(act(A::Reply, "start a thread"));
         }
         items.push(act(A::Favorite, "favorite the board (or not)"));
