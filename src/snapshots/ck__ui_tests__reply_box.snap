@@ -3,7 +3,7 @@ source: src/ui_tests.rs
 expression: snapshot(&mut a)
 ---
  ck  4chan  ›  /g/  ›  Snapshot thread                                            5 posts  ·  2 new
-    Reply to /g/ No.1000            ctrl-s post · ctrl-g editor · ctrl-p log in · esc keep draft
+    Reply to /g/ No.1000        ctrl-s post · ctrl-g editor · ctrl-p log in · esc keep for later
 
     Name     Anonymous
     Options  sage, …
