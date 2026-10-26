@@ -38,6 +38,11 @@
 #   "off"   no images, no image requests
 images = "auto"
 
+# Device pixels per image pixel in the viewer. Use 2 on a Retina / 2x display.
+# 100% is natural size (or fit for large images); 150% is 1.5 times that size.
+# Positive numbers, including fractional scales such as 1.5. Takes effect at the next start.
+display_scale = 1
+
 # Images on boards the site marks NSFW: "show", or "off" (no thumbnails, nothing asked for).
 # A board's own setting (". menu › images on this board") comes first. vichan sites don't
 # mark boards, so theirs count as worksafe.

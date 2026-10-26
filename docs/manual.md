@@ -720,6 +720,16 @@ or end, alt or ctrl with the arrows a word at a time. Pasted text keeps its line
 comment. The counter counts its characters, against the site's limit where ck knows it
 (4chan's 2000).
 
+In the File field, ctrl-v reads a copied file or image from the local system clipboard
+(PNG, JPEG or WebP on Linux; PNG on macOS).
+For a file list it uses the first file; an image is saved under ck's cache folder in
+`pasted/` with a neutral `clipboard-<hash>` name, so a saved draft can still attach it.
+These images are not automatically cleaned up. This needs `wl-paste` (wl-clipboard)
+on Wayland, `xclip` on X11, or macOS's `osascript`; it is unavailable over SSH or with
+`CK_NO_EXTERNAL` set. On macOS use ctrl-v: cmd-v belongs to the terminal. Pasted or
+dragged paths replace the File field and accept surrounding quotes, shell escapes, and
+percent-encoded `file://` URLs. Clipboard text must name an existing file.
+
 ctrl-g writes the comment in your own editor (`$VISUAL`, else `$EDITOR`, else `vi`;
 Notepad on Windows), in the box: it opens on what's written, in the comment's place, with
 the other fields around it, and every key is its own till it quits. What it saved is the
@@ -852,6 +862,15 @@ half-blocks, which work everywhere. The detected protocol is shown in the `?` he
 title bar. Thumbnails are skipped in terminals narrower than 60 columns. A thumbnail the
 site has lost (old posts on some sites, like kissu's) is made from the file itself when
 that's a picture of at most 4 MB; otherwise the tile shows ✗.
+
+At 100%, the viewer shows an image at natural size, or fitted if it is larger than the
+viewer. Each zoom step uses that same base: 150% is 1.5 times the 100% size, with the
+part outside the viewer cropped. Set `display_scale = 2` on a Retina / 2x display
+(default 1; positive fractional values such as 1.5 also work), then restart ck, so
+natural size accounts for device pixels.
+This also applies to half-blocks and animated GIFs. Videos keep filling the viewer at
+100%; their zoom steps are multiples of that fitted size. Natural size depends on the
+cell size reported by the terminal; a guessed cell size may give a different result.
 
 Animated GIFs play in the viewer, at up to 20 frames a second (frames are prepared in the
 background, and scaled down if a long GIF would take too much memory). Videos play there

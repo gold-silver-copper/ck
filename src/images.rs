@@ -102,7 +102,7 @@ impl Kind {
     }
 
     /// Whether it's scaled up to fill its area when it's smaller.
-    fn fills(self) -> bool {
+    pub(crate) fn fills(self) -> bool {
         self != Kind::Full
     }
 }
@@ -117,7 +117,7 @@ pub enum State<'a> {
     Ready(&'a Protocol),
 }
 
-/// Part of an image, zoomed in: `zoom` percent (100: all of it, fitted), centered at
+/// Part of an image, zoomed in: `zoom` percent of natural size (or fit), centered at
 /// (`x`, `y`) in thousandths of its width and height.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Crop {
@@ -155,10 +155,9 @@ impl Crop {
         Crop { x: at(self.x, dx, shown.0), y: at(self.y, dy, shown.1), ..self }.within(shown)
     }
 
-    /// How much is shown before it's known (not drawn yet): the image's shape at this zoom.
+    /// Unknown: treat it all as shown.
     pub fn guess_shown(self) -> (u16, u16) {
-        let s = u16::try_from(100_000u32.checked_div(u32::from(self.zoom.max(100))).unwrap_or(0)).unwrap_or(u16::MAX);
-        (s, s)
+        (1000, 1000)
     }
 
     /// The center kept where what's shown stays inside the image.
@@ -170,28 +169,54 @@ impl Crop {
         Crop { x: keep(self.x, shown.0), y: keep(self.y, shown.1), ..self }
     }
 
-    /// How much of a `w` x `h` image is shown zoomed into `view` (pixels on screen): in
-    /// thousandths of its width and height. Zoomed in, that's as much as the screen holds
-    /// at that zoom (its shape, not the image's), up to all of it.
-    pub fn shown(self, w: u32, h: u32, view: (u32, u32)) -> (u16, u16) {
-        let (_, _, rw, rh) = self.region(w, h, view);
+    /// How much of the image is shown, in thousandths of its width and height.
+    pub fn shown(self, w: u32, h: u32, view: (u32, u32), display_scale: f32, fill: bool) -> (u16, u16) {
+        let (_, _, rw, rh) = self.region(w, h, view, display_scale, fill).part;
         let part = |r: u32, of: u32| u16::try_from(u64::from(r).saturating_mul(1000).checked_div(u64::from(of.max(1))).unwrap_or(0)).unwrap_or(u16::MAX);
         (part(rw, w), part(rh, h))
     }
 
-    /// The part of a `w` x `h` image it shows on a screen area of `view` pixels: left, top,
-    /// width, height. At 100% the whole image fits the area; zoomed by `z`, the image is `z`
-    /// times that size, and the part is what the area holds of it.
-    pub fn region(self, w: u32, h: u32, view: (u32, u32)) -> (u32, u32, u32, u32) {
+    /// Pixels on screen per image pixel at this zoom.
+    fn scale(self, w: u32, h: u32, view: (u32, u32), display_scale: f32, fill: bool) -> f64 {
+        let fit = f64::min(f64::from(view.0.max(1)) / f64::from(w.max(1)), f64::from(view.1.max(1)) / f64::from(h.max(1)));
+        (if fill { fit } else { fit.min(f64::from(display_scale)) }) * f64::from(self.zoom.max(100)) / 100.0
+    }
+
+    /// Ignore levels that cannot change the crop or its size on screen.
+    pub fn limited(self, w: u32, h: u32, view: (u32, u32), display_scale: f32, fill: bool) -> Crop {
+        let mut crop = self;
+        while !crop.is_fit() {
+            let prev = crop.zoomed(false);
+            if crop.region(w, h, view, display_scale, fill) != prev.region(w, h, view, display_scale, fill) {
+                break;
+            }
+            crop = prev;
+        }
+        crop
+    }
+
+    /// The part shown (left, top, width, height), and its size on screen in pixels.
+    /// At 100% the image is natural size or fitted; zoom uses that same base.
+    pub fn region(self, w: u32, h: u32, view: (u32, u32), display_scale: f32, fill: bool) -> Region {
         let (w, h) = (w.max(1), h.max(1));
         let (aw, ah) = (f64::from(view.0.max(1)), f64::from(view.1.max(1)));
-        let scale = f64::min(aw / f64::from(w), ah / f64::from(h)) * f64::from(self.zoom.max(100)) / 100.0;
+        let scale = self.scale(w, h, view, display_scale, fill);
         #[allow(clippy::cast_possible_truncation)] // f64 as u32 saturates
         let (rw, rh) = (((aw / scale).round() as u32).clamp(1, w), ((ah / scale).round() as u32).clamp(1, h));
         let at = |side: u32, thousandths: u16| u32::try_from(u64::from(side).saturating_mul(u64::from(thousandths)) / 1000).unwrap_or(u32::MAX);
         let (left, top) = (at(w, self.x), at(h, self.y));
-        (left.saturating_sub(rw / 2).min(w.saturating_sub(rw)), top.saturating_sub(rh / 2).min(h.saturating_sub(rh)), rw, rh)
+        let part = (left.saturating_sub(rw / 2).min(w.saturating_sub(rw)), top.saturating_sub(rh / 2).min(h.saturating_sub(rh)), rw, rh);
+        #[allow(clippy::cast_possible_truncation)] // f64 as u32 saturates
+        let size = (((f64::from(rw) * scale).round() as u32).clamp(1, view.0.max(1)), ((f64::from(rh) * scale).round() as u32).clamp(1, view.1.max(1)));
+        Region { part, size }
     }
+}
+
+/// A crop in image pixels and its size in screen pixels.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Region {
+    pub part: (u32, u32, u32, u32),
+    pub size: (u32, u32),
 }
 
 /// What an encoding is for: a size in cells, and the part of the image.
@@ -246,9 +271,10 @@ enum Done {
 }
 
 enum EncodeJob {
-    /// An image for a view; `fill`: scaled up to fill it too (a thumbnail in its tile).
-    One(String, View, Arc<DynamicImage>, bool),
-    Frames(String, Size, Frames),
+    /// An image for a view; `fill`: scaled up to fill it too (a thumbnail in its tile),
+    /// followed by the display scale (device pixels per image pixel).
+    One(String, View, Arc<DynamicImage>, bool, f32),
+    Frames(String, Size, Frames, f32),
 }
 
 /// The image protocol to use: the one `images` names, or what the terminal said it can
@@ -295,6 +321,7 @@ pub struct Images {
     video_left: Option<(String, Duration)>,
     /// Videos play without sound.
     pub muted: bool,
+    pub display_scale: f32,
 }
 
 impl Images {
@@ -321,7 +348,7 @@ impl Images {
         }
         let (offline, frame) = (false, Vec::new());
         let (video, video_drawn, video_left, muted) = (None, false, None, false);
-        Self { picker, slots: HashMap::new(), queue, rx, encode, frame, tick: 0, bytes: 0, next_frame: None, drawing_next: None, offline, disk, wake, video, video_drawn, video_left, muted }
+        Self { picker, slots: HashMap::new(), queue, rx, encode, frame, tick: 0, bytes: 0, next_frame: None, drawing_next: None, offline, disk, wake, video, video_drawn, video_left, muted, display_scale: 1.0 }
     }
 
     /// Images "on", but nothing is ever fetched or encoded: everything stays a placeholder.
@@ -332,7 +359,7 @@ impl Images {
         let queue = Arc::new(Queue::default());
         let (offline, disk, wake) = (false, None, Arc::new(|| {}));
         let (video, video_drawn, video_left, muted) = (None, false, None, false);
-        Self { picker, slots: HashMap::new(), queue, rx, encode: None, frame: Vec::new(), tick: 0, bytes: 0, next_frame: None, drawing_next: None, offline, disk, wake, video, video_drawn, video_left, muted }
+        Self { picker, slots: HashMap::new(), queue, rx, encode: None, frame: Vec::new(), tick: 0, bytes: 0, next_frame: None, drawing_next: None, offline, disk, wake, video, video_drawn, video_left, muted, display_scale: 1.0 }
     }
 
     /// An encoder thread but no fetch workers (tests and benchmarks).
@@ -445,7 +472,7 @@ impl Images {
                 }
                 _ if *animating != Some(size) => {
                     if let Some(enc) = &self.encode {
-                        let _ = enc.send(EncodeJob::Frames(url.to_string(), size, f.clone()));
+                        let _ = enc.send(EncodeJob::Frames(url.to_string(), size, f.clone(), self.display_scale));
                         *animating = Some(size);
                     }
                 }
@@ -478,7 +505,7 @@ impl Images {
             if (protos.is_empty() || settled || new_part)
                 && let Some(enc) = &self.encode
             {
-                let _ = enc.send(EncodeJob::One(url.to_string(), view, img.clone(), kind.fills()));
+                let _ = enc.send(EncodeJob::One(url.to_string(), view, img.clone(), kind.fills(), self.display_scale));
                 *pending = Some(view);
             } else if let Some(due) = (*asked).and_then(|(_, since)| since.checked_add(RESIZE_DEBOUNCE)) {
                 // Drawn again once the size has held, even if nothing else happens by then.
@@ -607,7 +634,7 @@ impl Images {
                     // waiting for it forever.
                     let pending = asked.and_then(|(size, kind)| {
                         let view = (size, Crop::FIT);
-                        let sent = self.encode.as_ref().is_some_and(|enc| enc.send(EncodeJob::One(url.clone(), view, img.clone(), kind.fills())).is_ok());
+                        let sent = self.encode.as_ref().is_some_and(|enc| enc.send(EncodeJob::One(url.clone(), view, img.clone(), kind.fills(), self.display_scale)).is_ok());
                         sent.then_some(view)
                     });
                     let frame_bytes: usize = frames.iter().flat_map(|f| f.iter()).map(|(f, _)| f.as_bytes().len()).sum();
@@ -715,12 +742,12 @@ fn bug<T>(what: String) -> Result<T, String> {
 fn encoder(picker: &Picker, jobs: &Receiver<EncodeJob>, tx: &Sender<Done>, wake: &dyn Fn()) {
     while let Ok(job) = jobs.recv() {
         let done = match job {
-            EncodeJob::One(url, (size, crop), img, fill) => {
-                let res = crate::guard::catching(|| encode_crop(picker, &img, size, crop, fill)).unwrap_or_else(bug);
+            EncodeJob::One(url, (size, crop), img, fill, display_scale) => {
+                let res = crate::guard::catching(|| encode_crop(picker, &img, size, crop, fill, display_scale)).unwrap_or_else(bug);
                 Done::Encoded(url, (size, crop), res)
             }
-            EncodeJob::Frames(url, size, frames) => {
-                let res = crate::guard::catching(|| frames.iter().map(|(f, d)| encode(picker, f, size, false).map(|p| (p, *d))).collect()).unwrap_or_else(bug);
+            EncodeJob::Frames(url, size, frames, display_scale) => {
+                let res = crate::guard::catching(|| frames.iter().map(|(f, d)| encode_crop(picker, f, size, Crop::FIT, false, display_scale).map(|p| (p, *d))).collect()).unwrap_or_else(bug);
                 Done::EncodedFrames(url, size, res)
             }
         };
@@ -731,20 +758,21 @@ fn encoder(picker: &Picker, jobs: &Receiver<EncodeJob>, tx: &Sender<Done>, wake:
     }
 }
 
-/// Encode the part `crop` of `img` to fit in `size` cells: scaled up to fill them (that's
-/// zooming in), unless it's the whole image (then only with `fill`).
-pub(crate) fn encode_crop(picker: &Picker, img: &DynamicImage, size: Size, crop: Crop, fill: bool) -> Result<Protocol, String> {
-    if crop.is_fit() {
-        return encode(picker, img, size, fill);
+/// Encode the crop at a multiple of its natural size (or fit for a large image).
+pub(crate) fn encode_crop(picker: &Picker, img: &DynamicImage, size: Size, crop: Crop, fill: bool, display_scale: f32) -> Result<Protocol, String> {
+    if fill && crop.is_fit() {
+        return encode(picker, img, size, true);
     }
     let font = picker.font_size();
-    let (w, h) = pixels(size, font);
-    let (x, y, cw, ch) = crop.region(img.width(), img.height(), (w, h));
-    let part = img.crop_imm(x, y, cw, ch);
+    let region = crop.region(img.width(), img.height(), pixels(size, font), display_scale, fill);
+    let (x, y, cw, ch) = region.part;
+    let part = if region.part == (0, 0, img.width(), img.height()) { None } else { Some(img.crop_imm(x, y, cw, ch)) };
+    let img = part.as_ref().unwrap_or(img);
+    let (w, h) = region.size;
     if picker.protocol_type() == ProtocolType::Halfblocks {
-        return halfblocks(&part, size, font, true);
+        return halfblocks_grid(img, halfblock_grid((w, h), size, (u32::from(font.width), u32::from(font.height)), false));
     }
-    picker.new_protocol(shrink(&part, w, h, true), size, Resize::Fit(None)).map_err(|e| e.to_string())
+    picker.new_protocol(shrink(img, w, h, true), size, Resize::Fit(None)).map_err(|e| e.to_string())
 }
 
 /// Encode `img` to fit in `size` cells (and, with `fill`, scaled up to fill them: a small
@@ -766,7 +794,7 @@ fn pixels(size: Size, font: ratatui_image::FontSize) -> (u32, u32) {
 /// `img` fitted into `w` x `h` pixels (keeping its shape): scaled down with the fast
 /// area-averaging resize when it's much bigger (a high-quality filter over a large image costs
 /// tens of milliseconds, and the terminal shows no difference), and only scaled up with
-/// `grow` (a zoomed part fills the area).
+/// `grow` (enlarging to the target size).
 fn shrink(img: &DynamicImage, w: u32, h: u32, grow: bool) -> DynamicImage {
     let (w, h) = (w.max(1), h.max(1));
     if img.width() > w || img.height() > h {
@@ -786,7 +814,12 @@ fn shrink(img: &DynamicImage, w: u32, h: u32, grow: bool) -> DynamicImage {
 fn halfblocks(img: &DynamicImage, size: Size, font: ratatui_image::FontSize, fill: bool) -> Result<Protocol, String> {
     let (iw, ih) = (img.width().max(1), img.height().max(1));
     let (cells, cw, ch) = halfblock_grid((iw, ih), size, (u32::from(font.width), u32::from(font.height)), fill);
-    let scaled = if iw > cw.saturating_mul(2) || ih > ch.saturating_mul(2) { img.thumbnail_exact(cw, ch) } else { img.resize_exact(cw, ch, FilterType::Triangle) };
+    halfblocks_grid(img, (cells, cw, ch))
+}
+
+fn halfblocks_grid(img: &DynamicImage, (cells, cw, ch): (Size, u32, u32)) -> Result<Protocol, String> {
+    let (iw, ih) = (img.width(), img.height());
+    let scaled = if iw > cw || ih > ch { img.thumbnail_exact(cw, ch) } else { img.resize_exact(cw, ch, FilterType::Triangle) };
     // Padded to whole cells like the library pads (transparent, shown black).
     let (gw, gh) = (u32::from(cells.width), u32::from(cells.height) * 2);
     let image = if (cw, ch) == (gw, gh) {
@@ -966,7 +999,6 @@ mod tests {
 
     #[test]
     fn halfblocks_take_the_cells_the_library_would_give_them() {
-        let zoom = Crop::FIT.zoomed(true).zoomed(true);
         for font in [(10u16, 20u16), (25, 51), (8, 17), (1, 2)] {
             #[allow(deprecated)]
             let mut picker = Picker::from_fontsize(font.into());
@@ -974,23 +1006,33 @@ mod tests {
             for (iw, ih) in [(1200, 1200), (1200, 350), (300, 1300), (250, 250), (40, 30), (1, 1), (2500, 3)] {
                 let img = DynamicImage::new_rgb8(iw, ih);
                 for size in [Size::new(117, 30), Size::new(16, 8), Size::new(3, 1)] {
-                    let ours = encode_crop(&picker, &img, size, Crop::FIT, false).unwrap().size();
+                    let ours = encode_crop(&picker, &img, size, Crop::FIT, false, 1.0).unwrap().size();
                     assert_eq!(ours, library_size(&picker, &img, size, false), "font {font:?}, image {iw}x{ih}, area {size:?}");
                 }
-                // Zoomed: the part fills the area as it did (at small cell sizes: the
-                // library's own way is slow in a debug build at large ones).
-                if font.0 > 10 {
-                    continue;
-                }
-                let size = Size::new(40, 12);
-                let font_px = picker.font_size();
-                let view = (u32::from(size.width) * u32::from(font_px.width), u32::from(size.height) * u32::from(font_px.height));
-                let (x, y, cw, ch) = zoom.region(iw, ih, view);
-                let part = img.crop_imm(x, y, cw, ch);
-                let ours = encode_crop(&picker, &img, size, zoom, false).unwrap().size();
-                assert_eq!(ours, library_size(&picker, &part, size, true), "zoomed: font {font:?}, image {iw}x{ih}");
             }
         }
+    }
+
+    #[test]
+    fn natural_size_zoom_and_display_scale_agree_across_protocols() {
+        let img = DynamicImage::new_rgb8(200, 100);
+        let area = Size::new(100, 30);
+        for (display_scale, natural, zoomed) in [(1.0, Size::new(20, 5), Size::new(30, 8)), (1.5, Size::new(30, 8), Size::new(45, 12)), (2.0, Size::new(40, 10), Size::new(60, 15))] {
+            for (crop, expected, video_size) in [(Crop::FIT, natural, Size::new(100, 25)), (Crop::FIT.zoomed(true), zoomed, Size::new(100, 30))] {
+                for proto in [ProtocolType::Halfblocks, ProtocolType::Kitty, ProtocolType::Sixel] {
+                    #[allow(deprecated)]
+                    let mut picker = Picker::from_fontsize((10, 20).into());
+                    picker.set_protocol_type(proto);
+                    let size = encode_crop(&picker, &img, area, crop, false, display_scale).unwrap().size();
+                    assert_eq!(size, expected, "{proto:?} {crop:?} scale {display_scale}");
+                    assert_eq!(crate::video::geometry((200, 100), area, (10, 20), proto, crop).cells, video_size);
+                }
+            }
+            assert_eq!(Crop::FIT.zoomed(true).shown(200, 100, (1000, 600), display_scale, false), (1000, 1000));
+        }
+        let zoom = Crop::FIT.zoomed(true);
+        assert_eq!(zoom.region(600, 300, (1800, 1200), 1.0, false).size, (900, 450));
+        assert_eq!(zoom.limited(1, 1, (1, 1), 1.0, false), Crop::FIT);
     }
 
     #[test]
@@ -1003,9 +1045,9 @@ mod tests {
             let mut picker = Picker::from_fontsize((10, 20).into());
             picker.set_protocol_type(proto);
             let size = Size::new(117, 30);
-            let fitted = encode_crop(&picker, &img, size, Crop::FIT, false).unwrap().size();
+            let fitted = encode_crop(&picker, &img, size, Crop::FIT, false, 1.0).unwrap().size();
             assert_eq!(fitted.width, 60, "{proto:?}");
-            let zoomed = encode_crop(&picker, &img, size, Crop::FIT.zoomed(true).zoomed(true), false).unwrap().size();
+            let zoomed = encode_crop(&picker, &img, size, Crop::FIT.zoomed(true).zoomed(true), false, 1.0).unwrap().size();
             assert!(zoomed.width >= 115 && zoomed.height == 30, "{proto:?}: {zoomed:?}");
         }
     }
@@ -1019,7 +1061,7 @@ mod tests {
         #[allow(deprecated)]
         let mut picker = Picker::from_fontsize((25, 51).into());
         picker.set_protocol_type(ProtocolType::Halfblocks);
-        let p = encode_crop(&picker, &img, Size::new(20, 10), Crop::FIT, false).unwrap();
+        let p = encode_crop(&picker, &img, Size::new(20, 10), Crop::FIT, false, 1.0).unwrap();
         let s = p.size();
         let mut buf = ratatui::buffer::Buffer::empty(ratatui::layout::Rect::new(0, 0, s.width, s.height));
         ratatui::widgets::Widget::render(ratatui_image::Image::new(&p), buf.area, &mut buf);
@@ -1096,32 +1138,32 @@ mod tests {
     fn zooming_crops_and_moves_inside_the_image() {
         let c = Crop::FIT.zoomed(true);
         assert_eq!((c.zoom, c.x, c.y), (150, 500, 500));
-        // 200% of an image the same shape as the screen: half of each side, centered.
+        // At 200%, this small image reaches the screen size without cropping.
         let c = c.zoomed(true);
-        assert_eq!(c.region(1000, 600, (2000, 1200)), (250, 150, 500, 300));
+        assert_eq!(c.region(1000, 600, (2000, 1200), 1.0, false).part, (0, 0, 1000, 600));
         // A square image on a wide screen: zoomed in, the part shown is the screen's shape
         // (the 100% view is 600x600 of 1200x600; at 200% the screen holds 600x300 of the
         // image), not a square in the middle.
         let wide = (1200, 600);
-        assert_eq!(c.region(1000, 1000, wide), (0, 250, 1000, 500));
+        assert_eq!(c.region(1000, 1000, wide, 1.0, false).part, (0, 250, 1000, 500));
         let c4 = c.zoomed(true).zoomed(true);
         assert_eq!(c4.zoom, 400);
-        assert_eq!(c4.region(1000, 1000, wide), (250, 375, 500, 250));
-        assert_eq!(c4.shown(1000, 1000, wide), (500, 250));
+        assert_eq!(c4.region(1000, 1000, wide, 1.0, false).part, (250, 375, 500, 250));
+        assert_eq!(c4.shown(1000, 1000, wide, 1.0, false), (500, 250));
         // Moving steps a quarter of what's shown and stops at the edges, with no presses
         // wasted coming back.
-        let shown = c4.shown(1000, 1000, wide);
+        let shown = c4.shown(1000, 1000, wide, 1.0, false);
         let left = (0..10).fold(c4, |c, _| c.moved(-1, 0, shown));
-        assert_eq!(left.region(1000, 1000, wide).0, 0);
-        assert_eq!(left.moved(1, 0, shown).region(1000, 1000, wide).0, 125);
+        assert_eq!(left.region(1000, 1000, wide, 1.0, false).part.0, 0);
+        assert_eq!(left.moved(1, 0, shown).region(1000, 1000, wide, 1.0, false).part.0, 125);
         let down = (0..10).fold(c4, |c, _| c.moved(0, 1, shown));
-        assert_eq!(down.region(1000, 1000, wide).1, 750);
+        assert_eq!(down.region(1000, 1000, wide, 1.0, false).part.1, 750);
         // Zooming out goes back to the whole image; past the last level it stays.
         assert_eq!(c.zoomed(false).zoomed(false), Crop::FIT);
         assert_eq!(Crop::FIT.zoomed(false), Crop::FIT);
         let most = (0..20).fold(Crop::FIT, |c, _| c.zoomed(true));
         assert_eq!(most.zoom, 800);
-        assert!(most.region(7, 3, (100, 100)).2 >= 1 && most.region(7, 3, (100, 100)).3 >= 1);
+        assert!(most.region(7, 3, (100, 100), 1.0, false).part.2 >= 1 && most.region(7, 3, (100, 100), 1.0, false).part.3 >= 1);
     }
 
     #[test]
@@ -1285,6 +1327,7 @@ mod tests {
     #[test]
     fn animations_play_pause_and_wake_the_loop() {
         let mut im = Images::with_picker(Picker::halfblocks());
+        im.display_scale = 1.5;
         let frames = gif_frames(&gif(&[(0, 50), (255, 50)])).unwrap();
         im.insert_frames("g", frames.iter().cloned().collect());
         let size = Size::new(20, 6);
@@ -1301,6 +1344,10 @@ mod tests {
             std::thread::sleep(Duration::from_millis(10));
         }
         assert!(playing);
+        let expected = encode_crop(&Picker::halfblocks(), &frames[0].0, size, Crop::FIT, false, 1.5).unwrap().size();
+        let State::Ready(frame) = im.get("g", size, Kind::Full) else { panic!("animation not ready") };
+        assert_eq!(frame.size(), expected);
+        im.end_frame();
         let next = im.next_frame().unwrap();
         assert!(next <= Instant::now() + MIN_FRAME);
         // Paused: nothing to wake for.
@@ -1363,7 +1410,7 @@ mod tests {
         let img = DynamicImage::new_rgb8(64, 48);
         tx.send(Done::Fetched("u".into(), Ok((Arc::new(img.clone()), None)), Some((size, Kind::Thumb)))).unwrap();
         im.poll();
-        let Ok(EncodeJob::One(url, view, _, fill)) = enc_rx.try_recv() else { panic!("no encoding asked for") };
+        let Ok(EncodeJob::One(url, view, _, fill, _)) = enc_rx.try_recv() else { panic!("no encoding asked for") };
         assert_eq!((url.as_str(), view, fill), ("u", (size, Crop::FIT), true));
         assert!(matches!(im.get("u", size, Kind::Thumb), State::Rendering));
         let p = encode(&Picker::halfblocks(), &img, size, true).unwrap();

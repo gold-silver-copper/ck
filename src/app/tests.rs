@@ -2660,6 +2660,8 @@ fn the_viewer_goes_through_the_whole_thread_and_zooms() {
     // Zoomed, h/j/k/l move instead; page down is the next file (fitted again).
     key(&mut app, KeyCode::Char('+'));
     key(&mut app, KeyCode::Char('='));
+    // In the app, each key is followed by a draw that establishes how much is shown.
+    app.tab.viewer_mut().unwrap().shown = Some((500, 500));
     key(&mut app, KeyCode::Char('l'));
     let v = app.tab.viewer().unwrap();
     assert_eq!((v.index, v.crop.zoom), (3, 200));
@@ -6425,4 +6427,17 @@ fn an_overboard_starts_no_thread() {
     app.act(Action::Reply);
     assert!(app.popup.is_none());
     assert!(app.footer.get().unwrap().text.contains("many boards"));
+}
+
+#[test]
+fn reply_paste_cleans_only_file_paths() {
+    let mut app = fourchan_thread(&[1]);
+    app.act(Action::Reply);
+    let text = "  file:///home/me/a%20b.png\n";
+    app.paste_reply(text);
+    assert_eq!(reply_box(&mut app).comment.text(), text);
+    app.on_key(KeyEvent::from(KeyCode::Tab));
+    reply_box(&mut app).file.set("/old/path.png");
+    app.paste_reply(text);
+    assert_eq!(reply_box(&mut app).file.text(), "/home/me/a b.png");
 }

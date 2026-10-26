@@ -726,6 +726,7 @@ impl App {
             tx,
             rx,
         };
+        app.images.display_scale = cfg.display_scale;
         app.load_home_titles();
         app
     }

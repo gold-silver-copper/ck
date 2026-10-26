@@ -23,7 +23,9 @@ pub(super) fn draw_reply(f: &mut Frame, app: &mut App) {
     };
     let hint = match &c.stage {
         Stage::Writing if c.pty.is_some() => "the editor has the keys: save and quit it to come back",
-        Stage::Writing if c.login.is_some() => "ctrl-s post · ctrl-g editor · ctrl-p log in · esc keep draft",
+        Stage::Writing if c.field == Field::File && c.login.is_some() => "ctrl-v paste file/image · tab complete · ctrl-s post · ctrl-p log in · esc keep for later",
+        Stage::Writing if c.field == Field::File => "ctrl-v paste file/image · tab complete · ctrl-s post · esc keep for later",
+        Stage::Writing if c.login.is_some() => "ctrl-s post · ctrl-g editor · ctrl-p log in · esc keep for later",
         Stage::Writing => "ctrl-s post · ctrl-g editor · tab next · esc keep for later",
         Stage::Login(form) if form.logged_in => "y log out · esc back",
         Stage::Login(_) => "enter log in · tab next · esc back",

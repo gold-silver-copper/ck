@@ -17,6 +17,9 @@ pub const DEFAULT_CONFIG: &str = include_str!("../config.example.toml");
 pub struct Config {
     #[serde(default)]
     pub images: ImagesMode,
+    /// Device pixels per image pixel at natural size (2 on Retina displays).
+    #[serde(default = "default_display_scale", deserialize_with = "display_scale")]
+    pub display_scale: f32,
     /// Seconds between background refreshes of the open thread (at least 10).
     #[serde(default = "default_refresh_thread")]
     pub refresh_thread_secs: u64,
@@ -179,6 +182,19 @@ pub fn folder(kind: Folder) -> Option<PathBuf> {
 
 fn default_true() -> bool {
     true
+}
+
+fn display_scale<'de, D: serde::Deserializer<'de>>(deserializer: D) -> std::result::Result<f32, D::Error> {
+    let scale = f32::deserialize(deserializer)?;
+    if scale.is_finite() && scale > 0.0 {
+        Ok(scale)
+    } else {
+        Err(serde::de::Error::custom("display_scale must be finite and greater than 0"))
+    }
+}
+
+fn default_display_scale() -> f32 {
+    1.0
 }
 
 fn default_refresh_thread() -> u64 {
@@ -815,6 +831,17 @@ mod tests {
         let c: Config = toml::from_str(DEFAULT_CONFIG).unwrap();
         assert!(!c.sites.is_empty());
         assert!(!c.compact_catalog && crate::keys::Action::ALL.iter().all(|&a| c.keys.is_default(a)));
+    }
+
+    #[test]
+    fn display_scale_accepts_positive_fractional_values() {
+        for scale in ["0.75", "1.5", "2"] {
+            let c: Config = toml::from_str(&DEFAULT_CONFIG.replace("display_scale = 1", &format!("display_scale = {scale}"))).unwrap();
+            assert!((c.display_scale - scale.parse::<f32>().unwrap()).abs() < f32::EPSILON);
+        }
+        for scale in ["0", "-1", "nan", "inf"] {
+            assert!(toml::from_str::<Config>(&DEFAULT_CONFIG.replace("display_scale = 1", &format!("display_scale = {scale}"))).is_err());
+        }
     }
 
     #[test]
