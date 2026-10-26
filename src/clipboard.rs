@@ -4,6 +4,12 @@
 use anyhow::Context;
 use std::io::{Read, Write};
 use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
+
+/// The most a clipboard owner may send, including macOS's hex-encoded image data.
+const MAX_CLIPBOARD: u64 = 64 * 1024 * 1024;
+/// How long a clipboard command has to supply its data and exit.
+const READ_TIMEOUT: Duration = Duration::from_secs(1);
 
 /// Copy `text` to the clipboard.
 pub fn copy(text: &str) -> anyhow::Result<()> {
@@ -56,19 +62,28 @@ fn pipe(argv: &[&str], text: &str) -> anyhow::Result<()> {
 /// A pasted path, including a file manager's URL or a shell-quoted drag.
 pub fn file_path(text: &str) -> String {
     let text = text.trim().lines().next().unwrap_or_default().trim();
-    // Terminals quote each path in a multi-file drag, or escape its spaces.
+    // Terminals quote each path in a multi-file drag, or shell-escape its characters.
+    let quoted = matches!(text.chars().next(), Some('\'' | '"'));
     let text = if let Some(quote @ ('\'' | '"')) = text.chars().next() {
         text.get(1..).and_then(|s| s.find(quote).and_then(|end| s.get(..end))).unwrap_or(text)
-    } else if text.contains("\\ ") {
-        let mut escaped = false;
-        let end = text.char_indices().find_map(|(i, ch)| {
-            if escaped { escaped = false; return None; }
-            if ch == '\\' { escaped = true; return None; }
-            ch.is_whitespace().then_some(i)
-        }).unwrap_or(text.len());
-        text.get(..end).unwrap_or(text)
     } else {
         text.split(" /").next().unwrap_or(text).split(" file://").next().unwrap_or(text)
+    };
+    let text = if !cfg!(windows) && text.contains('\\') {
+        let mut chars = text.chars();
+        let mut path = String::new();
+        while let Some(ch) = chars.next() {
+            if ch == '\\' {
+                path.push(chars.next().unwrap_or(ch));
+            } else if !quoted && ch.is_whitespace() {
+                break;
+            } else {
+                path.push(ch);
+            }
+        }
+        path
+    } else {
+        text.to_string()
     };
     if let Some(url) = text.strip_prefix("file://") {
         let path = url.strip_prefix("localhost/").map_or_else(|| url.to_string(), |s| format!("/{s}"));
@@ -87,7 +102,7 @@ pub fn file_path(text: &str) -> String {
         }
         return String::from_utf8(decoded).unwrap_or(path);
     }
-    text.replace("\\ ", " ")
+    text
 }
 
 fn hex(b: u8) -> Option<u8> {
@@ -96,14 +111,10 @@ fn hex(b: u8) -> Option<u8> {
 
 /// Read on a worker: clipboard owners can take time to supply their data.
 pub fn read_file() -> anyhow::Result<String> {
-    anyhow::ensure!(!crate::sandboxed(), "Clipboard reading is disabled in the sandbox");
     let argv = local_command(true).context("No local clipboard reader (unavailable over SSH; install wl-clipboard or xclip on Linux)")?;
     if cfg!(target_os = "macos") {
-        if let Ok(data) = read_command(&argv, &["-e", "get the clipboard as «class furl» as text"]) {
-            let path = file_path(std::str::from_utf8(&data)?);
-            if !path.is_empty() {
-                return Ok(path);
-            }
+        if let Ok(data) = read_command(&argv, &["-e", "POSIX path of (the clipboard as «class furl»)"]) {
+            return existing_file(std::str::from_utf8(&data)?.trim().to_string());
         }
         let data = read_command(&argv, &["-e", "get the clipboard as «class PNGf»"])?;
         let data = std::str::from_utf8(&data)?.trim().strip_prefix("«data PNGf")
@@ -130,8 +141,11 @@ pub fn read_file() -> anyhow::Result<String> {
     let text = if kind == "text/uri-list" {
         text.lines().find(|s| !s.trim().is_empty() && !s.starts_with('#')).context("Clipboard file list is empty")?
     } else { text };
-    let path = file_path(text);
-    anyhow::ensure!(!path.is_empty(), "Clipboard path is empty");
+    existing_file(file_path(text))
+}
+
+fn existing_file(path: String) -> anyhow::Result<String> {
+    anyhow::ensure!(crate::config::expand_home(&path).is_file(), "The clipboard holds no file or image");
     Ok(path)
 }
 
@@ -145,26 +159,25 @@ fn save_image(data: &[u8], ext: &str) -> anyhow::Result<String> {
 
 fn read_command(argv: &[&str], args: &[&str]) -> anyhow::Result<Vec<u8>> {
     let (cmd, base) = argv.split_first().context("No clipboard command")?;
-    let mut child = Command::new(cmd).args(base).args(args).stdin(Stdio::null())
-        .stdout(Stdio::piped()).stderr(Stdio::null()).spawn()?;
+    let deadline = Instant::now().checked_add(READ_TIMEOUT).context("Clipboard deadline overflow")?;
+    let mut child = Command::new(cmd).args(base).args(args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn()?;
     let stdout = child.stdout.take().context("No clipboard output")?;
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
         let mut data = Vec::new();
-        let result = stdout.take(64 * 1024 * 1024 + 1).read_to_end(&mut data).map(|_| data);
+        let result = stdout.take(MAX_CLIPBOARD + 1).read_to_end(&mut data).map(|_| data);
         let _ = tx.send(result);
     });
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
     let result = (|| {
+        let data = rx.recv_timeout(deadline.saturating_duration_since(Instant::now())).context("Clipboard read timed out")??;
+        anyhow::ensure!(data.len() as u64 <= MAX_CLIPBOARD, "Clipboard image is too large");
         loop {
             if let Some(status) = child.try_wait()? {
-                anyhow::ensure!(status.success(), "Clipboard command failed");
-                let data = rx.recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()))??;
-                anyhow::ensure!(data.len() <= 64 * 1024 * 1024, "Clipboard image is too large");
+                anyhow::ensure!(status.success(), "The clipboard holds no file or image");
                 return Ok(data);
             }
-            anyhow::ensure!(std::time::Instant::now() < deadline, "Clipboard read timed out");
-            std::thread::sleep(std::time::Duration::from_millis(10));
+            anyhow::ensure!(Instant::now() < deadline, "Clipboard read timed out");
+            std::thread::sleep(Duration::from_millis(10));
         }
     })();
     if result.is_err() {
@@ -179,16 +192,37 @@ mod tests {
     use super::*;
 
     #[test]
+    fn clipboard_paths_must_be_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("a (1).png");
+        crate::atomic::write(&file, b"file").unwrap();
+        assert_eq!(existing_file(file.to_string_lossy().into_owned()).unwrap(), file.to_string_lossy());
+        for text in ["", "a sentence", "https://example.com/image.png", dir.path().to_str().unwrap()] {
+            assert!(existing_file(text.to_string()).is_err());
+        }
+    }
+
+    #[test]
     fn pasted_paths() {
+        if cfg!(windows) {
+            assert_eq!(file_path(r"C:\pictures\cat.png"), r"C:\pictures\cat.png");
+        } else {
+            for (text, path) in [
+                (r"/home/me/a\ b.png", "/home/me/a b.png"),
+                (r"/a\ b.png /c\ d.png", "/a b.png"),
+                (r"/a\ \(1\).png", "/a (1).png"),
+                (r"/it\'s.png", "/it's.png"),
+            ] {
+                assert_eq!(file_path(text), path);
+            }
+        }
         for (text, path) in [
             ("  '/home/me/a b.png'\n", "/home/me/a b.png"),
             ("\"/home/me/a b.png\"", "/home/me/a b.png"),
-            ("/home/me/a\\ b.png", "/home/me/a b.png"),
             ("file:///home/me/a%20b%23%C3%A9.png", "/home/me/a b#é.png"),
             ("file://localhost/home/me/a.png", "/home/me/a.png"),
             ("file:///a%xx.png", "/a%xx.png"),
             ("'/a b.png' '/c d.png'", "/a b.png"),
-            ("/a\\ b.png /c\\ d.png", "/a b.png"),
             ("/a.png /b.png", "/a.png"),
             ("file:///a.png\r\nfile:///b.png", "/a.png"),
             ("/home/me/a b.png", "/home/me/a b.png"),

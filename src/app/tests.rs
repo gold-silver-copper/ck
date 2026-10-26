@@ -6435,6 +6435,7 @@ fn reply_paste_cleans_only_file_paths() {
     app.paste_reply(text);
     assert_eq!(reply_box(&mut app).comment.text(), text);
     app.on_key(KeyEvent::from(KeyCode::Tab));
+    reply_box(&mut app).file.set("/old/path.png");
     app.paste_reply(text);
     assert_eq!(reply_box(&mut app).file.text(), "/home/me/a b.png");
 }

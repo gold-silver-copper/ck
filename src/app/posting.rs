@@ -183,8 +183,8 @@ pub struct Compose {
     pub file_choices: Vec<String>,
     /// The user's editor, writing the comment (ctrl-g), till it quits.
     pub pty: Option<PtyEditor>,
-    /// The pending paste, so its result cannot land in a new draft for the same thread.
-    clipboard: Option<Arc<()>>,
+    /// The pending paste's sequence number, to discard results for a replaced draft.
+    clipboard: Option<u64>,
 }
 
 impl Compose {
@@ -648,6 +648,7 @@ impl App {
         }
     }
 
+    /// Ctrl-v in File: the clipboard's file or image, read off the UI thread.
     fn paste_file(&mut self) {
         if crate::sandboxed() {
             return;
@@ -657,15 +658,16 @@ impl App {
         if c.clipboard.is_some() {
             return;
         }
-        let token = Arc::new(());
-        c.clipboard = Some(token.clone());
+        static NEXT_PASTE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let paste = NEXT_PASTE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        c.clipboard = Some(paste);
         let (to, before) = (c.to.clone(), c.file.text().to_string());
         c.note = Some("Reading clipboard…".into());
         std::thread::spawn(move || {
             let result = crate::clipboard::read_file();
             later.run(move |app| {
                 let Some(c) = app.compose_for(&to) else { return };
-                if !c.clipboard.as_ref().is_some_and(|t| Arc::ptr_eq(t, &token)) {
+                if c.clipboard != Some(paste) {
                     return;
                 }
                 c.clipboard = None;
@@ -695,8 +697,11 @@ impl App {
         match &mut c.stage {
             Stage::Writing => {
                 let field = c.field;
-                if let Some(e) = c.editor(field) {
-                    e.insert(&if field == Field::File { crate::clipboard::file_path(text) } else { text.to_string() });
+                if field == Field::File {
+                    c.file.set(&crate::clipboard::file_path(text));
+                    c.file_choices.clear();
+                } else if let Some(e) = c.editor(field) {
+                    e.insert(text);
                 }
             }
             Stage::Solving(s) if matches!(s.challenge.task, Task::Text { .. }) => s.typed.push_str(text.trim()),
