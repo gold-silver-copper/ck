@@ -117,11 +117,15 @@ pub enum State<'a> {
     Ready(&'a Protocol),
 }
 
-/// Part of an image, zoomed in: `zoom` percent (100: all of it, fitted), centered at
+/// Part of an image, zoomed in: `zoom` percent of natural size (or fit), centered at
 /// (`x`, `y`) in thousandths of its width and height.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Crop {
     pub zoom: u16,
+    /// Device pixels per image pixel at natural size.
+    pub display_scale: u8,
+    /// Thumbnails and videos use a fitted base, even when small.
+    pub fill: bool,
     pub x: u16,
     pub y: u16,
 }
@@ -130,7 +134,7 @@ pub struct Crop {
 const ZOOMS: [u16; 7] = [100, 150, 200, 300, 400, 600, 800];
 
 impl Crop {
-    pub const FIT: Crop = Crop { zoom: 100, x: 500, y: 500 };
+    pub const FIT: Crop = Crop { zoom: 100, display_scale: 1, fill: false, x: 500, y: 500 };
 
     pub fn is_fit(self) -> bool {
         self.zoom <= 100
@@ -142,7 +146,7 @@ impl Crop {
         let zoom = if zoom_in { ZOOMS.get(i.saturating_add(1)).or(ZOOMS.last()) } else { ZOOMS.get(i.saturating_sub(1)) };
         let zoom = zoom.copied().unwrap_or(100);
         if zoom <= 100 {
-            return Crop::FIT;
+            return Crop { display_scale: self.display_scale, fill: self.fill, ..Crop::FIT };
         }
         Crop { zoom, ..self }
     }
@@ -155,10 +159,9 @@ impl Crop {
         Crop { x: at(self.x, dx, shown.0), y: at(self.y, dy, shown.1), ..self }.within(shown)
     }
 
-    /// How much is shown before it's known (not drawn yet): the image's shape at this zoom.
+    /// Before drawing establishes the dimensions, keep the center inside the whole image.
     pub fn guess_shown(self) -> (u16, u16) {
-        let s = u16::try_from(100_000u32.checked_div(u32::from(self.zoom.max(100))).unwrap_or(0)).unwrap_or(u16::MAX);
-        (s, s)
+        (1000, 1000)
     }
 
     /// The center kept where what's shown stays inside the image.
@@ -179,13 +182,39 @@ impl Crop {
         (part(rw, w), part(rh, h))
     }
 
+    fn scale(self, w: u32, h: u32, view: (u32, u32)) -> f64 {
+        let fit = f64::min(f64::from(view.0.max(1)) / f64::from(w.max(1)), f64::from(view.1.max(1)) / f64::from(h.max(1)));
+        (if self.fill { fit } else { fit.min(f64::from(self.display_scale.max(1))) }) * f64::from(self.zoom.max(100)) / 100.0
+    }
+
+    /// The cropped image's size on screen, without enlarging it to fill unused space.
+    pub fn rendered(self, w: u32, h: u32, view: (u32, u32)) -> (u32, u32) {
+        let (_, _, rw, rh) = self.region(w, h, view);
+        let scale = self.scale(w, h, view);
+        #[allow(clippy::cast_possible_truncation)] // f64 as u32 saturates
+        (((f64::from(rw) * scale).round() as u32).clamp(1, view.0.max(1)), ((f64::from(rh) * scale).round() as u32).clamp(1, view.1.max(1)))
+    }
+
+    /// Ignore levels that cannot change the crop or its size on screen.
+    pub fn limited(self, w: u32, h: u32, view: (u32, u32)) -> Crop {
+        let mut crop = self;
+        while !crop.is_fit() {
+            let prev = crop.zoomed(false);
+            if crop.region(w, h, view) != prev.region(w, h, view) || crop.rendered(w, h, view) != prev.rendered(w, h, view) {
+                break;
+            }
+            crop = prev;
+        }
+        crop
+    }
+
     /// The part of a `w` x `h` image it shows on a screen area of `view` pixels: left, top,
-    /// width, height. At 100% the whole image fits the area; zoomed by `z`, the image is `z`
+    /// width, height. At 100% the image is natural size or fitted; zoomed by `z`, it is `z`
     /// times that size, and the part is what the area holds of it.
     pub fn region(self, w: u32, h: u32, view: (u32, u32)) -> (u32, u32, u32, u32) {
         let (w, h) = (w.max(1), h.max(1));
         let (aw, ah) = (f64::from(view.0.max(1)), f64::from(view.1.max(1)));
-        let scale = f64::min(aw / f64::from(w), ah / f64::from(h)) * f64::from(self.zoom.max(100)) / 100.0;
+        let scale = self.scale(w, h, view);
         #[allow(clippy::cast_possible_truncation)] // f64 as u32 saturates
         let (rw, rh) = (((aw / scale).round() as u32).clamp(1, w), ((ah / scale).round() as u32).clamp(1, h));
         let at = |side: u32, thousandths: u16| u32::try_from(u64::from(side).saturating_mul(u64::from(thousandths)) / 1000).unwrap_or(u32::MAX);
@@ -248,7 +277,7 @@ enum Done {
 enum EncodeJob {
     /// An image for a view; `fill`: scaled up to fill it too (a thumbnail in its tile).
     One(String, View, Arc<DynamicImage>, bool),
-    Frames(String, Size, Frames),
+    Frames(String, Size, Frames, u8),
 }
 
 /// The image protocol to use: the one `images` names, or what the terminal said it can
@@ -295,12 +324,18 @@ pub struct Images {
     video_left: Option<(String, Duration)>,
     /// Videos play without sound.
     pub muted: bool,
+    pub display_scale: u8,
 }
 
 impl Images {
     /// `None` disables images entirely: no workers, no requests.
     pub fn new(picker: Option<Picker>, wake: Waker, disk: Option<DiskCache>) -> Self {
         Self::start(picker, wake, disk, WORKERS)
+    }
+
+    pub fn with_display_scale(mut self, scale: u8) -> Self {
+        self.display_scale = scale.max(1);
+        self
     }
 
     fn start(picker: Option<Picker>, wake: Waker, disk: Option<DiskCache>, workers: usize) -> Self {
@@ -321,7 +356,7 @@ impl Images {
         }
         let (offline, frame) = (false, Vec::new());
         let (video, video_drawn, video_left, muted) = (None, false, None, false);
-        Self { picker, slots: HashMap::new(), queue, rx, encode, frame, tick: 0, bytes: 0, next_frame: None, drawing_next: None, offline, disk, wake, video, video_drawn, video_left, muted }
+        Self { picker, slots: HashMap::new(), queue, rx, encode, frame, tick: 0, bytes: 0, next_frame: None, drawing_next: None, offline, disk, wake, video, video_drawn, video_left, muted, display_scale: 1 }
     }
 
     /// Images "on", but nothing is ever fetched or encoded: everything stays a placeholder.
@@ -332,7 +367,7 @@ impl Images {
         let queue = Arc::new(Queue::default());
         let (offline, disk, wake) = (false, None, Arc::new(|| {}));
         let (video, video_drawn, video_left, muted) = (None, false, None, false);
-        Self { picker, slots: HashMap::new(), queue, rx, encode: None, frame: Vec::new(), tick: 0, bytes: 0, next_frame: None, drawing_next: None, offline, disk, wake, video, video_drawn, video_left, muted }
+        Self { picker, slots: HashMap::new(), queue, rx, encode: None, frame: Vec::new(), tick: 0, bytes: 0, next_frame: None, drawing_next: None, offline, disk, wake, video, video_drawn, video_left, muted, display_scale: 1 }
     }
 
     /// An encoder thread but no fetch workers (tests and benchmarks).
@@ -411,6 +446,7 @@ impl Images {
 
     /// `get`, for part of the image (zoomed in). Animations play only fitted.
     pub fn get_crop(&mut self, url: &str, size: Size, kind: Kind, crop: Crop) -> State<'_> {
+        let crop = Crop { display_scale: if kind == Kind::Full { self.display_scale.max(1) } else { 1 }, ..crop };
         let view = (size, crop);
         if self.picker.is_none() {
             return State::Failed;
@@ -445,7 +481,7 @@ impl Images {
                 }
                 _ if *animating != Some(size) => {
                     if let Some(enc) = &self.encode {
-                        let _ = enc.send(EncodeJob::Frames(url.to_string(), size, f.clone()));
+                        let _ = enc.send(EncodeJob::Frames(url.to_string(), size, f.clone(), crop.display_scale));
                         *animating = Some(size);
                     }
                 }
@@ -606,7 +642,7 @@ impl Images {
                     // the encoding arrive before the image, be dropped, and leave the slot
                     // waiting for it forever.
                     let pending = asked.and_then(|(size, kind)| {
-                        let view = (size, Crop::FIT);
+                        let view = (size, Crop { display_scale: if kind == Kind::Full { self.display_scale.max(1) } else { 1 }, ..Crop::FIT });
                         let sent = self.encode.as_ref().is_some_and(|enc| enc.send(EncodeJob::One(url.clone(), view, img.clone(), kind.fills())).is_ok());
                         sent.then_some(view)
                     });
@@ -719,8 +755,8 @@ fn encoder(picker: &Picker, jobs: &Receiver<EncodeJob>, tx: &Sender<Done>, wake:
                 let res = crate::guard::catching(|| encode_crop(picker, &img, size, crop, fill)).unwrap_or_else(bug);
                 Done::Encoded(url, (size, crop), res)
             }
-            EncodeJob::Frames(url, size, frames) => {
-                let res = crate::guard::catching(|| frames.iter().map(|(f, d)| encode(picker, f, size, false).map(|p| (p, *d))).collect()).unwrap_or_else(bug);
+            EncodeJob::Frames(url, size, frames, display_scale) => {
+                let res = crate::guard::catching(|| frames.iter().map(|(f, d)| encode_crop(picker, f, size, Crop { display_scale, ..Crop::FIT }, false).map(|p| (p, *d))).collect()).unwrap_or_else(bug);
                 Done::EncodedFrames(url, size, res)
             }
         };
@@ -731,20 +767,23 @@ fn encoder(picker: &Picker, jobs: &Receiver<EncodeJob>, tx: &Sender<Done>, wake:
     }
 }
 
-/// Encode the part `crop` of `img` to fit in `size` cells: scaled up to fill them (that's
-/// zooming in), unless it's the whole image (then only with `fill`).
+/// Encode the crop at a multiple of its natural size (or fit for a large image).
 pub(crate) fn encode_crop(picker: &Picker, img: &DynamicImage, size: Size, crop: Crop, fill: bool) -> Result<Protocol, String> {
-    if crop.is_fit() {
-        return encode(picker, img, size, fill);
+    if fill && crop.is_fit() {
+        return encode(picker, img, size, true);
     }
+    let crop = Crop { fill, ..crop };
     let font = picker.font_size();
-    let (w, h) = pixels(size, font);
-    let (x, y, cw, ch) = crop.region(img.width(), img.height(), (w, h));
+    let view = pixels(size, font);
+    let (x, y, cw, ch) = crop.region(img.width(), img.height(), view);
+    let target = crop.rendered(img.width(), img.height(), view);
     let part = img.crop_imm(x, y, cw, ch);
     if picker.protocol_type() == ProtocolType::Halfblocks {
-        return halfblocks(&part, size, font, true);
+        let grid = halfblock_grid(target, size, (u32::from(font.width), u32::from(font.height)), false);
+        return halfblocks_grid(&part, grid);
     }
-    picker.new_protocol(shrink(&part, w, h, true), size, Resize::Fit(None)).map_err(|e| e.to_string())
+    let scaled = if cw > target.0.saturating_mul(2) || ch > target.1.saturating_mul(2) { part.thumbnail_exact(target.0, target.1) } else { part.resize_exact(target.0, target.1, FilterType::Triangle) };
+    picker.new_protocol(scaled, size, Resize::Fit(None)).map_err(|e| e.to_string())
 }
 
 /// Encode `img` to fit in `size` cells (and, with `fill`, scaled up to fill them: a small
@@ -786,6 +825,11 @@ fn shrink(img: &DynamicImage, w: u32, h: u32, grow: bool) -> DynamicImage {
 fn halfblocks(img: &DynamicImage, size: Size, font: ratatui_image::FontSize, fill: bool) -> Result<Protocol, String> {
     let (iw, ih) = (img.width().max(1), img.height().max(1));
     let (cells, cw, ch) = halfblock_grid((iw, ih), size, (u32::from(font.width), u32::from(font.height)), fill);
+    halfblocks_grid(img, (cells, cw, ch))
+}
+
+fn halfblocks_grid(img: &DynamicImage, (cells, cw, ch): (Size, u32, u32)) -> Result<Protocol, String> {
+    let (iw, ih) = (img.width(), img.height());
     let scaled = if iw > cw.saturating_mul(2) || ih > ch.saturating_mul(2) { img.thumbnail_exact(cw, ch) } else { img.resize_exact(cw, ch, FilterType::Triangle) };
     // Padded to whole cells like the library pads (transparent, shown black).
     let (gw, gh) = (u32::from(cells.width), u32::from(cells.height) * 2);
@@ -977,8 +1021,8 @@ mod tests {
                     let ours = encode_crop(&picker, &img, size, Crop::FIT, false).unwrap().size();
                     assert_eq!(ours, library_size(&picker, &img, size, false), "font {font:?}, image {iw}x{ih}, area {size:?}");
                 }
-                // Zoomed: the part fills the area as it did (at small cell sizes: the
-                // library's own way is slow in a debug build at large ones).
+                // Zoomed: the part takes its scaled size, up to the area (the library
+                // is slow in a debug build at large cell sizes).
                 if font.0 > 10 {
                     continue;
                 }
@@ -988,9 +1032,36 @@ mod tests {
                 let (x, y, cw, ch) = zoom.region(iw, ih, view);
                 let part = img.crop_imm(x, y, cw, ch);
                 let ours = encode_crop(&picker, &img, size, zoom, false).unwrap().size();
-                assert_eq!(ours, library_size(&picker, &part, size, true), "zoomed: font {font:?}, image {iw}x{ih}");
+                let target = zoom.rendered(iw, ih, view);
+                let scaled = part.resize_exact(target.0, target.1, FilterType::Triangle);
+                assert_eq!(ours, library_size(&picker, &scaled, size, false), "zoomed: font {font:?}, image {iw}x{ih}");
             }
         }
+    }
+
+    #[test]
+    fn natural_size_zoom_and_display_scale_agree_across_protocols() {
+        let img = DynamicImage::new_rgb8(200, 100);
+        let area = Size::new(100, 30);
+        for display_scale in [1, 2] {
+            let fit = Crop { display_scale, ..Crop::FIT };
+            let display_scale = u16::from(display_scale);
+            for (crop, width, height) in [(fit, 20 * display_scale, 5 * display_scale), (fit.zoomed(true), 30 * display_scale, (15 * display_scale).div_ceil(2))] {
+                for proto in [ProtocolType::Halfblocks, ProtocolType::Kitty, ProtocolType::Sixel] {
+                    #[allow(deprecated)]
+                    let mut picker = Picker::from_fontsize((10, 20).into());
+                    picker.set_protocol_type(proto);
+                    let size = encode_crop(&picker, &img, area, crop, false).unwrap().size();
+                    assert_eq!(size, Size::new(width, height), "{proto:?} {crop:?}");
+                    let video = crate::video::geometry((200, 100), area, (10, 20), proto, crop);
+                    assert_eq!(video.cells, Size::new(100, 25 + if crop.is_fit() { 0 } else { 5 }));
+                }
+            }
+            assert_eq!(fit.zoomed(true).shown(200, 100, (1000, 600)), (1000, 1000));
+        }
+        let fit = Crop::FIT;
+        assert_eq!(fit.zoomed(true).rendered(600, 300, (1800, 1200)), (900, 450));
+        assert_eq!(fit.zoomed(true).limited(1, 1, (1, 1)), fit);
     }
 
     #[test]
@@ -1096,9 +1167,9 @@ mod tests {
     fn zooming_crops_and_moves_inside_the_image() {
         let c = Crop::FIT.zoomed(true);
         assert_eq!((c.zoom, c.x, c.y), (150, 500, 500));
-        // 200% of an image the same shape as the screen: half of each side, centered.
+        // At 200%, this small image reaches the screen size without cropping.
         let c = c.zoomed(true);
-        assert_eq!(c.region(1000, 600, (2000, 1200)), (250, 150, 500, 300));
+        assert_eq!(c.region(1000, 600, (2000, 1200)), (0, 0, 1000, 600));
         // A square image on a wide screen: zoomed in, the part shown is the screen's shape
         // (the 100% view is 600x600 of 1200x600; at 200% the screen holds 600x300 of the
         // image), not a square in the middle.
@@ -1284,7 +1355,7 @@ mod tests {
 
     #[test]
     fn animations_play_pause_and_wake_the_loop() {
-        let mut im = Images::with_picker(Picker::halfblocks());
+        let mut im = Images::with_picker(Picker::halfblocks()).with_display_scale(2);
         let frames = gif_frames(&gif(&[(0, 50), (255, 50)])).unwrap();
         im.insert_frames("g", frames.iter().cloned().collect());
         let size = Size::new(20, 6);
@@ -1301,6 +1372,10 @@ mod tests {
             std::thread::sleep(Duration::from_millis(10));
         }
         assert!(playing);
+        let expected = encode_crop(&Picker::halfblocks(), &frames[0].0, size, Crop { display_scale: 2, ..Crop::FIT }, false).unwrap().size();
+        let State::Ready(frame) = im.get("g", size, Kind::Full) else { panic!("animation not ready") };
+        assert_eq!(frame.size(), expected);
+        im.end_frame();
         let next = im.next_frame().unwrap();
         assert!(next <= Instant::now() + MIN_FRAME);
         // Paused: nothing to wake for.

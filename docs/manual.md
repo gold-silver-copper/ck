@@ -863,6 +863,14 @@ title bar. Thumbnails are skipped in terminals narrower than 60 columns. A thumb
 site has lost (old posts on some sites, like kissu's) is made from the file itself when
 that's a picture of at most 4 MB; otherwise the tile shows ✗.
 
+At 100%, the viewer shows an image at natural size, or fitted if it is larger than the
+viewer. Each zoom step uses that same base: 150% is 1.5 times the 100% size, with the
+part outside the viewer cropped. Set `display_scale = 2` on a Retina / 2x display
+(default 1; 0 means 1), then restart ck, so natural size accounts for device pixels.
+This also applies to half-blocks and animated GIFs. Videos keep filling the viewer at
+100%; their zoom steps are multiples of that fitted size. Natural size depends on the
+cell size reported by the terminal; a guessed cell size may give a different result.
+
 Animated GIFs play in the viewer, at up to 20 frames a second (frames are prepared in the
 background, and scaled down if a long GIF would take too much memory). Videos play there
 too (see [Videos](#videos)), and open externally with `enter` in the viewer (`i` in a

@@ -17,6 +17,9 @@ pub const DEFAULT_CONFIG: &str = include_str!("../config.example.toml");
 pub struct Config {
     #[serde(default)]
     pub images: ImagesMode,
+    /// Device pixels per image pixel at natural size (2 on Retina displays).
+    #[serde(default = "default_display_scale")]
+    pub display_scale: u8,
     /// Seconds between background refreshes of the open thread (at least 10).
     #[serde(default = "default_refresh_thread")]
     pub refresh_thread_secs: u64,
@@ -179,6 +182,10 @@ pub fn folder(kind: Folder) -> Option<PathBuf> {
 
 fn default_true() -> bool {
     true
+}
+
+fn default_display_scale() -> u8 {
+    1
 }
 
 fn default_refresh_thread() -> u64 {

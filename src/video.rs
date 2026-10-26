@@ -149,27 +149,27 @@ impl Geometry {
 }
 
 /// How a `w` x `h` video is drawn in `area` cells, at the terminal's cell size `font`
-/// (pixels): fitted to the area, scaled up too (as players do: a small video isn't left
-/// small), or the part `crop` zooms into; in kitty or iTerm2, at a frame rate within
+/// (pixels): fitted to the area, scaled up too, or the part `crop` zooms into;
+/// in kitty or iTerm2, at a frame rate within
 /// `PIXEL_BYTES_PER_SECOND`.
 pub fn geometry((w, h): (u32, u32), area: Size, font: (u32, u32), protocol: ProtocolType, crop: crate::images::Crop) -> Geometry {
     let (fw, fh) = (font.0.max(1), font.1.max(1));
     let (aw, ah) = (u32::from(area.width).saturating_mul(fw).max(1), u32::from(area.height).saturating_mul(fh).max(1));
     // Zoomed in: what's drawn is that part, at its size in the video.
-    let (part, (w, h)) = if crop.is_fit() {
-        (None, (w.max(1), h.max(1)))
+    let crop = crate::images::Crop { fill: true, ..crop };
+    let target = crop.rendered(w, h, (aw, ah));
+    let part = if crop.is_fit() {
+        None
     } else {
         let (x, y, rw, rh) = crop.region(w, h, (aw, ah));
         let of = |v: u32, side: u32| u32::try_from(u64::from(v).saturating_mul(1000).checked_div(u64::from(side.max(1))).unwrap_or(0)).unwrap_or(1000).min(1000);
-        (Some([of(x, w), of(y, h), of(rw, w).max(1), of(rh, h).max(1)]), (rw.max(1), rh.max(1)))
+        Some([of(x, w), of(y, h), of(rw, w).max(1), of(rh, h).max(1)])
     };
     if protocol == ProtocolType::Halfblocks {
-        let (cells, cw, ch) = crate::images::halfblock_grid((w, h), area, font, true);
+        let (cells, cw, ch) = crate::images::halfblock_grid(target, area, font, false);
         return Geometry { part, scaled: (cw, ch), padded: (u32::from(cells.width), u32::from(cells.height).saturating_mul(2)), cells, fps: FPS };
     }
-    let ratio = f64::min(f64::from(aw) / f64::from(w), f64::from(ah) / f64::from(h));
-    #[allow(clippy::cast_possible_truncation)] // f64 as u32 saturates
-    let (sw, sh) = (((f64::from(w) * ratio).round() as u32).clamp(1, aw), ((f64::from(h) * ratio).round() as u32).clamp(1, ah));
+    let (sw, sh) = target;
     let cells_in = |px: u32, f: u32, max: u16| u16::try_from(px.div_ceil(f)).unwrap_or(u16::MAX).clamp(1, max.max(1));
     let cells = Size::new(cells_in(sw, fw, area.width), cells_in(sh, fh, area.height));
     let padded = (u32::from(cells.width).saturating_mul(fw), u32::from(cells.height).saturating_mul(fh));

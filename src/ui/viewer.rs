@@ -49,6 +49,18 @@ pub(super) fn draw_viewer(f: &mut Frame, app: &mut App) {
         Constraint::Length(1),
     ])
     .areas(f.area());
+    let area = middle.inner(Margin::new(MARGIN, 0));
+    let source = app.viewer_source(file);
+    let video = app.video_source(file);
+    let dims = video.as_ref().and_then(|url| app.images.playing().filter(|p| &p.url == url).and_then(|p| p.dims()))
+        .or_else(|| source.as_ref().and_then(|(url, _)| app.images.dims(url)));
+    let height = if file.image().is_none() && video.is_none() || source.as_ref().is_some_and(|(_, k)| *k == Kind::Thumb) { area.height.saturating_sub(2) } else { area.height };
+    let scale = app.images.display_scale;
+    if let (Some((w, h)), Some((cw, ch)), Some(v)) = (dims, app.images.cell_size(), app.tab.viewer_mut()) {
+        let crop = crate::images::Crop { display_scale: scale, fill: video.is_some() || source.as_ref().is_some_and(|(_, k)| *k == Kind::Thumb), ..v.crop };
+        v.crop = crop.limited(w, h, (u32::from(area.width) * cw, u32::from(height) * ch));
+    }
+    let Some(v) = app.tab.viewer() else { return };
     let mut meta = file_facts(file);
     if let Some(no) = v.posts.get(v.index) {
         meta.push(format!("No.{no}"));
@@ -59,7 +71,6 @@ pub(super) fn draw_viewer(f: &mut Frame, app: &mut App) {
     }
     let crop = v.crop;
     // A video playing here: where it is, and whether it's paused or without sound.
-    let video = app.video_source(file);
     let failed = app.images.playing().is_some_and(|p| video.as_ref() == Some(&p.url) && p.has_failed());
     let muted = app.images.muted;
     if let Some(p) = app.images.playing().filter(|p| video.as_ref() == Some(&p.url)) {
@@ -104,7 +115,6 @@ pub(super) fn draw_viewer(f: &mut Frame, app: &mut App) {
         }
     }
     put(f, bottom.x, bottom.y, bottom.width, Line::from(hints));
-    let area = middle.inner(Margin::new(MARGIN, 0));
     // A video plays; if it can't, its thumbnail shows, saying why.
     let mut cant_play = None;
     if let Some(url) = &video {
@@ -141,7 +151,6 @@ pub(super) fn draw_viewer(f: &mut Frame, app: &mut App) {
     }
     // Non-images (videos, pdfs, ...) show their thumbnail, if any, with a hint; so do images
     // of a saved copy that weren't downloaded.
-    let source = app.viewer_source(file);
     let mut inner = area;
     let thumb_only = source.as_ref().is_some_and(|(_, k)| *k == Kind::Thumb);
     if file.image().is_none() || thumb_only {

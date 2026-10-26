@@ -683,7 +683,7 @@ impl App {
                 Arc::new(move || {
                     let _ = tx.send(Msg::Wake);
                 })
-            }, DiskCache::default_dir().map(|d| DiskCache::new(d, crate::disk_cache::BUDGET))),
+            }, DiskCache::default_dir().map(|d| DiskCache::new(d, crate::disk_cache::BUDGET))).with_display_scale(cfg.display_scale),
             image_search: if cfg.image_search.is_empty() { crate::config::ImageSearch::defaults() } else { cfg.image_search.clone() },
             restore_session: cfg.restore_session,
             remember_thread_position: cfg.remember_thread_position,
