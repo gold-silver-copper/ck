@@ -149,19 +149,19 @@ impl Geometry {
 }
 
 /// How a `w` x `h` video is drawn in `area` cells, at the terminal's cell size `font`
-/// (pixels): fitted to the area, scaled up too, or the part `crop` zooms into;
-/// in kitty or iTerm2, at a frame rate within
+/// (pixels): fitted to the area, scaled up too (as players do: a small video isn't left
+/// small), or the part `crop` zooms into; in kitty or iTerm2, at a frame rate within
 /// `PIXEL_BYTES_PER_SECOND`.
 pub fn geometry((w, h): (u32, u32), area: Size, font: (u32, u32), protocol: ProtocolType, crop: crate::images::Crop) -> Geometry {
     let (fw, fh) = (font.0.max(1), font.1.max(1));
     let (aw, ah) = (u32::from(area.width).saturating_mul(fw).max(1), u32::from(area.height).saturating_mul(fh).max(1));
     // Zoomed in: what's drawn is that part, at its size in the video.
-    let crop = crate::images::Crop { fill: true, ..crop };
-    let target = crop.rendered(w, h, (aw, ah));
+    let region = crop.region(w, h, (aw, ah), 1.0, true);
+    let target = region.size;
     let part = if crop.is_fit() {
         None
     } else {
-        let (x, y, rw, rh) = crop.region(w, h, (aw, ah));
+        let (x, y, rw, rh) = region.part;
         let of = |v: u32, side: u32| u32::try_from(u64::from(v).saturating_mul(1000).checked_div(u64::from(side.max(1))).unwrap_or(0)).unwrap_or(1000).min(1000);
         Some([of(x, w), of(y, h), of(rw, w).max(1), of(rh, h).max(1)])
     };

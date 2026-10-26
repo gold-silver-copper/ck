@@ -36,31 +36,13 @@ pub(super) fn draw_gallery(f: &mut Frame, app: &mut App, area: Rect) {
 }
 
 pub(super) fn draw_viewer(f: &mut Frame, app: &mut App) {
+    draw_viewer_body(f, app);
     let t = theme();
     let Some(v) = app.tab.viewer() else { return };
-    // (Owned: the viewer is changed below while it's used, as a video is zoomed.)
     let Some(file) = v.files.get(v.index).cloned() else { return };
     let file = &file;
-    let [top, _, middle, _, bottom] = Layout::vertical([
-        Constraint::Length(1),
-        Constraint::Length(1),
-        Constraint::Min(1),
-        Constraint::Length(1),
-        Constraint::Length(1),
-    ])
-    .areas(f.area());
-    let area = middle.inner(Margin::new(MARGIN, 0));
-    let source = app.viewer_source(file);
     let video = app.video_source(file);
-    let dims = video.as_ref().and_then(|url| app.images.playing().filter(|p| &p.url == url).and_then(|p| p.dims()))
-        .or_else(|| source.as_ref().and_then(|(url, _)| app.images.dims(url)));
-    let height = if file.image().is_none() && video.is_none() || source.as_ref().is_some_and(|(_, k)| *k == Kind::Thumb) { area.height.saturating_sub(2) } else { area.height };
-    let scale = app.images.display_scale;
-    if let (Some((w, h)), Some((cw, ch)), Some(v)) = (dims, app.images.cell_size(), app.tab.viewer_mut()) {
-        let crop = crate::images::Crop { display_scale: scale, fill: video.is_some() || source.as_ref().is_some_and(|(_, k)| *k == Kind::Thumb), ..v.crop };
-        v.crop = crop.limited(w, h, (u32::from(area.width) * cw, u32::from(height) * ch));
-    }
-    let Some(v) = app.tab.viewer() else { return };
+    let top = Rect::new(f.area().x, f.area().y, f.area().width, 1);
     let mut meta = file_facts(file);
     if let Some(no) = v.posts.get(v.index) {
         meta.push(format!("No.{no}"));
@@ -69,9 +51,7 @@ pub(super) fn draw_viewer(f: &mut Frame, app: &mut App) {
     if !v.crop.is_fit() {
         meta.push(format!("{}%", v.crop.zoom));
     }
-    let crop = v.crop;
     // A video playing here: where it is, and whether it's paused or without sound.
-    let failed = app.images.playing().is_some_and(|p| video.as_ref() == Some(&p.url) && p.has_failed());
     let muted = app.images.muted;
     if let Some(p) = app.images.playing().filter(|p| video.as_ref() == Some(&p.url)) {
         if let Some((at, length)) = p.position() {
@@ -93,6 +73,27 @@ pub(super) fn draw_viewer(f: &mut Frame, app: &mut App) {
         Span::styled(format!("    {}", meta.join("  ·  ")), dim()),
     ]);
     put(f, top.x, top.y, top.width, line);
+}
+
+fn draw_viewer_body(f: &mut Frame, app: &mut App) {
+    let t = theme();
+    let Some(v) = app.tab.viewer() else { return };
+    // (Owned: the viewer is changed below while it's used, as a video is zoomed.)
+    let Some(file) = v.files.get(v.index).cloned() else { return };
+    let file = &file;
+    let [_, _, middle, _, bottom] = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Min(1),
+        Constraint::Length(1),
+        Constraint::Length(1),
+    ])
+    .areas(f.area());
+    let area = middle.inner(Margin::new(MARGIN, 0));
+    let source = app.viewer_source(file);
+    let video = app.video_source(file);
+    let crop = v.crop;
+    let failed = app.images.playing().is_some_and(|p| video.as_ref() == Some(&p.url) && p.has_failed());
     fill(f, bottom, t.bar);
     let mut hints = vec![Span::raw(" ")];
     if let Some(s) = app.status() {
@@ -128,7 +129,9 @@ pub(super) fn draw_viewer(f: &mut Frame, app: &mut App) {
         let mut crop = crop;
         let dims = app.images.playing().filter(|p| &p.url == url).and_then(|p| p.dims());
         if let (Some((w, h)), Some((cw, ch)), Some(v)) = (dims, app.images.cell_size(), app.tab.viewer_mut()) {
-            let shown = crop.shown(w, h, (u32::from(area.width) * cw, u32::from(area.height) * ch));
+            let view = (u32::from(area.width) * cw, u32::from(area.height) * ch);
+            crop = crop.limited(w, h, view, 1.0, true);
+            let shown = crop.shown(w, h, view, 1.0, true);
             crop = crop.within(shown);
             (v.shown, v.crop) = (Some(shown), crop);
         }
@@ -174,8 +177,11 @@ pub(super) fn draw_viewer(f: &mut Frame, app: &mut App) {
     // How much of the image this zoom shows here, for moving around (and so what's shown stays
     // inside the image).
     let mut crop = crop;
+    let scale = app.images.display_scale;
     if let (Some((w, h)), Some((cw, ch)), Some(v)) = (app.images.dims(&url), app.images.cell_size(), app.tab.viewer_mut()) {
-        let shown = crop.shown(w, h, (u32::from(inner.width) * cw, u32::from(inner.height) * ch));
+        let view = (u32::from(inner.width) * cw, u32::from(inner.height) * ch);
+        crop = crop.limited(w, h, view, scale, kind != Kind::Full);
+        let shown = crop.shown(w, h, view, scale, kind != Kind::Full);
         crop = crop.within(shown);
         (v.shown, v.crop) = (Some(shown), crop);
     }
