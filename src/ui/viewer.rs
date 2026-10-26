@@ -180,8 +180,8 @@ fn draw_viewer_body(f: &mut Frame, app: &mut App) {
     let scale = app.images.display_scale;
     if let (Some((w, h)), Some((cw, ch)), Some(v)) = (app.images.dims(&url), app.images.cell_size(), app.tab.viewer_mut()) {
         let view = (u32::from(inner.width) * cw, u32::from(inner.height) * ch);
-        crop = crop.limited(w, h, view, scale, kind != Kind::Full);
-        let shown = crop.shown(w, h, view, scale, kind != Kind::Full);
+        crop = crop.limited(w, h, view, scale, kind.fills());
+        let shown = crop.shown(w, h, view, scale, kind.fills());
         crop = crop.within(shown);
         (v.shown, v.crop) = (Some(shown), crop);
     }

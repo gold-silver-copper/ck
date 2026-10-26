@@ -2660,7 +2660,7 @@ fn the_viewer_goes_through_the_whole_thread_and_zooms() {
     // Zoomed, h/j/k/l move instead; page down is the next file (fitted again).
     key(&mut app, KeyCode::Char('+'));
     key(&mut app, KeyCode::Char('='));
-    // Drawing establishes how much is shown before panning.
+    // In the app, each key is followed by a draw that establishes how much is shown.
     app.tab.viewer_mut().unwrap().shown = Some((500, 500));
     key(&mut app, KeyCode::Char('l'));
     let v = app.tab.viewer().unwrap();

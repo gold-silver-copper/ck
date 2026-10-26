@@ -102,7 +102,7 @@ impl Kind {
     }
 
     /// Whether it's scaled up to fill its area when it's smaller.
-    fn fills(self) -> bool {
+    pub(crate) fn fills(self) -> bool {
         self != Kind::Full
     }
 }
@@ -271,7 +271,8 @@ enum Done {
 }
 
 enum EncodeJob {
-    /// An image for a view; `fill`: scaled up to fill it too (a thumbnail in its tile).
+    /// An image for a view; `fill`: scaled up to fill it too (a thumbnail in its tile),
+    /// followed by the display scale (device pixels per image pixel).
     One(String, View, Arc<DynamicImage>, bool, f32),
     Frames(String, Size, Frames, f32),
 }
@@ -327,11 +328,6 @@ impl Images {
     /// `None` disables images entirely: no workers, no requests.
     pub fn new(picker: Option<Picker>, wake: Waker, disk: Option<DiskCache>) -> Self {
         Self::start(picker, wake, disk, WORKERS)
-    }
-
-    pub fn with_display_scale(mut self, scale: f32) -> Self {
-        self.display_scale = scale;
-        self
     }
 
     fn start(picker: Option<Picker>, wake: Waker, disk: Option<DiskCache>, workers: usize) -> Self {
@@ -798,7 +794,7 @@ fn pixels(size: Size, font: ratatui_image::FontSize) -> (u32, u32) {
 /// `img` fitted into `w` x `h` pixels (keeping its shape): scaled down with the fast
 /// area-averaging resize when it's much bigger (a high-quality filter over a large image costs
 /// tens of milliseconds, and the terminal shows no difference), and only scaled up with
-/// `grow` (a zoomed part fills the area).
+/// `grow` (enlarging to the target size).
 fn shrink(img: &DynamicImage, w: u32, h: u32, grow: bool) -> DynamicImage {
     let (w, h) = (w.max(1), h.max(1));
     if img.width() > w || img.height() > h {
@@ -1330,7 +1326,8 @@ mod tests {
 
     #[test]
     fn animations_play_pause_and_wake_the_loop() {
-        let mut im = Images::with_picker(Picker::halfblocks()).with_display_scale(1.5);
+        let mut im = Images::with_picker(Picker::halfblocks());
+        im.display_scale = 1.5;
         let frames = gif_frames(&gif(&[(0, 50), (255, 50)])).unwrap();
         im.insert_frames("g", frames.iter().cloned().collect());
         let size = Size::new(20, 6);
