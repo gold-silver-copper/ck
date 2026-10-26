@@ -183,7 +183,8 @@ pub struct Compose {
     pub file_choices: Vec<String>,
     /// The user's editor, writing the comment (ctrl-g), till it quits.
     pub pty: Option<PtyEditor>,
-    /// The pending paste's sequence number, to discard results for a replaced draft.
+    /// Bumped for each clipboard read; only the pending read may fill the field.
+    paste: u64,
     clipboard: Option<u64>,
 }
 
@@ -219,6 +220,7 @@ impl Compose {
             limit: poster.comment_limit(),
             file_choices: Vec::new(),
             pty: None,
+            paste: 0,
             clipboard: None,
         }
     }
@@ -658,8 +660,8 @@ impl App {
         if c.clipboard.is_some() {
             return;
         }
-        static NEXT_PASTE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-        let paste = NEXT_PASTE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        c.paste += 1;
+        let paste = c.paste;
         c.clipboard = Some(paste);
         let (to, before) = (c.to.clone(), c.file.text().to_string());
         c.note = Some("Reading clipboard…".into());

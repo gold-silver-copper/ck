@@ -726,9 +726,9 @@ For a file list it uses the first file; an image is saved under ck's cache folde
 `pasted/` with a neutral `clipboard-<hash>` name, so a saved draft can still attach it.
 These images are not automatically cleaned up. This needs `wl-paste` (wl-clipboard)
 on Wayland, `xclip` on X11, or macOS's `osascript`; it is unavailable over SSH or with
-`CK_NO_EXTERNAL` set. On macOS use ctrl-v: cmd-v belongs to the terminal. Pasted or dragged paths
-replace the File field and accept surrounding quotes, shell escapes, and percent-encoded
-`file://` URLs. Clipboard text must name an existing file.
+`CK_NO_EXTERNAL` set. On macOS use ctrl-v: cmd-v belongs to the terminal. Pasted or
+dragged paths replace the File field and accept surrounding quotes, shell escapes, and
+percent-encoded `file://` URLs. Clipboard text must name an existing file.
 
 ctrl-g writes the comment in your own editor (`$VISUAL`, else `$EDITOR`, else `vi`;
 Notepad on Windows), in the box: it opens on what's written, in the comment's place, with
