@@ -183,6 +183,8 @@ pub struct Compose {
     pub file_choices: Vec<String>,
     /// The user's editor, writing the comment (ctrl-g), till it quits.
     pub pty: Option<PtyEditor>,
+    /// The pending paste, so its result cannot land in a new draft for the same thread.
+    clipboard: Option<Arc<()>>,
 }
 
 impl Compose {
@@ -217,6 +219,7 @@ impl Compose {
             limit: poster.comment_limit(),
             file_choices: Vec::new(),
             pty: None,
+            clipboard: None,
         }
     }
 
@@ -400,6 +403,7 @@ enum Then {
     OpenLogin,
     /// Ctrl-g: write the comment in $EDITOR.
     Edit,
+    PasteFile,
     LogIn,
     LogOut,
     /// Stop the post on its way.
@@ -564,6 +568,7 @@ impl App {
                 KeyCode::Char('s') if ctrl => Then::Send,
                 KeyCode::Char('p') if ctrl => Then::OpenLogin,
                 KeyCode::Char('g') if ctrl => Then::Edit,
+                KeyCode::Char('v') if ctrl && c.field == Field::File => Then::PasteFile,
                 _ => {
                     c.on_writing_key(key);
                     Then::Nothing
@@ -612,6 +617,7 @@ impl App {
             Then::Send => self.send_reply(),
             Then::OpenLogin => self.open_login(),
             Then::Edit => self.open_editor(),
+            Then::PasteFile => self.paste_file(),
             Then::LogIn => {
                 // What was typed goes to the site, and isn't kept.
                 let Some(c) = self.reply_box() else { return };
@@ -642,6 +648,43 @@ impl App {
         }
     }
 
+    fn paste_file(&mut self) {
+        if crate::sandboxed() {
+            return;
+        }
+        let later = self.later();
+        let Some(c) = self.reply_box() else { return };
+        if c.clipboard.is_some() {
+            return;
+        }
+        let token = Arc::new(());
+        c.clipboard = Some(token.clone());
+        let (to, before) = (c.to.clone(), c.file.text().to_string());
+        c.note = Some("Reading clipboard…".into());
+        std::thread::spawn(move || {
+            let result = crate::clipboard::read_file();
+            later.run(move |app| {
+                let Some(c) = app.compose_for(&to) else { return };
+                if !c.clipboard.as_ref().is_some_and(|t| Arc::ptr_eq(t, &token)) {
+                    return;
+                }
+                c.clipboard = None;
+                c.note = None;
+                if !matches!(c.stage, Stage::Writing) || c.file.text() != before {
+                    return;
+                }
+                match result {
+                    Ok(path) => {
+                        c.file.set(&path);
+                        c.file_choices.clear();
+                        c.problem = None;
+                    }
+                    Err(e) => c.problem = Some(format!("Couldn't paste a file: {e:#}")),
+                }
+            });
+        });
+    }
+
     /// Text pasted into the box: into the field, or the captcha's answer.
     pub(super) fn paste_reply(&mut self, text: &str) -> bool {
         let Some(c) = self.reply_box() else { return false };
@@ -653,7 +696,7 @@ impl App {
             Stage::Writing => {
                 let field = c.field;
                 if let Some(e) = c.editor(field) {
-                    e.insert(text);
+                    e.insert(&if field == Field::File { crate::clipboard::file_path(text) } else { text.to_string() });
                 }
             }
             Stage::Solving(s) if matches!(s.challenge.task, Task::Text { .. }) => s.typed.push_str(text.trim()),

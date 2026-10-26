@@ -720,6 +720,15 @@ or end, alt or ctrl with the arrows a word at a time. Pasted text keeps its line
 comment. The counter counts its characters, against the site's limit where ck knows it
 (4chan's 2000).
 
+In the File field, ctrl-v reads a copied file or image from the local system clipboard
+(PNG, JPEG or WebP on Linux; PNG on macOS).
+For a file list it uses the first file; an image is saved under ck's cache folder in
+`pasted/` with a neutral `clipboard-<hash>` name, so a saved draft can still attach it.
+These images are not automatically cleaned up. This needs `wl-paste` (wl-clipboard)
+on Wayland, `xclip` on X11, or macOS's `osascript`; it is unavailable over SSH or in the
+sandbox. On macOS use ctrl-v: cmd-v belongs to the terminal. Pasted or dragged paths
+also accept surrounding quotes, escaped spaces, and percent-encoded `file://` URLs.
+
 ctrl-g writes the comment in your own editor (`$VISUAL`, else `$EDITOR`, else `vi`;
 Notepad on Windows), in the box: it opens on what's written, in the comment's place, with
 the other fields around it, and every key is its own till it quits. What it saved is the

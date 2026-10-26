@@ -6426,3 +6426,15 @@ fn an_overboard_starts_no_thread() {
     assert!(app.popup.is_none());
     assert!(app.footer.get().unwrap().text.contains("many boards"));
 }
+
+#[test]
+fn reply_paste_cleans_only_file_paths() {
+    let mut app = fourchan_thread(&[1]);
+    app.act(Action::Reply);
+    let text = "  file:///home/me/a%20b.png\n";
+    app.paste_reply(text);
+    assert_eq!(reply_box(&mut app).comment.text(), text);
+    app.on_key(KeyEvent::from(KeyCode::Tab));
+    app.paste_reply(text);
+    assert_eq!(reply_box(&mut app).file.text(), "/home/me/a b.png");
+}
